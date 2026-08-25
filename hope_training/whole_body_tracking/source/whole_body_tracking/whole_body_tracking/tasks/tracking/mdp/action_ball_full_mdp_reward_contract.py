@@ -40,6 +40,43 @@ class DenseRewardSpec(NamedTuple):
     scale_in_strike_window: Optional[float] = None
 
 
+class RegularizationRewardSpec(NamedTuple):
+    """One backend-neutral continuous cost and its effective coefficient."""
+
+    manager_name: str
+    evaluator_name: str
+    manager_weight: float
+    effective_coefficient: float
+
+
+REGULARIZATION_JOINT_COUNT = 31
+REGULARIZATION_SOFT_LIMIT_MARGIN_FRAC = 0.02
+REGULARIZATION_SOFT_LIMIT_PENALTY_FLOOR = 0.25
+REGULARIZATION_PROJECTION_KNEE_FRAC = 0.05
+REGULARIZATION_STANCE_EPS_FRAC = 0.005
+REGULARIZATION_MARGIN_FLOOR_FRAC = 1.0e-6
+REGULARIZATION_SPECS = (
+    RegularizationRewardSpec("action_rate_l2", "action_rate_l2", 0.1, -0.1),
+    RegularizationRewardSpec(
+        "qdes_limit_barrier", "qdes_limit_barrier_v2", 10.0, -10.0
+    ),
+    RegularizationRewardSpec(
+        "qdes_projection_penalty", "qdes_projection_penalty", 1.0, -1.0
+    ),
+    RegularizationRewardSpec(
+        "joint_limit", "actual_joint_limit_barrier_v2", 10.0, -10.0
+    ),
+)
+REGULARIZATION_NAMES = tuple(spec.manager_name for spec in REGULARIZATION_SPECS)
+
+if any(
+    spec.manager_weight <= 0.0
+    or spec.effective_coefficient != -spec.manager_weight
+    for spec in REGULARIZATION_SPECS
+):
+    raise RuntimeError("FullMDP regularization coefficients must be negative costs")
+
+
 LIFECYCLE_MANAGER_NAMES = (
     "racket_position",
     "racket_velocity",
@@ -114,14 +151,18 @@ COMMON_DENSE_SPECS = (
 # copying them beside unscaled body terms diluted the bridge by about 6.7x.
 # The contact target is constructed from the same measured motion row, so the
 # prior remains full strength through the strike window instead of creating a
-# timing hole before the one-tick lifecycle target is paid.
+# timing hole before the one-tick lifecycle target is paid.  ``std`` is the
+# physically anchored precision width and ``coarse_std`` is exactly four times
+# wider.  The evaluator mixes their exponential/Cauchy kernels 50/50, so every
+# term still peaks at one and the four-channel cap remains 3.5.
 PADDLE_MOTION_PRIOR_SPECS = (
     DenseRewardSpec(
         "motion_racket_position",
         "motion_racket_position_tracking_cauchy",
         1.0,
         "racket_target",
-        0.70,
+        0.075,
+        coarse_std=0.30,
         scale_in_strike_window=1.0,
     ),
     DenseRewardSpec(
@@ -129,7 +170,8 @@ PADDLE_MOTION_PRIOR_SPECS = (
         "motion_racket_velocity_tracking_cauchy",
         1.0,
         "racket_target",
-        4.0,
+        0.50,
+        coarse_std=2.0,
         scale_in_strike_window=1.0,
     ),
     DenseRewardSpec(
@@ -137,7 +179,8 @@ PADDLE_MOTION_PRIOR_SPECS = (
         "motion_racket_normal_tracking_cauchy",
         1.0,
         "racket_target",
-        3.141592653589793,
+        0.2617993877991494,
+        coarse_std=1.0471975511965976,
         scale_in_strike_window=1.0,
     ),
     DenseRewardSpec(
@@ -145,7 +188,8 @@ PADDLE_MOTION_PRIOR_SPECS = (
         "motion_racket_long_axis_tracking_cauchy",
         0.5,
         "racket_target",
-        1.0,
+        0.17453292519943295,
+        coarse_std=0.6981317007977318,
         scale_in_strike_window=1.0,
     ),
 )
@@ -155,7 +199,10 @@ PADDLE_MOTION_PRIOR_NAMES = tuple(
     spec.manager_name for spec in PADDLE_MOTION_PRIOR_SPECS
 )
 MANAGER_NAMES = (
-    LIFECYCLE_MANAGER_NAMES + COMMON_DENSE_NAMES + PADDLE_MOTION_PRIOR_NAMES
+    LIFECYCLE_MANAGER_NAMES
+    + COMMON_DENSE_NAMES
+    + PADDLE_MOTION_PRIOR_NAMES
+    + REGULARIZATION_NAMES
 )
 LIFECYCLE_PAYMENT_COUNT = len(LIFECYCLE_MANAGER_NAMES)
 REWARD_TERM_COUNT = len(MANAGER_NAMES)
@@ -169,11 +216,20 @@ __all__ = [
     "TRACKED_EXCEPT_HELD_WRIST",
     "tracked_except_held_wrist_body_names",
     "DenseRewardSpec",
+    "RegularizationRewardSpec",
+    "REGULARIZATION_JOINT_COUNT",
+    "REGULARIZATION_SOFT_LIMIT_MARGIN_FRAC",
+    "REGULARIZATION_SOFT_LIMIT_PENALTY_FLOOR",
+    "REGULARIZATION_PROJECTION_KNEE_FRAC",
+    "REGULARIZATION_STANCE_EPS_FRAC",
+    "REGULARIZATION_MARGIN_FLOOR_FRAC",
     "LIFECYCLE_MANAGER_NAMES",
     "COMMON_DENSE_SPECS",
     "PADDLE_MOTION_PRIOR_SPECS",
     "COMMON_DENSE_NAMES",
     "PADDLE_MOTION_PRIOR_NAMES",
+    "REGULARIZATION_SPECS",
+    "REGULARIZATION_NAMES",
     "MANAGER_NAMES",
     "LIFECYCLE_PAYMENT_COUNT",
     "REWARD_TERM_COUNT",

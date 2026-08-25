@@ -437,6 +437,21 @@ class ActionEpochCurrentShotProjection:
 
 
 @dataclass(frozen=True)
+class ActionEpochMotionPlaybackProjection:
+    """Narrow public Epoch facts needed by Motion's full-key playback join.
+
+    The projection is consumed synchronously while Epoch owns the publication
+    operation.  It carries no publication version or mutable owner authority:
+    freshness comes from Epoch constructing it from the locked current record.
+    """
+
+    current_task_slot: torch.Tensor
+    phase: torch.Tensor
+    selected_mask: torch.Tensor
+    shot_key: ActionEpochShotKey
+
+
+@dataclass(frozen=True)
 class ActionEpochRecord:
     """One immutable public carry-state version.
 
@@ -2620,7 +2635,9 @@ class ActionEpochOwner:
     # ------------------------------------------------------------------
     # Bound Motion/Physical/R06 publications
 
-    def publish_motion_playback_started(self, *, owner: object) -> ActionEpochRecord:
+    def publish_motion_playback_started(self, *, owner: object) -> torch.Tensor:
+        """Publish Motion's edge and return only the cumulative started mask."""
+
         with self._operation("Motion playback started"):
             self._healthy()
             record = self._publication.current
@@ -2629,8 +2646,16 @@ class ActionEpochOwner:
             if getattr(self._motion_playback, "__self__", None) is not owner:
                 raise ActionEpochError("Motion playback caller differs")
             try:
+                projection = ActionEpochMotionPlaybackProjection(
+                    current_task_slot=record.current_task_slot.detach().clone(),
+                    phase=record.phase.detach().clone(),
+                    # ``selected_mask`` is derived from ``phase`` and already
+                    # owns fresh storage; detach without a redundant copy.
+                    selected_mask=record.selected_mask.detach(),
+                    shot_key=record.identity.shot_key.clone(),
+                )
                 mask = self._tensor(
-                    self._motion_playback(MOTION_PLAYBACK_STARTED, record.clone()),
+                    self._motion_playback(MOTION_PLAYBACK_STARTED, projection),
                     label="Motion playback mask",
                     shape=self._shot_shape,
                     dtype=torch.bool,
@@ -2656,7 +2681,9 @@ class ActionEpochOwner:
                 values=values,
                 changes={"motion_playback_started": started},
             )
-            return record.clone()
+            # Do not expose the record-owned tensor: callers receive exactly
+            # the typed fact they consume, without a full-record round trip.
+            return record.motion_playback_started.detach().clone().contiguous()
 
     def refresh_physical_postphysics_rows(self) -> None:
         """Pull the sole active Physical packet and full-key join its fact planes."""
@@ -4617,6 +4644,7 @@ __all__ = [
     "ActionEpochDueRows",
     "ActionEpochError",
     "ActionEpochMaterializedDrain",
+    "ActionEpochMotionPlaybackProjection",
     "ActionEpochOwner",
     "ActionEpochPreparedSelectedReset",
     "ActionEpochRecord",

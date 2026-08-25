@@ -1,5 +1,28 @@
 # 简短进度记录
 
+## 2026-08-26 — FullMDP V6长跑结论翻转与V7替代源（branch diagnostic）
+
+- 固定Mu ACK0..6846=`673,087,488` transitions与Isaac ACK0..2508=`246,644,736` transitions。两端
+  episode mean length已从约`104/88`升到recent10约`1464/1442`，但selected contact分别保持
+  `0/1,439,028 launch`与`0/409,414 launch`；当前已是有巨大真实分母的hit negative，不再归类为
+  “课程尚未打开”，landing仍因contact分母为0记`未测`。其余action/side也仍`未测`。
+- hard-edge的早期下降前提已反转：Mu recent10 actual/qdes约`51.57%/52.52%`，末段500窗actual约
+  `58.42%`；Isaac actual first10→recent10=`1.843%→3.366%`。finite、qdes terminal、Reward守恒与
+  fact/attribution仍为0，数字可信。源码确认FullMDP Reward24整块替换时没有带入已有action-rate、qdes
+  projection/qdes limit/actual joint-limit连续成本，而actual hard edge又只记账不Done；下一source接回
+  shared cost，不新增安全Gate。
+- V7替代源已恢复`action_rate_l2`、qdes soft/projection和actual joint-limit四项连续成本，形成有序
+  `Reward28`；mimic直接记录同producer的四项teacher-achieved真实误差，并采用固定50/50
+  precision-exp + coarse-Cauchy paddle kernel。actor/critic observation仍为`215/231`，没有加入可推导
+  scalar、raw ball/aim/history或新Stage/Gate。Isaac milestone升为schema8，Mu evidence升为schema10，
+  不伪装成旧wire兼容。
+- active wall恶化为Mu recent10约`9.10 s/H48`、Isaac约`32.06 s/H48`。替代源把每项Reward/milestone
+  eager reduction批成每control step的固定少量reduction，并将Motion同writer完整record往返收窄为四字段
+  projection和一个bool返回；optimizer→WAL/fsync→ACK及独立plant/full-key边界保留。fixed-tape实测
+  `cq_n_iters=8/4`会改变admission/reason/selected identity，故拒绝作为等价加速；adaptive-KL也继续作为
+  独立算法轴，不与本轮学习修复混合。详细证据见
+  [课程实验§10.7](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)。
+
 ## 2026-08-25 — FullMDP V6 exact rate闭合并双fresh替换（branch diagnostic）
 
 - clean/pushed final source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`；本地分进程矩阵=

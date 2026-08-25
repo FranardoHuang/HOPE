@@ -1304,6 +1304,16 @@ class A3ReadyBallVecEnv:
       N, -1).clone()
     self._qdes_previous_executable_valid = torch.ones(
       N, dtype=torch.bool, device=self.device)
+    # Reward operands come from this same executable-target decision.  A
+    # downstream FullMDP consumer must not reconstruct the projection envelope.
+    self._qdes_reward_processed = self.action_offset.unsqueeze(0).expand(
+      N, -1).clone()
+    self._qdes_reward_pre_clamp = self._qdes_reward_processed.clone()
+    self._qdes_reward_nominal_projected = self._qdes_reward_processed.clone()
+    self._qdes_reward_projection_span = (self.jnt_hi - self.jnt_lo).unsqueeze(
+      0).expand(N, -1).clone()
+    self._qdes_reward_operand_valid = torch.zeros(
+      N, dtype=torch.bool, device=self.device)
     self._qdes_guard_terminal = torch.zeros(
       N, dtype=torch.bool, device=self.device)
     # Per-control physical readback evidence.  The executable q_des guard may
@@ -1773,6 +1783,7 @@ class A3ReadyBallVecEnv:
     self._qdes_previous_executable[ids] = self.action_offset
     self._qdes_previous_executable_valid[ids] = True
     self._qdes_guard_terminal[ids] = False
+    self._qdes_reward_operand_valid[ids] = False
     self._actual_hard_edge_latch[ids] = False
     self._qdes_guard_intervention[ids] = False
     self._cur_ret[ids] = 0.0
@@ -1886,6 +1897,7 @@ class A3ReadyBallVecEnv:
         "policy action shape differs from the runtime action buffer: "
         f"{tuple(incoming.shape)} != {tuple(self.actions.shape)}")
     pre_clamp_qdes = self.action_offset.unsqueeze(0) + self.act_scale * incoming
+    self._qdes_reward_pre_clamp = pre_clamp_qdes
     finite_qdes = torch.isfinite(pre_clamp_qdes)
     safe_actions = torch.where(finite_qdes, incoming, self.actions)
     self.last_actions = self.actions
@@ -1931,6 +1943,10 @@ class A3ReadyBallVecEnv:
       )
       self._qdes_previous_executable.copy_(q_des)
       self._qdes_previous_executable_valid.fill_(True)
+      self._qdes_reward_processed = q_des
+      self._qdes_reward_nominal_projected = guard.nominal_projected_qdes
+      self._qdes_reward_projection_span = guard.nominal_projection_span
+      self._qdes_reward_operand_valid.fill_(True)
     else:
       # Keep the historical base-lane ABI outside FullMDP.
       self.action_nonfinite_buf = ~finite_qdes.all(dim=1)
@@ -1938,6 +1954,11 @@ class A3ReadyBallVecEnv:
         self.action_offset.unsqueeze(0) + self.act_scale * safe_actions,
         self.jnt_lo, self.jnt_hi)
       self._qdes_guard_terminal.copy_(self.action_nonfinite_buf)
+      self._qdes_reward_processed = q_des
+      self._qdes_reward_nominal_projected = q_des
+      self._qdes_reward_projection_span = (
+        (self.jnt_hi - self.jnt_lo).unsqueeze(0).expand_as(q_des))
+      self._qdes_reward_operand_valid.fill_(True)
 
     tau_sq = torch.zeros(self.num_envs, device=self.device)
     for substep_index in range(self.decimation):

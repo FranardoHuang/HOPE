@@ -1105,7 +1105,7 @@ def test_diagnostic_marker_flattens_typed_completed_shots(
         if line.startswith("HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=")
     )
     assert payload["schema_version"] == 10
-    assert payload["milestone"]["schema_version"] == 7
+    assert payload["milestone"]["schema_version"] == 8
     reward_terms = payload["milestone"]["reward_terms"]
     rewards = sys.modules[
         "whole_body_tracking.tasks.tracking.mdp."

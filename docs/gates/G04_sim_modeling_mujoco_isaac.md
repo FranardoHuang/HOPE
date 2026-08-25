@@ -2,22 +2,21 @@
 
 Status: Partial
 
-## 2026-08-25 FullMDP V6 native-plant运行（仍`Partial`）
+## 2026-08-26 FullMDP V7替代源（仍`Partial`）
 
-`caddecb76727ea55b0ce089453eea91cb5a9f8ea`是最终clean/pushed source。真实Pod曾反证把
-MuJoCo-Warp外层pose代理当Torch tensor；最终实现直接消费底层native `data.struct.xpos/xquat`的
-`wp.array[vec3/quat]`，不经Torch或host sync。exact Pod host=`1,036 passed, 11 skipped`；
-真实Mu Full-A [`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5) rate自然完成61 update，p50/p90=
-`5.468/5.526 s/H48`，[`Reward24`](../DEFINITIONS.md#fullmdp-reward24)、
-[`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3)、
-rate-probe内lifecycle bookkeeping、finite与conservation均通过。失败、修复和receipt的详细真源是
-[热路实验§16](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)。
-fresh Mu长跑也已从同一source取得连续[逐optimizer durable ACK](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)；
-后续固定窗已在两端自然得到launch/R03，但selected contact仍为Mu`0/59 launch`、Isaac`0/2 launch`，
-landing因无selected contact仍为`未测`；task→contact→landing生命周期与Isaac↔MuJoCo fixed-tape
-数值/接触physics parity均未闭合。两端qdes nonfinite/terminal为0但actual-hard-edge非零且近期下降；
-[详细口径与分母](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#106-首次双侧launch与关节遥测裁决固定诊断窗)
-只支持diagnostic继续训练，明确阻断formal、promotion、deployment与真机安全声明。
+V6 source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`的native plant路径仍成立：真实Pod已证明
+MuJoCo-Warp必须直接消费底层`data.struct.xpos/xquat`的`wp.array[vec3/quat]`，不经Torch或host sync。
+但V6随后在Mu`1,439,028`次launch后selected contact仍为0、actual-hard-edge recent10约`51.57%`且
+继续恶化；这不推翻plant身份，却证伪Reward24学习经济。
+
+V7保持相同native plant、[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)和
+[`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3)，改用
+[`Reward28`](../DEFINITIONS.md#fullmdp-reward28)、Mu evidence schema10与Isaac milestone schema8。
+四项action/joint成本是连续学习目标，actual hard edge仍不是新增Done；paddle真实误差与fixed composite
+kernel不成为model安全Gate。当前本地聚焦矩阵=`606 passed, 34 skipped`；exact Pod V7 GPU、短学习与
+active wall仍在验证。task→contact→landing与Isaac↔MuJoCo fixed-tape physics parity也未闭合，因此
+G04不晋级。[详细口径与分母](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)
+明确阻断formal、promotion、deployment与真机安全声明。
 
 本Gate只保留独立可击穿的model/plant边界：finite、joint/table/contact几何、source asset与native runtime
 身份。task成功、mimic/contact比例、same-writer echo和测试fixture的数据类型不属于model安全Gate；也不因

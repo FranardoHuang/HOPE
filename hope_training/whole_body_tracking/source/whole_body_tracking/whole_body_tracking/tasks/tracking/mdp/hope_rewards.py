@@ -22,6 +22,12 @@ from typing import TYPE_CHECKING
 
 from whole_body_tracking.tasks.tracking.mdp.hope_commands import RacketTargetCommand, face_tracking_pair
 from whole_body_tracking.tasks.tracking.mdp import racket_contact_geometry
+try:
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_full_mdp_paddle_prior,
+    )
+except ImportError:  # pragma: no cover - focused direct-module tests.
+    import action_ball_full_mdp_paddle_prior
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -1233,13 +1239,20 @@ def motion_racket_position_tracking_cauchy(
     command_name: str,
     std: float,
     scale_in_strike_window: float = 1.0,
+    coarse_std: float | None = None,
 ) -> torch.Tensor:
     """Measured-paddle position imitation, optionally attenuated at ball contact."""
 
     cmd = _cmd(env, command_name)
     target_pos, _, _, _ = stage1_aligned_clip_racket_target_now(cmd)
     error = torch.linalg.vector_norm(cmd.racket_pos_w - target_pos, dim=-1)
-    raw = _cauchy_tracking_kernel(error, std)
+    raw = (
+        _cauchy_tracking_kernel(error, std)
+        if coarse_std is None
+        else action_ball_full_mdp_paddle_prior.coarse_precision_kernel(
+            error, precision_std=std, coarse_std=coarse_std
+        )
+    )
     return _scale_motion_racket_prior_in_strike_window(
         cmd, raw, scale_in_strike_window
     )
@@ -1250,13 +1263,20 @@ def motion_racket_velocity_tracking_cauchy(
     command_name: str,
     std: float,
     scale_in_strike_window: float = 1.0,
+    coarse_std: float | None = None,
 ) -> torch.Tensor:
     """Measured-paddle site-velocity imitation, optionally attenuated at ball contact."""
 
     cmd = _cmd(env, command_name)
     _, _, target_velocity, _ = stage1_aligned_clip_racket_target_now(cmd)
     error = torch.linalg.vector_norm(cmd.racket_lin_vel_w - target_velocity, dim=-1)
-    raw = _cauchy_tracking_kernel(error, std)
+    raw = (
+        _cauchy_tracking_kernel(error, std)
+        if coarse_std is None
+        else action_ball_full_mdp_paddle_prior.coarse_precision_kernel(
+            error, precision_std=std, coarse_std=coarse_std
+        )
+    )
     return _scale_motion_racket_prior_in_strike_window(
         cmd, raw, scale_in_strike_window
     )
@@ -1267,6 +1287,7 @@ def motion_racket_normal_tracking_cauchy(
     command_name: str,
     std: float,
     scale_in_strike_window: float = 1.0,
+    coarse_std: float | None = None,
 ) -> torch.Tensor:
     """Measured physical-face imitation, optionally attenuated at ball contact."""
 
@@ -1276,7 +1297,13 @@ def motion_racket_normal_tracking_cauchy(
         _stage1_actual_face_normal(cmd) * target_normal, dim=-1
     ).clamp(-1.0, 1.0)
     error = torch.acos(cosine)
-    raw = _cauchy_tracking_kernel(error, std)
+    raw = (
+        _cauchy_tracking_kernel(error, std)
+        if coarse_std is None
+        else action_ball_full_mdp_paddle_prior.coarse_precision_kernel(
+            error, precision_std=std, coarse_std=coarse_std
+        )
+    )
     return _scale_motion_racket_prior_in_strike_window(
         cmd, raw, scale_in_strike_window
     )
@@ -1287,15 +1314,41 @@ def motion_racket_long_axis_tracking_cauchy(
     command_name: str,
     std: float,
     scale_in_strike_window: float = 1.0,
+    coarse_std: float | None = None,
 ) -> torch.Tensor:
     """Measured butt-to-blade imitation; closes wrist twist left invisible by face normal."""
 
     cmd = _cmd(env, command_name)
     _, _, _, target_long_axis = stage1_aligned_clip_racket_target_now(cmd)
     cosine = torch.sum(cmd.racket_long_axis_w * target_long_axis, dim=-1).clamp(-1.0, 1.0)
-    raw = _cauchy_tracking_kernel(torch.acos(cosine), std)
+    error = torch.acos(cosine)
+    raw = (
+        _cauchy_tracking_kernel(error, std)
+        if coarse_std is None
+        else action_ball_full_mdp_paddle_prior.coarse_precision_kernel(
+            error, precision_std=std, coarse_std=coarse_std
+        )
+    )
     return _scale_motion_racket_prior_in_strike_window(
         cmd, raw, scale_in_strike_window
+    )
+
+
+def motion_racket_tracking_errors_now(cmd: RacketTargetCommand) -> torch.Tensor:
+    """Return the four physical errors used by FullMDP paddle telemetry."""
+
+    target_pos, target_normal, target_velocity, target_long_axis = (
+        stage1_aligned_clip_racket_target_now(cmd)
+    )
+    return action_ball_full_mdp_paddle_prior.tracking_errors(
+        cmd.racket_pos_w,
+        cmd.racket_lin_vel_w,
+        _stage1_actual_face_normal(cmd),
+        cmd.racket_long_axis_w,
+        target_pos,
+        target_velocity,
+        target_normal,
+        target_long_axis,
     )
 
 

@@ -1910,6 +1910,7 @@ def materialize_action_ball_full_mdp_reward_manager(
             in (
                 config.ACTION_BALL_FULL_MDP_COMMON_DENSE_WEIGHT_SOURCE,
                 config.ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_WEIGHT_SOURCE,
+                config.ACTION_BALL_FULL_MDP_REGULARIZATION_WEIGHT_SOURCE,
             )
             and term_template.manager_weight is not None
         ):

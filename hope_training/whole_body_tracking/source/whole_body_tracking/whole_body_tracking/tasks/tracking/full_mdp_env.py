@@ -1843,6 +1843,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
         scale: float | None = None,
         value: torch.Tensor | None = None,
         paddle_playback_active: torch.Tensor | None = None,
+        paddle_error_components: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Pay one manager ordinal through the atomically installed graph.
 
@@ -1895,6 +1896,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             if (
                 value is not None
                 or paddle_playback_active is not None
+                or paddle_error_components is not None
             ):
                 raise FullMdpPostPhysicsProtocolError(
                     "lifecycle Reward term cannot inject a dense value"
@@ -1904,11 +1906,24 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             raise FullMdpPostPhysicsProtocolError(
                 "common dense Reward term requires one tensor and no scale"
             )
-        paddle_row = ordinal >= lean_rewards.PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+        paddle_row = (
+            lean_rewards.PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+            <= ordinal
+            < lean_rewards.REGULARIZATION_FIRST_ORDINAL
+        )
         if (
             paddle_playback_active is not None
             and type(paddle_playback_active) is not torch.Tensor
-        ) or (not paddle_row and paddle_playback_active is not None):
+        ) or (
+            paddle_error_components is not None
+            and type(paddle_error_components) is not torch.Tensor
+        ) or (
+            not paddle_row
+            and (
+                paddle_playback_active is not None
+                or paddle_error_components is not None
+            )
+        ):
             raise FullMdpPostPhysicsProtocolError(
                 "dense Reward paddle telemetry binding differs"
             )
@@ -1917,6 +1932,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             ordinal,
             value,
             paddle_playback_active=paddle_playback_active,
+            paddle_error_components=paddle_error_components,
         )
 
     def _require_action_ball_full_mdp_lease(self, lease: object) -> None:

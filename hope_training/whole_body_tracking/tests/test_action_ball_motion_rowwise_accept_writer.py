@@ -1188,13 +1188,6 @@ def test_same_slot_uid_next_shot_rejects_stale_motion_key_then_publishes_exact_k
     # Simulate stale Motion state A after Epoch has already installed shot B.
     command._action_ball_continuous_canonical_shot_index.copy_(first_shot)
     _make_teacher_start_reachable(command)
-    same_version = epoch_owner.current()
-    mismatched_key_mask = command.action_epoch_playback_transition_mask(
-        epoch_mod.MOTION_PLAYBACK_STARTED,
-        same_version,
-    )
-    assert not bool(mismatched_key_mask.any())
-    assert epoch_owner.current().version == same_version.version
     _advance_canonical_lifecycle_once(command)
     assert not bool(epoch_owner.current().motion_playback_started.any())
     assert not bool(
@@ -1235,35 +1228,18 @@ def test_playback_path_cold_pins_the_epoch_row_identity_module() -> None:
     assert "import action_ball_full_mdp_row_identity" not in source
     assert "torch.arange" not in source
     assert "torch.clamp" not in source
-    assert "record.phase[:, 0]" in source
+    assert "projection.phase," in source
+    assert "projection.selected_mask," in source
     assert "slots.eq(0)" in source
+    assert "epoch_owner.current(" not in source
+    assert ".version" not in source
+    assert "action_epoch_shot_key_valid(public_key)" in source
+    assert "action_epoch_shot_key_valid(retained_key)" in source
+    assert "action_epoch_shot_key_equal(public_key, retained_key)" in source
     lifecycle = inspect.getsource(
         C.MotionCommand._advance_action_ball_continuous_canonical_lifecycle
     )
     assert "current().epoch" not in lifecycle
-    assert "record.epoch" not in source
-
-
-def test_playback_snapshot_version_rejects_stale_record_not_business_key() -> None:
-    epoch_mod = D05._require_action_epoch_module()
-    command, _ = bridge._configure_unbound_command(num_envs=2)
-    command._action_ball_continuous_motion_device_r05_owner = object.__new__(
-        D05.DeviceR05Owner
-    )
-    epoch_owner = epoch_mod.ActionEpochOwner(num_envs=2, device="cpu")
-    epoch_owner.activate_reset_genesis(
-        selected_mask=torch.ones(2, dtype=torch.bool),
-        reset_generation=torch.zeros(2, dtype=torch.int64),
-    )
-    command.bind_action_ball_full_mdp_motion_epoch_owner(epoch_owner)
-    stale = epoch_owner.current()
-    epoch_owner.publish_motion_playback_started(owner=command)
-
-    with pytest.raises(RuntimeError, match="became stale"):
-        command.action_epoch_playback_transition_mask(
-            epoch_mod.MOTION_PLAYBACK_STARTED,
-            stale,
-        )
 
 
 def test_motion_epoch_cold_bind_uses_current_sole_mask_factory_abi() -> None:

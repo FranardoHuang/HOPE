@@ -239,7 +239,7 @@ def _base_record(module, index, *, identity=IDENTITY):
     terminal = {key: 0 for key in module.TERMINAL_KEYS}
     lifecycle = {key: 0 for key in RUNNER_LIFECYCLE_KEYS}
     return {
-        "schema_version": 9,
+        "schema_version": 10,
         "record_type": "mujoco_full_mdp_update_ack",
         "diagnostic_unauthorized": True,
         "update_index": index,
@@ -301,6 +301,13 @@ def _base_record(module, index, *, identity=IDENTITY):
                 "domain_violation_rows": [
                     0
                 ] * module.PADDLE_PRIOR_TERM_COUNT,
+                "error_names": [
+                    "position", "velocity", "signed_face", "long_axis"
+                ],
+                "error_units": ["m", "m_per_s", "rad", "rad"],
+                "error_finite_rows": [0] * module.PADDLE_PRIOR_TERM_COUNT,
+                "error_sum": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
+                "error_sumsq": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
             },
         },
         "action_identity": {
@@ -590,7 +597,7 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
     }
 
 
-def test_runner_update_ack_fixture_matches_exact_evidence_v9_wire(tmp_path):
+def test_runner_update_ack_fixture_matches_exact_evidence_v10_wire(tmp_path):
     module = _load()
     assert module.EVENT_KEYS == RUNNER_EVENT_KEYS
     assert module.LIFECYCLE_KEYS == RUNNER_LIFECYCLE_KEYS
@@ -661,6 +668,9 @@ def test_playback_paddle_prior_wire_accepts_non_gating_finite_moments(
             "kernel_sum": [1.5, 1.5, 1.2, 2.4],
             "kernel_sumsq": [1.875, 1.25, 0.48, 1.92],
             "domain_violation_rows": [2, 0, 0, 0],
+            "error_finite_rows": [3, 3, 2, 3],
+            "error_sum": [0.6, 1.5, 0.5, 2.4],
+            "error_sumsq": [0.14, 0.77, 0.13, 1.94],
         })
 
     evidence, snapshots, _completion, _rows = _artifacts(
@@ -681,6 +691,10 @@ def test_playback_paddle_prior_wire_accepts_non_gating_finite_moments(
         ("negative_sumsq", "playback paddle prior moments"),
         ("impossible_moments", "playback paddle prior moments"),
         ("zero_finite_nonzero_moment", "playback paddle prior moments"),
+        ("error_names", "playback paddle prior term contract"),
+        ("error_finite_rows", "playback paddle prior error_finite_rows"),
+        ("negative_error_sumsq", "playback paddle prior error moments"),
+        ("impossible_error_moments", "playback paddle prior error moments"),
     ),
 )
 def test_playback_paddle_prior_wire_rejects_nonexact_or_impossible_moments(
@@ -714,6 +728,20 @@ def test_playback_paddle_prior_wire_rejects_nonexact_or_impossible_moments(
             paddle["kernel_sumsq"][0] = 0.5
         elif case == "zero_finite_nonzero_moment":
             paddle["kernel_sum"][0] = 1.0
+        elif case == "error_names":
+            paddle["error_names"][:2] = reversed(paddle["error_names"][:2])
+        elif case == "error_finite_rows":
+            paddle["row_count"] = 1
+            paddle["error_finite_rows"][0] = 2
+        elif case == "negative_error_sumsq":
+            paddle["row_count"] = 1
+            paddle["error_finite_rows"][0] = 1
+            paddle["error_sumsq"][0] = -0.1
+        elif case == "impossible_error_moments":
+            paddle["row_count"] = 1
+            paddle["error_finite_rows"][0] = 1
+            paddle["error_sum"][0] = 1.0
+            paddle["error_sumsq"][0] = 0.5
 
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False, row_mutation=mutate

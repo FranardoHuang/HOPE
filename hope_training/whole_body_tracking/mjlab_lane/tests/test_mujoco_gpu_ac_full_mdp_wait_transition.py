@@ -34,6 +34,25 @@ P = wait_env.observation_contract
 RUN_GPU_DIRECT = os.environ.get("ACTIONBALL_RUN_MUJOCO_GPU_DIRECT") == "1"
 
 
+def test_regularization_projection_operands_are_the_same_shared_guard_result():
+    plant_source = inspect.getsource(wait_env.A3ReadyBallVecEnv._advance_plant)
+    assert (
+        "self._qdes_reward_processed = q_des" in plant_source
+        and "self._qdes_reward_nominal_projected = guard.nominal_projected_qdes"
+        in plant_source
+        and "self._qdes_reward_projection_span = guard.nominal_projection_span"
+        in plant_source
+    )
+    assert "_advance_plant" not in wait_env.FullMdpInitialWaitVecEnv.__dict__
+    reward_source = inspect.getsource(
+        wait_env.FullMdpInitialWaitVecEnv._fullmdp_regularization_reward_terms
+    )
+    assert "self._qdes_reward_processed" in reward_source
+    assert "self._qdes_reward_nominal_projected" in reward_source
+    assert "self._qdes_reward_projection_span" in reward_source
+    assert "torch.clamp" not in reward_source
+
+
 def test_step_refreshes_derived_state_before_termination_and_reward():
     source = Path(wait_env.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -290,11 +309,19 @@ def _fixed_reward_env():
             ],
             dtype=dtype,
         ),
-        _fullmdp_paddle_stds=torch.tensor(
+        _fullmdp_paddle_precision_stds=torch.tensor(
             [spec.std for spec in wait_env.FULLMDP_PADDLE_REWARD_SPECS],
             dtype=dtype,
         ),
+        _fullmdp_paddle_coarse_stds=torch.tensor(
+            [spec.coarse_std for spec in wait_env.FULLMDP_PADDLE_REWARD_SPECS],
+            dtype=dtype,
+        ),
         _fullmdp_mount_normal_sign=torch.ones(num_envs, dtype=dtype),
+        _fullmdp_regularization_reward_terms=lambda: torch.zeros(
+            (num_envs, len(wait_env.reward_contract.REGULARIZATION_SPECS)),
+            dtype=dtype,
+        ),
         _epoch_task_valid=torch.zeros(num_envs, dtype=torch.bool),
         _epoch_phase=torch.zeros(num_envs, dtype=torch.long),
         _full_a_outcome_code=torch.zeros(num_envs, dtype=torch.long),
@@ -399,8 +426,9 @@ def _independent_aligned_teacher(env, pos, quat):
     return aligned_pos, _test_quat_mul(expanded, env._teacher_body_quat)
 
 
-def test_host_reward24_matches_common_and_measured_paddle_formulas():
+def test_host_reward28_matches_common_and_measured_paddle_formulas():
     env = _fixed_reward_env()
+    env._fullmdp_regularization_reward_terms = lambda: torch.zeros((2, 4))
     assert env._fullmdp_paddle_weights.tolist() == [1.0, 1.0, 1.0, 0.5]
     reward, terms = wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward(env)
 
@@ -464,10 +492,11 @@ def test_host_reward24_matches_common_and_measured_paddle_formulas():
     expected_dense = expected_raw * weights * env.step_dt
     expected_paddle = env._fullmdp_paddle_weights * env.step_dt
 
-    assert tuple(terms.shape) == (2, 24)
+    assert tuple(terms.shape) == (2, wait_env.reward_contract.REWARD_TERM_COUNT)
     assert torch.count_nonzero(terms[:, :14]) == 0
     assert torch.allclose(terms[:, 14:20], expected_dense, rtol=0.0, atol=1.0e-15)
-    assert torch.equal(terms[:, 20:], expected_paddle.repeat(2, 1))
+    assert torch.equal(terms[:, 20:24], expected_paddle.repeat(2, 1))
+    assert torch.count_nonzero(terms[:, 24:]) == 0
     assert torch.allclose(
         reward,
         expected_dense.sum(dim=1) + expected_paddle.sum(),
@@ -497,7 +526,7 @@ def test_host_reward24_matches_common_and_measured_paddle_formulas():
     env._full_a_racket_kinematics = original_racket_kinematics
     env._body_com_velocities_w = original_body_velocities
 
-    # Counterexample: this buffer is live Reward24 authority, not a private
+    # Counterexample: this buffer is live Reward28 authority, not a private
     # command-ramp scratch tensor.  Replacing one exact teacher body with a
     # midpoint changes the body-position reward immediately.
     exact_body_term = terms[:, 16].clone()
@@ -509,23 +538,26 @@ def test_host_reward24_matches_common_and_measured_paddle_formulas():
     assert not torch.equal(drifted_terms[:, 16], exact_body_term)
 
 
-def test_reward24_paddle_cauchy_channels_are_half_height_at_one_sigma():
+def test_reward28_paddle_composite_channels_have_fixed_analytic_precision_value():
     env = _fixed_reward_env()
     target_pos = (
         env._aligned_teacher_racket_site_pos_w - env.env.scene.env_origins
     )
     target_velocity = env._aligned_teacher_racket_site_lin_vel_w
     target_pos = target_pos + torch.tensor(
-        [0.70, 0.0, 0.0], dtype=torch.float64
+        [0.075, 0.0, 0.0], dtype=torch.float64
     )
     target_velocity = target_velocity + torch.tensor(
-        [4.0, 0.0, 0.0], dtype=torch.float64
+        [0.50, 0.0, 0.0], dtype=torch.float64
     )
-    target_normal = torch.tensor([[0.0, -1.0, 0.0]], dtype=torch.float64).repeat(
-        env.num_envs, 1
-    )
+    face_angle = math.radians(15.0)
+    target_normal = torch.tensor(
+        [[math.sin(face_angle), math.cos(face_angle), 0.0]],
+        dtype=torch.float64,
+    ).repeat(env.num_envs, 1)
+    long_angle = math.radians(10.0)
     target_long_axis = torch.tensor(
-        [[math.cos(1.0), 0.0, math.sin(1.0)]],
+        [[math.cos(long_angle), 0.0, math.sin(long_angle)]],
         dtype=torch.float64,
     ).repeat(env.num_envs, 1)
     calls = 0
@@ -539,9 +571,10 @@ def test_reward24_paddle_cauchy_channels_are_half_height_at_one_sigma():
     _reward, terms = wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward(env)
 
     assert calls == 1
+    expected_kernel = 0.5 * math.exp(-1.0) + 0.5 / (1.0 + 0.25**2)
     torch.testing.assert_close(
-        terms[:, 20:],
-        (0.5 * env._fullmdp_paddle_weights * env.step_dt).repeat(
+        terms[:, 20:24],
+        (expected_kernel * env._fullmdp_paddle_weights * env.step_dt).repeat(
             env.num_envs, 1
         ),
         rtol=0.0,
@@ -549,7 +582,7 @@ def test_reward24_paddle_cauchy_channels_are_half_height_at_one_sigma():
     )
 
 
-def test_reward24_generic_body_terms_exclude_only_the_held_wrist():
+def test_reward28_generic_body_terms_exclude_only_the_held_wrist():
     env = _fixed_reward_env()
     _reward, baseline = wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward(env)
 
@@ -571,7 +604,7 @@ def test_reward24_generic_body_terms_exclude_only_the_held_wrist():
     assert not torch.equal(non_wrist_changed[:, 16], baseline[:, 16])
 
 
-def test_reward24_ready_face_is_raw_y_but_selected_face_uses_mount_sign():
+def test_reward28_ready_face_is_raw_y_but_selected_face_uses_mount_sign():
     env = _fixed_reward_env()
     env.full_a_mode = True
     env._full_a_owner_valid_bits = torch.zeros(
@@ -731,7 +764,7 @@ def test_relative_body_rewards_use_prior_anchor_cache_then_align_next_tick():
     assert torch.equal(second_raw[1, 2:4], torch.ones(2, dtype=dtype))
 
 
-def test_reward24_two_transition_moving_anchor_uses_prior_alignment_cache():
+def test_reward28_two_transition_moving_anchor_uses_prior_alignment_cache():
     env = _fixed_reward_env()
     dtype = env._teacher_body_pos.dtype
     anchor = env._fullmdp_anchor_index
@@ -997,7 +1030,10 @@ def test_step_delegates_raw_action_to_single_owner_and_preserves_nonfinite_evide
         _latch_post_forward_table_keepout=lambda: None,
         _state=lambda: {},
         _fullmdp_termination=terminate,
-        _fullmdp_reward=lambda: (torch.zeros(2), torch.zeros(2, 24)),
+        _fullmdp_reward=lambda: (
+            torch.zeros(2),
+            torch.zeros(2, wait_env.reward_contract.REWARD_TERM_COUNT),
+        ),
         last_terminal_bits=torch.zeros(2, dtype=torch.long),
         reset_generation=torch.ones(2, dtype=torch.long),
         _all_env_ids=torch.arange(2),
@@ -2428,7 +2464,7 @@ def test_host_full_a_step_reveals_after_balance_prefix_without_r07_admission():
         torch.tensor([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]]),
         torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
     )
-    fixed_terms = torch.zeros((2, 24))
+    fixed_terms = torch.zeros((2, wait_env.reward_contract.REWARD_TERM_COUNT))
     fixed_terms[:, 20] = fixed_racket_kinematics[0][:, 0]
     fixed_terms[:, 21] = fixed_racket_kinematics[1][:, 0]
 
@@ -2500,7 +2536,12 @@ def test_host_full_a_step_reveals_after_balance_prefix_without_r07_admission():
         torch.zeros(2, dtype=torch.bool),
         torch.zeros(2, dtype=torch.bool),
     )
-    def reward24(racket_kinematics, tracked_kinematics=None):
+    def reward28(
+        racket_kinematics,
+        tracked_kinematics=None,
+        *,
+        return_paddle_error=False,
+    ):
         reward_racket_inputs.append(racket_kinematics)
         assert tracked_kinematics is fixed_tracked_kinematics
         reward_teacher.append(
@@ -2511,9 +2552,12 @@ def test_host_full_a_step_reveals_after_balance_prefix_without_r07_admission():
                 env._aligned_teacher_body_pos.clone(),
             )
         )
-        return fixed_terms.sum(1), fixed_terms.clone()
+        result = (fixed_terms.sum(1), fixed_terms.clone())
+        if return_paddle_error:
+            return result + (torch.zeros((2, 4)),)
+        return result
 
-    env._fullmdp_reward = reward24
+    env._fullmdp_reward = reward28
     env._full_a_finish_recovery = lambda _terminated, _truncated: (
         torch.zeros(2, dtype=torch.bool),
         torch.zeros(2, dtype=torch.bool),
@@ -2714,9 +2758,13 @@ def test_host_full_a_step_freezes_landing_crossing_on_shot_retirement():
         torch.ones(2, dtype=torch.bool),
         torch.ones(2, dtype=torch.bool),
     )
-    env._fullmdp_reward = lambda _racket_kinematics=None, _tracked=None: (
-        torch.zeros(2),
-        torch.zeros((2, 24)),
+    env._fullmdp_reward = (
+        lambda _racket_kinematics=None, _tracked=None,
+        return_paddle_error=False: (
+            torch.zeros(2),
+            torch.zeros((2, wait_env.reward_contract.REWARD_TERM_COUNT)),
+            *(() if not return_paddle_error else (torch.zeros((2, 4)),)),
+        )
     )
     def finish(_terminated, _truncated):
         env._epoch_phase[:] = wait_env.FULL_A_PHASE_RETIRED
@@ -4145,8 +4193,13 @@ def test_host_full_a_step_settles_invalid_r06_without_early_recovery_retire(
         torch.zeros(2, dtype=torch.bool),
         torch.zeros(2, dtype=torch.bool),
     )
-    env._fullmdp_reward = lambda _racket_kinematics=None, _tracked=None: (
-        torch.zeros(2), torch.zeros((2, 24))
+    env._fullmdp_reward = (
+        lambda _racket_kinematics=None, _tracked=None,
+        return_paddle_error=False: (
+            torch.zeros(2),
+            torch.zeros((2, wait_env.reward_contract.REWARD_TERM_COUNT)),
+            *(() if not return_paddle_error else (torch.zeros((2, 4)),)),
+        )
     )
     env._full_a_finish_recovery = MethodType(
         wait_env.FullMdpInitialWaitVecEnv._full_a_finish_recovery, env
@@ -4534,7 +4587,7 @@ def test_host_full_a_invalid_outcome_completes_r07_unpaid_then_retires_failure()
     assert not r07_present.any() and not r07_valid.any()
 
 
-def test_host_full_a_r07_window_success_failure_timeout_and_reward24_conservation():
+def test_host_full_a_r07_window_success_failure_timeout_and_reward28_conservation():
     env = _host_full_a_lifecycle_env()
     env._epoch_phase[:] = wait_env.FULL_A_PHASE_OUTCOME_SETTLED
     env._epoch_task_valid.fill_(True)
@@ -4901,8 +4954,13 @@ def _completion_fault_step_result(*, compound_invalid_contact=False):
     env._full_a_publish_r07_fact = lambda *_args: (
         torch.zeros(2, dtype=torch.bool), torch.zeros(2, dtype=torch.bool)
     )
-    env._fullmdp_reward = lambda _racket_kinematics=None, _tracked=None: (
-        torch.zeros(2), torch.zeros((2, 24))
+    env._fullmdp_reward = (
+        lambda _racket_kinematics=None, _tracked=None,
+        return_paddle_error=False: (
+            torch.zeros(2),
+            torch.zeros((2, wait_env.reward_contract.REWARD_TERM_COUNT)),
+            *(() if not return_paddle_error else (torch.zeros((2, 4)),)),
+        )
     )
     env._full_a_finish_recovery = MethodType(
         wait_env.FullMdpInitialWaitVecEnv._full_a_finish_recovery, env
@@ -5154,7 +5212,7 @@ def test_cached_reward14_matches_fallback_bitwise_for_all_terms_and_fact_states(
     assert torch.count_nonzero(cached[2]) == 0
 
 
-def test_reward24_cached_lifecycle_weights_avoid_step_host_ops(monkeypatch):
+def test_reward28_cached_lifecycle_weights_avoid_step_host_ops(monkeypatch):
     env = _fixed_reward_env()
     env.full_a_mode = True
     env._full_a_owner_valid_bits = torch.zeros((2, 4), dtype=torch.long)
@@ -5176,7 +5234,7 @@ def test_reward24_cached_lifecycle_weights_avoid_step_host_ops(monkeypatch):
     cached_pointer = env._full_a_lifecycle_reward_weights.data_ptr()
 
     def forbidden_host_or_constructor(*_args, **_kwargs):
-        raise AssertionError("Reward24 hot path performed a host read or tensor construction")
+        raise AssertionError("Reward28 hot path performed a host read or tensor construction")
 
     with monkeypatch.context() as patch:
         patch.setattr(wait_env.portable_reward.torch, "tensor", forbidden_host_or_constructor)
@@ -5196,7 +5254,7 @@ def test_reward24_cached_lifecycle_weights_avoid_step_host_ops(monkeypatch):
     )
 
 
-def test_reward24_explicitly_passes_the_construction_cached_weights():
+def test_reward28_explicitly_passes_the_construction_cached_weights():
     source = ast.parse(Path(wait_env.__file__).read_text(encoding="utf-8"))
     cls = next(
         node
@@ -5221,7 +5279,7 @@ def test_reward24_explicitly_passes_the_construction_cached_weights():
     assert keyword.value.attr == "_full_a_lifecycle_reward_weights"
 
 
-def test_reward24_pays_r03_once_while_retaining_the_sticky_fact():
+def test_reward28_pays_r03_once_while_retaining_the_sticky_fact():
     env = _fixed_reward_env()
     env.full_a_mode = True
     env._full_a_owner_valid_bits = torch.zeros((2, 4), dtype=torch.long)
@@ -5257,7 +5315,7 @@ def test_reward24_pays_r03_once_while_retaining_the_sticky_fact():
     assert torch.equal(env._full_a_owner_fact_f32[:, 1], sticky_fact)
 
 
-def test_reward24_nonfinite_is_left_for_pre_optimizer_ledger_without_step_sync():
+def test_reward28_nonfinite_is_left_for_pre_optimizer_ledger_without_step_sync():
     source = ast.parse(Path(wait_env.__file__).read_text(encoding="utf-8"))
     cls = next(
         node
@@ -5430,7 +5488,10 @@ def _assert_step_surface(result, *, num_envs: int):
     assert extras["termination_bits"].dtype == torch.int64
     assert tuple(extras["backend_resolved_table_contact"].shape) == (num_envs,)
     assert extras["backend_resolved_table_contact"].dtype == torch.bool
-    assert tuple(extras["reward_terms"].shape) == (num_envs, 24)
+    assert tuple(extras["reward_terms"].shape) == (
+        num_envs,
+        wait_env.reward_contract.REWARD_TERM_COUNT,
+    )
     assert tuple(extras["reset_generation"].shape) == (num_envs,)
     assert extras["reset_generation"].dtype == torch.int64
     assert torch.isfinite(observations["policy"]).all()

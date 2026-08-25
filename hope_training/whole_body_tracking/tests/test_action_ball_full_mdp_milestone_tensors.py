@@ -43,7 +43,7 @@ def test_reward_keeps_eligible_zero_distinct_and_names_only_configured_income():
     _add_step(leaf, eligible=torch.tensor([True, False]))
     payload = M.decode_host_window(*leaf.pack_views()).as_json(_term_names())
     row = payload["reward_terms"][0]
-    assert payload["schema_version"] == 7
+    assert payload["schema_version"] == 8
     assert payload["sample_unit"] == "reward_manager_payment_sample"
     assert "ladder_counts" not in payload and "ladder_stats" not in payload
     assert "per_action_event_strata" in payload["not_produced"]
@@ -159,15 +159,19 @@ def test_decoder_rejects_negative_domains_and_independent_actual_verdicts():
 def test_paddle_motion_prior_playback_is_exactly_masked_non_gating_telemetry():
     leaf = M.MilestoneTensorAccumulator(3, torch.device("cpu"))
     playback = torch.tensor([True, False, True], dtype=torch.bool)
-    first = M.REWARD_TERM_COUNT - len(M.PADDLE_PLAYBACK_TERM_NAMES)
     expected = []
-    for index, ordinal in enumerate(range(first, M.REWARD_TERM_COUNT)):
+    for index, ordinal in enumerate(M.PADDLE_PLAYBACK_ORDINALS):
         kernel = torch.tensor(
             [0.5 + 0.1 * index, 0.99, 0.25 + 0.1 * index],
             dtype=torch.float32,
         )
         leaf.add_paddle_motion_prior_playback(
-            ordinal, kernel, playback
+            ordinal,
+            kernel,
+            playback,
+            torch.tensor(
+                [0.1 + index, 99.0, 0.2 + index], dtype=torch.float32
+            ),
         )
         expected.append(kernel)
 
@@ -176,17 +180,29 @@ def test_paddle_motion_prior_playback_is_exactly_masked_non_gating_telemetry():
     assert payload["paddle_motion_prior_playback"]["predicate"] == (
         "Motion.action_ball_full_mdp_playback_active_mask"
     )
+    assert payload["paddle_motion_prior_playback"]["error_names"] == (
+        "position", "velocity", "signed_face", "long_axis"
+    )
+    assert payload["paddle_motion_prior_playback"]["error_units"] == (
+        "m", "m_per_s", "rad", "rad"
+    )
     assert tuple(row["term"] for row in rows) == M.PADDLE_PLAYBACK_TERM_NAMES
-    for row, kernel in zip(rows, expected):
+    assert tuple(row["ordinal"] for row in rows) == M.PADDLE_PLAYBACK_ORDINALS
+    for index, (row, kernel) in enumerate(zip(rows, expected)):
         assert row["telemetry_unavailable_count"] == 0
         assert row["playback_count"] == 2
         assert row["finite_count"] == 2
         assert row["domain_violation_count"] == 0
+        assert row["error_finite_count"] == 2
         assert row["kernel_sum"] == pytest.approx(
             float(kernel[0].double() + kernel[2].double())
         )
         assert row["kernel_sum_sq"] == pytest.approx(
             float(kernel[0].double().square() + kernel[2].double().square())
+        )
+        assert row["error_sum"] == pytest.approx(0.3 + 2.0 * index)
+        assert row["error_sum_sq"] == pytest.approx(
+            (0.1 + index) ** 2 + (0.2 + index) ** 2
         )
     # Telemetry does not open or mutate the configured-income reward step.
     assert leaf._scratch_open is False
@@ -195,8 +211,7 @@ def test_paddle_motion_prior_playback_is_exactly_masked_non_gating_telemetry():
 
 def test_paddle_motion_prior_unavailable_is_explicit_non_gating_telemetry():
     leaf = M.MilestoneTensorAccumulator(3, torch.device("cpu"))
-    first = M.REWARD_TERM_COUNT - len(M.PADDLE_PLAYBACK_TERM_NAMES)
-    for ordinal in range(first, M.REWARD_TERM_COUNT):
+    for ordinal in M.PADDLE_PLAYBACK_ORDINALS:
         leaf.add_paddle_motion_prior_unavailable(ordinal)
     rows = M.decode_host_window(*leaf.pack_views()).as_json(_term_names())[
         "paddle_motion_prior_playback"
@@ -204,16 +219,18 @@ def test_paddle_motion_prior_unavailable_is_explicit_non_gating_telemetry():
     assert [row["telemetry_unavailable_count"] for row in rows] == [3] * 4
     assert [row["playback_count"] for row in rows] == [0] * 4
     assert [row["finite_count"] for row in rows] == [0] * 4
+    assert [row["error_finite_count"] for row in rows] == [0] * 4
     assert leaf._scratch_open is False
 
 
 def test_paddle_motion_prior_playback_counts_active_nonfinite_without_pollution():
     leaf = M.MilestoneTensorAccumulator(3, torch.device("cpu"))
-    first = M.REWARD_TERM_COUNT - len(M.PADDLE_PLAYBACK_TERM_NAMES)
+    first = M.PADDLE_PLAYBACK_FIRST_ORDINAL
     leaf.add_paddle_motion_prior_playback(
         first,
         torch.tensor([0.5, float("nan"), 0.0], dtype=torch.float32),
         torch.tensor([True, True, True], dtype=torch.bool),
+        torch.tensor([0.1, float("nan"), 9.0], dtype=torch.float32),
     )
     row = M.decode_host_window(*leaf.pack_views()).as_json(_term_names())[
         "paddle_motion_prior_playback"
@@ -222,15 +239,19 @@ def test_paddle_motion_prior_playback_counts_active_nonfinite_without_pollution(
     assert row["finite_count"] == 2
     assert row["domain_violation_count"] == 0
     assert row["kernel_sum"] == 0.5
+    assert row["error_finite_count"] == 2
+    assert row["error_sum"] == pytest.approx(9.1)
+    assert row["error_sum_sq"] == pytest.approx(81.01)
 
 
 def test_paddle_motion_prior_domain_drift_is_telemetry_not_a_decoder_gate():
     leaf = M.MilestoneTensorAccumulator(3, torch.device("cpu"))
-    first = M.REWARD_TERM_COUNT - len(M.PADDLE_PLAYBACK_TERM_NAMES)
+    first = M.PADDLE_PLAYBACK_FIRST_ORDINAL
     leaf.add_paddle_motion_prior_playback(
         first,
         torch.tensor([-2.0, 1.25, 0.0], dtype=torch.float32),
         torch.ones(3, dtype=torch.bool),
+        torch.tensor([0.1, 0.2, 0.3], dtype=torch.float32),
     )
     row = M.decode_host_window(*leaf.pack_views()).as_json(_term_names())[
         "paddle_motion_prior_playback"
@@ -240,6 +261,142 @@ def test_paddle_motion_prior_domain_drift_is_telemetry_not_a_decoder_gate():
     assert row["domain_violation_count"] == 2
     assert row["kernel_sum"] == pytest.approx(-0.75)
     assert row["kernel_sum_sq"] == pytest.approx(5.5625)
+
+
+def test_cycle_batched_reductions_are_bitwise_equal_to_legacy_term_reductions():
+    """The launch optimization must not alter any public scalar statistic."""
+
+    num_envs = 17
+    leaf = M.MilestoneTensorAccumulator(num_envs, torch.device("cpu"))
+    expected_i64 = torch.zeros_like(leaf.i64)
+    expected_f64 = torch.zeros_like(leaf.f64)
+    generator = torch.Generator().manual_seed(20260825)
+    first_paddle = M.PADDLE_PLAYBACK_FIRST_ORDINAL
+
+    for cycle in range(3):
+        configured = torch.zeros(num_envs, dtype=torch.float64)
+        configured_abs = torch.zeros_like(configured)
+        for ordinal in range(M.REWARD_TERM_COUNT):
+            primitive = torch.randn(num_envs, generator=generator)
+            payment = torch.randn(num_envs, generator=generator)
+            eligible = torch.rand(num_envs, generator=generator).gt(0.25)
+            finite = torch.rand(num_envs, generator=generator).gt(0.15)
+            if ordinal == cycle:
+                primitive[0] = float("nan")
+                payment[0] = float("nan")
+                finite[0] = False
+            scale = torch.tensor(
+                (-1.0 if ordinal % 3 == 0 else 1.0)
+                * (0.01 + ordinal / 20.0),
+                dtype=torch.float64,
+            )
+            leaf.add_reward(
+                ordinal, primitive, payment, eligible, finite, scale
+            )
+
+            valid = eligible & finite
+            p = torch.where(valid, primitive, 0).to(torch.float64)
+            q = torch.where(valid, payment, 0).to(torch.float64)
+            income = q * scale
+            configured.add_(income)
+            configured_abs.add_(income.abs())
+            i0, f0 = ordinal * 4, ordinal * 7
+            expected_i64[i0:i0 + 4].add_(torch.stack((
+                torch.full((), num_envs, dtype=torch.int64),
+                eligible.sum(dtype=torch.int64),
+                valid.sum(dtype=torch.int64),
+                (valid & payment.ne(0)).sum(dtype=torch.int64),
+            )))
+            expected_f64[f0:f0 + 7].add_(torch.stack((
+                p.sum(), p.square().sum(), q.sum(), income.sum(),
+                income.square().sum(), income.clamp_min(0).sum(),
+                (-income.clamp_max(0)).sum(),
+            )))
+
+            if ordinal in M.PADDLE_PLAYBACK_ORDINALS:
+                playback = torch.rand(
+                    num_envs, generator=generator
+                ).gt(0.35)
+                kernel = torch.rand(num_envs, generator=generator)
+                error = 2.0 * torch.rand(num_envs, generator=generator)
+                if ordinal == first_paddle + cycle:
+                    kernel[1] = float("nan")
+                    error[1] = float("nan")
+                    playback[1] = True
+                leaf.add_paddle_motion_prior_playback(
+                    ordinal, kernel, playback, error
+                )
+                paddle_finite = playback & torch.isfinite(kernel)
+                error_finite = playback & torch.isfinite(error)
+                domain = paddle_finite & (kernel.lt(0.0) | kernel.gt(1.0))
+                clean = torch.where(paddle_finite, kernel, 0.0).to(
+                    torch.float64
+                )
+                clean_error = torch.where(error_finite, error, 0.0).to(
+                    torch.float64
+                )
+                index = M.PADDLE_PLAYBACK_ORDINALS.index(ordinal)
+                pi0 = M._PI + index * len(M.PADDLE_PLAYBACK_I64_COLUMNS)
+                pf0 = M._PF + index * len(M.PADDLE_PLAYBACK_F64_COLUMNS)
+                expected_i64[pi0:pi0 + 5].add_(torch.stack((
+                    torch.zeros((), dtype=torch.int64),
+                    playback.sum(dtype=torch.int64),
+                    paddle_finite.sum(dtype=torch.int64),
+                    domain.sum(dtype=torch.int64),
+                    error_finite.sum(dtype=torch.int64),
+                )))
+                expected_f64[pf0:pf0 + 4].add_(torch.stack((
+                    clean.sum(), clean.square().sum(),
+                    clean_error.sum(), clean_error.square().sum(),
+                )))
+
+        actual_reward = configured.to(torch.float32)
+        leaf.close_actual_step(actual_reward)
+        actual = actual_reward.to(torch.float64)
+        actual_finite = (
+            torch.isfinite(actual)
+            & torch.isfinite(configured)
+            & torch.isfinite(configured_abs)
+        )
+        clean_actual = torch.where(actual_finite, actual, 0)
+        residual = torch.where(actual_finite, actual - configured, 0)
+        residual_abs = residual.abs()
+        tolerance = (
+            configured_abs
+            * (
+                M.FLOAT32_REWARD_ACCUMULATION_TOLERANCE_FACTOR
+                * torch.finfo(torch.float32).eps
+            )
+            + M.REWARD_TERM_COUNT * torch.finfo(torch.float32).tiny
+        )
+        expected_i64[M._AI:M._EI].add_(torch.stack((
+            torch.full((), num_envs, dtype=torch.int64),
+            actual_finite.sum(dtype=torch.int64),
+            (~actual_finite).sum(dtype=torch.int64),
+            (actual_finite & residual_abs.gt(tolerance)).sum(
+                dtype=torch.int64
+            ),
+        )))
+        expected_f64[M._AF:M._EPF].add_(torch.stack((
+            clean_actual.sum(), clean_actual.square().sum(), residual.sum(),
+            residual_abs.sum(), residual.square().sum(), residual_abs.amax(),
+            tolerance.amax(),
+        )))
+
+        assert torch.equal(leaf.i64, expected_i64)
+        assert torch.equal(leaf.f64, expected_f64)
+        assert not bool(leaf._reward_evaluated.any())
+        assert not bool(leaf._reward_i64_samples.any())
+        assert not bool(leaf._reward_f64_samples.any())
+        assert not bool(leaf._paddle_unavailable.any())
+        assert not bool(leaf._paddle_i64_samples.any())
+        assert not bool(leaf._paddle_f64_samples.any())
+
+
+def test_hot_reward_term_path_contains_no_eager_reduction():
+    source = inspect.getsource(M.MilestoneTensorAccumulator.add_reward)
+    assert ".sum(" not in source
+    assert ".amax(" not in source
 
 
 def test_decoder_does_not_recheck_same_writer_analytic_relationships():

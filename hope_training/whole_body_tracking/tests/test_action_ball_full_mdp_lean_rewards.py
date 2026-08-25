@@ -41,6 +41,11 @@ def _paddle_telemetry_kwargs(ordinal, value):
         "paddle_playback_active": torch.ones(
             value.shape, dtype=torch.bool, device=value.device
         ),
+        "paddle_error_components": torch.zeros(
+            (value.shape[0], len(R.PADDLE_MOTION_PRIOR_SPECS)),
+            dtype=value.dtype,
+            device=value.device,
+        ),
     }
 
 
@@ -183,9 +188,19 @@ def _pay_all(
             term = value * float(manager_weights[ordinal])
             term = term * float(manager_dt)
         actual.add_(term)
-    dense_values = dense_values or tuple(
-        torch.ones(graph.num_envs, dtype=torch.float32, device=TEST_DEVICE)
-        for _ in R.ALL_DENSE_SPECS
+    dense_values = dense_values or (
+        tuple(
+            torch.ones(
+                graph.num_envs, dtype=torch.float32, device=TEST_DEVICE
+            )
+            for _ in R.ALL_DENSE_SPECS
+        )
+        + tuple(
+            torch.zeros(
+                graph.num_envs, dtype=torch.float32, device=TEST_DEVICE
+            )
+            for _ in R.REGULARIZATION_SPECS
+        )
     )
     for offset, value in enumerate(dense_values):
         ordinal = R.LIFECYCLE_PAYMENT_COUNT + offset
@@ -219,6 +234,7 @@ class _ExactEnvRewardDispatcherRepresentation:
         scale: float | None = None,
         value=None,
         paddle_playback_active=None,
+        paddle_error_components=None,
     ) -> torch.Tensor:
         if ordinal < R.LIFECYCLE_PAYMENT_COUNT:
             return self._test_reward_graph.pay(ordinal, scale=scale)
@@ -226,6 +242,7 @@ class _ExactEnvRewardDispatcherRepresentation:
             ordinal,
             value,
             paddle_playback_active=paddle_playback_active,
+            paddle_error_components=paddle_error_components,
         )
 
 
@@ -987,18 +1004,25 @@ def test_materializer_builds_exact_order_with_real_type_surface(monkeypatch):
     assert tuple(term.params["ordinal"] for term in dense_terms) == tuple(
         range(R.LIFECYCLE_PAYMENT_COUNT, R.MANAGER_TERM_COUNT)
     )
-    assert R.MANAGER_TERM_COUNT == len(R.MANAGER_NAMES) == 24
-    assert R.MANAGER_NAMES[-4:] == (
+    assert R.MANAGER_TERM_COUNT == len(R.MANAGER_NAMES) == 28
+    assert R.MANAGER_NAMES[-8:-4] == (
         "motion_racket_position",
         "motion_racket_velocity",
         "motion_racket_normal",
         "motion_racket_long_axis",
     )
+    assert R.MANAGER_NAMES[-4:] == R.REGULARIZATION_NAMES
     assert tuple(cfg[name].weight for name in R.PADDLE_MOTION_PRIOR_NAMES) == (
         1.0,
         1.0,
         1.0,
         0.5,
+    )
+    assert tuple(cfg[name].weight for name in R.REGULARIZATION_NAMES) == (
+        0.1,
+        10.0,
+        1.0,
+        10.0,
     )
     body_names_by_term = {
         name: cfg[name].params.get("body_names")
@@ -1149,13 +1173,14 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
 
     def make_evaluator(evaluator_name):
         def evaluator(
-            env, *, command_name, std, scale_in_strike_window
+            env, *, command_name, std, coarse_std, scale_in_strike_window
         ):
             calls.append(
                 (
                     evaluator_name,
                     command_name,
                     std,
+                    coarse_std,
                     scale_in_strike_window,
                 )
             )
@@ -1189,6 +1214,11 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
             for spec in R.PADDLE_MOTION_PRIOR_SPECS
         }
     )
+    evaluator_module.motion_racket_tracking_errors_now = lambda _cmd: torch.tensor(
+        [[0.10, 0.20, 0.30, 0.40], [0.50, 0.60, 0.70, 0.80]],
+        dtype=torch.float32,
+        device=TEST_DEVICE,
+    )
     real_import = R.importlib.import_module
     monkeypatch.setattr(
         R.importlib,
@@ -1217,8 +1247,13 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
                 ordinal=ordinal,
                 command_name=spec.command_name,
                 std=spec.std,
+                coarse_std=spec.coarse_std,
                 scale_in_strike_window=spec.scale_in_strike_window,
             )
+        )
+    for ordinal in range(R.REGULARIZATION_FIRST_ORDINAL, R.MANAGER_TERM_COUNT):
+        graph.record_common_dense(
+            ordinal, torch.zeros(2, dtype=torch.float32, device=TEST_DEVICE)
         )
     assert graph.completed_cycle_count == 1
     assert graph.poisoned is False
@@ -1229,11 +1264,18 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
             spec.evaluator_name,
             spec.command_name,
             spec.std,
+            spec.coarse_std,
             spec.scale_in_strike_window,
         )
         for spec in R.PADDLE_MOTION_PRIOR_SPECS
     ]
     owner_telemetry = graph.epoch_owner.milestone
+    # Batched milestone reductions are committed only when RewardManager's
+    # exact actual reward closes the cycle.  Use the already accumulated
+    # configured value so this focused test exercises the production boundary.
+    graph.close_milestone_actual_reward(
+        owner_telemetry.open_step_configured_income.to(torch.float32)
+    )
     payload = R.epoch_v1.milestone_tensors.decode_host_window(
         *(
             value.detach().cpu().contiguous()
@@ -1248,10 +1290,19 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
     ] == expected_unavailable
     assert [row["playback_count"] for row in playback_rows] == expected_playback
     assert [row["finite_count"] for row in playback_rows] == expected_playback
+    assert [row["error_finite_count"] for row in playback_rows] == expected_playback
     assert [row["domain_violation_count"] for row in playback_rows] == [0] * 4
     for row, value in zip(playback_rows, values):
         expected_sum = float(value[0]) if telemetry_available else 0.0
         assert row["kernel_sum"] == pytest.approx(expected_sum)
+    expected_error = [0.10, 0.20, 0.30, 0.40]
+    for row, error in zip(playback_rows, expected_error):
+        assert row["error_sum"] == pytest.approx(
+            error if telemetry_available else 0.0
+        )
+        assert row["error_sum_sq"] == pytest.approx(
+            error * error if telemetry_available else 0.0
+        )
 
 
 def test_shared_reward_contract_removes_exactly_one_held_wrist_in_order():

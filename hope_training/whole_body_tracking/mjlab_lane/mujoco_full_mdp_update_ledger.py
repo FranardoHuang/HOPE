@@ -4,7 +4,7 @@ import copy
 from dataclasses import dataclass
 import hashlib, importlib.util, json, math, os, re, sys
 from pathlib import Path
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 EXACT_RUNTIME_STACK = {
     "schema_version": 1,
@@ -94,6 +94,24 @@ def _reward_contract_module():
         source=source,
         name="_hope_mujoco_ledger_action_ball_full_mdp_reward_contract",
         subject="FullMDP reward contract",
+    )
+
+
+def _paddle_prior_module():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_paddle_prior.py"
+    ).resolve()
+    return _load_pinned_local_module(
+        source=source,
+        name="_hope_mujoco_ledger_action_ball_full_mdp_paddle_prior",
+        subject="FullMDP paddle prior",
     )
 
 
@@ -190,9 +208,12 @@ def _exact_paddle_prior_contract():
         raise RuntimeError("FullMDP paddle prior contract differs")
     names = tuple(spec.manager_name for spec in specs)
     weights = tuple(float(spec.manager_weight) for spec in specs)
-    start = REWARD_TERM_COUNT - len(names)
+    try:
+        start = REWARD_TERM_NAMES.index(names[0])
+    except ValueError as exc:
+        raise RuntimeError("FullMDP paddle prior contract differs") from exc
     if (
-        REWARD_TERM_NAMES[start:] != names
+        REWARD_TERM_NAMES[start : start + len(names)] != names
         or any(
             not math.isfinite(value) or value <= 0.0
             for value in weights
@@ -208,6 +229,10 @@ def _exact_paddle_prior_contract():
     PADDLE_PRIOR_TERM_START,
 ) = _exact_paddle_prior_contract()
 PADDLE_PRIOR_TERM_COUNT = len(PADDLE_PRIOR_TERM_NAMES)
+PADDLE_ERROR_NAMES = tuple(_paddle_prior_module().PADDLE_ERROR_NAMES)
+PADDLE_ERROR_UNITS = tuple(_paddle_prior_module().PADDLE_ERROR_UNITS)
+if len(PADDLE_ERROR_NAMES) != PADDLE_PRIOR_TERM_COUNT:
+    raise RuntimeError("FullMDP paddle error contract differs")
 FULLMDP_POLICY_STEP_S = float(
     _portable_catalog_module().FRESH_POLICY_STEP_S
 )
@@ -408,9 +433,9 @@ class FullMdpUpdateLedger:
         self._paddle_playback_rows = torch.zeros(
             1, dtype=torch.float64, device=device
         )
-        # Rows: finite count, raw kernel sum/sumsq, domain-violation count.
+        # Rows: kernel finite/sum/sumsq/domain, then true-error finite/sum/sumsq.
         self._paddle_playback_stats = torch.zeros(
-            (4, PADDLE_PRIOR_TERM_COUNT), dtype=torch.float64, device=device
+            (7, PADDLE_PRIOR_TERM_COUNT), dtype=torch.float64, device=device
         )
         self._paddle_max_payment = torch.tensor(
             [
@@ -430,6 +455,22 @@ class FullMdpUpdateLedger:
                 and value.device == self.device):
             self._faults.add(key)
             return self.torch.zeros(self.num_envs, dtype=dtype, device=self.device)
+        return value
+    def _floating_matrix(self, extras, key, width):
+        value = extras.get(key)
+        if not (
+            isinstance(value, self.torch.Tensor)
+            and self.torch.is_floating_point(value)
+            and tuple(value.shape) == (self.num_envs, width)
+            and value.device == self.device
+        ):
+            self._faults.add(key)
+            return self.torch.full(
+                (self.num_envs, width),
+                self.torch.nan,
+                dtype=self.torch.float32,
+                device=self.device,
+            )
         return value
     def ingest(self, result) -> None:
         torch = self.torch
@@ -465,6 +506,11 @@ class FullMdpUpdateLedger:
         )
         paddle_playback = self._vector(
             extras, "full_a_paddle_prior_playback", torch.bool
+        )
+        paddle_error = self._floating_matrix(
+            extras,
+            "full_a_paddle_prior_error",
+            PADDLE_PRIOR_TERM_COUNT,
         )
         fact_integrity = {
             name: torch.bitwise_and(fact_integrity_bits, bit).ne(0)
@@ -584,6 +630,14 @@ class FullMdpUpdateLedger:
         paddle_domain_violation = paddle_finite & (
             paddle_kernel.lt(0.0) | paddle_kernel.gt(1.0)
         )
+        paddle_error_finite = paddle_playback[:, None] & torch.isfinite(
+            paddle_error
+        )
+        finite_error = torch.where(
+            paddle_error_finite,
+            paddle_error,
+            torch.zeros_like(paddle_error),
+        ).to(dtype=torch.float64)
         self._paddle_playback_rows += paddle_playback.sum(
             dtype=torch.float64
         )
@@ -593,6 +647,9 @@ class FullMdpUpdateLedger:
                 finite_kernel.sum(0),
                 torch.square(finite_kernel).sum(0),
                 paddle_domain_violation.sum(0, dtype=torch.float64),
+                paddle_error_finite.sum(0, dtype=torch.float64),
+                finite_error.sum(0),
+                torch.square(finite_error).sum(0),
             )
         )
         self._actual += torch.where(actual_finite, actual,
@@ -672,7 +729,7 @@ class FullMdpUpdateLedger:
         reward_values = take(REWARD_TERM_COUNT); cursor += REWARD_TERM_COUNT
         actual_sum = values[cursor]; cursor += 1
         paddle_playback_rows = values[cursor]; cursor += 1
-        paddle_stat_width = 4 * PADDLE_PRIOR_TERM_COUNT
+        paddle_stat_width = 7 * PADDLE_PRIOR_TERM_COUNT
         paddle_stats = values[cursor:cursor + paddle_stat_width]
         cursor += paddle_stat_width
         paddle_finite = paddle_stats[:PADDLE_PRIOR_TERM_COUNT]
@@ -684,6 +741,15 @@ class FullMdpUpdateLedger:
         ]
         paddle_domain_violation = paddle_stats[
             3 * PADDLE_PRIOR_TERM_COUNT : 4 * PADDLE_PRIOR_TERM_COUNT
+        ]
+        paddle_error_finite = paddle_stats[
+            4 * PADDLE_PRIOR_TERM_COUNT : 5 * PADDLE_PRIOR_TERM_COUNT
+        ]
+        paddle_error_sum = paddle_stats[
+            5 * PADDLE_PRIOR_TERM_COUNT : 6 * PADDLE_PRIOR_TERM_COUNT
+        ]
+        paddle_error_sumsq = paddle_stats[
+            6 * PADDLE_PRIOR_TERM_COUNT : 7 * PADDLE_PRIOR_TERM_COUNT
         ]
         episode_values = values[cursor:cursor + 3]; cursor += 3
         storage_values = values[cursor:cursor + len(storage_names)]
@@ -780,6 +846,13 @@ class FullMdpUpdateLedger:
                     "domain_violation_rows": [
                         int(value) for value in paddle_domain_violation
                     ],
+                    "error_names": list(PADDLE_ERROR_NAMES),
+                    "error_units": list(PADDLE_ERROR_UNITS),
+                    "error_finite_rows": [
+                        int(value) for value in paddle_error_finite
+                    ],
+                    "error_sum": paddle_error_sum,
+                    "error_sumsq": paddle_error_sumsq,
                 },
             },
             "action_identity": {

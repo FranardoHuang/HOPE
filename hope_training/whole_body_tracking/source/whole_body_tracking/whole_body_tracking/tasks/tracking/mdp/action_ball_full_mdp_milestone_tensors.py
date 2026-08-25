@@ -16,8 +16,12 @@ try:
     from . import action_ball_full_mdp_reward_contract as reward_contract
 except ImportError:
     import action_ball_full_mdp_reward_contract as reward_contract
+try:
+    from . import action_ball_full_mdp_paddle_prior as paddle_prior
+except ImportError:
+    import action_ball_full_mdp_paddle_prior as paddle_prior
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 REWARD_TERM_COUNT = reward_contract.REWARD_TERM_COUNT
 REWARD_I64_COLUMNS = ("evaluated", "eligible", "finite", "nonzero")
 REWARD_F64_COLUMNS = (
@@ -63,14 +67,29 @@ PADDLE_PLAYBACK_I64_COLUMNS = (
     "playback_count",
     "finite_count",
     "domain_violation_count",
+    "error_finite_count",
 )
-PADDLE_PLAYBACK_F64_COLUMNS = ("kernel_sum", "kernel_sum_sq")
+PADDLE_PLAYBACK_F64_COLUMNS = (
+    "kernel_sum", "kernel_sum_sq", "error_sum", "error_sum_sq",
+)
 PADDLE_PLAYBACK_TERM_NAMES = reward_contract.PADDLE_MOTION_PRIOR_NAMES
+PADDLE_PLAYBACK_ORDINALS = tuple(
+    reward_contract.MANAGER_NAMES.index(name)
+    for name in PADDLE_PLAYBACK_TERM_NAMES
+)
+if PADDLE_PLAYBACK_ORDINALS != tuple(
+    range(
+        PADDLE_PLAYBACK_ORDINALS[0],
+        PADDLE_PLAYBACK_ORDINALS[0] + len(PADDLE_PLAYBACK_ORDINALS),
+    )
+):
+    raise RuntimeError("milestone paddle playback Reward order differs")
+PADDLE_PLAYBACK_FIRST_ORDINAL = PADDLE_PLAYBACK_ORDINALS[0]
 NOT_PRODUCED = (
     "per_action_event_strata", "per_side_event_strata",
     "landing_xy_event_statistics", "recovery_success_event",
     "recovery_component_event_statistics", "all_policy_balance",
-    "outgoing_v_plus_w_plus", "action_rate_l2", "multi_action_side_strata",
+    "outgoing_v_plus_w_plus", "multi_action_side_strata",
     "shot_attributed_reward",
 )
 FLOAT32_REWARD_ACCUMULATION_TOLERANCE_FACTOR = 64.0
@@ -131,9 +150,7 @@ class MilestoneWindowTelemetry:
             paddle_playback.append(
                 {
                     "ordinal": (
-                        REWARD_TERM_COUNT
-                        - len(PADDLE_PLAYBACK_TERM_NAMES)
-                        + index
+                        PADDLE_PLAYBACK_FIRST_ORDINAL + index
                     ),
                     "term": name,
                     **dict(
@@ -186,6 +203,8 @@ class MilestoneWindowTelemetry:
                 "predicate": (
                     "Motion.action_ball_full_mdp_playback_active_mask"
                 ),
+                "error_names": paddle_prior.PADDLE_ERROR_NAMES,
+                "error_units": paddle_prior.PADDLE_ERROR_UNITS,
                 "terms": paddle_playback,
             },
             "not_produced": NOT_PRODUCED,
@@ -219,14 +238,20 @@ def decode_host_window(i64: torch.Tensor, f64: torch.Tensor) -> MilestoneWindowT
             playback_count,
             finite_count,
             domain_violation_count,
+            error_finite_count,
         ) = ints[
             i0 : i0 + len(PADDLE_PLAYBACK_I64_COLUMNS)
         ]
-        kernel_sum_sq = floats[f0 + 1]
+        kernel_sum_sq, error_sum, error_sum_sq = (
+            floats[f0 + 1], floats[f0 + 2], floats[f0 + 3]
+        )
         if (
             finite_count > playback_count
             or domain_violation_count > finite_count
+            or error_finite_count > playback_count
             or kernel_sum_sq < 0.0
+            or error_sum < 0.0
+            or error_sum_sq < 0.0
         ):
             raise ValueError("milestone paddle playback telemetry differs")
     nonfinite_count, violations = ints[_AI + 2:_EI]
@@ -242,6 +267,9 @@ class MilestoneTensorAccumulator:
         "i64", "f64", "open_episode_return", "open_step_configured_income",
         "open_step_configured_abs_income", "r03_seen", "r07_outcome_seen",
         "r07_ready_seen",
+        "_reward_evaluated", "_reward_i64_samples", "_reward_f64_samples",
+        "_paddle_unavailable", "_paddle_i64_samples",
+        "_paddle_f64_samples",
         "_num_envs", "_shot_shape", "_device",
         "_scratch_open", "_frozen", "_lean_carry_coordinator",
     )
@@ -263,6 +291,37 @@ class MilestoneTensorAccumulator:
             )
             self.r07_outcome_seen = torch.zeros_like(self.r03_seen)
             self.r07_ready_seen = torch.zeros_like(self.r03_seen)
+            # Reward terms enter exactly once per ordinal and close as one cycle.
+            # Retain per-env rows until that close so CUDA performs reductions
+            # across all terms in a few batched kernels instead of launching a
+            # separate eager reduction for every scalar statistic.
+            self._reward_evaluated = torch.zeros(
+                REWARD_TERM_COUNT, dtype=torch.int64, device=self._device
+            )
+            self._reward_i64_samples = torch.zeros(
+                (REWARD_TERM_COUNT, 3, num_envs),
+                dtype=torch.bool,
+                device=self._device,
+            )
+            self._reward_f64_samples = torch.zeros(
+                (REWARD_TERM_COUNT, 7, num_envs),
+                dtype=torch.float64,
+                device=self._device,
+            )
+            paddle_count = len(PADDLE_PLAYBACK_TERM_NAMES)
+            self._paddle_unavailable = torch.zeros(
+                paddle_count, dtype=torch.int64, device=self._device
+            )
+            self._paddle_i64_samples = torch.zeros(
+                (paddle_count, 4, num_envs),
+                dtype=torch.bool,
+                device=self._device,
+            )
+            self._paddle_f64_samples = torch.zeros(
+                (paddle_count, 4, num_envs),
+                dtype=torch.float64,
+                device=self._device,
+            )
         self._scratch_open = False
         self._frozen = False
         self._lean_carry_coordinator = None
@@ -281,20 +340,18 @@ class MilestoneTensorAccumulator:
         elif not self._scratch_open:
             raise RuntimeError("milestone configured-income step was not opened")
         valid = eligible & finite
-        i0, f0 = ordinal * 4, ordinal * 7
-        self.i64[i0:i0 + 4].add_(torch.stack((
-            torch.full((), primitive.numel(), dtype=torch.int64, device=primitive.device),
-            eligible.sum(dtype=torch.int64), valid.sum(dtype=torch.int64),
-            (valid & payment.ne(0)).sum(dtype=torch.int64),
-        )))
         p = torch.where(valid, primitive, 0).to(torch.float64)
         q = torch.where(valid, payment, 0).to(torch.float64)
         income = q * configured_scale
         self.open_step_configured_income.add_(income)
         self.open_step_configured_abs_income.add_(income.abs())
-        self.f64[f0:f0 + 7].add_(torch.stack((
-            p.sum(), p.square().sum(), q.sum(), income.sum(), income.square().sum(),
-            income.clamp_min(0).sum(), (-income.clamp_max(0)).sum(),
+        self._reward_evaluated[ordinal].fill_(primitive.numel())
+        self._reward_i64_samples[ordinal].copy_(torch.stack((
+            eligible, valid, valid & payment.ne(0),
+        )))
+        self._reward_f64_samples[ordinal].copy_(torch.stack((
+            p, p.square(), q, income, income.square(),
+            income.clamp_min(0), -income.clamp_max(0),
         )))
 
     def add_paddle_motion_prior_playback(
@@ -302,6 +359,7 @@ class MilestoneTensorAccumulator:
         ordinal: int,
         kernel: torch.Tensor,
         playback_active: torch.Tensor,
+        error: torch.Tensor,
     ) -> None:
         """Reduce raw motion-prior kernels on Motion-owned playback rows.
 
@@ -312,25 +370,41 @@ class MilestoneTensorAccumulator:
         """
 
         self._writable()
-        first = REWARD_TERM_COUNT - len(PADDLE_PLAYBACK_TERM_NAMES)
-        if type(ordinal) is not int or not first <= ordinal < REWARD_TERM_COUNT:
+        first = PADDLE_PLAYBACK_FIRST_ORDINAL
+        if type(ordinal) is not int or ordinal not in PADDLE_PLAYBACK_ORDINALS:
             raise RuntimeError("milestone paddle playback ordinal differs")
         if (
             type(kernel) is not torch.Tensor
             or type(playback_active) is not torch.Tensor
+            or type(error) is not torch.Tensor
             or tuple(kernel.shape) != (self._num_envs,)
             or playback_active.shape != kernel.shape
+            or error.shape != kernel.shape
             or kernel.device != self._device
             or playback_active.device != self._device
+            or error.device != self._device
             or kernel.dtype is not torch.float32
             or playback_active.dtype != torch.bool
+            or error.dtype is not torch.float32
         ):
             raise RuntimeError("milestone paddle playback tensor ABI differs")
         finite = playback_active & torch.isfinite(kernel)
         domain_violation = finite & (
             kernel.lt(0.0) | kernel.gt(1.0)
         )
+        error_finite = playback_active & torch.isfinite(error)
         index = ordinal - first
+        clean_kernel = torch.where(finite, kernel, 0.0).to(torch.float64)
+        clean_error = torch.where(error_finite, error, 0.0).to(torch.float64)
+        if self._scratch_open:
+            self._paddle_i64_samples[index].copy_(torch.stack((
+                playback_active, finite, domain_violation, error_finite,
+            )))
+            self._paddle_f64_samples[index].copy_(torch.stack((
+                clean_kernel, clean_kernel.square(),
+                clean_error, clean_error.square(),
+            )))
+            return
         i0 = _PI + index * len(PADDLE_PLAYBACK_I64_COLUMNS)
         f0 = _PF + index * len(PADDLE_PLAYBACK_F64_COLUMNS)
         self.i64[i0 : i0 + len(PADDLE_PLAYBACK_I64_COLUMNS)].add_(
@@ -340,15 +414,17 @@ class MilestoneTensorAccumulator:
                     playback_active.sum(dtype=torch.int64),
                     finite.sum(dtype=torch.int64),
                     domain_violation.sum(dtype=torch.int64),
+                    error_finite.sum(dtype=torch.int64),
                 )
             )
         )
-        clean_kernel = torch.where(finite, kernel, 0.0).to(torch.float64)
         self.f64[f0 : f0 + len(PADDLE_PLAYBACK_F64_COLUMNS)].add_(
             torch.stack(
                 (
                     clean_kernel.sum(),
                     clean_kernel.square().sum(),
+                    clean_error.sum(),
+                    clean_error.square().sum(),
                 )
             )
         )
@@ -357,10 +433,13 @@ class MilestoneTensorAccumulator:
         """Record missing optional telemetry without changing training flow."""
 
         self._writable()
-        first = REWARD_TERM_COUNT - len(PADDLE_PLAYBACK_TERM_NAMES)
-        if type(ordinal) is not int or not first <= ordinal < REWARD_TERM_COUNT:
+        first = PADDLE_PLAYBACK_FIRST_ORDINAL
+        if type(ordinal) is not int or ordinal not in PADDLE_PLAYBACK_ORDINALS:
             raise RuntimeError("milestone paddle playback ordinal differs")
         index = ordinal - first
+        if self._scratch_open:
+            self._paddle_unavailable[index].fill_(self._num_envs)
+            return
         i0 = _PI + index * len(PADDLE_PLAYBACK_I64_COLUMNS)
         self.i64[i0].add_(self._num_envs)
 
@@ -375,6 +454,16 @@ class MilestoneTensorAccumulator:
             or reward.dtype is not torch.float32
         ):
             raise RuntimeError("milestone actual reward tensor ABI differs")
+        reward_i64 = torch.cat((
+            self._reward_evaluated[:, None],
+            self._reward_i64_samples.sum(dim=2, dtype=torch.int64),
+        ), dim=1)
+        reward_f64 = self._reward_f64_samples.sum(dim=2)
+        paddle_i64 = torch.cat((
+            self._paddle_unavailable[:, None],
+            self._paddle_i64_samples.sum(dim=2, dtype=torch.int64),
+        ), dim=1)
+        paddle_f64 = self._paddle_f64_samples.sum(dim=2)
         actual = reward.to(torch.float64)
         finite = (
             torch.isfinite(actual)
@@ -392,16 +481,34 @@ class MilestoneTensorAccumulator:
             )
             + REWARD_TERM_COUNT * torch.finfo(torch.float32).tiny
         )
-        self.i64[_AI:_EI].add_(torch.stack((
-            torch.full((), reward.numel(), dtype=torch.int64, device=reward.device),
-            finite.sum(dtype=torch.int64), (~finite).sum(dtype=torch.int64),
-            (finite & residual_abs.gt(tolerance)).sum(dtype=torch.int64),
-        )))
-        self.f64[_AF:_EPF].add_(torch.stack((
-            clean_actual.sum(), clean_actual.square().sum(), residual.sum(),
-            residual_abs.sum(), residual.square().sum(), residual_abs.amax(),
-            tolerance.amax(),
-        )))
+        actual_i64 = torch.cat((
+            torch.full(
+                (1,), reward.numel(), dtype=torch.int64,
+                device=reward.device,
+            ),
+            torch.stack((
+                finite, ~finite, finite & residual_abs.gt(tolerance),
+            )).sum(dim=1, dtype=torch.int64),
+        ))
+        actual_f64 = torch.cat((
+            torch.stack((
+                clean_actual, clean_actual.square(), residual,
+                residual_abs, residual.square(),
+            )).sum(dim=1),
+            torch.stack((residual_abs, tolerance)).amax(dim=1),
+        ))
+        self.i64[_AI:_EI].add_(actual_i64)
+        self.f64[_AF:_EPF].add_(actual_f64)
+        self.i64[:_RI].add_(reward_i64.reshape(-1))
+        self.f64[:_RF].add_(reward_f64.reshape(-1))
+        self.i64[_PI:].add_(paddle_i64.reshape(-1))
+        self.f64[_PF:].add_(paddle_f64.reshape(-1))
+        self._reward_evaluated.zero_()
+        self._reward_i64_samples.zero_()
+        self._reward_f64_samples.zero_()
+        self._paddle_unavailable.zero_()
+        self._paddle_i64_samples.zero_()
+        self._paddle_f64_samples.zero_()
         self.open_step_configured_income.zero_()
         self.open_step_configured_abs_income.zero_()
         self._scratch_open = False

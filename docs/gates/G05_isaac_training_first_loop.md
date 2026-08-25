@@ -2,28 +2,20 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
-## 2026-08-25 FullMDP V6 Isaac fresh（仍`Partial`）
+## 2026-08-26 FullMDP V7 Isaac replacement（仍`Partial`）
 
-fresh候选采用[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)、
-[`Reward24`](../DEFINITIONS.md#fullmdp-reward24)和
-[`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3) `215/231`；final clean/pushed source=
-`caddecb76727ea55b0ce089453eea91cb5a9f8ea`。四个due与耗尽clock、schema7具名slice、terminal-overlap跨writer合成及4096 predecessor Pod
-反例/receipt只认[课程真源](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)和
-[性能真源](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)。
-exact Pod host=`1,036 passed, 11 skipped`；PPO V5 2048 rate自然完成61 update，p50/p90=
-`7.81/8.38 s/H48`，仍未达到严格6秒。fresh Isaac已从同一source连续ACK，Reward24/V3/optimizer/WAL/
-finite/conservation启动边界通过；25000 completion尚未完成，mimic基本成功尚未判定；固定快照的
-contact/hit/landing尚无eligible denominator，均为`未测`。
-固定`ACK 0..101`快照中，episode first10→recent10 mean length/return=
-`87.502/12.956 → 129.229/20.532`；common mimic与paddle prior income/sample均改善，但尚无row活到
-tick295，故task/playback/launch/contact/landing均为`未测`。该早期状态符合先balance且common mimic/
-paddle-prior income/sample同步提高，不构成hit失败；这些income不是policy gradient。
+V7 fresh候选采用[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)、
+[`Reward28`](../DEFINITIONS.md#fullmdp-reward28)和
+[`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3) `215/231`。它保持四个due、耗尽clock、
+terminal-overlap跨writer合成和自然重叠课程；milestone升为schema8，并为四项paddle reward记录同producer
+真实误差的finite/sum/sumsq。没有新增actor scalar、Stage、success Gate或hard Done。
 
-后续固定窗到ACK294已自然出现`4` playback、`2` launch/R03与`2` settlement；selected contact=
-`0/2 launch`，landing仍为`未测`。逐row审计的`24`个accepted-terminal样本都在tick`297..367`因
-base tilt结束，说明主约束仍是生存而非状态机断链。Isaac actual-hard-edge近期相对first10下降约`237×`、
-qdes nonfinite/terminal为0；这允许当前diagnostic训练继续，但非零actual-hard-edge仍阻断formal/promotion/
-deployment/真机安全。详细不同口径分母只认[课程实验§10.6](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#106-首次双侧launch与关节遥测裁决固定诊断窗)。
+V6 exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`已冻结为negative：Isaac在`409,414`
+次launch后仍零contact，actual-hard-edge从first10约`1.843%`升到recent10约`3.366%`，active wall也
+恶化到约`32.06 s/H48`。旧61-update rate、启动ACK和早期下降不能再代表当前训练健康。V7本地聚焦=
+`606 passed, 34 skipped`；exact Pod Kit、short-learning、active-strata wall与fresh ACK尚未闭合，故
+contact/hit/landing仍全部`未测`，不能把本地通过写成训练成功。最终不同口径分母只认
+[课程实验§10.7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)。
 
 旧V5能够改善balance却未闭合mimic→contact；新候选必须fresh验证balance→mimic→hit→landing。上一阶段
 开始基本成形时下一阶段应已有自然非零分母，但`ACCEPT/contact/landing`都不是启动或安全Gate。Gate只保留

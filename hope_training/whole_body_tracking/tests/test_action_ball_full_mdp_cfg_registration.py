@@ -936,7 +936,7 @@ def test_fresh_cfg_scene_is_frozen_and_refuses_a_duplicate_pre_env_attach():
     ) == spec.scene_entity_names
 
 
-def test_reward_template_matches_exact_shared_reward24_contract():
+def test_reward_template_matches_exact_shared_reward28_contract():
     pytest.importorskip("isaaclab")
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking import mdp
@@ -960,13 +960,14 @@ def test_reward_template_matches_exact_shared_reward24_contract():
     terms = reward_cfg.terms
     assert mdp.EXPECTED_PAYMENT_COUNT == 14
     contract = H._full_mdp_reward_contract
-    assert len(terms) == contract.REWARD_TERM_COUNT == 24
+    assert len(terms) == contract.REWARD_TERM_COUNT == 28
     assert tuple(term.manager_name for term in terms) == (
         H.ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER
     )
     assert H.ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER == contract.MANAGER_NAMES
     lifecycle_count = contract.LIFECYCLE_PAYMENT_COUNT
     common_end = lifecycle_count + len(contract.COMMON_DENSE_SPECS)
+    paddle_end = common_end + len(contract.PADDLE_MOTION_PRIOR_SPECS)
     assert tuple(term.payment_consumer for term in terms[:lifecycle_count]) == mdp.ORDERED_CONSUMERS
     assert tuple(
         term.payment_consumer for term in terms[lifecycle_count:common_end]
@@ -974,9 +975,12 @@ def test_reward_template_matches_exact_shared_reward24_contract():
         f"common_dense:{term.manager_name}"
         for term in terms[lifecycle_count:common_end]
     )
-    assert tuple(term.payment_consumer for term in terms[common_end:]) == tuple(
+    assert tuple(term.payment_consumer for term in terms[common_end:paddle_end]) == tuple(
         f"paddle_motion_prior:{term.manager_name}"
-        for term in terms[common_end:]
+        for term in terms[common_end:paddle_end]
+    )
+    assert tuple(term.payment_consumer for term in terms[paddle_end:]) == tuple(
+        f"regularization:{term.manager_name}" for term in terms[paddle_end:]
     )
     assert tuple(term.func for term in terms) == (
         mdp.r03_racket_position,
@@ -1001,6 +1005,10 @@ def test_reward_template_matches_exact_shared_reward24_contract():
             H._full_mdp_lean_rewards.paddle_motion_prior_reward
             for _ in contract.PADDLE_MOTION_PRIOR_SPECS
         ),
+        *(
+            H._full_mdp_lean_rewards.regularization_reward
+            for _ in contract.REGULARIZATION_SPECS
+        ),
     )
     assert tuple(term.owner_role for term in terms) == (
         *("r03_owner" for _ in range(10)),
@@ -1015,13 +1023,16 @@ def test_reward_template_matches_exact_shared_reward24_contract():
                 + contract.PADDLE_MOTION_PRIOR_SPECS
             )
         ),
+        *("regularization_kernel" for _ in contract.REGULARIZATION_SPECS),
     )
     assert tuple(term.manager_weight for term in terms[lifecycle_count:]) == (
         *(spec.manager_weight for spec in contract.COMMON_DENSE_SPECS),
         *(spec.manager_weight for spec in contract.PADDLE_MOTION_PRIOR_SPECS),
+        *(spec.manager_weight for spec in contract.REGULARIZATION_SPECS),
     )
     assert terms[lifecycle_count:common_end] == H.ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
-    assert terms[common_end:] == H.ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES
+    assert terms[common_end:paddle_end] == H.ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES
+    assert terms[paddle_end:] == H.ACTION_BALL_FULL_MDP_REGULARIZATION_TERM_TEMPLATES
 
     for term in terms[:13]:
         assert term.weight_source == H.ACTION_BALL_FULL_MDP_WEIGHT_SOURCE
@@ -1051,16 +1062,23 @@ def test_reward_template_matches_exact_shared_reward24_contract():
             ("ordinal", ordinal),
             ("command_name", "motion"),
         )
-    for ordinal, term in enumerate(terms[common_end:], start=common_end):
+    for ordinal, term in enumerate(terms[common_end:paddle_end], start=common_end):
         assert term.weight_source == H.ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_WEIGHT_SOURCE
         assert term.fixed_func_params[:2] == (
             ("ordinal", ordinal),
             ("command_name", "racket_target"),
         )
+    for ordinal, term in enumerate(terms[paddle_end:], start=paddle_end):
+        assert term.weight_source == H.ACTION_BALL_FULL_MDP_REGULARIZATION_WEIGHT_SOURCE
+        assert term.fixed_func_params == (("ordinal", ordinal),)
     assert contract.HELD_RACKET_WRIST_BODY_NAME not in H.ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES
     for term in terms[lifecycle_count + 2 : common_end]:
         assert dict(term.fixed_func_params)["body_names"] == H.ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES
-    for term in (*terms[lifecycle_count : lifecycle_count + 2], *terms[common_end:]):
+    for term in (
+        *terms[lifecycle_count : lifecycle_count + 2],
+        *terms[common_end:paddle_end],
+        *terms[paddle_end:],
+    ):
         assert "body_names" not in dict(term.fixed_func_params)
 
     forbidden = {

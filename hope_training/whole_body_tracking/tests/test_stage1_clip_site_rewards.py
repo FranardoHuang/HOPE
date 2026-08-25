@@ -29,9 +29,11 @@ def _load_rewards():
     canonical = "whole_body_tracking.tasks.tracking.mdp.hope_commands"
     mdp_canonical = "whole_body_tracking.tasks.tracking.mdp"
     geometry_canonical = f"{mdp_canonical}.racket_contact_geometry"
+    paddle_canonical = f"{mdp_canonical}.action_ball_full_mdp_paddle_prior"
     old = sys.modules.get(canonical)
     old_mdp = sys.modules.get(mdp_canonical)
     old_geometry = sys.modules.get(geometry_canonical)
+    old_paddle = sys.modules.get(paddle_canonical)
     stub = types.ModuleType(canonical)
     stub.RacketTargetCommand = object
     stub.face_tracking_pair = lambda command: (
@@ -49,6 +51,15 @@ def _load_rewards():
     sys.modules[geometry_canonical] = geometry
     geometry_spec.loader.exec_module(geometry)
     mdp_stub.racket_contact_geometry = geometry
+    paddle_spec = importlib.util.spec_from_file_location(
+        paddle_canonical,
+        REWARD_PATH.with_name("action_ball_full_mdp_paddle_prior.py"),
+    )
+    assert paddle_spec is not None and paddle_spec.loader is not None
+    paddle = importlib.util.module_from_spec(paddle_spec)
+    sys.modules[paddle_canonical] = paddle
+    paddle_spec.loader.exec_module(paddle)
+    mdp_stub.action_ball_full_mdp_paddle_prior = paddle
     sys.modules[canonical] = stub
     try:
         spec = importlib.util.spec_from_file_location("stage1_clip_site_rewards_under_test", REWARD_PATH)
@@ -69,6 +80,10 @@ def _load_rewards():
             sys.modules.pop(geometry_canonical, None)
         else:
             sys.modules[geometry_canonical] = old_geometry
+        if old_paddle is None:
+            sys.modules.pop(paddle_canonical, None)
+        else:
+            sys.modules[paddle_canonical] = old_paddle
 
 
 @pytest.fixture(scope="module")

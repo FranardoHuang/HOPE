@@ -49,6 +49,8 @@ import action_ball_full_mdp_portable_observation as observation_contract
 import action_ball_full_mdp_portable_reward as portable_reward
 import action_ball_full_mdp_portable_catalog as portable_catalog
 import action_ball_full_mdp_reward_contract as reward_contract
+import action_ball_full_mdp_regularization as regularization
+import action_ball_full_mdp_paddle_prior as paddle_prior
 import racket_contact_geometry as racket_contact_geometry
 
 
@@ -207,10 +209,31 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             dtype=self.qpos_init.dtype,
             device=self.device,
         )
-        self._fullmdp_paddle_stds = self._torch.tensor(
+        self._fullmdp_paddle_precision_stds = self._torch.tensor(
             [spec.std for spec in FULLMDP_PADDLE_REWARD_SPECS],
             dtype=self.qpos_init.dtype,
             device=self.device,
+        )
+        if any(spec.coarse_std is None for spec in FULLMDP_PADDLE_REWARD_SPECS):
+            raise RuntimeError("FullMDP paddle coarse widths are unavailable")
+        self._fullmdp_paddle_coarse_stds = self._torch.tensor(
+            [spec.coarse_std for spec in FULLMDP_PADDLE_REWARD_SPECS],
+            dtype=self.qpos_init.dtype,
+            device=self.device,
+        )
+        self._fullmdp_regularization_weights = self._torch.tensor(
+            [spec.manager_weight for spec in reward_contract.REGULARIZATION_SPECS],
+            dtype=self.qpos_init.dtype,
+            device=self.device,
+        )
+        hard_span = self.jnt_hi - self.jnt_lo
+        soft_lower = self.jnt_lo + 0.05 * hard_span
+        soft_upper = self.jnt_hi - 0.05 * hard_span
+        self._fullmdp_regularization_soft_limits = self._torch.stack(
+            (soft_lower, soft_upper), dim=1
+        )
+        self._fullmdp_regularization_hard_limits = self._torch.stack(
+            (self.jnt_lo, self.jnt_hi), dim=1
         )
         self._fullmdp_racket_long_axis_local = self._torch.tensor(
             racket_contact_geometry.RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
@@ -2509,10 +2532,44 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             batch_size=[self.num_envs],
         )
 
+    def _fullmdp_regularization_reward_terms(self):
+        """Return four configured component rows from the shared tensor kernels."""
+
+        raw = self._torch.stack(
+            (
+                regularization.action_rate_l2(self.actions, self.last_actions),
+                regularization.soft_limit_barrier_v2(
+                    self._qdes_reward_processed,
+                    self._fullmdp_regularization_soft_limits,
+                    self.action_offset,
+                    self._fullmdp_regularization_hard_limits,
+                ),
+                regularization.qdes_projection_penalty(
+                    self._qdes_reward_pre_clamp,
+                    self._qdes_reward_nominal_projected,
+                    self._qdes_reward_projection_span,
+                    self._qdes_reward_operand_valid,
+                    self._qdes_reward_operand_valid,
+                ),
+                regularization.soft_limit_barrier_v2(
+                    self._qpos_act(),
+                    self._fullmdp_regularization_soft_limits,
+                    self.action_offset,
+                    self._fullmdp_regularization_hard_limits,
+                ),
+            ),
+            dim=1,
+        )
+        return raw * self._fullmdp_regularization_weights * self.step_dt
+
     def _fullmdp_reward(
-        self, racket_kinematics=None, tracked_body_kinematics=None
+        self,
+        racket_kinematics=None,
+        tracked_body_kinematics=None,
+        *,
+        return_paddle_error=False,
     ):
-        """Return the shared ordered Reward24 graph and its exact term vector."""
+        """Return the shared ordered Reward28 graph and its exact term vector."""
 
         torch = self._torch
         if tracked_body_kinematics is None:
@@ -2616,35 +2673,20 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._aligned_teacher_racket_site_pos_w
             - self.env.scene.env_origins
         )
-        paddle_error = torch.stack(
-            (
-                torch.linalg.vector_norm(
-                    racket_pos_scene - teacher_racket_pos_scene, dim=1
-                ),
-                torch.linalg.vector_norm(
-                    racket_velocity
-                    - self._aligned_teacher_racket_site_lin_vel_w,
-                    dim=1,
-                ),
-                torch.acos(
-                    torch.sum(
-                        racket_signed_normal
-                        * self._aligned_teacher_racket_signed_normal_w,
-                        dim=1,
-                    ).clamp(-1.0, 1.0)
-                ),
-                torch.acos(
-                    torch.sum(
-                        racket_long_axis
-                        * self._aligned_teacher_racket_long_axis_w,
-                        dim=1,
-                    ).clamp(-1.0, 1.0)
-                ),
-            ),
-            dim=1,
+        paddle_error = paddle_prior.tracking_errors(
+            racket_pos_scene,
+            racket_velocity,
+            racket_signed_normal,
+            racket_long_axis,
+            teacher_racket_pos_scene,
+            self._aligned_teacher_racket_site_lin_vel_w,
+            self._aligned_teacher_racket_signed_normal_w,
+            self._aligned_teacher_racket_long_axis_w,
         )
-        paddle_raw = torch.reciprocal(
-            1.0 + torch.square(paddle_error / self._fullmdp_paddle_stds)
+        paddle_raw = paddle_prior.kernels(
+            paddle_error,
+            precision_stds=self._fullmdp_paddle_precision_stds,
+            coarse_stds=self._fullmdp_paddle_coarse_stds,
         )
         paddle_configured = (
             paddle_raw * self._fullmdp_paddle_weights * self.step_dt
@@ -2696,13 +2738,17 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             )
         common_start = reward_contract.LIFECYCLE_PAYMENT_COUNT
         paddle_start = common_start + len(FULLMDP_DENSE_REWARD_SPECS)
+        paddle_end = paddle_start + len(FULLMDP_PADDLE_REWARD_SPECS)
         terms[:, common_start:paddle_start] = configured
-        terms[:, paddle_start:] = paddle_configured
+        terms[:, paddle_start:paddle_end] = paddle_configured
+        terms[:, paddle_end:] = self._fullmdp_regularization_reward_terms()
         reward = terms.sum(dim=1)
         # Do not synchronize or poison the CUDA context here.  The bound
         # FullMdpUpdateLedger accumulates per-row reward finiteness on device
         # and performs the single, attributed host reduction before PPO's
         # optimizer step.
+        if return_paddle_error:
+            return reward, terms, paddle_error
         return reward, terms
 
     def _fullmdp_termination(self, st, requested_qdes):
@@ -2842,7 +2888,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         torch = self._torch
         _st_before_forward, _tau_sq, requested_qdes = self._advance_plant(actions)
         # MuJoCo-Warp's step integrates qpos/qvel after its derived-tensor
-        # forward pass.  Re-forward once so termination, Reward24, and the
+        # forward pass.  Re-forward once so termination, Reward28, and the
         # returned observation all describe the same post-transition state.
         self.sim.forward()
         self._latch_post_forward_resolved_table_contacts()
@@ -2931,8 +2977,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             ._full_a_paddle_prior_playback_mask(self)
             .clone()
         )
-        reward, reward_terms = self._fullmdp_reward(
-            racket_kinematics, tracked_body_kinematics
+        reward, reward_terms, paddle_prior_error = self._fullmdp_reward(
+            racket_kinematics,
+            tracked_body_kinematics,
+            return_paddle_error=True,
         )
         (
             recovery_terminal,
@@ -2998,6 +3046,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "backend_resolved_table_contact": resolved_table_contact,
             "reward_terms": reward_terms,
             "full_a_paddle_prior_playback": paddle_prior_playback,
+            "full_a_paddle_prior_error": paddle_prior_error,
             "reset_generation": self.reset_generation.clone(),
             "full_a_phase_before_reset": terminal_phase,
             "full_a_outcome_code": outcome_state,

@@ -130,9 +130,9 @@ self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，
 
 <a id="fullmdp-ppo-v5-observation-v3-current"></a>
 
-#### Current FullMDP PPO V5与Observation V3执行合同（2026-08-25 branch diagnostic）
+#### Current FullMDP V7：PPO V5、Reward28与Observation V3（2026-08-26 branch diagnostic）
 
-V6 fresh-only launcher必须从code-owned typed recipe读取[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)：
+V7 fresh-only launcher必须从code-owned typed recipe读取[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)：
 `num_envs=2048`、`num_steps_per_env=48`、`max_iterations=25000`、`save_interval=500`、
 `num_learning_epochs=5`、`num_mini_batches=4`、`gamma=.99`、GAE`lambda=.98`、fresh
 `init_noise_std=.05`、learned`log_std`、`entropy_coef=0`且无强制std decay。Hydra argv、task YAML和
@@ -142,22 +142,25 @@ MuJoCo CLI不得复制或覆盖这些值。相对4096/U12500/MB8，总transition
 actor/critic必须分别绑定`action_ball_full_mdp_semantic_actor_v3` 215-D与
 `action_ball_full_mdp_semantic_critic_v3` 231-D；完整顺序只认
 [Observation接口](../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)。
-V2 203/219只允许旧checkpoint解析和paired control，不得作为fresh fallback。Reward必须为Reward24；
-Mu update/completion/summary wire为`9/5/6`，Isaac milestone为schema7具名episode slice。四个due是
+V2 203/219只允许旧checkpoint解析和paired control，不得作为fresh fallback。Reward必须为
+[`Reward28`](../DEFINITIONS.md#fullmdp-reward28)：四项paddle composite与四项action/joint连续成本均从
+shared contract materialize，不能由backend复制另一套数值。Mu update/completion/summary wire为`10/5/6`，
+Isaac milestone为schema8；新增teacher-achieved paddle error必须有finite/sum/sumsq，不能沿用旧schema
+伪兼容。四个due是
 `295/588/881/1174`，V3 `[208]`在第四次消费后发布raw`-1` exhausted sentinel。
 
 两端rate diagnostic仍是`10 warm-up + 50 measured + 1 tail`，但必须按当前recipe跑
 `2048 env × H48 × 61 update`、profiler-off、fresh process和`diagnostic_unauthorized=true`。Mu使用
 `--full-a --diagnostic-rate-probe`；Isaac只显式打开task内的
 `action_ball_full_mdp_rate_probe`。长跑的`max_iterations`仍是25000，61预算由code-owned diagnostic
-边界安装。final `caddecb7`实测Mu p50/p90=`5.468/5.526 s/H48`、Isaac=
+边界安装。历史V6 `caddecb7`实测Mu p50/p90=`5.468/5.526 s/H48`、Isaac=
 `7.81/8.38 s/H48`；Mu达到约6秒方向，Isaac未达到严格6秒。该差异包含PPO尺度取舍，不是语义等价热路
 对拍；probe不能自动转成长跑或代签学习质量。
 
-`9d333b0b`（语义`ba7225b2`）只是pre-V3/pre-PPO-V5 predecessor；final clean/pushed exact source=
-`caddecb76727ea55b0ce089453eea91cb5a9f8ea`。CPU partition、两端真实GPU rate、Reward24/V3 finite、
-Mu Full-A returned observation/lifecycle、Isaac启动canary均已闭合，两个fresh root/namespace已按本合同
-创建并连续ACK。当前状态和顺序只认
+`9d333b0b`（语义`ba7225b2`）只是pre-V3/pre-PPO-V5 predecessor；V6 exact source=
+`caddecb76727ea55b0ce089453eea91cb5a9f8ea`已被大分母零接触与hard-edge反升证伪。V7替代源必须先在
+Pod1验证Reward28、schema8/10、fixed-tape、short-learning和active-strata wall；只在replacement ready后
+精确停止旧PID，并使用fresh root/namespace，禁止resume或复用V6。当前状态和顺序只认
 [双后端长跑TODO §0.5](action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)；
 G04/G05/G06保持`Partial`，不授权promotion、export、部署或真机。
 

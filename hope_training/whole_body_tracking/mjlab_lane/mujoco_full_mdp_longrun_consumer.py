@@ -195,10 +195,20 @@ PADDLE_PRIOR_TERM_NAMES = tuple(
     spec.manager_name
     for spec in _reward_contract_module().PADDLE_MOTION_PRIOR_SPECS
 )
-if REWARD_TERM_NAMES[-len(PADDLE_PRIOR_TERM_NAMES):] != PADDLE_PRIOR_TERM_NAMES:
+try:
+    PADDLE_PRIOR_TERM_START = REWARD_TERM_NAMES.index(PADDLE_PRIOR_TERM_NAMES[0])
+except ValueError as exc:
+    raise RuntimeError("FullMDP paddle prior contract differs") from exc
+if (
+    REWARD_TERM_NAMES[
+        PADDLE_PRIOR_TERM_START : PADDLE_PRIOR_TERM_START
+        + len(PADDLE_PRIOR_TERM_NAMES)
+    ]
+    != PADDLE_PRIOR_TERM_NAMES
+):
     raise RuntimeError("FullMDP paddle prior contract differs")
 PADDLE_PRIOR_TERM_COUNT = len(PADDLE_PRIOR_TERM_NAMES)
-EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 9, 5, 6
+EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 10, 5, 6
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
     FULL_MDP_PPO_RECIPE.max_iterations, FULL_MDP_PPO_RECIPE.num_envs,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
@@ -234,7 +244,8 @@ REWARD_GRAPH_KEYS = _names("""term_names term_count term_sums actual_reward_sum
  actual_reward_finite_rows actual_reward_nonfinite_rows
  conservation_fault_rows playback_paddle_prior""")
 PLAYBACK_PADDLE_PRIOR_KEYS = _names("""term_names row_count finite_rows
- kernel_sum kernel_sumsq domain_violation_rows""")
+ kernel_sum kernel_sumsq domain_violation_rows error_names error_units
+ error_finite_rows error_sum error_sumsq""")
 IDENTITY_KEYS = _names("""action_slot action_uid mount_normal_sign family family_source
  observed_rows slot0_rows uid_rows mount_sign_rows identity_rows family_counts""")
 RECEIPT_KEYS = _names("name bytes sha256")
@@ -476,6 +487,12 @@ def _validate_record(row, index, run_identity):
         or len(paddle["finite_rows"]) != PADDLE_PRIOR_TERM_COUNT
         or type(paddle["domain_violation_rows"]) is not list
         or len(paddle["domain_violation_rows"]) != PADDLE_PRIOR_TERM_COUNT
+        or paddle["error_names"] != [
+            "position", "velocity", "signed_face", "long_axis"
+        ]
+        or paddle["error_units"] != ["m", "m_per_s", "rad", "rad"]
+        or type(paddle["error_finite_rows"]) is not list
+        or len(paddle["error_finite_rows"]) != PADDLE_PRIOR_TERM_COUNT
     ):
         _fail("playback paddle prior term contract")
     paddle_rows = _int(
@@ -522,6 +539,33 @@ def _validate_record(row, index, run_identity):
             )
         ):
             _fail("playback paddle prior moments")
+    error_finite = [
+        _int(value, "playback paddle prior error_finite_rows", paddle_rows)
+        for value in paddle["error_finite_rows"]
+    ]
+    error_moments = {}
+    for key in ("error_sum", "error_sumsq"):
+        values = paddle[key]
+        if type(values) is not list or len(values) != PADDLE_PRIOR_TERM_COUNT:
+            _fail("playback paddle prior " + key)
+        error_moments[key] = [
+            _num(value, "playback paddle prior " + key) for value in values
+        ]
+    for term_index, finite in enumerate(error_finite):
+        error_sum = error_moments["error_sum"][term_index]
+        error_sumsq = error_moments["error_sumsq"][term_index]
+        moment_floor = error_sum * error_sum
+        moment_ceiling = finite * error_sumsq
+        tolerance = 1.0e-9 * max(
+            1.0, abs(moment_floor), abs(moment_ceiling)
+        )
+        if (
+            error_sum < 0.0
+            or error_sumsq < 0.0
+            or moment_floor > moment_ceiling + tolerance
+            or (finite == 0 and (error_sum != 0.0 or error_sumsq != 0.0))
+        ):
+            _fail("playback paddle prior error moments")
     if (reward["reward_terms_finite_rows"] != TRANSITIONS_PER_UPDATE
             or reward["actual_reward_finite_rows"] != TRANSITIONS_PER_UPDATE
             or any(reward[key] for key in ("reward_terms_nonfinite_rows",

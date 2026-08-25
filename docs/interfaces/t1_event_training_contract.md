@@ -1,7 +1,7 @@
 # T1 Post-Strike Event Training Contract
 
-Status: **FullMDP V6 cadence/evidence candidate plus historical T1 scheduler; exact Pod retest pending**
-(2026-08-25).
+Status: **FullMDP V7 cadence/evidence candidate plus historical T1 scheduler; exact Pod retest pending**
+(2026-08-26).
 
 This note defines the runtime seam added after the frozen T0/T1 preregistration at commit
 `1913861`. It does not mutate that preregistration or fill any of its null launch bindings.
@@ -30,14 +30,14 @@ intersection of `ResetTelemetry` terminal rows and D05 scheduled-due rows. This 
 evidence join, not a per-step safety Gate. It adds no D2H, owner, actor field, receipt or task-success
 dependency, and healthy peers remain trainable.
 
-Isaac milestone schema7 appends paddle telemetry after the episode/reset block. Consumers must use
+Isaac milestone schema8 adds named paddle kernel and true-error telemetry beside the episode/reset block. Consumers must use
 the named episode slice, never a positional `[-7:]` suffix. Predecessor `9d333b0b` includes the
-fresh-due terminal counterexample, but the final Observation V3/PPO V5 source SHA, its exact Pod
+fresh-due terminal counterexample, but the final Observation V3/PPO V5/Reward28 source SHA, its exact Pod
 CPU/Kit validation and fresh runtime evidence remain `未测`; schema correctness is not launch or
 promotion authority.
 
 The older materialized T1 scheduler below remains a separate historical design track. It must not
-override the current FullMDP four-opportunity cadence or be cited as V6 launch readiness.
+override the current FullMDP four-opportunity cadence or be cited as V7 launch readiness.
 
 ## Materialized schedule bytes
 

@@ -116,21 +116,38 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   std decay。`.05`是探索初值，不是安全阈值或性能修复；V3的`.02` checkpoint不得resume到V4，V4也不得
   resume为V5。当前fresh配方是V5。
 
-- <a id="fullmdp-reward24"></a>**`Reward24` / FullMDP二十四项奖励合同**：一个有序共享真源，包含
+- <a id="fullmdp-reward24"></a>**`Reward24` / FullMDP二十四项历史奖励合同**：一个有序共享真源，包含
   14项shot lifecycle/task payment、6项通用全身mimic和4项official measured-paddle continuous prior。
   六项common mimic中两个anchor项不变，另外四个body-average项排除持拍腕；四项prior直接约束官方拍心
   位置、point-consistent速度、selected physical hitting-face法向与mesh-bound长轴，weight=`1/1/1/.5`、Cauchy width=
   `.70 m / 4 mps / pi rad / 1 rad`，strike window不降权。动作选择后按`mount_normal_sign`取得physical
   face；只有reset-ready使用canonical raw `+Y`。它与actor task tail的raw-A目标残差不是同一字段。
   它补的是mimic→hit的连续控制桥，不新增contact oracle、actor authority或安全Gate；真实接触/落点仍只由
-  lifecycle事实判定。
+  lifecycle事实判定。V6大分母训练证明它缺少action/joint连续成本且宽prior不能保证接触精度，已由
+  [`Reward28`](#fullmdp-reward28)取代；只用于解释V6只读证据，不能作为fresh fallback。
+
+- <a id="fullmdp-reward28"></a>**`Reward28` / FullMDP二十八项当前候选奖励合同**：保留Reward24的
+  14项shot lifecycle和6项common mimic；四项measured-paddle prior改成固定50/50
+  `exp(-(e/precision)^2) + 1/(1+(e/coarse)^2)`的平均，position/velocity/signed-face/long-axis的
+  `precision/coarse`分别为`.075/.30 m`、`.50/2.0 mps`、`15/60 deg`、`10/40 deg`，weight仍为
+  `1/1/1/.5`。末尾再加入四项共享非正连续成本：31维raw-action相邻差平方和`-0.1`、processed-qdes
+  soft-limit barrier `-10`、pre-clamp到nominal-projected qdes距离`-1`、actual joint soft-limit barrier
+  `-10`。Isaac与MuJoCo共用纯tensor kernel；paddle reward和telemetry共用同一teacher-achieved误差producer。
+  它不增加actor observation、termination、Stage、owner、receipt或安全Gate。
 
 - <a id="fullmdp-v6-candidate"></a>**`fullmdp-a-h48-v6-*` / FullMDP第六批最小学习闭环lineage**：
   2026-08-25以PPO V5、Reward24、Observation V3、四次真实cadence、terminal-overlap跨writer合成、
   milestone schema7具名slice与Mu native-Warp keepout为核心的fresh-only branch lineage。最终
   clean/pushed source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`，两端rate与fresh ACK已闭合；
   `9d333b0b`（语义`ba7225b2`）只作predecessor。该名称不表示第六课程Stage、25000完成、
-  checkpoint兼容、promotion、physics parity或部署授权。
+  checkpoint兼容、promotion、physics parity或部署授权。V6随后在Mu`1,439,028`、Isaac`409,414`次
+  launch后仍为零selected contact且hard-edge反升，已冻结为negative只读谱系。
+
+- <a id="fullmdp-v7-candidate"></a>**`fullmdp-a-h48-v7-*` / FullMDP第七批学习经济与可审计性替代谱系**：
+  2026-08-26以PPO V5、Reward28、Observation V3 `215/231`、四次自然重叠cadence为唯一学习合同；
+  同时把Isaac milestone按term批处理、Motion publication收窄，并将新增真实paddle误差明确升为Isaac
+  milestone schema8与Mu evidence/completion/summary `10/5/6`。`cq_n_iters`保持12，因为8/4的fixed-tape
+  已改变题目admission/reason/selected identity。该名称不表示课程第七Stage、正式安全或promotion。
 
 - <a id="fullmdp-rate-probe"></a>**FullMDP 61-update rate probe / FullMDP六十一轮吞吐探针**：按当前
   recipe固定`2048 env × H48`，使用profiler-off的`10`轮warm-up + `50`轮measured + `1`轮tail诊断预算。
@@ -164,7 +181,7 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   2026-08-23基于V4继续的fresh-only诊断候选谱系；只收窄不改学习语义的hot-path减法与
   [`plant定位/身份分层`](#mujoco-fullmdp-plant-binding)，PPO仍是V3 H48，Observation仍是203/219 V2。
   MuJoCo evidence wire在该历史lineage内多次显式升版；早期`5/5/4`与V4的`4/4/3`均只按各自source解析，
-  不与当前`9/5/6`伪兼容。V5引入path-free [`runtime_stack`](#mujoco-fullmdp-runtime-stack)与plant identity。
+  不与V6的`9/5/6`伪兼容。V5引入path-free [`runtime_stack`](#mujoco-fullmdp-runtime-stack)与plant identity。
   V5也修合法payment-before-close、launch-before-playback、exact publication join、具名row fault及negative-face
   normal，并删除可证伪的热路冗余。`v5`只是source/run lineage编号，不是
   PPO V5、现役配方、ready结论、promotion或真机授权；当前执行由V6 fresh取代，V5只保留只读证据。

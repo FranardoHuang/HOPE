@@ -2633,6 +2633,9 @@ ACTION_BALL_FULL_MDP_COMMON_DENSE_WEIGHT_SOURCE = "fixed_common_dense_contract"
 ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_WEIGHT_SOURCE = (
     "fixed_paddle_motion_prior_contract"
 )
+ACTION_BALL_FULL_MDP_REGULARIZATION_WEIGHT_SOURCE = (
+    "fixed_regularization_contract"
+)
 ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES = (
     _full_mdp_reward_contract.tracked_except_held_wrist_body_names(
         A3_TRACKED_BODIES
@@ -2810,10 +2813,33 @@ ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES = tuple(
         _full_mdp_reward_contract.PADDLE_MOTION_PRIOR_SPECS
     )
 )
+ACTION_BALL_FULL_MDP_REGULARIZATION_TERM_TEMPLATES = tuple(
+    ActionBallFullMdpRewardTermTemplate(
+        manager_name=spec.manager_name,
+        payment_consumer=f"regularization:{spec.manager_name}",
+        owner_role="regularization_kernel",
+        func=_full_mdp_lean_rewards.regularization_reward,
+        weight_source=ACTION_BALL_FULL_MDP_REGULARIZATION_WEIGHT_SOURCE,
+        manager_weight=spec.manager_weight,
+        fixed_func_params=(
+            (
+                "ordinal",
+                _full_mdp_reward_contract.LIFECYCLE_PAYMENT_COUNT
+                + len(_full_mdp_reward_contract.COMMON_DENSE_SPECS)
+                + len(_full_mdp_reward_contract.PADDLE_MOTION_PRIOR_SPECS)
+                + index,
+            ),
+        ),
+    )
+    for index, spec in enumerate(
+        _full_mdp_reward_contract.REGULARIZATION_SPECS
+    )
+)
 ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = (
     ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES
     + ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
     + ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES
+    + ACTION_BALL_FULL_MDP_REGULARIZATION_TERM_TEMPLATES
 )
 ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER = tuple(
     term.manager_name for term in ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES
@@ -2956,6 +2982,9 @@ def action_ball_full_mdp_reward_template_blockers(value) -> tuple[str, ...]:
     common_end = lifecycle_count + len(
         ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
     )
+    paddle_end = common_end + len(
+        ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES
+    )
     if tuple(
         term.payment_consumer for term in value.terms[:lifecycle_count]
     ) != mdp.ORDERED_CONSUMERS:
@@ -2969,12 +2998,19 @@ def action_ball_full_mdp_reward_template_blockers(value) -> tuple[str, ...]:
     ):
         blockers.append("reward_template_common_dense_order_differs")
     if tuple(
-        term.payment_consumer for term in value.terms[common_end:]
+        term.payment_consumer for term in value.terms[common_end:paddle_end]
     ) != tuple(
         f"paddle_motion_prior:{term.manager_name}"
         for term in ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES
     ):
         blockers.append("reward_template_paddle_motion_prior_order_differs")
+    if tuple(
+        term.payment_consumer for term in value.terms[paddle_end:]
+    ) != tuple(
+        f"regularization:{term.manager_name}"
+        for term in ACTION_BALL_FULL_MDP_REGULARIZATION_TERM_TEMPLATES
+    ):
+        blockers.append("reward_template_regularization_order_differs")
     for term in value.terms[: lifecycle_count - 1]:
         if (
             term.weight_source != ACTION_BALL_FULL_MDP_WEIGHT_SOURCE

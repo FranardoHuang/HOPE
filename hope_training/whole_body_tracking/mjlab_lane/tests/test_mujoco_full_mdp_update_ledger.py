@@ -188,7 +188,7 @@ def test_fact_integrity_bit_and_counter_abi_is_exact():
 def test_reward_graph_contract_is_loaded_from_the_shared_ordered_authority():
     module = _load()
     contract = module._reward_contract_module()
-    assert module.SCHEMA_VERSION == 9
+    assert module.SCHEMA_VERSION == 10
     assert module.REWARD_TERM_NAMES == contract.MANAGER_NAMES
     assert module.REWARD_TERM_COUNT == contract.REWARD_TERM_COUNT
     assert module.REWARD_TERM_COUNT == len(module.REWARD_TERM_NAMES)
@@ -396,7 +396,7 @@ def test_constructor_isolates_nested_runtime_identity_copy():
 def _result(module, *, num_envs=3, event=None, bits=None, done=None,
             generation=None, time_outs=None, resolved=None, status=None,
             landing=None, opponent_bound=None, outcome=None, phase=None,
-            fact_integrity_bits=None, paddle_playback=None):
+            fact_integrity_bits=None, paddle_playback=None, paddle_error=None):
     event = dict(event or {})
     if "scheduled_due_rows" not in event:
         public_due = event.get("reveal_due_rows", [False] * num_envs)
@@ -445,6 +445,10 @@ def _result(module, *, num_envs=3, event=None, bits=None, done=None,
             ),
             "full_a_paddle_prior_playback": torch.tensor(
                 paddle_playback or [False] * num_envs, dtype=torch.bool
+            ),
+            "full_a_paddle_prior_error": torch.tensor(
+                paddle_error or [[0.0] * module.PADDLE_PRIOR_TERM_COUNT] * num_envs,
+                dtype=torch.float32,
             ),
             "full_a_landing_on_opponent": torch.tensor(
                 landing or [False] * num_envs, dtype=torch.bool
@@ -553,7 +557,7 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     prepared = _prepare(ledger, 0, environment_steps=2)
     record = _decode(prepared)
 
-    assert record["schema_version"] == 9
+    assert record["schema_version"] == 10
     assert record["run_identity"] == _run_identity()
     assert record["run_identity"]["plant_model"]["runtime_attach"][
         "final_augmented_mjb"
@@ -626,6 +630,11 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
         "kernel_sum": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
         "kernel_sumsq": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
         "domain_violation_rows": [0] * module.PADDLE_PRIOR_TERM_COUNT,
+        "error_names": list(module.PADDLE_ERROR_NAMES),
+        "error_units": list(module.PADDLE_ERROR_UNITS),
+        "error_finite_rows": [0] * module.PADDLE_PRIOR_TERM_COUNT,
+        "error_sum": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
+        "error_sumsq": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
     }
     assert record["action_identity"] == {
         "action_slot": 0,
@@ -640,8 +649,11 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
         "identity_rows": 6,
         "family_counts": {"forehand": 6, "backhand": 0},
     }
-    assert "rate" not in prepared.payload.decode("utf-8")
-    assert "not_produced" not in prepared.payload.decode("utf-8")
+    # The retired top-level rate probe remains absent.  Do not search the raw
+    # JSON substring: Reward28 legitimately names the learning term
+    # ``action_rate_l2``.
+    assert "rate" not in record
+    assert "not_produced" not in reward
 
 
 def test_playback_paddle_prior_reuses_reward_terms_for_non_gating_moments():
@@ -651,6 +663,12 @@ def test_playback_paddle_prior_reuses_reward_terms_for_non_gating_moments():
         module,
         num_envs=4,
         paddle_playback=[True, True, False, True],
+        paddle_error=[
+            [0.10, 0.20, 0.30, 0.40],
+            [0.50, 0.60, 0.70, 0.80],
+            [9.00, 9.00, 9.00, 9.00],
+            [0.90, 1.00, 1.10, 1.20],
+        ],
     )
     kernels = torch.tensor(
         [
@@ -700,6 +718,19 @@ def test_playback_paddle_prior_reuses_reward_terms_for_non_gating_moments():
         playback.square().sum(0).tolist()
     )
     assert measured["domain_violation_rows"] == [0, 0, 0, 0]
+    expected_error = torch.tensor(
+        [[0.10, 0.20, 0.30, 0.40],
+         [0.50, 0.60, 0.70, 0.80],
+         [0.90, 1.00, 1.10, 1.20]],
+        dtype=torch.float64,
+    )
+    assert measured["error_names"] == list(module.PADDLE_ERROR_NAMES)
+    assert measured["error_units"] == list(module.PADDLE_ERROR_UNITS)
+    assert measured["error_finite_rows"] == [3, 3, 3, 3]
+    assert measured["error_sum"] == pytest.approx(expected_error.sum(0).tolist())
+    assert measured["error_sumsq"] == pytest.approx(
+        expected_error.square().sum(0).tolist()
+    )
 
 
 def test_playback_paddle_prior_domain_violations_are_visible_but_non_gating():
@@ -709,6 +740,7 @@ def test_playback_paddle_prior_domain_violations_are_visible_but_non_gating():
         module,
         num_envs=2,
         paddle_playback=[True, True],
+        paddle_error=[[float("nan"), 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]],
     )
     kernels = torch.tensor(
         [[-0.25, 1.25, 0.0, 1.0], [0.5, 0.5, 0.5, 0.5]],
@@ -732,6 +764,8 @@ def test_playback_paddle_prior_domain_violations_are_visible_but_non_gating():
     measured = record["reward_graph"]["playback_paddle_prior"]
     assert measured["finite_rows"] == [2, 2, 2, 2]
     assert measured["domain_violation_rows"] == [1, 1, 0, 0]
+    assert measured["error_finite_rows"] == [1, 2, 2, 2]
+    assert measured["error_sum"] == pytest.approx([0.5, 0.8, 1.0, 1.2])
 
 
 def test_prepare_does_not_gate_structurally_clean_zero_business_telemetry():
@@ -761,6 +795,19 @@ def test_prepare_does_not_gate_structurally_clean_zero_business_telemetry():
                 "full_a_paddle_prior_playback"
             ),
             "full_a_paddle_prior_playback",
+        ),
+        (
+            lambda module, result: result[3].pop(
+                "full_a_paddle_prior_error"
+            ),
+            "full_a_paddle_prior_error",
+        ),
+        (
+            lambda module, result: result[3].__setitem__(
+                "full_a_paddle_prior_error",
+                torch.zeros(3, module.PADDLE_PRIOR_TERM_COUNT - 1),
+            ),
+            "full_a_paddle_prior_error",
         ),
         (
             lambda module, result: result[3].__setitem__(

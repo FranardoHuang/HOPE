@@ -3972,9 +3972,9 @@ class MotionCommand(CommandTerm):
             # -1 in the row-wise lane.  Epoch pulls Motion's exact full-key
             # mask below; an IDLE, foreign or stale row produces an empty
             # event without becoming caller-authored selection authority.
-            published = epoch_owner.publish_motion_playback_started(owner=self)
             published_started = (
-                published.motion_playback_started[:, 0] & writable_rows
+                epoch_owner.publish_motion_playback_started(owner=self)[:, 0]
+                & writable_rows
             )
             teacher_started &= published_started
             playback_after = playback_after | published_started
@@ -6112,7 +6112,7 @@ class MotionCommand(CommandTerm):
     def action_epoch_playback_transition_mask(
         self,
         kind: str,
-        record: object,
+        projection: object,
     ) -> torch.Tensor:
         """Derive one packed playback transition solely from Motion state.
 
@@ -6134,21 +6134,18 @@ class MotionCommand(CommandTerm):
         row_identity = _ACTION_BALL_ROW_IDENTITY
         if (
             type(epoch_owner) is not epoch.ActionEpochOwner
-            or type(record) is not epoch.ActionEpochRecord
+            or type(projection) is not epoch.ActionEpochMotionPlaybackProjection
             or type(kind) is not str
             or kind != epoch.MOTION_PLAYBACK_STARTED
         ):
             raise RuntimeError("Motion playback transition ABI differs")
-        current = epoch_owner.current()
-        if record.version != current.version:
-            raise RuntimeError("Motion playback transition epoch became stale")
         device = torch.device(self.device)
         n = self.num_envs
         s = epoch_owner.shot_slot_capacity
         if s != 1:
             raise RuntimeError("Motion playback requires the exact single action slot")
         slots = self._action_ball_full_mdp_motion_exact_tensor(
-            record.current_task_slot,
+            projection.current_task_slot,
             name="playback.current_task_slot",
             device=device,
             dtype=torch.int64,
@@ -6159,8 +6156,20 @@ class MotionCommand(CommandTerm):
         # would turn corruption into apparent authority, and a per-tick
         # full-N arange would add allocation without representing semantics.
         row_slot_active = slots.eq(0)
-        phase = record.phase[:, 0]
-        selected = record.selected_mask[:, 0]
+        phase = self._action_ball_full_mdp_motion_exact_tensor(
+            projection.phase,
+            name="playback.phase",
+            device=device,
+            dtype=torch.int64,
+            shape=(n, s),
+        )[:, 0]
+        selected = self._action_ball_full_mdp_motion_exact_tensor(
+            projection.selected_mask,
+            name="playback.selected_mask",
+            device=device,
+            dtype=torch.bool,
+            shape=(n, s),
+        )[:, 0]
         retained_key = row_identity.ActionEpochShotKey(
             reset_generation=self._action_ball_reset_generation[:, None],
             ball_generation=self._action_ball_swing_generation[:, None],
@@ -6178,7 +6187,7 @@ class MotionCommand(CommandTerm):
             ),
         )
         public_key = row_identity.require_action_epoch_shot_key(
-            record.identity.shot_key,
+            projection.shot_key,
             shape=(n, s),
             device=device,
             label="Motion playback public shot_key",

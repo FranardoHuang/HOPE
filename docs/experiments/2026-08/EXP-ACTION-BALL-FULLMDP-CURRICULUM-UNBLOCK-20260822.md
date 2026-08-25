@@ -4,7 +4,7 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`V6 PPO-V5/Observation-V3 dual-fresh active / old V4-V5 evidence frozen / no authorized formal run`
+> 状态：`V6 dual-fresh negative read-only / V7 replacement Pod validation / no authorized formal run`
 > 证据边界：`diagnostic_unauthorized=true`；本记录不授权 resume、promotion、export、部署或真机。
 
 > **阅读边界（2026-08-25）：**§1--§9保留课程故障发现、V4/V5运行和被替换实现史，不是现役执行真源；
@@ -818,3 +818,74 @@ actual-hard-edge则是真实模拟关节在任一readback到达或越过机械�
 “可由policy学会回避则记账继续”的范围；两端近期显著下降且nonfinite/完整性故障为0，所以当前不停车、
 不重启。但这批非零actual-hard-edge明确阻断formal、promotion、deployment与真机安全声明；若qdes
 nonfinite变为非零、证据/守恒失真，或balance成熟后actual hard edge不再下降甚至反升，必须停下做根因修复。
+
+### 10.7 V6结论翻转：生存形成，但mimic→hit桥与joint经济失败
+
+`observed_at=2026-08-25T16:15:41Z`固定前缀已经触发§10.6最后一句的既有根因检查条件；这不是看完曲线后
+补一个新Gate。两条进程仍是exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`、
+`diagnostic_unauthorized=true`，completion均不存在：
+
+- Mu ACK0..6846共`673,087,488` transitions。first10→recent10 episode mean length/return从
+  `104.337/16.043`升到`1463.64/202.27`，但scheduled/public/terminal-overlap=
+  `1,640,751/1,640,328/423`、launch=`1,439,028`、R03 physically-valid=`1,337,501`之后，
+  selected contact仍是`0/1,439,028 launch`；landing因contact分母为0继续是`未测`。
+- Isaac ACK0..2508共`246,644,736` transitions。first10→recent10 episode mean length/return从
+  `87.502/12.956`升到`1441.81/177.55`；scheduled/public/overlap=`517,350/517,102/248`、
+  accepted/rejected=`432,670/84,432`、playback=`424,472`、launch=`409,414`、R03 valid=
+  `403,060`，但selected contact=`0/409,414 launch`，`377,513`次R06 settlement也没有common legal。
+
+以上分母全部属于single slot0 forehand；其余action/side继续`未测`。接近1500 tick的survival说明balance
+已经形成可用行为，但两端巨大launch分母下exact zero contact使hit成为明确negative，不再是“还没走到击球”。
+common mimic/paddle income per transition也从first10的Mu`0.08751/0.06794`、Isaac
+`0.08173/0.06768`降到recent10的`0.07508/0.06200`与`0.06289/0.06017`；收入只能说明经济，且当前wire
+没有输出teacher-achieved物理误差，所以不能把mimic写成基本成功。
+
+关节趋势同时反转。Mu actual-hard-edge累计`135,158,801/673,087,488=20.08%`，recent10=
+`51.57%`、末段500-update窗=`58.42%`；qdes guard recent10=`52.52%`。Isaac按各自真实分母计算，
+actual-hard-edge从first10=`1.843%`升到recent10=`3.366%`，近期policy/substep crossing均约`4.95%`。
+qdes joint/forbidden terminal、Reward nonfinite/conservation、fact/attribution fault仍全0，故这是可信的策略/
+plant行为，不是ledger损坏。
+
+源码对账给出一个无需猜测的目标漏洞：FullMDP materialized reward只含14 lifecycle + 6 common mimic +
+4 paddle prior；旧ActionBall中已经验证的`action_rate_l2`、`qdes_projection_penalty`、`qdes_limit_barrier`和
+actual `joint_limit`没有进入该图。FullMDP termination又只对nonfinite qdes、fall/low/table终止，
+actual-hard-edge特意只记账不Done。因此“允许policy从可恢复边缘学习”的设计前提——平滑动作和连续joint
+cost——在现役图中实际缺席，policy可以用抖动/硬边换survival而不付目标成本。修复应把已有纯tensor代价
+接进shared reward/PlantFacts，而不是新增阻断Gate。
+
+第二个可审计缺口是paddle prior只存kernel income，没有实际误差；当前宽度`.70 m / 4 mps / pi rad / 1 rad`
+适合远场capture，却没有证据证明达到球拍接触所需的精度。下一source先输出真实误差，再用一个固定
+coarse+precision kernel同时保留capture梯度和物理精度，不新增actor observation；perfect-mimic几何闭合仍然
+成立，所以不复活offset/reference猜修。
+
+性能也随active business翻转：Mu recent10约`9.10 s/H48`，Isaac约`32.06 s/H48`（collection
+`29.73 s`、learning`2.33 s`），不再等同于空任务为主的rate probe。Isaac drain在PPO边界逐CommitEntry
+Python重放，并对event/row做`.item()`/`.tolist()`后把完整opportunity/shot/reset列表写进每条ACK；这不是
+训练、聚合分层或durability所需的最小状态。下一性能刀应换成device compact counts + bounded fault sample，
+保留optimizer/WAL/fsync/ACK独立边界；不能把整个owner graph原样移进C++或再加receipt。
+
+可复算前缀：Mu `head -n 6847 evidence.jsonl` SHA-256=
+`e27dc113e792c797ad83c04162c68e5039adda8cd9d5c54b791cb60e4159107f`；Isaac筛选前2509条
+`HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=`整行 SHA-256=
+`92c452506e2e9702cfc3f1c995d31022d1d2c292fc5854d51992df40fbdebff9`。两条active root仍只读；
+replacement未通过exact Pod前不hot-patch、不resume、不复用namespace。
+
+### 10.8 V7 replacement合同：修学习目标，不加课程Gate
+
+V7保留`balance → mimic → hit → landing`的自然重叠课程、四个due和Observation V3 `215/231`；没有把
+“上一阶段成功”做成runtime admission。实现只修V6已测出的两个学习目标漏洞：
+
+- `Reward28`在原14 lifecycle + 6 common mimic + 4 paddle之上恢复四项连续成本：31维
+  `action_rate_l2=-.1`、processed-qdes soft barrier=`-10`、pre-clamp projection distance=`-1`、actual
+  joint soft barrier=`-10`。双backend共用纯tensor kernel；actual-hard-edge继续作plant telemetry，不新增
+  Done或所谓安全Gate。
+- 四项paddle prior固定为50/50 precision-exp + coarse-Cauchy，position/velocity/face/long-axis的
+  `precision/coarse`分别为`.075/.30 m`、`.50/2.0 mps`、`15/60 deg`、`10/40 deg`，weight=`1/1/1/.5`。
+  同一个teacher-achieved误差producer同时服务Reward和telemetry；inactive不进分母，active nonfinite只降低
+  finite denominator，不污染sum/sumsq。Isaac N1先报告aggregate，Mu由pinned slot0/forehand identity精确
+  归属；其他action/side仍`未测`。
+
+wire因新增误差字段显式升版：Isaac milestone schema8，Mu evidence/completion/summary=`10/5/6`。
+本地聚焦回归=`606 passed, 34 skipped`。Pod1 fixed synthetic action-shaped tape拒绝把`cq_n_iters`从12
+降到8/4：两者均改变admission reason、selected identity和target residual，故本轮保持12。exact Pod
+GPU、短学习、active-strata wall与fresh双端ACK仍是V7启动前置；通过前旧V6只读，不修改source/PID/governor。

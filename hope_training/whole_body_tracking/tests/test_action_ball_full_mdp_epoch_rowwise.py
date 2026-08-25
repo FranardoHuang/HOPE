@@ -476,10 +476,12 @@ class _PlaybackOwner:
             [[True], [False]], dtype=torch.bool, device=epoch.device
         )
         self.fail = False
+        self.projection = None
 
-    def action_epoch_playback_transition_mask(self, _kind, _record):
+    def action_epoch_playback_transition_mask(self, _kind, projection):
         if self.fail:
             raise E.ActionEpochError("clip identity differs")
+        self.projection = projection
         return self.mask
 
 
@@ -3615,9 +3617,9 @@ def test_motion_playback_edge_is_monotonic_and_owner_failure_poison_is_sticky(mo
     epoch.prepare_after_command_rows()
     epoch.settle_d05_transaction(d05.arm())
     first = epoch.publish_motion_playback_started(owner=playback)
-    assert first.motion_playback_started[:, 0].tolist() == [True, False]
+    assert first[:, 0].tolist() == [True, False]
     replay = epoch.publish_motion_playback_started(owner=playback)
-    assert replay.motion_playback_started[:, 0].tolist() == [True, False]
+    assert replay[:, 0].tolist() == [True, False]
     try:
         epoch.publish_motion_playback_started(owner=object())
     except E.ActionEpochError:
@@ -3638,6 +3640,38 @@ def test_motion_playback_edge_is_monotonic_and_owner_failure_poison_is_sticky(mo
         pass
     else:
         raise AssertionError("poisoned Epoch continued")
+
+
+def test_motion_playback_publication_does_not_clone_the_full_epoch_record(
+    monkeypatch,
+):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    epoch, d05, _cadence, _r06, playback, *_ = _ready_epoch(bind_playback=True)
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+
+    def forbidden_record_clone(_record):
+        raise AssertionError("Motion playback must use a narrow Epoch projection")
+
+    monkeypatch.setattr(E.ActionEpochRecord, "clone", forbidden_record_clone)
+
+    started = epoch.publish_motion_playback_started(owner=playback)
+    assert type(playback.projection) is E.ActionEpochMotionPlaybackProjection
+    assert tuple(field.name for field in fields(playback.projection)) == (
+        "current_task_slot",
+        "phase",
+        "selected_mask",
+        "shot_key",
+    )
+    assert type(started) is torch.Tensor
+    assert started.dtype is torch.bool
+    assert tuple(started.shape) == (2, 1)
+    assert started.tolist() == [[True], [False]]
+    started.zero_()
+    assert epoch._publication.current.motion_playback_started.tolist() == [
+        [True],
+        [False],
+    ]
 
 
 @pytest.mark.parametrize(

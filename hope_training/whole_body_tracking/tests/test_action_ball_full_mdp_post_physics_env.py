@@ -858,6 +858,13 @@ class _RewardManager:
                     "paddle_playback_active": torch.zeros(
                         self.count, dtype=torch.bool
                     ),
+                    "paddle_error_components": torch.zeros(
+                        (
+                            self.count,
+                            len(REWARDS.PADDLE_MOTION_PRIOR_SPECS),
+                        ),
+                        dtype=torch.float32,
+                    ),
                 }
                 if ordinal == REWARDS.PADDLE_MOTION_PRIOR_FIRST_ORDINAL
                 else {}

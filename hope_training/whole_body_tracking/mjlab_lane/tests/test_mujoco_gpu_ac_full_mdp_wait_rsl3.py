@@ -610,6 +610,9 @@ def _install_fake_stack(
                     "full_a_paddle_prior_playback": torch.zeros(
                         num_envs, dtype=torch.bool
                     ),
+                    "full_a_paddle_prior_error": torch.zeros(
+                        (num_envs, 4), dtype=torch.float32
+                    ),
                     "reset_generation": self.reset_generation.clone(),
                     "full_a_action_slot": torch.zeros(num_envs, dtype=torch.long),
                     "full_a_action_uid": torch.full(
@@ -1004,7 +1007,7 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     rows = [json.loads(line) for line in evidence.read_text().splitlines()]
     assert [row["update_index"] for row in rows] == [0, 1]
     assert all(
-        row["schema_version"] == 9 and row["run_identity"] == _identity()
+        row["schema_version"] == 10 and row["run_identity"] == _identity()
         for row in rows
     )
     expected_mjb = _augmented_mjb()

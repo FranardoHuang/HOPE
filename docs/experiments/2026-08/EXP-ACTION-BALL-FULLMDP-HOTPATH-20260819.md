@@ -9,7 +9,7 @@
 > fixed-tape跨引擎physics parity、formal learning与promotion未完成
 >
 > 阅读边界：current结论只认§16；§1--15保留为热墙定位与已做减法的历史证据，旧Reward20/PPO版本不得
-> 覆盖当前Reward24/PPO V5/Observation V3。
+> 覆盖当前Reward28/PPO V5/Observation V3；Reward24只作V6历史。
 
 ## 1. 采用、延后、拒绝
 
@@ -569,12 +569,12 @@ clean exact Pod=`304 passed, 6 skipped`。同GPU H48 profile的`r07_idle_support
 
 <a id="fullmdp-v6-rate-current"></a>
 
-## 16. 2026-08-25 current：V6 exact rate、fresh重启与结构债
+## 16. 2026-08-26 current：V6 active反例与V7结构减法
 
 旧MuJoCo V5最新只读窗口仍约`13.4 s/H48`（精确快照见课程实验§10.1），所以即便曾有更快的历史窗口，
 当前仍有大幅加速空间。H48与约6秒
 只是学习/迭代方向；性能结论必须来自exact source、同卡、profiler-off、`10 warm-up + 50 measured + 1 tail`
-的p50/p90和transitions/s，并同时保持fixed-tape RNG/done/reason/reset/lifecycle/Reward24及
+的p50/p90和transitions/s，并同时保持fixed-tape RNG/done/reason/reset/lifecycle/Reward28及
 Observation V3 parity。
 
 `72b87100`把table keepout的多次广播几何运算融合为一个Warp kernel，synthetic exact tape通过；但真实
@@ -648,11 +648,27 @@ command API在不可逆ACK前完成真正校验后返回`None`。WAL parent-dire
 no-clobber和GPU lifetime lock均保留。这是按`HANDOFF_TO_CODEX_20260808.md`的四问删除“看起来安全”的
 同源回声，不是弱化真正独立边界。
 
-仍未解决的结构债已量化：`ActionEpochRecord`含44个tensor，N2048一份为`2.9765625 MiB`；每policy
-step固定5份全量clone，即H48每update `714.375 MiB`、10,560次`Tensor.clone()`，其中Motion路径占
-`428.625 MiB`。下一最小候选是删除callback内same-writer重读，并让publisher只返回caller唯一消费的
-`[N] bool`；静态上减少`285.75 MiB/H48`和4,224次clone。该数字只是payload，不换算成秒；须用Pod
-profile确认Motion/command span后再实施，不为两份同写者复制新建Gate。
+结构债的一个可证局部已删除：`ActionEpochRecord`原含44个tensor，Motion callback此前同writer回读并
+往返整份record。V7改为仅携带`current_task_slot/phase/selected_mask/shot_key`四字段窄projection，publisher
+只返回caller消费且不与owner别名的`[N] bool`；full-key/generation、phase/selected和mutation反例保持。
+静态少约`285.75 MiB/H48`与4,224次clone，但该数字仍不是wall结论。
+
+Reward/milestone也不再为28项的每个scalar逐次发起eager reduction：每个control step缓存有界per-env
+term行，到actual-reward close时批量做6个sum和1个amax，约增加`3.38 MiB`固定buffer。CPU随机三周期对
+legacy i64/f64 bitwise parity通过；新paddle误差使Isaac milestone显式升为schema8，不能冒充schema7兼容。
+旧V6微测中整个milestone约`0.443 s/H48`，所以这项优化本身不可能解释32→6秒，PPO-boundary完整业务重放
+仍需独立profile。
+
+Pod1 GPU2 fixed synthetic action-shaped tape又排除了“把solver 12轮直接降到8/4”的等价加速说法。
+K≈6/control step时full recurring composer按H48估算为12轮`2.205 s`、8轮`1.853 s`、4轮`1.502 s`；
+但12→8已使2304 candidate的admitted `497→485`、reason改变33、selected identity `6/256`改变，
+target residual差p99=`58.08 mm`；12→4更使admitted降到320、selected identity `69/256`改变。
+因此`cq_n_iters`保持12；8/4只能另作learning-risk ablation，不能放进V7同因果包。完整artifact在Pod1
+`/workspace/franco/validations/cq_niters_caddecb_gpu2_20260826T0100Z/`。
+
+active CPU另有独立infra事实：旧V6使用的CPU partition当时governor=`powersave`且抽样频率`800 MHz`。
+这可能影响Isaac host-bound wall，但在旧run仍活着时修改会污染其只读证据；V7只允许在精确停止旧PID后做
+matched on/off检查，不与solver或Reward修复混合归因。
 
 §16全部证据保持`diagnostic_unauthorized=true`。rate和真实运行路径已闭合，但contact/landing、
 fixed-tape跨引擎physics parity、formal checkpoint、promotion、export、deployment与真机授权均没有因此完成。

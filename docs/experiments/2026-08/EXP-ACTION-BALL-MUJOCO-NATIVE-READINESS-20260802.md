@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`V6-dual-fresh-active / old-V5-frozen / no-authorized-formal-run`
+- 状态：`V6-dual-fresh-negative-read-only / V7-replacement-Pod-validation / no-authorized-formal-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -8,33 +8,40 @@
 - 复核/决策负责人：Franco
 - 本 successor 当前最高证据等级：最终V3/PPO V5两端各自runtime/rate与fresh prefix达到诊断`E2`；
   跨引擎physics parity、formal learning与promotion仍低于`E2`，历史negative-control的`E3`不向新系统传递
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-25
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-26
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 `origin/main:docs/NOW.md`；功能分支内的 `docs/NOW.md` 只能是待合入提案。
 
-> **阅读规则：**当前执行合同只认“2026-08-25 current correction”、紧随其后的adoption table与
+> **阅读规则：**当前执行合同只认“2026-08-26 current correction”、紧随其后的adoption table与
 > [双后端TODO §0.5](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)。从
 > “2026-08-21 portable successor事实纠正”起的229/399、211/319、H24、`history=8`与旧schema/gate结论
-> 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`9/5/6` wire、PPO V5或
+> 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
 
-## 2026-08-25 current correction
+## 2026-08-26 current correction
 
-**当前fresh与旧run分层：**旧MuJoCo V5只读证据已证明balance/task exposure改善而
-mimic→selected contact没有闭合；landing因没有eligible contact仍为`未测`，不能写成零成功率。冻结计数、
-分母和Build4来源只认[课程实验§10](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)。
-`9d333b0b`（语义`ba7225b2`）只是predecessor；最终V6 clean/pushed exact source已冻结为
-`caddecb76727ea55b0ce089453eea91cb5a9f8ea`，两端均从零fresh启动，不继承V5 checkpoint或证据等级。
+**当前fresh与旧run分层：**V6 exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`两端仍在
+只读运行，但其科学结论已经冻结为negative；继续到25k不再是当前学习结论的前置条件。Mu固定
+`673,087,488` transitions后有`0/1,439,028 launch` selected contact，Isaac固定`246,644,736`
+transitions后有`0/409,414 launch`；landing因没有eligible contact仍为`未测`，不能写成零成功率。
+两端episode mean length已接近1500-tick horizon，说明balance/survival形成；mimic收入反降且wire没有
+teacher-achieved真实误差，因此不能宣称mimic基本成功。冻结分母和因果裁决只认
+[课程实验§10.7](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)。
 
-**当前学习合同：**fresh learner采用[`PPO V5`](../../DEFINITIONS.md#fullmdp-ppo-v5)的
+**V6已执行学习合同与V7 replacement：**V6 learner采用[`PPO V5`](../../DEFINITIONS.md#fullmdp-ppo-v5)的
 `2048 env × H48 × U25000`、save500、E5/MB4，继承V4的GAE`lambda=.98`、entropy0、learned`log_std`、
 fresh sigma`.05`且无强制decay。总transition、minibatch大小和optimizer-step数虽保持，但刷新/GAE/KL/
 WAL/checkpoint边界改变，因此已另做exact rate与fresh学习prefix；结果只认
 [热路实验§16](EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)和
-[课程实验§10.5](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#105-验收边界)。Reward采用
-[`Reward24`](../../DEFINITIONS.md#fullmdp-reward24)，Observation采用
+[课程实验§10.7](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)。
+源码确认[`Reward24`](../../DEFINITIONS.md#fullmdp-reward24)整块替换时删除了`action_rate_l2`、qdes
+projection/qdes limit和actual joint-limit四项连续学习代价；actual hard edge却有意只记账不Done。Mu
+actual-hard-edge从早期低位升到recent10=`51.57%`、末段500窗=`58.42%`，Isaac从first10=`1.843%`
+升到recent10=`3.366%`。V7现已实现[`Reward28`](../../DEFINITIONS.md#fullmdp-reward28)：恢复共享
+`action_rate_l2=-.1`、qdes soft=`-10`、projection=`-1`和actual joint soft=`-10`四项非正连续成本；
+paddle改为固定50/50 precision-exp + coarse-Cauchy并保留四项分账。这不是新增安全Gate。Observation继续采用
 [`V3`](../../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)
 `215/231`：四个全phase、同clock measured-teacher-minus-achieved paddle heading residual关闭Reward source
 未直接actor-visible的representation gap；不加入raw ball/aim/rate/history/action ID，也不宣称strict
@@ -44,44 +51,50 @@ normal是signed physical face；ball-task normal仍是raw-A，两者不可复用
 **Cadence与wire纠正：**真实due只有tick`295/588/881/1174`；`1467`是第四球settlement boundary，不是
 第五个机会。V3 actor `[208] time_to_next_opportunity_s`在第四次due消费后用raw `-1`表示exhausted，两个
 backend同义。Isaac的due+terminal overlap来自独立ResetTelemetry与D05 scheduled-due在既有CPU
-pre-optimizer drain求交集，不新增每步Gate/D2H/owner。Isaac milestone schema7按具名episode slice解码；
-Mu evidence/completion/summary当前为`9/5/6`，旧`6/5/5`只作历史。
+pre-optimizer drain求交集，不新增每步Gate/D2H/owner。V7 Isaac milestone schema8按具名字段解码，新增
+四项teacher-achieved真实误差finite/sum/sumsq；Mu evidence/completion/summary为`10/5/6`。显式升版避免
+新旧wire伪兼容；旧schema7、`9/5/6`和`6/5/5`只作各自source历史。
 
 **MuJoCo native表示与Pod结果：**真实Full-A已证明pose事实源是底层
 `data.struct.xpos/xquat` native Warp `wp.array[vec3/quat]`，不是外层TorchArray代理；最终实现直接消费
 native arrays，不做Torch中转或host sync。72b失败分类、最终`1,036 passed, 11 skipped` CPU矩阵与
 PPO V5性能边界只认[热路实验§16](EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)。
-最终两端61-update rate均自然完成：Mu p50/p90=`5.468/5.526 s/H48`，Isaac=`7.81/8.38 s/H48`；
-两个fresh长跑也已连续ACK。它们分别关闭runtime路径，但matched physics仍`未测`，不能整体抬成跨后端`E2`。
+最终两端61-update空业务rate曾为Mu p50/p90=`5.468/5.526 s/H48`、Isaac=`7.81/8.38 s/H48`；active
+业务近期已恶化到Mu约`9.10 s/H48`、Isaac约`32.06 s/H48`，后者collection约`29.73 s`。空任务率不能
+代表真实训练率。V7已把milestone逐term eager reduction合为每control step少量batched reduction，并将
+Motion同writer完整record往返缩为四字段projection与一个bool结果；跨writer事实、optimizer→WAL/fsync→ACK
+仍保留。逐CommitEntry/row完整业务重放继续是后续性能项，不能在未验证compact分层前直接删掉。两端分别关闭
+runtime路径，但V7 exact Pod active wall和matched physics仍`未测`，不能整体抬成跨后端`E2`。
 
 **Build4辩证对照：**mandatory Build1 `model21800` actor warm-start是相对fresh run最直接的已证配置
 差异；因此Build4不能被当作fresh-from-zero证据。缺actual model0 receipt且配方混杂，早期行为也不能独立
 归因给继承。只采用direct-paddle
-objective/correction-information原则；Reward24是本轮直接Reward实现，Observation V3 residual是本轮独立
+objective/correction-information原则；Reward28是本轮直接Reward实现，Observation V3 residual是本轮独立
 实现且必要性仍待paired control。曝光频率、warm-start、
 replay、双LR、sigma与具体权重延后。当前V6仍是single slot0，所以2 clips与73动作的差距只限制最终外推，
 不解释当前early-learning差异。Build4 selected candidate仍`NOT_PROVEN`；commit、混杂因素与
 adopt/defer/reject详见课程实验§10.3。
 
-**结构与安全边界：**目标是`PlantFacts → ActionBallState transition → StepTelemetry`。same-writer echo、
+**结构与安全边界：**目标仍是`PlantFacts → ActionBallState transition → StepTelemetry`。same-writer echo、
 无人消费Gate或seal后source recheck只能作为逐callpoint删除候选；未点名writer/seal并同批提供mutation反例前
 不得删除。跨writer conservation、native plant finite/joint/table、full-key/generation、optimizer边界、
 run-owned no-clobber、WAL/fsync/ACK和GPU lock继续保留。
-本轮已删除dead keyed work与post-ACK identity echo；固定full-record clone仍为
-`714.375 MiB/H48`、10,560次tensor clone。下一刀只候选减少Motion同writer的两份复制
-（静态`285.75 MiB/H48`），须先用Pod profile确认，不能为其再造Gate或把payload换算成秒。
+本轮已删除dead keyed work与post-ACK identity echo；Motion路径又以四字段窄projection替代同writer完整
+record往返，milestone也改为按term批处理。静态payload只能说明删除了无用数据流，不能换算为秒；active
+profiling仍须覆盖PPO-boundary完整业务重放。只保留学习、分层聚合、独立事实与durability
+真正需要的最小状态；不得把臃肿owner graph原样翻译到C++，也不得用新Gate补偿目标函数缺项。
 
-### 2026-08-25 current adoption table
+### 2026-08-26 current adoption table
 
 | 项 | 当前裁决 | 原因 |
 | --- | --- | --- |
-| learner | 采用PPO V5 `2048/H48/U25000/MB4/E5` | 总样本经济保持但刷新语义改变；exact rate与fresh启动canary已测，25k学习结果未完成 |
-| Reward | 采用Reward24与四项measured-paddle prior | 直接提供并约束持拍腕的连续mimic bridge objective，不增Stage；行为闭合待训练证据 |
+| learner | replacement保留`2048/H48/MB4/E5`作第一因果包；per-minibatch adaptive-KL独立复核 | H48、lambda `.98`、sigma `.05`无旧值漂移；LR在`1e-5..1e-2`频繁振荡，但不能与Reward修复捆绑猜数 |
+| Reward | 采用Reward28：shared action-rate/qdes-projection/qdes-limit/actual-limit经济、真实paddle误差账和固定composite核 | V6在巨大launch分母下contact为0且硬边恶化；这是目标漏洞，不是课程尚未开放或需新增Gate |
 | actor/critic | 采用Observation V3 `215/231`；V2只作旧ABI/paired control | 同producer最小残差关闭representation gap；拒绝raw ball/aim/history/ID扩张 |
 | cadence | 采用四个真实due与耗尽`-1` sentinel | 不给policy不存在的第五机会；双backend同义 |
-| Build4 | 采用direct-paddle objective/correction-information原则；Reward24/V3是本轮实现且V3必要性待paired control；延后曝光频率/warm-start/replay/数值；拒绝formal/73-action外推 | mandatory actor warm-start排除fresh-from-zero比较，但不独立归因行为；只采用可泛化原则 |
-| performance | Mu p50/p90=`5.468/5.526 s`；Isaac=`7.81/8.38 s` | Mu达到约6秒方向，Isaac仍未达严格6秒；PPO尺度变化是算法取舍，不能冒充纯热路等价加速 |
-| authority | 保持`diagnostic_unauthorized`、G04/G05/G06 `Partial` | contact/landing、physics parity、completion与transfer均未闭合 |
+| Build4 | 采用direct-paddle objective/correction-information与Build1 `action_rate_l2`的可解释原则；延后warm-start/replay/双LR/sigma与具体权重 | mandatory actor warm-start排除fresh-from-zero比较；不复制混杂配方或把Build4写成formal证明 |
+| performance | 采用milestone batching和Motion窄projection；compact shot drain继续待profile | active Mu/Isaac约`9.10/32.06 s/H48`，真实迭代率失败；保留跨writer事实与WAL/ACK，不保留无用完整record往返 |
+| authority | V6只读negative；replacement仍`diagnostic_unauthorized`，G04/G05/G06 `Partial` | contact、landing、physics parity、replacement exact Pod短学习与transfer均未闭合 |
 
 ## HISTORICAL / FROZEN — 2026-08-23 current correction
 
@@ -11218,11 +11231,11 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `SOURCE-CLAIM-MANIFEST` | `IN_PROGRESS` | 智元/mjlab/unitree/BeyondMimic/SMASH/PACE/ACE 的 revision、文件、证据等级、允许结论、UNKNOWN 可复算；外部源码按资产策略固定 |
 | `MOCAP-RACKET-AUTHORITY` | `PARTIAL` | v3 因错长轴 revoked；v4 本地 sibling 已完成 exact `73/73` full-phase kinematic solver/materializer/FK audit、receipt 与 73-action manifest，但尚未 tracked/adopted。Mechanical audit 为 `0/73` admitted：`57/73` 已知硬失败，另 `16/73` 只通过 position/velocity，仍因缺 acceleration/torque-speed/inverse-dynamics authority 而 `UNKNOWN`。关闭仍需 mechanical-safe re-solve、schema-v2 prototype（当前缺 `velocity_contract`）、schema-v4 source-capsule/compiler 无损传递和 content-bound marker→official-site 原始生成收据 |
 | `RACKET-PHYSICS-CALIBRATION` | `BLOCKED` | 真实拍子 mass/CoM/inertia 与接触参数仍需测量；只阻塞 calibrated sim2real/真机声明，不回溯否定 URDF-grounded motion retarget |
-| `PORTABLE-SYSTEM-CONTRACT` | `IN_PROGRESS / V6 SINGLE-SLOT ABI + RUNTIME BINDING CLOSED (DIAGNOSTIC)` | 当前FullMDP V6已单值绑定actor/critic `215/231`、Reward24、四due/exhausted clock与分层SHA；不加raw ball/aim/history/ID。最终N73、incoming producer、两步delay history和export producer仍未闭合；`H225`只作历史canary |
+| `PORTABLE-SYSTEM-CONTRACT` | `IN_PROGRESS / V7 SINGLE-SLOT CONTRACT IMPLEMENTED (DIAGNOSTIC)` | V7单值绑定actor/critic `215/231`、Reward28、四due/exhausted clock、Isaac schema8与Mu `10/5/6`；不加raw ball/aim/history/ID。exact Pod与fresh双端ACK待闭合；最终N73、incoming producer、两步delay history和export producer仍未闭合 |
 | `MOTION-REFERENCE-OBSERVABILITY` | `IN_PROGRESS` | 不新增 motion-intent/ID；teacher trajectory 已表达动作。N1 学会后不等待 N2/N3 即进入逐件准入后的全库；只有全库失败时才用小动作集诊断共享容量/串扰。仅当出现相同当前 teacher state、不同必要未来的反例时，才加 short future-teacher preview |
 | `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS / B DEFERRED / A-C UNMEASURED` | 旧 `L194` A/B long 已停：每 update 是 `512 env x 24=12,288 env-step`；A/B 同时时片约 `3.126/2.983 s/update`、约 `3931/4119 env-step/s`，B 只快 `4.78%` 且 CI 跨零，不值得保留第三条 ABI。legacy profiler-on `4096x24 / 6.700 s` 是8倍 env-step/update，原始秒数不可混比。最终 `14,509/18,026` opportunities 都是0 capture；旧 `outcome_dense_only/000` 又没有 ball-state actor，不能冒充 C。fresh A211/C211 均已有独立 211/319 consumer；C211 的 runner-before-oracle live hook、32个 TASK_ACTIVE closed-attempt collector、selected-rubber H/C ledger、achieved-flight sidecar 与 actor/critic incoming-ball逐值校验已经实现并通过 host 回归，但 exact Pod oracle32 仍未执行。因此真 A/C 学习与速率均=`未测`。A 只对 distinct semantic Q 调一次 online solver并缓存；C 是 direct-ball、总 inverse call=0。C 的当前最小 reward 冻结为 nominal strike tick 拍心-球心距离与`vb_fired` analytic selected-rubber contact-gated一次落点，不再私自添加其它 desired-contact 或 dense outcome 项，也不冒充PhysX observed landing。 |
 | `CANONICAL-REWARD-RECIPE` | `IN_PROGRESS / STATIC N1 ORDER PASS` | V2 已实改为非腕全身 mimic + 全相位低权 measured paddle + window 内高权 task master。当前 A211 fixed-center 将 `base_position 1.5→0`，保留 `racket_progress=10`，coarse/fine/precision 九项均为父配方`×1.15`；C211 proximity=`240`；A/C landing=`700` (`+8.4..14`)。Take061 task-valid、`gamma=.99`的静态账为 A `1.773<1.852≤3.009<3.332`，C `1.773<1.904<3.332`；ready/swing mimic 分账专项已过。C reward identity 为 v3，schema-3 training-contract 已与 runtime facts exact cross-check。关闭仍需 launcher/oracle/fixture 和 MuJoCo consumer 串行 repin、pre-long 实测 eligible income/advantage、`landing∧post-contact-fall` 专项和 physical outcome truth |
-| `PPO-RUNTIME-RECEIPT` | `PARTIAL / V6 RATE + FRESH PREFIX` | final `caddecb7` exact Pod已绑定RSL3.1.2、PPO V5、Reward24、215/231、fresh std/LR/optimizer/WAL；两端61-update rate与fresh ACK0..101均finite/conserved。snapshot仍是`diagnostic_nonresumable`，formal resume/normalizer、完整KL/clip/grad、25k completion与独立逐reward-group consumer未闭合。 |
+| `PPO-RUNTIME-RECEIPT` | `PARTIAL / V7 POD VALIDATION` | V7继续绑定RSL3.1.2、PPO V5、Reward28、215/231、fresh std/LR/optimizer/WAL；本地聚焦已过，exact Pod与fresh ACK待闭合。snapshot仍是`diagnostic_nonresumable`，formal resume/normalizer、完整KL/clip/grad、25k completion与独立逐reward-group consumer未闭合。 |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | Isaac atomic reserve/commit 可复用；MuJoCo diagnostic lane 已实现 per-env done latch、terminated-row compact reset、pre-reset terminal observation 与 post-reset next observation、caller-owned ledger、per-env question lineage和可独立复算 receipt。关闭仍需 phase fidelity termination、follow-through/recovery RSI 与完整 mid-episode resume；当前只允许声称 reset-boundary resume |
 | `BALL-FIRST-SCHEDULER` | `IN_PROGRESS / FIXED-CENTER READY, EXPANSION UNMEASURED` | formal A 使用 `online_solver + complete-semantic exact-answer cache`：sampler/curriculum/RNG 每次 reset 正常推进，只有 Q 字节语义全同才复用；cold Q/Q' 各真实解一次。formal C 使用 `direct_ball` 且从不反解。`immutable_tape` 只保留历史目标信息消融，不进入 A/C formal lineage；`banded_question_bank` 只是可选未来 producer 优化，不阻塞首个 expanding long。仍须冻结 generator、initial/max envelope、扩域/回退、heldout state，并补齐可逆重测、new-band配额、样本不足作废、global/arm attribution、hysteresis、uniform/center floor 与并行探臂前置。 |
 | `ISAAC-FOUR-CELL-FIXED-QUESTION` | `A211/C211 CODE IMPLEMENTED / INTEGRATION + PRE-LONG BLOCKED` | 当前四格是 `A/C x {fixed-lr1e-4, adaptive-KL-initial-lr1e-3}`。两者分别用独立211/319 ABI/normalizer/checkpoint，共享 measured teacher/seed/old plant/safety/network/budget。physical reset 使用 tracked split-ready，WAIT 5--25 tick；reveal 同 tick teacher 切到 measured frame0并公开本族current-center receipt派生的启动钟（literal center当前预计A约`.692376 s`、C约`.86 s`），由 dense mimic 学 bridge；禁止共用历史`.712376 s`。direct frame0 birth 已实测 `0/73`，不再授权。当前还须把 A cache/C direct-ball、DR-L0 leaf 与 split-ready lineage 在同一 clean exact SHA 闭合，随后跑两族 oracle32 和四格真 4096x5；全局 barrier 重开并逐份复核 source/claim/model5/telemetry 前 long 全阻断。 |
@@ -11230,11 +11243,11 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条来自真人对拉录制的单拍 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的定量真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
 | `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / SELECTED-RUBBER CONTACT RECEIPT CLOSED` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装。exact Pod `592835dc` 同题真实 rollout 得 generic edge=1/table=0/valid outgoing，sidecar 分类正号红面，tick/substep=1/3，切向距 `0.007168732 < 0.044263876 m`，invalid=[]；receipt-v2 已在 exact detached `95382a53` replay=`18 passed`，classification 与 backend seals 独立重算一致。Reward/PPO/incoming-question parity 仍未授权 |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / PORTABLE HOLD V2 PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。action-specific hold v2 用 repo-relative logical path+SHA，consumer 拒绝旧 v1、absolute/traversal/repo-escape；host=`18 passed,6 skipped`、exact Pod 真 MuJoCo d0/d1/d2=`24 passed,0 skipped`。immutable authority probe 仍只有 table edge，没有 racket hit/reward/learnability授权 |
-| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / V6 2048-H48 RATE + FRESH` | final `caddecb7`真实Full-A rate完成61 update，p50/p90=`5.468/5.526 s`；fresh schema9 ACK0..101、Reward24/V3/storage/fact-integrity全绿并已有scheduled/public/overlap=`14/13/1`。禁止resume；尚无25000 completion、selected contact/landing、mid-episode restore或formal checkpoint authority。 |
-| `MUJOCO-RUN-CONFIG-DETERMINISM` | `PARTIAL / V6 FRESH IDENTITY CLOSED` | one-shot launcher已单值绑定final clean source、PPO V5、GPU UUID/flock、run-owned cache、EPA48/RSL3/MJLab runtime stack及source-plant/runtime-attach；rate与fresh real run闭合。paired-tape Tier-1、接触/飞行Tier-2统计与跨run复算仍未完成。 |
-| `ISAAC-MUJOCO-CROSS-ENGINE-PARITY` | `PARTIAL / V6 SHARED CONTRACT + DUAL RUNTIME` | 两端已由同一`caddecb7`以215/231、Reward24、PPO V5、H48、三段reference和同一课程fresh运行且各有finite ACK；各自rate闭合，但尚无paired tape。ACK0..101时Mu已有14 scheduled而Isaac无due，反映early distribution不同；Mu launch=0故contact/landing为`未测`，Isaac task及其下游均`未测`，数值、physics与transfer parity仍未测。 |
+| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / V7 2048-H48 POD VALIDATION` | V7使用schema10 ACK、Reward28/V3；本地聚焦通过，exact Full-A rate/short learning与fresh ACK待闭合。禁止resume；尚无25000 completion、selected contact/landing、mid-episode restore或formal checkpoint authority。 |
+| `MUJOCO-RUN-CONFIG-DETERMINISM` | `PARTIAL / V7 SOURCE TO FREEZE` | one-shot launcher继续单值绑定clean source、PPO V5、GPU UUID/flock、run-owned cache、EPA48/RSL3/MJLab runtime stack及source-plant/runtime-attach；V7 exact source/Pod receipt待闭合。paired-tape Tier-1、接触/飞行Tier-2统计与跨run复算仍未完成。 |
+| `ISAAC-MUJOCO-CROSS-ENGINE-PARITY` | `PARTIAL / V7 SHARED CONTRACT, POD PENDING` | 两端代码共用215/231、Reward28、PPO V5、H48、三段reference和同一课程；exact V7双runtime与paired tape尚未完成。V6大分母为零contact且hard-edge反升，只作negative历史；V7 contact、landing、数值、physics与transfer parity均未测。 |
 | `MUJOCO-CANONICAL-N1-AUTHORIZATION` | `BLOCKED` | 显式合取门：portable ABI ∧ admitted teacher ∧ pinned sim contact/physics profile ∧ full termination/reset ∧ reward/evaluator parity ∧ trainer/save/resume ∧ run determinism ∧ fixed-tape cross-engine parity。真实拍子质量/惯量可只阻塞 sim2real，但 formal sim 仍需具名接触 profile |
-| `MUJOCO-N1-REPRODUCE` | `IN_PROGRESS / V6 DUAL FRESH DIAGNOSTIC` | shared FullMDP bundle已在fresh MuJoCo与Isaac并行训练；ACK0..101两端survival、common mimic与paddle-prior income/sample均提高，Mu已有14 scheduled/13 public而Isaac尚无due；Mu launch=0故contact/landing为`未测`，Isaac task及其下游均`未测`。不能把启动ACK、mimic income或旧V4零contact写成N1复现，关闭仍需自然hit/landing与逐分母证据。 |
+| `MUJOCO-N1-REPRODUCE` | `IN_PROGRESS / V7 REPLACEMENT NOT YET RUN` | V6双fresh已在巨大launch分母下证明零contact与hard-edge反升，不能写成N1复现。V7修复学习经济和真实mimic误差，但尚未fresh运行；关闭仍需balance→mimic→hit→landing自然重叠的逐分母未来证据。 |
 | `N73-CATALOG-ADMISSION` | `BLOCKED` | v4 的 73-action manifest 已产生且 receipt-bound，但完整 mechanical audit 是 `0/73` admitted：`57/73` position/stored-or-FD-velocity 硬失败，`16/73` 仅通过这些已知门且仍为 `UNKNOWN`。较早窄口径反例为 `37/73` URDF 超速和 `58/73` 近限位。必须重算并逐件闭合 velocity/acceleration/limit-margin、signed torque-speed/thermal、floating-base inverse dynamics、足底接触/摩擦、自碰/桌净空、fitted-ball，再补 prototype/strict load/alias/family sampling |
 | `SPIN-CONTACT-CALIBRATION` | `BLOCKED` | ABI 保留 spin 列但首版 `spin_valid=false`。只有 incoming producer、off-centre friction/restitution/spin transfer、drag/Magnus flight、marker alias/effective-domain 全过后才能 promotion 且付 spin reward |
 | `N73-SCALE-COMPACTION` | `IN_PROGRESS / PREP PARALLEL` | admission/manifest/alias/zero-PPO scale 可与 N1 并行准备；formal N73 才等待 N1。N73 zero-PPO/1x2/4096x5、O(envs) hotpath、memory/ledger compaction、逐动作及实际 selector transition starvation 门 |
@@ -11495,12 +11508,12 @@ leg-only projection、4 s被动稳定和 `200/800` durability 都不得成为隐
    与 stateful export Gate3B 通过，且按实际 transition/lead-time/streak 报分母；
 6. independent physical exam 完成；缺数据的 formal 格仍明确 `未测`，没有被平均数掩盖。
 
-在此之前，当前总体状态只认页首`2026-08-25 current correction`与
+在此之前，当前总体状态只认页首`2026-08-26 current correction`与
 [双后端TODO §0.5](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)：
-PPO V5、Reward24与Observation V3 `215/231`合同已冻结；final exact source、两端Pod rate与fresh启动
-canary已经闭合，但mimic→contact、landing/recovery、formal checkpoint、physics/transfer parity与25000
-completion仍未测或未闭合。下文A211/C211、211/319-D、oracle32、四格与`0/73` mechanical audit是predecessor历史，不得覆盖
-V3、H48、三段reference、`9/5/6` wire或`diagnostic_unauthorized=true`边界。
+PPO V5、Reward28与Observation V3 `215/231`合同已冻结；V7 exact source、两端Pod rate与fresh启动
+canary仍待闭合，mimic→contact、landing/recovery、formal checkpoint、physics/transfer parity与25000
+completion也未测或未闭合。下文A211/C211、211/319-D、oracle32、四格与`0/73` mechanical audit是predecessor历史，不得覆盖
+V3、H48、三段reference、`10/5/6` wire或`diagnostic_unauthorized=true`边界。
 ### 2026-08-18：WAIT RSL3 输入身份修正
 
 薄launcher原先没有把one-shot运行器冻结的ready-pose传进production env；direct GPU测试与真实

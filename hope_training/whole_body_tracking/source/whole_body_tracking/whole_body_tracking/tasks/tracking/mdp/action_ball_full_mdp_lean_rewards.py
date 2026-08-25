@@ -39,6 +39,11 @@ try:
 except ImportError:
     import action_ball_full_mdp_reward_contract as reward_contract
 
+try:
+    from . import action_ball_full_mdp_regularization as regularization
+except ImportError:
+    import action_ball_full_mdp_regularization as regularization
+
 
 DIAGNOSTIC_UNAUTHORIZED = True
 RUNTIME_INTEGRATED = False
@@ -57,9 +62,11 @@ if LIFECYCLE_MANAGER_NAMES != reward_contract.LIFECYCLE_MANAGER_NAMES:
     raise RuntimeError("lean lifecycle Reward order differs from shared contract")
 COMMON_DENSE_SPECS = reward_contract.COMMON_DENSE_SPECS
 PADDLE_MOTION_PRIOR_SPECS = reward_contract.PADDLE_MOTION_PRIOR_SPECS
+REGULARIZATION_SPECS = reward_contract.REGULARIZATION_SPECS
 ALL_DENSE_SPECS = COMMON_DENSE_SPECS + PADDLE_MOTION_PRIOR_SPECS
 COMMON_DENSE_NAMES = reward_contract.COMMON_DENSE_NAMES
 PADDLE_MOTION_PRIOR_NAMES = reward_contract.PADDLE_MOTION_PRIOR_NAMES
+REGULARIZATION_NAMES = reward_contract.REGULARIZATION_NAMES
 BODY_ORIENTATION_COARSE_STD = next(
     spec.coarse_std
     for spec in COMMON_DENSE_SPECS
@@ -69,6 +76,9 @@ MANAGER_NAMES = reward_contract.MANAGER_NAMES
 MANAGER_TERM_COUNT = reward_contract.REWARD_TERM_COUNT
 PADDLE_MOTION_PRIOR_FIRST_ORDINAL = (
     LIFECYCLE_PAYMENT_COUNT + len(COMMON_DENSE_SPECS)
+)
+REGULARIZATION_FIRST_ORDINAL = (
+    PADDLE_MOTION_PRIOR_FIRST_ORDINAL + len(PADDLE_MOTION_PRIOR_SPECS)
 )
 
 R03_PRESENT = 1 << 0
@@ -95,6 +105,10 @@ DIAGNOSTIC_N2_WEIGHTS = {
     # R07 fact is already weighted by its construction-owned profile.
     "common_recovery_reward_v1": 1.0,
     **{spec.manager_name: spec.manager_weight for spec in ALL_DENSE_SPECS},
+    **{
+        spec.manager_name: spec.manager_weight
+        for spec in REGULARIZATION_SPECS
+    },
 }
 DIAGNOSTIC_N2_R03_SCALES = {
     "racket_position": 0.2,
@@ -204,6 +218,7 @@ class LeanActionEpochRewardGraph:
         self._cycle_epoch: epoch_v1.ActionEpochRecord | None = None
         self._r03_cycle_cache: _PackedR03RewardCycle | None = None
         self._paddle_playback_cycle_mask: torch.Tensor | None = None
+        self._paddle_error_cycle_matrix: torch.Tensor | None = None
         self._paddle_playback_cycle_resolved = False
         self._next_ordinal = 0
         self._next_dense_ordinal = LIFECYCLE_PAYMENT_COUNT
@@ -274,6 +289,7 @@ class LeanActionEpochRewardGraph:
 
     def _clear_paddle_playback_cycle_cache(self) -> None:
         self._paddle_playback_cycle_mask = None
+        self._paddle_error_cycle_matrix = None
         self._paddle_playback_cycle_resolved = False
 
     def _record(self) -> epoch_v1.ActionEpochRecord:
@@ -544,6 +560,7 @@ class LeanActionEpochRewardGraph:
         value: torch.Tensor,
         *,
         paddle_playback_active: torch.Tensor | None = None,
+        paddle_error_components: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Record one existing Motion reward without extending lifecycle payment bits."""
 
@@ -572,7 +589,11 @@ class LeanActionEpochRewardGraph:
                 or value.dtype is not torch.float32
             ):
                 raise LeanRewardCycleError("common dense Reward tensor ABI differs")
-            if ordinal >= PADDLE_MOTION_PRIOR_FIRST_ORDINAL:
+            if (
+                PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+                <= ordinal
+                < REGULARIZATION_FIRST_ORDINAL
+            ):
                 if ordinal == PADDLE_MOTION_PRIOR_FIRST_ORDINAL:
                     if self._paddle_playback_cycle_resolved:
                         raise LeanRewardCycleError(
@@ -591,17 +612,41 @@ class LeanActionEpochRewardGraph:
                         raise LeanRewardCycleError(
                             "paddle motion-prior playback telemetry ABI differs"
                         )
+                    if paddle_error_components is not None and (
+                        type(paddle_error_components) is not torch.Tensor
+                        or tuple(paddle_error_components.shape)
+                        != (self.num_envs, len(PADDLE_MOTION_PRIOR_SPECS))
+                        or paddle_error_components.device != self.device
+                        or paddle_error_components.dtype is not torch.float32
+                        or not paddle_error_components.is_contiguous()
+                    ):
+                        raise LeanRewardCycleError(
+                            "paddle motion-prior error telemetry ABI differs"
+                        )
+                    if (paddle_playback_active is None) != (
+                        paddle_error_components is None
+                    ):
+                        raise LeanRewardCycleError(
+                            "paddle motion-prior telemetry resolved partially"
+                        )
                     self._paddle_playback_cycle_mask = paddle_playback_active
+                    self._paddle_error_cycle_matrix = paddle_error_components
                     self._paddle_playback_cycle_resolved = True
-                elif paddle_playback_active is not None:
+                elif (
+                    paddle_playback_active is not None
+                    or paddle_error_components is not None
+                ):
                     raise LeanRewardCycleError(
-                        "paddle playback telemetry must be resolved once"
+                        "paddle telemetry must be resolved once"
                     )
                 if not self._paddle_playback_cycle_resolved:
                     raise LeanRewardCycleError(
                         "paddle playback telemetry cycle was not resolved"
                     )
-            elif paddle_playback_active is not None:
+            elif (
+                paddle_playback_active is not None
+                or paddle_error_components is not None
+            ):
                 raise LeanRewardCycleError(
                     "non-paddle dense row received paddle telemetry"
                 )
@@ -615,14 +660,24 @@ class LeanActionEpochRewardGraph:
                 finite,
                 self._milestone_configured_income_scale[ordinal],
             )
-            if ordinal >= PADDLE_MOTION_PRIOR_FIRST_ORDINAL:
-                if self._paddle_playback_cycle_mask is None:
+            if (
+                PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+                <= ordinal
+                < REGULARIZATION_FIRST_ORDINAL
+            ):
+                if (
+                    self._paddle_playback_cycle_mask is None
+                    or self._paddle_error_cycle_matrix is None
+                ):
                     self._milestone.add_paddle_motion_prior_unavailable(ordinal)
                 else:
                     self._milestone.add_paddle_motion_prior_playback(
                         ordinal,
                         value,
                         self._paddle_playback_cycle_mask,
+                        self._paddle_error_cycle_matrix[
+                            :, ordinal - PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+                        ],
                     )
         except BaseException as exc:
             self._poison(
@@ -680,6 +735,7 @@ class LeanActionEpochRewardGraph:
             or self._next_dense_ordinal != LIFECYCLE_PAYMENT_COUNT
             or self._completed_cycle_count != self._actual_closed_cycle_count
             or self._paddle_playback_cycle_mask is not None
+            or self._paddle_error_cycle_matrix is not None
             or self._paddle_playback_cycle_resolved
         ):
             self._invalidate_r03_cycle_cache()
@@ -854,12 +910,13 @@ def paddle_motion_prior_reward(
     ordinal: int,
     command_name: str,
     std: float,
+    coarse_std: float,
     scale_in_strike_window: float,
 ) -> torch.Tensor:
     """Evaluate one full-phase official-site motion prior and record its row."""
 
     first = PADDLE_MOTION_PRIOR_FIRST_ORDINAL
-    if type(ordinal) is not int or not first <= ordinal < MANAGER_TERM_COUNT:
+    if type(ordinal) is not int or not first <= ordinal < REGULARIZATION_FIRST_ORDINAL:
         raise LeanRewardConstructionHold("paddle motion-prior ordinal differs")
     spec = PADDLE_MOTION_PRIOR_SPECS[ordinal - first]
     if (
@@ -868,6 +925,11 @@ def paddle_motion_prior_reward(
             std, label=spec.manager_name + " std"
         ).hex()
         != spec.std.hex()
+        or spec.coarse_std is None
+        or _positive_host_number(
+            coarse_std, label=spec.manager_name + " coarse std"
+        ).hex()
+        != spec.coarse_std.hex()
         or _positive_host_number(
             scale_in_strike_window,
             label=spec.manager_name + " strike-window scale",
@@ -891,9 +953,11 @@ def paddle_motion_prior_reward(
         env,
         command_name=command_name,
         std=spec.std,
+        coarse_std=spec.coarse_std,
         scale_in_strike_window=float(spec.scale_in_strike_window),
     )
     playback_active = None
+    paddle_error_components = None
     if ordinal == PADDLE_MOTION_PRIOR_FIRST_ORDINAL:
         try:
             cmd = evaluator_module._cmd(env, command_name)
@@ -915,16 +979,126 @@ def paddle_motion_prior_reward(
             ):
                 raise RuntimeError("Motion playback telemetry ABI differs")
             playback_active = candidate
+            errors = evaluator_module.motion_racket_tracking_errors_now(cmd)
+            if (
+                type(errors) is not torch.Tensor
+                or tuple(errors.shape)
+                != (value.shape[0], len(PADDLE_MOTION_PRIOR_SPECS))
+                or errors.device != value.device
+                or errors.dtype is not torch.float32
+                or not errors.is_contiguous()
+            ):
+                raise RuntimeError("Motion paddle-error telemetry ABI differs")
+            paddle_error_components = errors
         except Exception:
             # This denominator is diagnostic only.  Missing or malformed
             # telemetry is recorded explicitly by the graph and can never
             # poison a valid reward cycle or become a safety/admission gate.
             playback_active = None
+            paddle_error_components = None
     return _env_reward_dispatcher(env)(
         ordinal=ordinal,
         value=value,
         paddle_playback_active=playback_active,
+        paddle_error_components=paddle_error_components,
     )
+
+
+def _regularization_action_term(env: object) -> object:
+    try:
+        action = env.action_manager.get_term("joint_pos")
+    except Exception as exc:
+        raise LeanRewardConstructionHold(
+            "FullMDP regularization lacks joint_pos action term"
+        ) from exc
+    names = tuple(getattr(action, "_joint_names", ()))
+    raw_ids = getattr(action, "_joint_ids", slice(None))
+    if isinstance(raw_ids, slice):
+        ids = tuple(range(regularization.JOINT_COUNT))[raw_ids]
+    else:
+        if hasattr(raw_ids, "tolist"):
+            raw_ids = raw_ids.tolist()
+        ids = tuple(int(value) for value in raw_ids)
+    if (
+        len(names) != regularization.JOINT_COUNT
+        or len(set(names)) != regularization.JOINT_COUNT
+        or ids != tuple(range(regularization.JOINT_COUNT))
+    ):
+        raise LeanRewardConstructionHold(
+            "FullMDP regularization requires identity 31-joint action order"
+        )
+    return action
+
+
+def _regularization_robot_data(env: object, action: object) -> object:
+    asset = getattr(action, "_asset", None)
+    data = getattr(asset, "data", None)
+    names = tuple(
+        getattr(data, "joint_names", getattr(asset, "joint_names", ()))
+    )
+    if (
+        data is None
+        or len(names) != regularization.JOINT_COUNT
+        or len(set(names)) != regularization.JOINT_COUNT
+        or tuple(getattr(action, "_joint_names", ())) != names
+    ):
+        raise LeanRewardConstructionHold(
+            "FullMDP regularization requires identity 31-joint robot order"
+        )
+    return data
+
+
+def regularization_reward(env: object, *, ordinal: int) -> torch.Tensor:
+    """Evaluate one shared negative-cost kernel and record its manager row."""
+
+    if (
+        type(ordinal) is not int
+        or not REGULARIZATION_FIRST_ORDINAL <= ordinal < MANAGER_TERM_COUNT
+    ):
+        raise LeanRewardConstructionHold("regularization ordinal differs")
+    spec = REGULARIZATION_SPECS[ordinal - REGULARIZATION_FIRST_ORDINAL]
+    action = _regularization_action_term(env)
+    data = _regularization_robot_data(env, action)
+    if spec.evaluator_name == "action_rate_l2":
+        value = regularization.action_rate_l2(
+            env.action_manager.action, env.action_manager.prev_action
+        )
+    elif spec.evaluator_name == "qdes_limit_barrier_v2":
+        value = regularization.soft_limit_barrier_v2(
+            action.processed_actions,
+            data.soft_joint_pos_limits,
+            data.default_joint_pos,
+            data.joint_pos_limits,
+        )
+    elif spec.evaluator_name == "qdes_projection_penalty":
+        value = regularization.qdes_projection_penalty(
+            action.pre_clamp_qdes,
+            action.nominal_projected_qdes,
+            action.nominal_projection_span,
+            action.pre_clamp_qdes_valid,
+            action.nominal_projected_qdes_valid,
+        )
+    elif spec.evaluator_name == "actual_joint_limit_barrier_v2":
+        value = regularization.soft_limit_barrier_v2(
+            data.joint_pos,
+            data.soft_joint_pos_limits,
+            data.default_joint_pos,
+            data.joint_pos_limits,
+        )
+    else:
+        raise LeanRewardConstructionHold(
+            "regularization evaluator differs: " + spec.evaluator_name
+        )
+    if (
+        type(value) is not torch.Tensor
+        or tuple(value.shape) != (int(env.num_envs),)
+        or value.dtype is not torch.float32
+        or not value.is_contiguous()
+    ):
+        raise LeanRewardConstructionHold(
+            "regularization evaluator tensor ABI differs: " + spec.manager_name
+        )
+    return _env_reward_dispatcher(env)(ordinal=ordinal, value=value)
 
 
 def racket_position(
@@ -1034,7 +1208,9 @@ REWARD_TERM_CALLABLES = LIFECYCLE_REWARD_TERM_CALLABLES + (
     common_dense_reward,
 ) * len(COMMON_DENSE_SPECS) + (
     paddle_motion_prior_reward,
-) * len(PADDLE_MOTION_PRIOR_SPECS)
+) * len(PADDLE_MOTION_PRIOR_SPECS) + (
+    regularization_reward,
+) * len(REGULARIZATION_SPECS)
 
 
 def _a3_tracked_except_held_wrist_body_names() -> tuple[str, ...]:
@@ -1084,6 +1260,21 @@ def materialize_reward_manager_cfg(
                 r03_scales[name], label=name + " scale"
             )
         elif ordinal >= LIFECYCLE_PAYMENT_COUNT:
+            if ordinal >= REGULARIZATION_FIRST_ORDINAL:
+                spec = REGULARIZATION_SPECS[
+                    ordinal - REGULARIZATION_FIRST_ORDINAL
+                ]
+                if weight.hex() != spec.manager_weight.hex():
+                    raise LeanRewardConstructionHold(
+                        name + " weight must equal shared regularization contract"
+                    )
+                params["ordinal"] = ordinal
+                result[name] = reward_term_type(
+                    func=REWARD_TERM_CALLABLES[ordinal],
+                    weight=weight,
+                    params=params,
+                )
+                continue
             spec = ALL_DENSE_SPECS[ordinal - LIFECYCLE_PAYMENT_COUNT]
             if weight.hex() != spec.manager_weight.hex():
                 raise LeanRewardConstructionHold(
@@ -1148,13 +1339,16 @@ __all__ = [
     "LIFECYCLE_MANAGER_NAMES",
     "COMMON_DENSE_SPECS",
     "PADDLE_MOTION_PRIOR_SPECS",
+    "REGULARIZATION_SPECS",
     "ALL_DENSE_SPECS",
     "COMMON_DENSE_NAMES",
     "PADDLE_MOTION_PRIOR_NAMES",
+    "REGULARIZATION_NAMES",
     "BODY_ORIENTATION_COARSE_STD",
     "MANAGER_NAMES",
     "MANAGER_TERM_COUNT",
     "PADDLE_MOTION_PRIOR_FIRST_ORDINAL",
+    "REGULARIZATION_FIRST_ORDINAL",
     "DIAGNOSTIC_N2_REWARD_PROFILE_KIND",
     "DIAGNOSTIC_N2_WEIGHTS",
     "DIAGNOSTIC_N2_R03_SCALES",
@@ -1168,6 +1362,7 @@ __all__ = [
     *LIFECYCLE_MANAGER_NAMES,
     "common_dense_reward",
     "paddle_motion_prior_reward",
+    "regularization_reward",
     "LIFECYCLE_REWARD_TERM_CALLABLES",
     "REWARD_TERM_CALLABLES",
     "materialize_reward_manager_cfg",

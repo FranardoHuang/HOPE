@@ -1,9 +1,9 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`ACTIVE-V6-dual-fresh / old-V5-frozen / branch-scoped / diagnostic_unauthorized`
+> 状态：`V6-dual-fresh-negative-read-only / V7-replacement-Pod-validation / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-25
+> 更新：2026-08-26
 >
 > `origin/main:docs/NOW.md` 是全项目唯一优先级权威。本页只维护
 > [FullMDP](../DEFINITIONS.md)（完整球路、击球、落点与恢复状态机）单动作双后端
@@ -12,12 +12,13 @@
 
 <a id="fullmdp-v6-todo-current"></a>
 
-## 0.5 2026-08-25 current：V6 exact Pod闭合与双fresh训练
+## 0.5 2026-08-26 current：V6证伪与V7替代源
 
 本节是本页唯一现役局部执行合同；它不改变`origin/main:docs/NOW.md`的统一优先级。V5 source
 `39f9481950a660e198dedac7fd402806d648906b`及其namespace保持只读，禁止hot-patch、resume或复用。
-`9d333b0b`（语义`ba7225b2`）只是Observation/PPO最终裁决前的predecessor；V6 clean/pushed最终source
-已经冻结为`caddecb76727ea55b0ce089453eea91cb5a9f8ea`并成为两个fresh live source。所有运行仍为
+`9d333b0b`（语义`ba7225b2`）只是Observation/PPO最终裁决前的predecessor；V6 clean/pushed source
+`caddecb76727ea55b0ce089453eea91cb5a9f8ea`的两个live namespace已经被大分母证伪，只保留只读到V7
+替代物完成exact Pod验证。所有运行仍为
 [`diagnostic_unauthorized`](../DEFINITIONS.md#diagnostic-unauthorized)，不得由
 短验、单轮wall或文档状态推出promotion、physics parity、export、部署或真机授权。
 
@@ -34,16 +35,16 @@ mimic→真实接触的桥；此时再把零接触解释成“step还不够”�
 仍无分母，才是交接实现故障；在此之前缺失格写`未测`，已有分母的零结果写`0/denominator`，不靠return
 均值遮掉。
 
-### V6唯一合同
+### V7 replacement唯一合同
 
 | 面 | 当前合同 | 第一性原理理由 |
 | --- | --- | --- |
 | learner | [`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)：`2048 env × H48 × U25000`、save500、E5/MB4；继承V4的`gamma=.99`、GAE`lambda=.98`、entropy0、learned`log_std`、fresh sigma`.05`、无强制std decay | 总transition、minibatch大小与optimizer-step数保持但刷新语义改变；exact rate与fresh prefix只验证运行/刷新边界，25k学习质量尚未完成，固定快照的contact/landing尚无eligible denominator、均为`未测`；不冒充语义等价性能优化 |
-| Reward | [`Reward24`](../DEFINITIONS.md#fullmdp-reward24)：14项lifecycle + 6项common mimic + 4项measured-paddle prior | 两个anchor项照常保留；四个body-average项排除持拍腕，官方实测拍心/速度/signed physical hitting-face法向/长轴直接给腕部连续桥；reset-ready才使用canonical raw `+Y` |
-| Observation | [`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3)：actor/critic=`215/231`，在common prefix加入4×3同clock、全phase heading residual；V2 `203/219`只作旧checkpoint ABI和paired control | Reward24直接依赖独立measured Motion paddle teacher；把同producer的teacher-achieved最小残差交给actor，关闭source未直接可见的representation gap，避免从q/dq重学FK/Jacobian；不加入raw ball/aim/rate/history/action ID或声称完整Markov |
+| Reward | [`Reward28`](../DEFINITIONS.md#fullmdp-reward28)：14项lifecycle + 6项common mimic + 4项measured-paddle composite prior + 4项action/joint连续成本 | Paddle固定50/50 precision-exp + coarse-Cauchy，物理宽度为`.075/.30 m`、`.50/2.0 mps`、`15/60 deg`、`10/40 deg`；另恢复`action_rate_l2=-.1`、qdes soft=`-10`、projection=`-1`、actual joint soft=`-10`，用连续目标修复硬边套利，不新增Done或安全Gate |
+| Observation | [`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3)：actor/critic=`215/231`，在common prefix加入4×3同clock、全phase heading residual；V2 `203/219`只作旧checkpoint ABI和paired control | Reward28的paddle objective仍依赖独立measured Motion teacher；把同producer的teacher-achieved最小残差交给actor，关闭source未直接可见的representation gap，避免从q/dq重学FK/Jacobian；不加入raw ball/aim/rate/history/action ID或声称完整Markov |
 | cadence | 真实due固定为tick `295/588/881/1174`；`1467`只是第四球settlement boundary | schedule必须表达真实可发生事件；terminal overlap不是actor看到过的reveal |
 | Isaac terminal overlap | `ResetTelemetry × D05 scheduled-due`只在既有CPU pre-optimizer drain做跨writer交集 | 保留独立事实源的证据；绝不新增每步Gate、D2H、owner或same-writer receipt |
-| evidence | Isaac milestone schema7按具名episode slice解码；Mu update/completion/summary wire为`9/5/6` | suffix在追加paddle telemetry后不再等于episode字段；wire只绑定可界定事实，不将布局偶然性当合同 |
+| evidence | Isaac milestone schema8按具名字段解码；Mu update/completion/summary wire为`10/5/6` | 新wire增加paddle真实误差finite/sum/sumsq并显式升版；Isaac当前N1按aggregate报告，Mu由pinned action identity精确归属；不把新字段伪装成旧schema兼容 |
 | Mu keepout | fused table-keepout直接消费`data.struct.xpos/xquat`的native Warp `wp.array` `vec3/quat`，不要求Torch中转或host sync | 真实mjwarp state就是事实源；adapter应贴合引擎表示，而不是要求环境迁就测试fixture |
 
 ### 对Build4的辩证裁决
@@ -51,7 +52,7 @@ mimic→真实接触的桥；此时再把零接触解释成“step还不够”�
 mandatory Build1 `model21800` bit-exact actor warm-start是Build4相对fresh run最直接的已证配置差异；
 因此Build4不能被当作fresh-from-zero证据。缺actual model0 receipt且配方混杂，早期行为也不能独立归因给
 继承。V6只采用其
-**直接连续拍面目标必须由policy可推断**的通用原则：Reward24直接实现拍面objective，Observation V3则是
+**直接连续拍面目标必须由policy可推断**的通用原则：Reward28直接实现拍面objective，Observation V3则是
 本轮独立的最小correction-state实现，必要性仍待paired control。两者使用同一measured producer闭合
 reward/action信息。Build4本身没有独立actor normal或achieved-residual字段，所以不能替V3证明必要性；
 `1--1.3 s`曝光频率、warm-start、replay、双learning-rate、
@@ -72,7 +73,8 @@ Gate和独立sealed immutable artifact后的重复source recheck只是**逐callp
 
 ### 当前Pod事实与执行顺序
 
-上一候选`72b87100`在真实Pod揭示Isaac schema slice和Mu native pose adapter两处实现错误；最终
+V6的历史闭合仍如下；它不再是待继续到25k的学习候选。上一候选`72b87100`在真实Pod揭示Isaac schema
+slice和Mu native pose adapter两处实现错误；最终
 `caddecb7`已完成exact Pod CPU与两端`2048×H48×61` rate。Mu p50/p90=`5.468/5.526 s`达到约6秒
 方向；Isaac=`7.81/8.38 s`仍未达到严格6秒。该变化包含PPO迭代尺度取舍，不冒充纯热路径等价加速。
 失败分类、receipt、rate window与唯一详细数字真源见
@@ -95,6 +97,20 @@ Gate和独立sealed immutable artifact后的重复source recheck只是**逐callp
   PID/startticks/PGID/cwd/source/namespace停止旧Mu，绝不广域kill或复用旧root。
 - [x] fresh两端取得连续durable ACK，Reward24/V3/finite/conservation/fault启动边界已通过；按
   balance→mimic→hit→landing继续判读，不以早期0 hit停车。
+- [x] 冻结V6结论翻转窗：balance/survival已经接近episode horizon，两端launch/R03均有数十万以上
+  独立分母而selected contact仍为0，actual-hard-edge也从早期下降翻成末段持续上升；当前V6不再按
+  “课程尚未打开”继续解释，也不再把25k自然完成当作科学上必须等待的结果。
+- [x] 实现V7最小因果包：Reward28四项连续成本、固定composite paddle prior、同producer真实误差矩；
+  Observation V3保持`215/231`，四次真实cadence和自然重叠课程不变。
+- [x] 完成结构减法：milestone按term批处理；Motion只传四字段窄projection和caller消费的bool；保留独立
+  plant/full-key、optimizer、WAL/fsync/ACK边界。新增误差使Isaac/Mu wire显式升为`8`与`10/5/6`。
+- [x] Pod1 GPU2 fixed synthetic action-shaped tape拒绝`cq_n_iters=8/4`：两者都改变admission reason、
+  selected identity和target residual；保持12 iterations，不把学习风险冒充等价加速。
+- [x] 本地集成聚焦矩阵=`606 passed, 34 skipped`，changed tree compileall与`git diff --check`通过。
+- [ ] 在Pod1 exact clean source完成CPU/Isaac/Mu GPU聚焦矩阵、短学习和active-strata wall；旧V6在此之前
+  继续只读，不修改governor/source/PID。
+- [ ] replacement ready后逐一复核PID/startticks/PGID/cwd/source/namespace，精确停止旧V6；确认GPU/lock
+  释放后以两个fresh V7 namespace重启，读取首批durable ACK、Reward28、误差分母与wall。
 - [ ] 在首次使用“基本成功”作结论前，先冻结可复算的**证据判读合同**，不能看完曲线再补阈值：balance按固定窗
   survival-to-due与terminal mix判；mimic按task/playback eligible行上的teacher-achieved paddle残差与行为趋势判，
   `income/sample`只能作收入诊断、不能代替梯度或行为成功；hit按`selected contact / launch`与target error判；landing按
@@ -103,6 +119,26 @@ Gate和独立sealed immutable artifact后的重复source recheck只是**逐callp
   不进入runtime、不成为安全Gate；四阶段从首个自然eligible事件起始终重叠开放。
 - [ ] 等上一阶段开始基本成形时核验下一阶段已自然出现非零分母；25000自然完成、
   formal physics parity、transfer与部署继续是独立未闭合项。
+- [ ] replacement按一个可审计的最小因果包修复，顺序固定为：
+  1. [x] 把已有纯tensor action/joint经济接回shared FullMDP Reward；现役24项图整块替换了旧ActionBall reward，
+     却没有Build1已证明关键的`action_rate_l2`，也没有`qdes_projection_penalty`、`qdes_limit_barrier`或
+     actual `joint_limit`。FullMDP又有意不把actual-hard-edge变成Done，导致抖动/硬边只有telemetry、没有
+     可学习代价。修复应复用既有action/q/qdot/qdes/limits，不新增owner、receipt或安全Gate；action、命令、
+     plant和projection四项可在一个shared cost里分别记component。
+  2. [x] 在既有paddle producer中累计teacher-achieved position/velocity/face/long-axis真实误差及平方和，按
+     playback/action/side给分母；`income/sample`不再代替mimic行为证据，也不把这些误差加进actor。
+  3. [x] 用固定的coarse+precision连续paddle kernel关闭`.70 m / 4 mps / pi rad / 1 rad`宽核可长期取得收入、
+     却不必达到物理接触精度的目标漏洞；数值先以现有strike-success物理尺度和Build4原则构造
+     counterfactual，不直接抄Build4的`14/14/5`、warm-start、replay或sigma`.19`。
+  4. [ ] Isaac把每update的逐CommitEntry Python重放、逐row `.item()/.tolist()`与完整shot JSON移出训练ACK；
+     active长跑只保留device compact counts、per-action/per-side分层与bounded fault exemplars，完整逐shot
+     transcript只留给显式诊断。保留optimizer→WAL/fsync→ACK顺序，不为删自证流再加Gate。
+  5. [ ] 对PPO的per-minibatch adaptive-KL做独立算法复核。当前两端LR都在`1e-5..1e-2`间频繁振荡；先做
+     update-level聚合KL或fixed-LR短对照，不把它与joint/paddle修复混成不可归因的一个数字猜测。
+
+replacement未在exact Pod完成fixed-tape、hard-edge反例、paddle误差单调性、active-strata wall和短学习前，
+现役namespace保持只读且不resume/不hot-patch；只有replacement ready后才按精确PID/startticks/PGID收口，
+并用全新namespace双后端重启。
 
 `ACK 0..101`启动快照已冻结：两端各`10,027,008` transitions且仍持有exact GPU/CPU affinity/flock；
 Mu first10→recent10 episode length=`104.337→159.622`并已有scheduled/public/overlap=
@@ -113,9 +149,11 @@ nonfinite/conservation/fault/qdes-terminal全0；Mu launch=0故contact/landing�
 维护，避免本页复制流水账。
 
 后续[首次双侧launch与关节遥测固定窗](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#106-首次双侧launch与关节遥测裁决固定诊断窗)
-已证明两端自然打开playback/launch/R03，故当前不因零contact重启。两端qdes nonfinite/terminal仍为0，
-但actual-hard-edge非零；它是可学习且正在下降的模拟行为遥测，不是完整性fault，也绝不等于安全通过。
-继续训练时须按各自真实denominator单列；formal、promotion、deployment与真机安全保持NO-GO。
+只证明两端自然打开playback/launch/R03；当时“hard-edge正在下降、继续只读训练”的前提已被
+[结论翻转窗](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)
+推翻。当前两端qdes nonfinite/terminal、Reward nonfinite/conservation与fact/attribution fault仍为0，
+所以证据数字可信；失败是学习目标/热数据流问题，不是用新安全Gate包住即可解决的问题。formal、promotion、
+deployment与真机安全保持NO-GO。
 
 ## HISTORICAL / SUPERSEDED — 0. 2026-08-22 学习阻塞修复与 fresh 重启 TODO
 
