@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`V6-exact-rate-complete / dual-fresh-active / prior-runs-frozen / diagnostic-unauthorized`
-> 证据等级：final V3/PPO V5两端runtime/rate与fresh prefix各为诊断E2；静态clone payload仍只是E1，
+> 状态：`V8-exact-rate-complete / dual-fresh-active / prior-runs-frozen / diagnostic-unauthorized`
+> 证据等级：final V3/PPO V6两端runtime/rate与fresh prefix各为诊断E2；静态clone payload仍只是E1，
 > fixed-tape跨引擎physics parity、formal learning与promotion未完成
 >
 > 阅读边界：current结论只认§16；§1--15保留为热墙定位与已做减法的历史证据，旧Reward20/PPO版本不得
@@ -25,10 +25,13 @@ Isaac每条ACK约`293 kB`，run.log与durable WAL均已约`1.3 GB`；完整逐sh
 consumer，但这不是全部collection主墙，不能承诺删JSON即可到6秒。`cq_n_iters=8/4`fixed-tape又已改变题目
 语义，继续拒绝作为等价加速。
 
-V8先采用[`PPO V6`](../../DEFINITIONS.md#fullmdp-ppo-v6)的`512×H48/MB1`，相对V5保持总transition、
+V8采用[`PPO V6`](../../DEFINITIONS.md#fullmdp-ppo-v6)的`512×H48/MB1`，相对V5保持总transition、
 24,576-row minibatch、500,000 optimizer step与transition-save cadence，把单次采样规模缩为1/4并让policy
-刷新快4倍。它是可审计的算法/迭代速度取舍，不声称kernel fixed-tape等价。512-shape的两端61-update
-profiler-off rate、active-strata wall与短学习均尚未运行；未得到Pod数字前不得用线性比例推算成绩。
+刷新快4倍。它是可审计的算法/迭代速度取舍，不声称kernel fixed-tape等价。clean source
+`0ad85ae1dfae13f617dc102a15bf99dba6b9ebf6`的两端61-update profiler-off rate均自然完成：Mu
+p50/p90/mean=`3.796/3.999/3.807 s`，约`6,455 transitions/s`；Isaac=
+`6.835/7.612/6.830 s`，约`3,598 transitions/s`。Mu达到约6秒方向；Isaac相对V7 active约25.6秒已大砍，
+但仍未闭合严格6秒。双fresh启动窗已运行，active-strata未来窗与学习质量仍不能从rate外推。
 
 ## 1. 采用、延后、拒绝
 

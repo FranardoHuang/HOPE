@@ -22,7 +22,9 @@ G04不晋级。[详细口径与分母](../experiments/2026-08/EXP-ACTION-BALL-FU
 
 V7随后在Mu/Isaac约`1,748,621/430,393`次launch后仍为零contact；两端checkpoint LR都为`1e-5`。
 V8只把learner换成[`PPO V6`](../DEFINITIONS.md#fullmdp-ppo-v6)的fixed LR与512-env刷新，不改plant、contact、
-Reward28或Observation，所以不凭learner修复重开model Gate。exact Pod/runtime仍待验，G04保持`Partial`。
+Reward28或Observation，所以不凭learner修复重开model Gate。source `0ad85ae1…`已完成exact Pod目标测试、
+双rate与fresh双端连续ACK；这关闭runtime启动，不提供contact/landing或跨engine physics parity，G04保持
+`Partial`。
 
 本Gate只保留独立可击穿的model/plant边界：finite、joint/table/contact几何、source asset与native runtime
 身份。task成功、mimic/contact比例、same-writer echo和测试fixture的数据类型不属于model安全Gate；也不因

@@ -157,15 +157,16 @@ Isaac milestone为schema8；新增teacher-achieved paddle error必须有finite/s
 `512 env × H48 × 61 update`、profiler-off、fresh process和`diagnostic_unauthorized=true`。Mu使用
 `--full-a --diagnostic-rate-probe`；Isaac只显式打开task内的
 `action_ball_full_mdp_rate_probe`。长跑的`max_iterations`仍是100000，61预算由code-owned diagnostic
-边界安装。历史V6 `caddecb7`实测Mu p50/p90=`5.468/5.526 s/H48`、Isaac=
-`7.81/8.38 s/H48`；Mu达到约6秒方向，Isaac未达到严格6秒。该差异包含PPO尺度取舍，不是语义等价热路
+边界安装。V8 source `0ad85ae1…`实测Mu p50/p90=`3.796/3.999 s/H48`、Isaac=
+`6.835/7.612 s/H48`；Mu达到约6秒方向，Isaac大砍但未达到严格6秒。该差异包含PPO尺度取舍，不是语义等价热路
 对拍；probe不能自动转成长跑或代签学习质量。
 
 `9d333b0b`（语义`ba7225b2`）只是pre-V3/pre-PPO-V5 predecessor；V6 exact source=
 `caddecb76727ea55b0ce089453eea91cb5a9f8ea`已被大分母零接触与hard-edge反升证伪并停止。V7 exact source=
 `1d33130ba07288918aa73d1323e1106303b7cad1`随后也在约218万次launch后保持零contact，且两端optimizer LR
-均卡`1e-5`；它在V8 ready前只读运行，不得热改或resume。V8 replacement尚须完成exact Pod与fresh启动，
-不能把typed recipe修改写成已运行。当前状态和顺序只认
+均卡`1e-5`；它已在V8 replacement ready后精确停止，旧root只读且不得resume。V8 clean source
+`0ad85ae1dfae13f617dc102a15bf99dba6b9ebf6`已完成exact Pod、双rate与fresh双端启动；当前仍只是balance
+起点，mimic/hit/landing为`未测`。当前状态和顺序只认
 [双后端长跑TODO §0.5](action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)；
 G04/G05/G06保持`Partial`，不授权promotion、export、部署或真机。
 

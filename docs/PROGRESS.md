@@ -1,5 +1,18 @@
 # 简短进度记录
 
+## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
+
+- clean source=`0ad85ae1dfae13f617dc102a15bf99dba6b9ebf6`在Pod1目标矩阵通过
+  `305 passed, 4 skipped`，双production dry-run绑定PPO V6 `512×H48×U100000/MB1/save2000`、fixed
+  LR`1e-4`、Reward28与Observation V3。profiler-off 61-update rate的Mu p50/p90/throughput=
+  `3.796/3.999 s/6,455 transitions/s`，Isaac=`6.835/7.612 s/3,598 transitions/s`；Mu低于约6秒方向，
+  Isaac已大砍但未闭合严格6秒。
+- replacement ready后按PID/startticks/PGID/cwd/source/namespace精确停止V7；Mu TERM自然退出，Isaac
+  exact Kit child在满60秒后仍占GPU1，复核同一startticks/namespace后只KILL该PID。旧root均保留、无
+  completion造假。V8 fresh namespace为`fullmdp-a-h48-v8-mujoco-fixedlr512-0ad85ae1-20260826T203329Z`
+  与`fullmdp-a-h48-v8-isaac-fixedlr512-0ad85ae1-20260826T203329Z`；两端已有连续durable ACK、finite graph与
+  exact LR`1e-4`证据。启动期尚未活到tick295，mimic/hit/landing均按零eligible写`未测`。
+
 ## 2026-08-27 — PPO V6 fixed-schedule materialization修复（branch diagnostic）
 
 - V8首次exact Pod Isaac rate在environment construction前fail-closed：typed recipe正确给出
@@ -19,7 +32,8 @@
 - 新[`PPO V6`](DEFINITIONS.md#fullmdp-ppo-v6)候选固定LR`1e-4`，把batch改成
   `512×H48×U100000/MB1/save2000`；总transition、24,576-row minibatch、500,000 optimizer step和
   transition-save cadence保持，policy刷新快4倍是显式算法取舍。Reward28、Observation V3、课程、plant和
-  `cq_n_iters=12`不变，先隔离LR根因；exact Pod/rate/fresh双端尚未完成，G04/G05/G06保持`Partial`。
+  `cq_n_iters=12`不变，先隔离LR根因；后续exact Pod/rate/fresh双端见本页最新条目，G04/G05/G06仍保持
+  `Partial`。
 
 ## 2026-08-26 — FullMDP V6冻结与V7双fresh运行（branch diagnostic）
 

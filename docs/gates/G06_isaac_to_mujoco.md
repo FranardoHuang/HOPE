@@ -19,7 +19,9 @@ ABI只认[Observation接口](../interfaces/policy_observation_action.md#current-
 
 V7后续固定窗已把两端合计约218万launch后的selected contact保持为0，且两端optimizer LR均卡`1e-5`；
 两端共享失败支持learner schedule根因，但不构成physics parity。V8保持共同plant-facing语义，只共享替换为
-[`PPO V6`](../DEFINITIONS.md#fullmdp-ppo-v6)。两端exact rate/fresh ACK仍未测，G06继续`Partial`。
+[`PPO V6`](../DEFINITIONS.md#fullmdp-ppo-v6)。source `0ad85ae1…`两端exact rate已完成：Mu
+p50/p90=`3.796/3.999 s`，Isaac=`6.835/7.612 s`；fresh双端已有连续ACK与exact LR`1e-4`。当前尚无
+due/contact/landing或matched physics分母，G06继续`Partial`。
 
 跨引擎Gate保留真正独立的plant/source、finite、joint/table/contact、full-key/generation、WAL/artifact
 boundary与可重放fixed tape；same-writer echo、task成功和R07 ready不是parity或安全Gate。当前没有contact/

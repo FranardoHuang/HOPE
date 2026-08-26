@@ -940,3 +940,18 @@ save cadence保持；刷新快4倍是显式算法取舍。Reward28、Observation
 schedule正确给出`desired_kl=None`，shared `runner_kwargs()`仍执行`float(None)`。这证明recipe和launcher
 identity测试不能代替最终RSL cfg构造。修复只落在唯一转换边界：null保持null，非null仍显式转float；失败
 namespace永久封存，新source必须重跑两端exact rate，不能沿用修复前Mu receipt。
+
+修复后的clean source=`0ad85ae1dfae13f617dc102a15bf99dba6b9ebf6`在Pod1目标矩阵为
+`305 passed, 4 skipped`。两端production dry-run与61-update profiler-off rate均绑定learning SHA
+`5a39b660…321f8`；Mu p50/p90=`3.796/3.999 s`、约`6,455 transitions/s`，Isaac=
+`6.835/7.612 s`、约`3,598 transitions/s`。这证明iteration latency显著下降；Isaac仍未达到严格6秒，且
+rate不代签学习质量。
+
+replacement ready后只按exact PID/startticks/PGID/cwd/source/namespace停止V7，旧root保持只读且没有
+伪造completion。V8 fresh namespace为
+`fullmdp-a-h48-v8-mujoco-fixedlr512-0ad85ae1-20260826T203329Z`与
+`fullmdp-a-h48-v8-isaac-fixedlr512-0ad85ae1-20260826T203329Z`。启动快照Mu ACK0..35、Isaac ACK0..51均
+连续durable；Mu每条LR=`1e-4`，Isaac `model_0` optimizer param-group LR也精确为`1e-4`。两端episode
+mean length仍约百步、未到首个due tick295，因此launch/contact/paddle-error/landing当前均是零eligible的
+`未测`，符合balance起点，不能提前写成hit negative。下一结论只看预注册未来窗中的survival-to-due、
+paddle真实误差与contact/landing分母。

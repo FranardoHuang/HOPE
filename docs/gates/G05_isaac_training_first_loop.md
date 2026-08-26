@@ -22,7 +22,9 @@ mimic/contact/hit/landing仍全部`未测`，也未达到严格6秒；不能把�
 V7继续到update4459后已形成`430,393`次launch却仍零contact，最近50 paddle position error约`.704 m`；
 `model_4000` optimizer LR精确为`1e-5`，recent50 wall约`25.64 s/H48`。因此旧启动窗已被正式负结果取代。
 V8保持Reward28/Observation V3/四due，改用[`PPO V6`](../DEFINITIONS.md#fullmdp-ppo-v6)的fixed LR`1e-4`
-和`512×H48/MB1`；Pod验证与fresh ACK尚未完成，不能写成训练恢复或Gate晋级。
+和`512×H48/MB1`。clean source `0ad85ae1…`的exact Pod目标矩阵=`305 passed, 4 skipped`，Isaac rate
+p50/p90=`6.835/7.612 s`并已fresh运行；ACK0..51连续durable，`model_0` optimizer LR精确为`1e-4`。
+当前episode仍约百步且无due，mimic/hit/landing是零eligible的`未测`；不能写成训练恢复或Gate晋级。
 
 旧V5能够改善balance却未闭合mimic→contact；新候选必须fresh验证balance→mimic→hit→landing。上一阶段
 开始基本成形时下一阶段应已有自然非零分母，但`ACCEPT/contact/landing`都不是启动或安全Gate。Gate只保留

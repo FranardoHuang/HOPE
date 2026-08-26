@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`V7-dual-fresh-negative-running-read-only / V8-replacement-validating / branch-scoped / diagnostic_unauthorized`
+> 状态：`V7-negative-stopped-read-only / V8-dual-fresh-running / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-27
@@ -19,8 +19,9 @@
 `9d333b0b`（语义`ba7225b2`）只是Observation/PPO最终裁决前的predecessor；V6 clean/pushed source
 `caddecb76727ea55b0ce089453eea91cb5a9f8ea`的两个namespace已经被大分母证伪并在精确身份复核后停止；
 run root与证据保持只读。V7 exact source=`1d33130ba07288918aa73d1323e1106303b7cad1`已经完成Pod聚焦验证并以
-两个fresh namespace运行，但最新固定前缀已把它翻转为learning negative；replacement ready前仍只读保留，
-不因结论翻转热改或先停后找方案。V8只改变共享PPO配方，代码与Pod验证正在进行。所有运行仍为
+两个fresh namespace运行，但最新固定前缀已把它翻转为learning negative；它已在replacement ready后按
+exact身份停止，root继续只读且不得resume。V8 clean source=
+`0ad85ae1dfae13f617dc102a15bf99dba6b9ebf6`已完成Pod目标测试、双rate与fresh双端启动。所有运行仍为
 [`diagnostic_unauthorized`](../DEFINITIONS.md#diagnostic-unauthorized)，不得由
 短验、单轮wall或文档状态推出promotion、physics parity、export、部署或真机授权。
 
@@ -77,7 +78,7 @@ Motion callback同writer重读并缩窄返回值，理论减少`285.75 MiB/H48`�
 3,401行、`_run_with_environment_close_owner`为1,778行；`ActionEpochOwner`单类3,743行。Reward24整包
 替换漏掉四项连续成本就是跨层procedural override的真实反例。后续结构目标固定为code-owned typed learning
 spec、pure transition/reward kernel、薄backend adapter和offline evidence consumer；先把逐shot JSON/Python
-重放移出active ACK。active V7 exact checkout保持只读，不为整理文件热改训练，也不新造自证Gate。
+重放移出active ACK。active V8 exact checkout保持只读，不为整理文件热改训练，也不新造自证Gate。
 
 ### 当前Pod事实与执行顺序
 
@@ -89,6 +90,14 @@ episode均长`1499.39/1500`，Isaac约`494.91`，说明balance至少在Mu已形�
 时点与真实due/mimic开始重合。active-strata wall最近50约为Mu mean/p50=`9.46/9.40 s/H48`、Isaac
 console=`25.64/25.51 s/H48`。这些数字只裁决V7学习与迭代设计，不代签physics或formal安全；详细分母只认
 [课程实验§10.9](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#109-v7结论固定lr在mimic曝光前耗尽)。
+
+V8 exact Pod目标矩阵=`305 passed, 4 skipped`。61-update profiler-off rate的Mu
+p50/p90/throughput=`3.796/3.999 s/6,455 transitions/s`，Isaac=
+`6.835/7.612 s/3,598 transitions/s`。V8 fresh namespace为
+`fullmdp-a-h48-v8-mujoco-fixedlr512-0ad85ae1-20260826T203329Z`与
+`fullmdp-a-h48-v8-isaac-fixedlr512-0ad85ae1-20260826T203329Z`；启动快照Mu ACK0..35、Isaac ACK0..51均
+连续durable，optimizer LR精确为`1e-4`。两端尚未活到首个due tick295，故mimic/hit/landing为零eligible
+`未测`；这只是balance起点，不是学习成功或失败结论。
 
 V6的历史闭合仍如下；它不再是待继续到25k的学习候选。上一候选`72b87100`在真实Pod揭示Isaac schema
 slice和Mu native pose adapter两处实现错误；最终
@@ -162,14 +171,14 @@ slice和Mu native pose adapter两处实现错误；最终
   5. [x] 对PPO的per-minibatch adaptive-KL做独立算法复核。V7两端最新checkpoint optimizer LR均为
      `1e-5`；Mu从约update500起长期贴底，而真实playback随后才大量出现。采用fixed LR`1e-4`，不改
      Reward28/Observation/plant，先隔离“学习步长被早期balance占用”的根因。
-  6. [ ] 验证PPO V6：`512×H48×U100000/MB1/save2000`保持总transition、minibatch、optimizer-step和
+  6. [x] 验证PPO V6：`512×H48×U100000/MB1/save2000`保持总transition、minibatch、optimizer-step和
      transition-save cadence；先做两端61-update profiler-off rate与短学习未来窗。只有replacement ready后
      才精确停止V7并fresh双端重启。若paddle真实误差仍不降，再独立测试Build4启发的强direct-paddle权重，
      不把LR、reward和obs三轴混成一个不可归因版本。
 
-replacement未在exact Pod完成fixed-tape、hard-edge反例、paddle误差单调性、active-strata wall和短学习前，
-现役namespace保持只读且不resume/不hot-patch；只有replacement ready后才按精确PID/startticks/PGID收口，
-并用全新namespace双后端重启。
+replacement已完成exact Pod target tests、双rate与fresh启动；fixed-tape的`cq_n_iters=12`结论沿用同一
+未变physics合同。hard-edge、paddle误差单调性、active-strata wall和短学习未来窗仍未闭合，现役namespace
+保持只读且不resume/不hot-patch；不得把启动ACK或rate probe升级成阶段成功。
 
 `ACK 0..101`启动快照已冻结：两端各`10,027,008` transitions且仍持有exact GPU/CPU affinity/flock；
 Mu first10→recent10 episode length=`104.337→159.622`并已有scheduled/public/overlap=
