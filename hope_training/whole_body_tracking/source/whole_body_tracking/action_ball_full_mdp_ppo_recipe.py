@@ -1,4 +1,4 @@
-"""Typed, dependency-free PPO V5 recipe for the continuous FullMDP lanes.
+"""Typed, dependency-free PPO V6 recipe for the continuous FullMDP lanes.
 
 The shared ``cfg/algo/ppo.yaml`` remains the legacy/default recipe for every
 other task.  FullMDP Isaac and MuJoCo consumers derive their effective values
@@ -16,16 +16,18 @@ import json
 class ActionBallFullMdpPpoRecipe:
     """Complete FullMDP PPO recipe, including its finite run schedule."""
 
-    # V5 is a latency/refresh tradeoff, not a fixed-tape-equivalent speedup.
-    # Halving N and doubling the update count preserves the total transition
-    # budget, while halving the minibatch count preserves minibatch size and
-    # the total number of optimizer steps.  It deliberately refreshes the
-    # policy twice as often, so N belongs to the scientific learning identity.
-    kind: str = "action_ball_full_mdp_ppo_v5"
-    num_envs: int = 2_048
+    # V6 is a latency/refresh tradeoff, not a fixed-tape-equivalent speedup.
+    # Relative to V5, quartering N and quadrupling the update count preserves
+    # the total transition budget.  One full-rollout minibatch preserves the
+    # 24,576-row minibatch and the total 500,000 optimizer steps.  The policy
+    # refreshes four times as often, so this shape remains part of the
+    # scientific learning identity rather than being called pure hot-path
+    # acceleration.
+    kind: str = "action_ball_full_mdp_ppo_v6"
+    num_envs: int = 512
     num_steps_per_env: int = 48
-    max_iterations: int = 25_000
-    save_interval: int = 500
+    max_iterations: int = 100_000
+    save_interval: int = 2_000
     empirical_normalization: bool = False
 
     policy_class_name: str = "ActorCritic"
@@ -37,7 +39,7 @@ class ActionBallFullMdpPpoRecipe:
 
     algorithm_class_name: str = "PPO"
     num_learning_epochs: int = 5
-    num_mini_batches: int = 4
+    num_mini_batches: int = 1
     clip_param: float = 0.2
     gamma: float = 0.99
     lam: float = 0.98
@@ -49,11 +51,16 @@ class ActionBallFullMdpPpoRecipe:
     # balance policy.  Keep exploration in the learned distribution instead
     # of paying an unconditional lifetime bonus for more noise.
     entropy_coef: float = 0.0
-    learning_rate: float = 1.0e-3
+    # Both V7 fresh backends reached the 1e-5 adaptive-KL floor by the time
+    # real playback became common, then stayed there while teacher-achieved
+    # paddle error remained far outside contact scale.  A fixed rate makes the
+    # learner step independent of task-occupancy order and removes the
+    # per-minibatch controller's hidden curriculum state.
+    learning_rate: float = 1.0e-4
     max_grad_norm: float = 1.0
     use_clipped_value_loss: bool = True
-    schedule: str = "adaptive"
-    desired_kl: float = 0.01
+    schedule: str = "fixed"
+    desired_kl: float | None = None
     normalize_advantage_per_mini_batch: bool = False
 
     def policy(self) -> dict:

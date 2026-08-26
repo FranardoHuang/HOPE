@@ -897,3 +897,41 @@ update0..61均为28项finite且conservation fault 0；paddle error字段存在�
 分母为0，所以mimic仍`未测`，不是0误差。两端due/contact/landing也尚无分母；按自然重叠课程继续等待，
 不能把启动窗变成success Gate。Mu recent10 mean/p50=`5.360/5.366 s/H48`，Isaac=
 `8.423/8.380 s/H48`；active-strata wall和各阶段预注册判据仍未闭合。
+
+<a id="109-v7结论固定lr在mimic曝光前耗尽"></a>
+
+### 10.9 V7结论：固定LR在mimic曝光前耗尽
+
+`observed_at=2026-08-26T19:27Z`冻结Mu ACK0..9815与Isaac update0..4459。两条仍是exact source=
+`1d33130ba07288918aa73d1323e1106303b7cad1`、`diagnostic_unauthorized=true`，进程与root未热改：
+
+- Mu共`964,952,064` transitions；累计launch=`1,748,621`、selected contact=`0/1,748,621`。最近50窗
+  episode mean length/return=`1499.389/164.890`，`3,294/3,298`个terminal为timeout，故balance已基本
+  形成。playback=`1,273,020` row，teacher-achieved position/velocity/face/long-axis mean=
+  `.568/1.123/1.192/.898`（单位依次为m、m/s、rad、rad），远非contact尺度。
+- Isaac共`438,435,840` transitions；累计launch=`430,393`、selected contact=`0/430,393`。最近50窗
+  episode mean length/return=`494.914/68.581`，仍以base tilt结束，但比first10的`87.639/10.655`明显
+  学会更多生存。playback=`1,047,071` row，四项真实误差mean=`.704/.919/1.087/1.063`。两端landing均因
+  selected-contact分母为0写`未测`；全部分母只属于slot0 forehand，其余action/side也写`未测`。
+
+Reward28的连续成本并非无效：Mu最近50 actual-hard-edge row约`0.155%`，显著低于启动窗；Isaac最近50按
+`joint sample`约`3.6%`，仍阻断formal但没有qdes-forbidden/nonfinite/conservation/fact fault。失败不应再
+归因为安全Gate缺失，也不能把aggregate survival当mimic成功。
+
+真正的learner顺序错误由checkpoint直接闭合。Mu evidence显示LR约update500起反复贴`1e-5`下限，
+update9787..9836的median仍为`1e-5`；Mu `model_9500.pt`与Isaac
+`model_4000.diagnostic_nonresumable.pt`的optimizer param-group LR均精确为`1e-5`。这个时间点正与真实due/
+playback开始打开重合：per-minibatch adaptive KL先在balance-only分布上耗尽步长，等paddle任务有大分母后
+learner已几乎不能适应。Build4使用fixed/分离LR虽受warm-start混杂、不能直接复制行为结论，却进一步支持
+“不要让早期阶段消费掉后期任务的学习率控制权”这一原则。
+
+性能也不符合迭代要求：Mu最近50 mean/p50=`9.457/9.400 s/H48`；Isaac console最近50=
+`25.638/25.505 s/H48`。启动balance-only的`5.36/8.42 s`不能代表active业务。Isaac每update又写约
+`293 kB`完整shot/opportunity/reset JSON，累计`run.log`与WAL各约`1.3 GB`；这证明offline consumer分离是
+真实结构债，但它不解释全部20+秒collection，不能把删日志夸成已证加速。
+
+V8最小因果包因此只采用[`PPO V6`](../../DEFINITIONS.md#fullmdp-ppo-v6)：fixed LR`1e-4`以及
+`512×H48×U100000/MB1/save2000`。总transition、24,576-row minibatch、总optimizer step与按transition
+save cadence保持；刷新快4倍是显式算法取舍。Reward28、Observation V3、课程、plant、physics和
+`cq_n_iters=12`不变。先验证LR不再被early balance吞掉及迭代wall；若未来固定窗paddle真实误差仍不降，
+才把Build4的强direct-paddle权重作为独立下一轴，不在同一版本混入warm-start/replay/sigma/新obs或Stage。

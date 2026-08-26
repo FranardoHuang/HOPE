@@ -220,27 +220,31 @@ fi
 
 def _expected_trainer(rig, commit: str) -> list[str]:
     root = rig.root
+    recipe = rig.module.FULL_MDP_PPO_RECIPE
     return [
         str(rig.python), str(rig.runner), "--full-a",
-        "--num-envs", "2048", "--num-updates", "25000",
+        "--num-envs", str(recipe.num_envs),
+        "--num-updates", str(recipe.max_iterations),
         "--evidence-jsonl", str(root / "evidence.jsonl"),
         "--snapshot-dir", str(root / "snapshots"),
         "--completion-json", str(root / "completion.json"),
         "--source-commit", commit, "--run-namespace", NAMESPACE,
         "--mujoco-warp-runtime-site", str(root / "runtime_site"),
-        "--save-interval", "500",
+        "--save-interval", str(recipe.save_interval),
     ]
 
 
 def _expected_rate_trainer(rig, commit: str) -> list[str]:
     root = rig.root
+    recipe = rig.module.FULL_MDP_PPO_RECIPE
     return [
         str(rig.python), str(rig.runner), "--full-a",
-        "--num-envs", "2048", "--num-updates", "61",
+        "--num-envs", str(recipe.num_envs), "--num-updates", "61",
         "--evidence-jsonl", str(root / "evidence.jsonl"),
         "--source-commit", commit, "--run-namespace", NAMESPACE,
         "--mujoco-warp-runtime-site", str(root / "runtime_site"),
-        "--save-interval", "500", "--diagnostic-rate-probe",
+        "--save-interval", str(recipe.save_interval),
+        "--diagnostic-rate-probe",
     ]
 
 
@@ -360,7 +364,7 @@ print(json.dumps({'payloads': payloads, 'hashes': hashes,
     assert result["hashes"][0] != result["candidate"]
     assert result["payloads"][0]["runner_overrides"] == {
         "max_iterations": {
-            "candidate_production": 25_000,
+            "candidate_production": 100_000,
             "rate_execution": 61,
         }
     }
@@ -453,7 +457,7 @@ def test_diagnostic_rate_dry_run_binds_actual_61_update_identity_only(
     )
     assert rate_execution["runner_overrides"] == {
         "max_iterations": {
-            "candidate_production": 25_000,
+            "candidate_production": 100_000,
             "rate_execution": 61,
         }
     }

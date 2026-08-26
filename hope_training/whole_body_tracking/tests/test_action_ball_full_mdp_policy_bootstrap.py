@@ -182,9 +182,10 @@ def test_common_ac_config_pins_one_exact_full_mdp_bootstrap():
     assert source.count("kind: a3_default_stand_zero_head_v1") == 1
     assert "init_noise_std:" not in source
     assert "noise_std_type:" not in source
-    assert source.count("num_envs: 2048") == 1
+    assert source.count("num_envs: 512") == 1
+    assert "num_envs: 2048" not in source
     assert "num_envs: 4096" not in source
-    assert "25,000-update learning recipe" in source
+    assert "100,000-update learning recipe" in source
     assert "12,500-update learning recipe" not in source
 
 

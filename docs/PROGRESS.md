@@ -1,5 +1,19 @@
 # 简短进度记录
 
+## 2026-08-27 — FullMDP V7负结果与PPO V6 fixed-LR替代（branch diagnostic）
+
+- 固定只读前缀Mu ACK0..9815 / Isaac update0..4459分别约`965M/438M` transitions；累计launch=
+  `1,748,621/430,393`，selected contact仍均为0。Mu balance已到最近50 episode均长`1499.39/1500`，
+  Isaac约`494.91`；两端都有大规模playback，但拍心位置误差仍约`.568/.704 m`，故mimic未达到接触尺度、
+  hit为明确negative、landing因contact分母为0继续`未测`。其余action/side也`未测`。
+- Mu `model_9500`与Isaac `model_4000`的optimizer LR均精确为`1e-5`；Mu约update500起已长期贴下限，
+  与首次真实due/mimic曝光重合。最近50 wall约为Mu`9.46 s/H48`、Isaac`25.64 s/H48`，启动窗速度不再代表
+  active业务。V7在replacement ready前继续只读，不热改、不resume、不复用namespace。
+- 新[`PPO V6`](DEFINITIONS.md#fullmdp-ppo-v6)候选固定LR`1e-4`，把batch改成
+  `512×H48×U100000/MB1/save2000`；总transition、24,576-row minibatch、500,000 optimizer step和
+  transition-save cadence保持，policy刷新快4倍是显式算法取舍。Reward28、Observation V3、课程、plant和
+  `cq_n_iters=12`不变，先隔离LR根因；exact Pod/rate/fresh双端尚未完成，G04/G05/G06保持`Partial`。
+
 ## 2026-08-26 — FullMDP V6冻结与V7双fresh运行（branch diagnostic）
 
 - V7 source=`1d33130ba07288918aa73d1323e1106303b7cad1`已push；Pod1把14个受影响测试文件逐进程隔离为

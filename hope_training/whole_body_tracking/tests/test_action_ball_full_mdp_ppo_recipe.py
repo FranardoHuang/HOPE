@@ -1,4 +1,4 @@
-"""Dependency-free checks for the shared continuous FullMDP PPO V5 recipe."""
+"""Dependency-free checks for the shared continuous FullMDP PPO V6 recipe."""
 
 from __future__ import annotations
 
@@ -31,27 +31,28 @@ def _load():
     return module
 
 
-def test_v5_recipe_is_frozen_complete_and_keeps_total_training_work():
+def test_v6_recipe_is_frozen_complete_and_keeps_total_training_work():
     recipe = _load().ACTION_BALL_FULL_MDP_PPO_RECIPE
-    assert recipe.kind == "action_ball_full_mdp_ppo_v5"
+    assert recipe.kind == "action_ball_full_mdp_ppo_v6"
     assert (
         recipe.num_envs,
         recipe.num_steps_per_env,
         recipe.max_iterations,
         recipe.save_interval,
-    ) == (2_048, 48, 25_000, 500)
+    ) == (512, 48, 100_000, 2_000)
     assert recipe.empirical_normalization is False
-    assert (recipe.num_learning_epochs, recipe.num_mini_batches) == (5, 4)
+    assert (recipe.num_learning_epochs, recipe.num_mini_batches) == (5, 1)
     assert (recipe.gamma, recipe.lam) == (0.99, 0.98)
     assert recipe.init_noise_std == 0.05
     assert recipe.noise_std_type == "log"
     assert recipe.entropy_coef == 0.0
-    assert 2_048 * 48 * 25_000 == 4_096 * 48 * 12_500
-    assert 2_048 * 48 // 4 == 4_096 * 48 // 8 == 24_576
-    assert 5 * 4 * 25_000 == 5 * 8 * 12_500 == 500_000
-    # Keeping save=500 intentionally doubles refresh/checkpoint frequency in
-    # transition units; V5 is a latency tradeoff, not fixed-tape parity.
-    assert 2_048 * 48 * 500 * 2 == 4_096 * 48 * 500
+    assert recipe.learning_rate == 1.0e-4
+    assert recipe.schedule == "fixed"
+    assert recipe.desired_kl is None
+    assert 512 * 48 * 100_000 == 2_048 * 48 * 25_000 == 4_096 * 48 * 12_500
+    assert 512 * 48 // 1 == 2_048 * 48 // 4 == 4_096 * 48 // 8 == 24_576
+    assert 5 * 1 * 100_000 == 5 * 4 * 25_000 == 5 * 8 * 12_500 == 500_000
+    assert 512 * 48 * 2_000 == 2_048 * 48 * 500
     with pytest.raises(FrozenInstanceError):
         recipe.lam = 0.95
 
@@ -60,7 +61,7 @@ def test_learning_identity_matches_existing_training_contract_serializer_shape()
     recipe = _load().ACTION_BALL_FULL_MDP_PPO_RECIPE
     scientific = recipe.learning_recipe()
     assert scientific["runner"] == {
-        "num_envs": 2_048,
+        "num_envs": 512,
         "num_steps_per_env": 48,
         "empirical_normalization": False,
     }
@@ -72,7 +73,7 @@ def test_learning_identity_matches_existing_training_contract_serializer_shape()
         "init_noise_std": 0.05,
         "noise_std_type": "log",
     }
-    assert scientific["algorithm"]["num_mini_batches"] == 4
+    assert scientific["algorithm"]["num_mini_batches"] == 1
     assert scientific["algorithm"]["lam"] == 0.98
     assert scientific["algorithm"]["entropy_coef"] == 0.0
     payload = json.dumps(
@@ -87,12 +88,12 @@ def test_learning_identity_matches_existing_training_contract_serializer_shape()
     execution = recipe.execution_recipe()
     assert execution == {
         "schema_version": 2,
-        "kind": "action_ball_full_mdp_ppo_v5",
+        "kind": "action_ball_full_mdp_ppo_v6",
         "runner": {
-            "num_envs": 2_048,
+            "num_envs": 512,
             "num_steps_per_env": 48,
-            "max_iterations": 25_000,
-            "save_interval": 500,
+            "max_iterations": 100_000,
+            "save_interval": 2_000,
         },
         "learning_recipe": scientific,
     }
@@ -112,8 +113,8 @@ def test_isaac_and_mujoco_views_share_scientific_values_without_aliasing():
     mujoco = recipe.mujoco_train_cfg()
     assert isaac["runner"] == {
         "num_steps_per_env": 48,
-        "max_iterations": 25_000,
-        "save_interval": 500,
+        "max_iterations": 100_000,
+        "save_interval": 2_000,
         "empirical_normalization": False,
     }
     assert mujoco["num_steps_per_env"] == isaac["runner"]["num_steps_per_env"]

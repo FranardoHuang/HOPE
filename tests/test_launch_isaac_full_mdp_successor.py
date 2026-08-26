@@ -199,7 +199,7 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
         "logger=tensorboard",
         "device=cuda:0",
         "seed=0",
-        "num_envs=2048",
+        "num_envs=512",
         f"run_name={NAMESPACE}-DIAGNOSTIC_UNAUTHORIZED",
         "checkpoint_path=null",
         "checkpoint_tolerant=false",
@@ -209,7 +209,7 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     ]
     joined = " ".join(payload["argv"])
     assert "task=HOPEPingPongActionBallFullMdpA" in joined
-    assert "num_envs=2048" in joined
+    assert "num_envs=512" in joined
     assert "DIAGNOSTIC_UNAUTHORIZED" in joined
     assert "max_iterations=" not in joined
     assert "save_interval=" not in joined
@@ -336,7 +336,7 @@ def test_rate_probe_receipt_parses_exact_10_plus_50_and_is_no_clobber(
     assert payload["kind"] == "action_ball_isaac_full_mdp_h48_rate_probe_v2"
     assert payload["schema_version"] == 2
     assert payload["shape"] == {
-        "num_envs": 2_048,
+        "num_envs": 512,
         "num_steps_per_env": 48,
         "updates": 61,
     }
@@ -348,13 +348,13 @@ def test_rate_probe_receipt_parses_exact_10_plus_50_and_is_no_clobber(
     )
     assert payload["rate_execution_recipe"] == rate_execution
     assert rate_execution["effective_runner"] == {
-        "num_envs": 2_048,
+        "num_envs": 512,
         "num_steps_per_env": 48,
         "max_iterations": 61,
-        "save_interval": 500,
+        "save_interval": 2_000,
     }
     assert rate_execution["runner_overrides"]["max_iterations"] == {
-        "candidate_production": 25_000,
+        "candidate_production": 100_000,
         "rate_execution": 61,
     }
     assert rate_execution["diagnostic_overrides"] == {
@@ -465,7 +465,9 @@ def test_rate_probe_parser_requires_one_exact_child_marker(
             "diagnostic_unauthorized=true", "diagnostic_unauthorized=false"
         ).replace("profiler=off", "profiler=on")
     elif mutation == "wrong_recipe_shape":
-        recipe = recipe.replace("N=2048", "N=4096")
+        recipe = recipe.replace(
+            f"N={rig.module.FULL_MDP_PPO_RECIPE.num_envs}", "N=4096"
+        )
     rows = [budget, recipe]
     if mutation == "duplicate_budget":
         rows.append(budget)

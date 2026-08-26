@@ -2,14 +2,14 @@
 
 Status: Partial
 
-## 2026-08-26 FullMDP V7替代源（仍`Partial`）
+## 2026-08-27 FullMDP V8 learner替代源（仍`Partial`）
 
 V6 source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`的native plant路径仍成立：真实Pod已证明
 MuJoCo-Warp必须直接消费底层`data.struct.xpos/xquat`的`wp.array[vec3/quat]`，不经Torch或host sync。
 但V6随后在Mu`1,439,028`次launch后selected contact仍为0、actual-hard-edge recent10约`51.57%`且
 继续恶化；这不推翻plant身份，却证伪Reward24学习经济。
 
-V7保持相同native plant、[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)和
+V7保持相同native plant、PPO V5和
 [`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3)，改用
 [`Reward28`](../DEFINITIONS.md#fullmdp-reward28)、Mu evidence schema10与Isaac milestone schema8。
 四项action/joint成本是连续学习目标，actual hard edge仍不是新增Done；paddle真实误差与fixed composite
@@ -19,6 +19,10 @@ kernel不成为model安全Gate。本地聚焦矩阵=`606 passed, 34 skipped`；s
 task→contact→landing或Isaac↔MuJoCo fixed-tape physics parity，因此
 G04不晋级。[详细口径与分母](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)
 明确阻断formal、promotion、deployment与真机安全声明。
+
+V7随后在Mu/Isaac约`1,748,621/430,393`次launch后仍为零contact；两端checkpoint LR都为`1e-5`。
+V8只把learner换成[`PPO V6`](../DEFINITIONS.md#fullmdp-ppo-v6)的fixed LR与512-env刷新，不改plant、contact、
+Reward28或Observation，所以不凭learner修复重开model Gate。exact Pod/runtime仍待验，G04保持`Partial`。
 
 本Gate只保留独立可击穿的model/plant边界：finite、joint/table/contact几何、source asset与native runtime
 身份。task成功、mimic/contact比例、same-writer echo和测试fixture的数据类型不属于model安全Gate；也不因

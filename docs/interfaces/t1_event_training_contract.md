@@ -1,7 +1,7 @@
 # T1 Post-Strike Event Training Contract
 
-Status: **FullMDP V7 cadence/evidence candidate plus historical T1 scheduler; exact Pod retest pending**
-(2026-08-26).
+Status: **FullMDP V7 negative evidence, V8 PPO replacement candidate, plus historical T1 scheduler**
+(2026-08-27).
 
 This note defines the runtime seam added after the frozen T0/T1 preregistration at commit
 `1913861`. It does not mutate that preregistration or fill any of its null launch bindings.
@@ -32,9 +32,11 @@ dependency, and healthy peers remain trainable.
 
 Isaac milestone schema8 adds named paddle kernel and true-error telemetry beside the episode/reset block. Consumers must use
 the named episode slice, never a positional `[-7:]` suffix. Predecessor `9d333b0b` includes the
-fresh-due terminal counterexample, but the final Observation V3/PPO V5/Reward28 source SHA, its exact Pod
-CPU/Kit validation and fresh runtime evidence remain `未测`; schema correctness is not launch or
-promotion authority.
+fresh-due terminal counterexample. V7 subsequently supplied exact Pod evidence for Observation V3,
+PPO V5 and Reward28, but more than 2.17 million launches still produced zero contact while both
+optimizers had decayed to their `1e-5` floor. V8 therefore changes only the PPO update geometry and
+learning-rate schedule; this event/observation contract remains unchanged. V8 exact Pod validation
+and fresh runtime evidence remain `未测`; schema correctness is not launch or promotion authority.
 
 The older materialized T1 scheduler below remains a separate historical design track. It must not
 override the current FullMDP four-opportunity cadence or be cited as V7 launch readiness.

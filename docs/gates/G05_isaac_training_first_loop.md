@@ -2,7 +2,7 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
-## 2026-08-26 FullMDP V7 Isaac replacement（仍`Partial`）
+## 2026-08-27 FullMDP V8 Isaac replacement（仍`Partial`）
 
 V7 fresh候选采用[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)、
 [`Reward28`](../DEFINITIONS.md#fullmdp-reward28)和
@@ -18,6 +18,11 @@ V6 exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`已冻结为negative�
 conservation fault 0，recent10 wall mean/p50=`8.423/8.380 s/H48`。该窗仍是balance-only且无due，故
 mimic/contact/hit/landing仍全部`未测`，也未达到严格6秒；不能把启动通过写成训练成功。最终不同口径分母只认
 [课程实验§10.7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)。
+
+V7继续到update4459后已形成`430,393`次launch却仍零contact，最近50 paddle position error约`.704 m`；
+`model_4000` optimizer LR精确为`1e-5`，recent50 wall约`25.64 s/H48`。因此旧启动窗已被正式负结果取代。
+V8保持Reward28/Observation V3/四due，改用[`PPO V6`](../DEFINITIONS.md#fullmdp-ppo-v6)的fixed LR`1e-4`
+和`512×H48/MB1`；Pod验证与fresh ACK尚未完成，不能写成训练恢复或Gate晋级。
 
 旧V5能够改善balance却未闭合mimic→contact；新候选必须fresh验证balance→mimic→hit→landing。上一阶段
 开始基本成形时下一阶段应已有自然非零分母，但`ACCEPT/contact/landing`都不是启动或安全Gate。Gate只保留

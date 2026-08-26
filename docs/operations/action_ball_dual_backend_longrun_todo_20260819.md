@@ -1,9 +1,9 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`V6-stopped-negative-frozen / V7-dual-fresh-running / branch-scoped / diagnostic_unauthorized`
+> 状态：`V7-dual-fresh-negative-running-read-only / V8-replacement-validating / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-26
+> 更新：2026-08-27
 >
 > `origin/main:docs/NOW.md` 是全项目唯一优先级权威。本页只维护
 > [FullMDP](../DEFINITIONS.md)（完整球路、击球、落点与恢复状态机）单动作双后端
@@ -12,35 +12,36 @@
 
 <a id="fullmdp-v6-todo-current"></a>
 
-## 0.5 2026-08-26 current：V6证伪与V7替代源
+## 0.5 2026-08-27 current：V7证伪与V8替代源
 
 本节是本页唯一现役局部执行合同；它不改变`origin/main:docs/NOW.md`的统一优先级。V5 source
 `39f9481950a660e198dedac7fd402806d648906b`及其namespace保持只读，禁止hot-patch、resume或复用。
 `9d333b0b`（语义`ba7225b2`）只是Observation/PPO最终裁决前的predecessor；V6 clean/pushed source
 `caddecb76727ea55b0ce089453eea91cb5a9f8ea`的两个namespace已经被大分母证伪并在精确身份复核后停止；
 run root与证据保持只读。V7 exact source=`1d33130ba07288918aa73d1323e1106303b7cad1`已经完成Pod聚焦验证并以
-两个fresh namespace运行。所有运行仍为
+两个fresh namespace运行，但最新固定前缀已把它翻转为learning negative；replacement ready前仍只读保留，
+不因结论翻转热改或先停后找方案。V8只改变共享PPO配方，代码与Pod验证正在进行。所有运行仍为
 [`diagnostic_unauthorized`](../DEFINITIONS.md#diagnostic-unauthorized)，不得由
 短验、单轮wall或文档状态推出promotion、physics parity、export、部署或真机授权。
 
-### 为什么不能继续等V5
+### 为什么不能继续等V7
 
-旧MuJoCo V5已有大量due、launch与R03 physically-valid分母，但`selected contact=0/launch`；
+V7两端已有大量due、launch与R03 physically-valid分母，但`selected contact=0/launch`；
 因此landing没有eligible分母，仍是`未测`。这说明balance/survival与task exposure已经改善，却没有形成
 mimic→真实接触的桥；此时再把零接触解释成“step还不够”没有因果依据。冻结数字、正确分母与Build4对照只认
 [课程实验§10](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)。
-旧V5只保留作实现失败的反例，不裁决修正后自然课程的成败。
+V7只保留作当前learner失败的反例，不裁决固定LR后自然课程的成败。
 
 课程顺序仍是**balance → mimic → hit → landing**，但交接判据不是硬Stage：上一阶段开始基本成形时，
 下一阶段必须已经有自然非零分母。mimic开始成形而launch/contact仍无分母，或hit基本满足target而landing
 仍无分母，才是交接实现故障；在此之前缺失格写`未测`，已有分母的零结果写`0/denominator`，不靠return
 均值遮掉。
 
-### V7 replacement唯一合同
+### V8 replacement唯一合同
 
 | 面 | 当前合同 | 第一性原理理由 |
 | --- | --- | --- |
-| learner | [`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)：`2048 env × H48 × U25000`、save500、E5/MB4；继承V4的`gamma=.99`、GAE`lambda=.98`、entropy0、learned`log_std`、fresh sigma`.05`、无强制std decay | 总transition、minibatch大小与optimizer-step数保持但刷新语义改变；exact rate与fresh prefix只验证运行/刷新边界，25k学习质量尚未完成，固定快照的contact/landing尚无eligible denominator、均为`未测`；不冒充语义等价性能优化 |
+| learner | [`PPO V6`](../DEFINITIONS.md#fullmdp-ppo-v6)：`512 env × H48 × U100000`、save2000、E5/MB1、fixed LR`1e-4`；`gamma=.99`、GAE`lambda=.98`、entropy0、learned`log_std`、fresh sigma`.05`不变 | 相对V5保持总transition、24,576-row minibatch、总optimizer step与按transition save cadence，但policy刷新快4倍；V7两端checkpoint均已卡LR=`1e-5`且mimic大分母零contact，所以移除per-minibatch adaptive KL。它是显式算法/速度取舍，不冒充等价热路优化 |
 | Reward | [`Reward28`](../DEFINITIONS.md#fullmdp-reward28)：14项lifecycle + 6项common mimic + 4项measured-paddle composite prior + 4项action/joint连续成本 | Paddle固定50/50 precision-exp + coarse-Cauchy，物理宽度为`.075/.30 m`、`.50/2.0 mps`、`15/60 deg`、`10/40 deg`；另恢复`action_rate_l2=-.1`、qdes soft=`-10`、projection=`-1`、actual joint soft=`-10`，用连续目标修复硬边套利，不新增Done或安全Gate |
 | Observation | [`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3)：actor/critic=`215/231`，在common prefix加入4×3同clock、全phase heading residual；V2 `203/219`只作旧checkpoint ABI和paired control | Reward28的paddle objective仍依赖独立measured Motion teacher；把同producer的teacher-achieved最小残差交给actor，关闭source未直接可见的representation gap，避免从q/dq重学FK/Jacobian；不加入raw ball/aim/rate/history/action ID或声称完整Markov |
 | cadence | 真实due固定为tick `295/588/881/1174`；`1467`只是第四球settlement boundary | schedule必须表达真实可发生事件；terminal overlap不是actor看到过的reveal |
@@ -79,6 +80,15 @@ spec、pure transition/reward kernel、薄backend adapter和offline evidence con
 重放移出active ACK。active V7 exact checkout保持只读，不为整理文件热改训练，也不新造自证Gate。
 
 ### 当前Pod事实与执行顺序
+
+`observed_at=2026-08-26T19:27Z`的V7固定前缀不再支持“继续等”：Mu ACK0..9815、Isaac update0..4459
+分别约`965M/438M` transitions；累计launch约`1,748,621/430,393`，selected contact仍均为0。Mu最近50
+episode均长`1499.39/1500`，Isaac约`494.91`，说明balance至少在Mu已形成、两端mimic/playback也已有
+真实大分母；但teacher-achieved position error仍约`.568/.704 m`，远非接触尺度，landing因contact分母为0
+继续写`未测`。Mu/Isaac最新可读checkpoint optimizer LR都精确为`1e-5`；Mu约update500起已长期贴下限，
+时点与真实due/mimic开始重合。active-strata wall最近50约为Mu mean/p50=`9.46/9.40 s/H48`、Isaac
+console=`25.64/25.51 s/H48`。这些数字只裁决V7学习与迭代设计，不代签physics或formal安全；详细分母只认
+[课程实验§10.9](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#109-v7结论固定lr在mimic曝光前耗尽)。
 
 V6的历史闭合仍如下；它不再是待继续到25k的学习候选。上一候选`72b87100`在真实Pod揭示Isaac schema
 slice和Mu native pose adapter两处实现错误；最终
@@ -124,17 +134,16 @@ slice和Mu native pose adapter两处实现错误；最终
   未恢复ignored EPA48/RSL3 pinned bundle fail-closed且不复用，按既有`setup_local_sync`恢复后现役为
   `fullmdp-a-h48-v7-mujoco-reward28-obsv3-1d33130b-20260825T180216Z-r2`。两端首批ACK均为28项、finite、
   conservation fault 0，Isaac milestone schema8、Mu schema10。
-- [ ] exact active-strata wall、短学习与课程交接仍在运行中。启动balance-only前缀中Mu ACK0..16
-  recent10 mean/p50=`5.360/5.366 s/H48`，Isaac update0..61 recent10 mean/p50=`8.423/8.380 s/H48`；
-  Mu达到约6秒迭代方向，Isaac仍未达到，且两者都不能代替mimic/action-active matched wall。Pod `/sys`
-  为只读，无法把绑核governor从powersave切到performance；此infra限制独立记录，不绕过、不与算法混合归因。
+- [x] 冻结V7 active-strata wall与学习结论：Mu/Isaac最近50约`9.46/25.64 s/H48`，两端累计约218万
+  launch仍零contact，checkpoint LR均为`1e-5`；不再用启动balance-only的`5.36/8.42 s`代表现态。Pod
+  `/sys`只读、governor仍为powersave；该infra限制独立记录，不绕过、不与算法混合归因。
 - [ ] 在首次使用“基本成功”作结论前，先冻结可复算的**证据判读合同**，不能看完曲线再补阈值：balance按固定窗
   survival-to-due与terminal mix判；mimic按task/playback eligible行上的teacher-achieved paddle残差与行为趋势判，
   `income/sample`只能作收入诊断、不能代替梯度或行为成功；hit按`selected contact / launch`与target error判；landing按
   `opponent landing / selected contact`判。最小分母、连续窗口数和置信精度须在下一固定快照前预注册，正式阈值只
   消费预注册UTC/ACK之后的未来窗口，不得把已看过的ACK102+回填成首个判定窗。该合同只约束报告与停车解释，
   不进入runtime、不成为安全Gate；四阶段从首个自然eligible事件起始终重叠开放。
-- [ ] 等上一阶段开始基本成形时核验下一阶段已自然出现非零分母；25000自然完成、
+- [ ] 等上一阶段开始基本成形时核验下一阶段已自然出现非零分母；100000自然完成、
   formal physics parity、transfer与部署继续是独立未闭合项。
 - [ ] replacement按一个可审计的最小因果包修复，顺序固定为：
   1. [x] 把已有纯tensor action/joint经济接回shared FullMDP Reward；现役24项图整块替换了旧ActionBall reward，
@@ -150,8 +159,13 @@ slice和Mu native pose adapter两处实现错误；最终
   4. [ ] Isaac把每update的逐CommitEntry Python重放、逐row `.item()/.tolist()`与完整shot JSON移出训练ACK；
      active长跑只保留device compact counts、per-action/per-side分层与bounded fault exemplars，完整逐shot
      transcript只留给显式诊断。保留optimizer→WAL/fsync→ACK顺序，不为删自证流再加Gate。
-  5. [ ] 对PPO的per-minibatch adaptive-KL做独立算法复核。当前两端LR都在`1e-5..1e-2`间频繁振荡；先做
-     update-level聚合KL或fixed-LR短对照，不把它与joint/paddle修复混成不可归因的一个数字猜测。
+  5. [x] 对PPO的per-minibatch adaptive-KL做独立算法复核。V7两端最新checkpoint optimizer LR均为
+     `1e-5`；Mu从约update500起长期贴底，而真实playback随后才大量出现。采用fixed LR`1e-4`，不改
+     Reward28/Observation/plant，先隔离“学习步长被早期balance占用”的根因。
+  6. [ ] 验证PPO V6：`512×H48×U100000/MB1/save2000`保持总transition、minibatch、optimizer-step和
+     transition-save cadence；先做两端61-update profiler-off rate与短学习未来窗。只有replacement ready后
+     才精确停止V7并fresh双端重启。若paddle真实误差仍不降，再独立测试Build4启发的强direct-paddle权重，
+     不把LR、reward和obs三轴混成一个不可归因版本。
 
 replacement未在exact Pod完成fixed-tape、hard-edge反例、paddle误差单调性、active-strata wall和短学习前，
 现役namespace保持只读且不resume/不hot-patch；只有replacement ready后才按精确PID/startticks/PGID收口，

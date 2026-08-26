@@ -2,7 +2,7 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
-## 2026-08-26 FullMDP V7双后端replacement（仍`Partial`）
+## 2026-08-27 FullMDP V8双后端replacement（仍`Partial`）
 
 V7共享候选合同是PPO V5、Reward28、Observation V3 `215/231`、四个真实due/耗尽clock、Mu wire
 `10/5/6`与Isaac milestone schema8。两个backend共用action/joint与paddle纯tensor数学，仍由各自plant
@@ -16,6 +16,10 @@ Mu/Isaac分别在`1,439,028/409,414`次launch后selected contact仍为0，且har
 [课程实验§10.7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)，
 性能证据只认[热路实验§16](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)，
 ABI只认[Observation接口](../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)。
+
+V7后续固定窗已把两端合计约218万launch后的selected contact保持为0，且两端optimizer LR均卡`1e-5`；
+两端共享失败支持learner schedule根因，但不构成physics parity。V8保持共同plant-facing语义，只共享替换为
+[`PPO V6`](../DEFINITIONS.md#fullmdp-ppo-v6)。两端exact rate/fresh ACK仍未测，G06继续`Partial`。
 
 跨引擎Gate保留真正独立的plant/source、finite、joint/table/contact、full-key/generation、WAL/artifact
 boundary与可重放fixed tape；same-writer echo、task成功和R07 ready不是parity或安全Gate。当前没有contact/

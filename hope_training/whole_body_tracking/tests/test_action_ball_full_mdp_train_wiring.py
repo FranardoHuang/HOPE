@@ -176,6 +176,10 @@ def test_full_mdp_rate_probe_is_exact_scoped_and_profiler_off(monkeypatch):
 
 
 def test_full_mdp_rate_probe_keeps_the_typed_cli_budget_authority(monkeypatch):
+    recipe = (
+        train_mod._action_ball_full_mdp_ppo_recipe_module()
+        .ACTION_BALL_FULL_MDP_PPO_RECIPE
+    )
     task = {
         "action_ball_full_mdp_runtime": True,
         "action_ball_full_mdp_rate_probe": True,
@@ -193,9 +197,12 @@ def test_full_mdp_rate_probe_keeps_the_typed_cli_budget_authority(monkeypatch):
         ),
     )
     assert train_mod._preflight_action_ball_full_mdp_ppo_cli(
-        {"task": task, "max_iterations": 25_000}
+        {"task": task, "max_iterations": recipe.max_iterations}
     ) is None
-    with pytest.raises(train_mod._OverrideError, match="code-owned at 25000"):
+    with pytest.raises(
+        train_mod._OverrideError,
+        match=f"code-owned at {recipe.max_iterations}",
+    ):
         train_mod._preflight_action_ball_full_mdp_ppo_cli(
             {"task": task, "max_iterations": 61}
         )
@@ -768,7 +775,7 @@ def test_pre_gym_binding_uses_only_code_owned_lean_factory(monkeypatch):
         binding.owner_type = object
 
 
-def test_full_mdp_typed_ppo_v5_replaces_only_the_fresh_algo_mapping():
+def test_full_mdp_typed_ppo_v6_replaces_only_the_fresh_algo_mapping():
     legacy = {
         "name": "ppo",
         "runner": {"num_steps_per_env": 24, "max_iterations": 25_000},
@@ -781,14 +788,17 @@ def test_full_mdp_typed_ppo_v5_replaces_only_the_fresh_algo_mapping():
     assert legacy["name"] == "ppo"
     assert legacy["runner"] == {
         "num_steps_per_env": 48,
-        "max_iterations": 25_000,
-        "save_interval": 500,
+        "max_iterations": 100_000,
+        "save_interval": 2_000,
         "empirical_normalization": False,
     }
     assert legacy["policy"] == recipe.policy()
     assert legacy["algorithm"] == recipe.algorithm()
     assert legacy["algorithm"]["lam"] == 0.98
-    assert legacy["algorithm"]["num_mini_batches"] == 4
+    assert legacy["algorithm"]["num_mini_batches"] == 1
+    assert legacy["algorithm"]["learning_rate"] == 1.0e-4
+    assert legacy["algorithm"]["schedule"] == "fixed"
+    assert legacy["algorithm"]["desired_kl"] is None
 
     class _AgentCfg:
         def to_dict(self):
@@ -799,7 +809,7 @@ def test_full_mdp_typed_ppo_v5_replaces_only_the_fresh_algo_mapping():
             }
 
     serialized = train_mod._task_first_agent_recipe(
-        _AgentCfg(), num_envs=2_048
+        _AgentCfg(), num_envs=512
     )
     assert serialized["recipe"] == recipe.learning_recipe()
     assert serialized["sha256"] == recipe.learning_recipe_sha256()
@@ -808,9 +818,13 @@ def test_full_mdp_typed_ppo_v5_replaces_only_the_fresh_algo_mapping():
 def test_full_mdp_ppo_cli_preflight_rejects_competing_schedule_before_kit(
     monkeypatch,
 ):
+    recipe = (
+        train_mod._action_ball_full_mdp_ppo_recipe_module()
+        .ACTION_BALL_FULL_MDP_PPO_RECIPE
+    )
     cfg = {
         "task": {"action_ball_full_mdp_runtime": True},
-        "max_iterations": 25_000,
+        "max_iterations": recipe.max_iterations,
     }
     monkeypatch.setattr(
         train_mod,
@@ -820,14 +834,17 @@ def test_full_mdp_ppo_cli_preflight_rejects_competing_schedule_before_kit(
     assert train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg) is None
 
     cfg["max_iterations"] = 5
-    with pytest.raises(train_mod._OverrideError, match="code-owned at 25000"):
+    with pytest.raises(
+        train_mod._OverrideError,
+        match=f"code-owned at {recipe.max_iterations}",
+    ):
         train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg)
 
-    cfg["max_iterations"] = 25_000.0
+    cfg["max_iterations"] = float(recipe.max_iterations)
     with pytest.raises(train_mod._OverrideError, match="exact integer"):
         train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg)
 
-    cfg["max_iterations"] = 25_000
+    cfg["max_iterations"] = recipe.max_iterations
     monkeypatch.setattr(
         train_mod,
         "_ORIGINAL_TRAINING_ARGV",
@@ -854,6 +871,10 @@ def test_full_mdp_ppo_cli_preflight_rejects_competing_schedule_before_kit(
 def test_full_mdp_ppo_cli_preflight_rejects_whole_node_overrides(
     monkeypatch, whole_node_override
 ):
+    recipe = (
+        train_mod._action_ball_full_mdp_ppo_recipe_module()
+        .ACTION_BALL_FULL_MDP_PPO_RECIPE
+    )
     monkeypatch.setattr(
         train_mod,
         "_ORIGINAL_TRAINING_ARGV",
@@ -863,12 +884,16 @@ def test_full_mdp_ppo_cli_preflight_rejects_whole_node_overrides(
         train_mod._preflight_action_ball_full_mdp_ppo_cli(
             {
                 "task": {"action_ball_full_mdp_runtime": True},
-                "max_iterations": 25_000,
+                "max_iterations": recipe.max_iterations,
             }
         )
 
 
 def test_full_mdp_ppo_cli_preflight_rejects_resolved_task_algo(monkeypatch):
+    recipe = (
+        train_mod._action_ball_full_mdp_ppo_recipe_module()
+        .ACTION_BALL_FULL_MDP_PPO_RECIPE
+    )
     monkeypatch.setattr(
         train_mod,
         "_ORIGINAL_TRAINING_ARGV",
@@ -881,7 +906,7 @@ def test_full_mdp_ppo_cli_preflight_rejects_resolved_task_algo(monkeypatch):
                     "action_ball_full_mdp_runtime": True,
                     "algo": {"entropy_coef": 0.2},
                 },
-                "max_iterations": 25_000,
+                "max_iterations": recipe.max_iterations,
             }
         )
 
@@ -960,7 +985,7 @@ def _exercise_full_mdp_num_env_preflight(
         "_action_ball_full_mdp_ppo_recipe_module",
         lambda: types.SimpleNamespace(
             ACTION_BALL_FULL_MDP_PPO_RECIPE=types.SimpleNamespace(
-                num_envs=2_048
+                num_envs=512
             )
         ),
     )
@@ -989,16 +1014,16 @@ def _exercise_full_mdp_num_env_preflight(
     return train_mod._run_with_environment_close_owner(cfg, object())
 
 
-def test_full_mdp_v5_accepts_only_typed_2048_before_gym(monkeypatch):
+def test_full_mdp_v6_accepts_only_typed_512_before_gym(monkeypatch):
     with pytest.raises(_PreGymReached) as caught:
-        _exercise_full_mdp_num_env_preflight(monkeypatch, num_envs=2_048)
-    assert caught.value.num_envs == 2_048
+        _exercise_full_mdp_num_env_preflight(monkeypatch, num_envs=512)
+    assert caught.value.num_envs == 512
 
-    with pytest.raises(train_mod._OverrideError, match="code-owned at 2048"):
+    with pytest.raises(train_mod._OverrideError, match="code-owned at 512"):
         _exercise_full_mdp_num_env_preflight(monkeypatch, num_envs=4_096)
 
 
-def test_full_mdp_oracle_forces_n1_without_v5_training_shape_rejection(
+def test_full_mdp_oracle_forces_n1_without_v6_training_shape_rejection(
     monkeypatch,
 ):
     with pytest.raises(_PreGymReached) as caught:

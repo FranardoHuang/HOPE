@@ -128,16 +128,18 @@ generation/overflow、finite与sticky poison/fail-stop；FullMDP全局checkpoint
 self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，也不表示学会回球、获得formal authority或
 完成任何Gate；当前速度结果只认下面V6 exact Pod rate，不从Phase-A结构推算。
 
+<a id="fullmdp-ppo-v6-observation-v3-current"></a>
 <a id="fullmdp-ppo-v5-observation-v3-current"></a>
 
-#### Current FullMDP V7：PPO V5、Reward28与Observation V3（2026-08-26 branch diagnostic）
+#### Current FullMDP V8：PPO V6、Reward28与Observation V3（2026-08-27 branch diagnostic）
 
-V7 fresh-only launcher必须从code-owned typed recipe读取[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)：
-`num_envs=2048`、`num_steps_per_env=48`、`max_iterations=25000`、`save_interval=500`、
-`num_learning_epochs=5`、`num_mini_batches=4`、`gamma=.99`、GAE`lambda=.98`、fresh
-`init_noise_std=.05`、learned`log_std`、`entropy_coef=0`且无强制std decay。Hydra argv、task YAML和
-MuJoCo CLI不得复制或覆盖这些值。相对4096/U12500/MB8，总transition、minibatch大小和optimizer-step数
-保持，但刷新/GAE/KL/WAL/checkpoint边界改变；只能fresh，不能resume，也不能称语义等价加速。
+V8 fresh-only launcher必须从code-owned typed recipe读取[`PPO V6`](../DEFINITIONS.md#fullmdp-ppo-v6)：
+`num_envs=512`、`num_steps_per_env=48`、`max_iterations=100000`、`save_interval=2000`、
+`num_learning_epochs=5`、`num_mini_batches=1`、fixed LR`1e-4`、`desired_kl=None`、`gamma=.99`、GAE
+`lambda=.98`、fresh `init_noise_std=.05`、learned`log_std`、`entropy_coef=0`且无强制std decay。Hydra
+argv、task YAML和MuJoCo CLI不得复制或覆盖这些值。相对V7的2048/U25000/MB4，总transition、minibatch
+大小、optimizer-step数和按transition save cadence保持，但policy刷新快4倍；只能fresh，不能resume，也
+不能称语义等价加速。
 
 actor/critic必须分别绑定`action_ball_full_mdp_semantic_actor_v3` 215-D与
 `action_ball_full_mdp_semantic_critic_v3` 231-D；完整顺序只认
@@ -150,18 +152,18 @@ Isaac milestone为schema8；新增teacher-achieved paddle error必须有finite/s
 `295/588/881/1174`，V3 `[208]`在第四次消费后发布raw`-1` exhausted sentinel。
 
 两端rate diagnostic仍是`10 warm-up + 50 measured + 1 tail`，但必须按当前recipe跑
-`2048 env × H48 × 61 update`、profiler-off、fresh process和`diagnostic_unauthorized=true`。Mu使用
+`512 env × H48 × 61 update`、profiler-off、fresh process和`diagnostic_unauthorized=true`。Mu使用
 `--full-a --diagnostic-rate-probe`；Isaac只显式打开task内的
-`action_ball_full_mdp_rate_probe`。长跑的`max_iterations`仍是25000，61预算由code-owned diagnostic
+`action_ball_full_mdp_rate_probe`。长跑的`max_iterations`仍是100000，61预算由code-owned diagnostic
 边界安装。历史V6 `caddecb7`实测Mu p50/p90=`5.468/5.526 s/H48`、Isaac=
 `7.81/8.38 s/H48`；Mu达到约6秒方向，Isaac未达到严格6秒。该差异包含PPO尺度取舍，不是语义等价热路
 对拍；probe不能自动转成长跑或代签学习质量。
 
 `9d333b0b`（语义`ba7225b2`）只是pre-V3/pre-PPO-V5 predecessor；V6 exact source=
 `caddecb76727ea55b0ce089453eea91cb5a9f8ea`已被大分母零接触与hard-edge反升证伪并停止。V7 exact source=
-`1d33130ba07288918aa73d1323e1106303b7cad1`已经按本节入口以fresh Mu/Isaac namespace运行，首批ACK验证
-Reward28、Mu schema10、Isaac milestone schema8、finite与conservation；仍禁止resume、复用root或热改
-exact checkout。启动前缀不是active-strata rate、mimic/hit/landing或formal证据。当前状态和顺序只认
+`1d33130ba07288918aa73d1323e1106303b7cad1`随后也在约218万次launch后保持零contact，且两端optimizer LR
+均卡`1e-5`；它在V8 ready前只读运行，不得热改或resume。V8 replacement尚须完成exact Pod与fresh启动，
+不能把typed recipe修改写成已运行。当前状态和顺序只认
 [双后端长跑TODO §0.5](action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)；
 G04/G05/G06保持`Partial`，不授权promotion、export、部署或真机。
 

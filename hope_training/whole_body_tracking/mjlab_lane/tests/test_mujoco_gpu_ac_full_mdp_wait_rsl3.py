@@ -229,7 +229,7 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     module = _load()
     cfg = module.build_train_cfg()
     assert cfg["num_steps_per_env"] == 48
-    assert cfg["save_interval"] == 500
+    assert cfg["save_interval"] == 2_000
     assert cfg["obs_groups"] == {"policy": ["policy"], "critic": ["critic"]}
     assert cfg["policy"]["init_noise_std"] == (
         module.FULL_MDP_PPO_RECIPE.init_noise_std
@@ -240,7 +240,10 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     assert cfg["policy"]["actor_obs_normalization"] is False
     assert cfg["policy"]["critic_obs_normalization"] is False
     assert cfg["algorithm"]["num_learning_epochs"] == 5
-    assert cfg["algorithm"]["num_mini_batches"] == 4
+    assert cfg["algorithm"]["num_mini_batches"] == 1
+    assert cfg["algorithm"]["learning_rate"] == 1.0e-4
+    assert cfg["algorithm"]["schedule"] == "fixed"
+    assert cfg["algorithm"]["desired_kl"] is None
     assert cfg["algorithm"]["gamma"] == 0.99
     assert cfg["algorithm"]["lam"] == 0.98
     assert cfg["algorithm"]["entropy_coef"] == 0.0
@@ -1240,9 +1243,9 @@ def test_full_a_rate_probe_reuses_ledger_without_snapshot_or_completion(
         record["candidate_production_execution_recipe_sha256"]
     )
     assert actual_rate_recipe["runner_overrides"] == {
-        "num_envs": {"candidate_production": 2_048, "rate_execution": 1},
+        "num_envs": {"candidate_production": 512, "rate_execution": 1},
         "max_iterations": {
-            "candidate_production": 25_000,
+            "candidate_production": 100_000,
             "rate_execution": 61,
         },
     }
@@ -1270,14 +1273,14 @@ def test_rate_probe_keeps_production_shape_and_rejects_artifact_authority(
     module = _load()
     production_rate_recipe = module._rate_execution_recipe()
     assert production_rate_recipe["effective_runner"] == {
-        "num_envs": 2_048,
+        "num_envs": 512,
         "num_steps_per_env": 48,
         "max_iterations": 61,
-        "save_interval": 500,
+        "save_interval": 2_000,
     }
     assert production_rate_recipe["runner_overrides"] == {
         "max_iterations": {
-            "candidate_production": 25_000,
+            "candidate_production": 100_000,
             "rate_execution": 61,
         }
     }
@@ -1294,17 +1297,17 @@ def test_rate_probe_keeps_production_shape_and_rejects_artifact_authority(
         source_commit=SOURCE_COMMIT, run_namespace=RUN_NAMESPACE,
         mujoco_warp_runtime_site=str(tmp_path / "runtime_site"),
     )
-    with pytest.raises(ValueError, match="2048x48x61"):
+    with pytest.raises(ValueError, match="512x48x61"):
         module.main(num_envs=2, num_updates=61, **common)
     with pytest.raises(ValueError, match="forbids snapshot/completion"):
         module.main(
-            num_envs=2048, num_updates=61,
+            num_envs=512, num_updates=61,
             snapshot_dir=str(tmp_path / "snapshots"), **common,
         )
     assert profiler_env in module.RATE_PROBE_PROFILE_ENVS
     monkeypatch.setenv(profiler_env, "1")
     with pytest.raises(ValueError, match="profiler environment off"):
-        module.main(num_envs=2048, num_updates=61, **common)
+        module.main(num_envs=512, num_updates=61, **common)
 
 
 def test_rate_probe_cli_has_no_resume_surface():

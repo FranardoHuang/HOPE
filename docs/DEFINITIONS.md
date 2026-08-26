@@ -101,6 +101,15 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   Gate多好，都不自动授权resume、promotion、正式checkpoint、export、deployment、跨引擎physics parity或
   真机。缺少formal证据的格继续写`未测`或`Partial`，不能用本旗标把它们升级，也不能把本旗标本身当安全Gate。
 
+- <a id="fullmdp-ppo-v6"></a>**`action_ball_full_mdp_ppo_v6` / FullMDP统一PPO V6配方**：V8
+  replacement采用`512 env × H48 × 100,000 update`、save interval`2,000`、每轮`5`个learning epoch和
+  `1`个minibatch；`gamma=.99`、GAE`lambda=.98`、`entropy_coef=0`、learned`log_std`与fresh
+  `init_noise_std=.05`不变。LR固定为`1e-4`，不再使用per-minibatch adaptive KL；`desired_kl=None`，避免
+  保留一个不生效的第二控制权威。相对V5，总transition=`2,457,600,000`、每minibatch=`24,576` sample、
+  总optimizer step=`500,000`和按transition计算的save cadence保持，但policy刷新快4倍，所以它是明确的
+  算法/迭代速度取舍，不是假称fixed-tape等价优化。V7两端在真实playback变得常见前后都已把optimizer LR
+  压到`1e-5`下限，随后大分母零接触；该实测因果是V6替换adaptive schedule的依据。
+
 - <a id="fullmdp-ppo-v5"></a>**`action_ball_full_mdp_ppo_v5` / FullMDP统一PPO V5配方**：fresh V6
   learner采用`2048 env × H48 × 25,000 update`、save interval`500`、每轮`5`个learning epoch和`4`个
   minibatch；继承V4的`gamma=.99`、GAE`lambda=.98`、`entropy_coef=0`、learned`log_std`、fresh
@@ -147,10 +156,18 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   2026-08-26以PPO V5、Reward28、Observation V3 `215/231`、四次自然重叠cadence为唯一学习合同；
   同时把Isaac milestone按term批处理、Motion publication收窄，并将新增真实paddle误差明确升为Isaac
   milestone schema8与Mu evidence/completion/summary `10/5/6`。`cq_n_iters`保持12，因为8/4的fixed-tape
-  已改变题目admission/reason/selected identity。该名称不表示课程第七Stage、正式安全或promotion。
+  已改变题目admission/reason/selected identity。V7随后在两端共约218万次launch后仍为零selected contact，
+  且teacher-achieved拍心位置误差仍约`.57/.70 m`；两端optimizer checkpoint均为LR=`1e-5`。它因此冻结为
+  learning negative，不表示课程第七Stage、正式安全或promotion。
+
+- <a id="fullmdp-v8-candidate"></a>**`fullmdp-a-h48-v8-*` / FullMDP第八批固定步长低延迟替代谱系**：
+  保持Reward28、Observation V3、四due、plant与事件语义，只把learner替换为
+  [`PPO V6`](#fullmdp-ppo-v6)。它首先回答“LR不在mimic曝光前耗尽后，现有直接拍面目标是否可学”，不在
+  同一因果包复制Build4的`14/14/5`权重、warm-start、replay或双LR。若未来固定窗的真实paddle误差仍不降，
+  才独立提高direct-paddle经济。该名称仍是`diagnostic_unauthorized`，不是课程Stage或部署授权。
 
 - <a id="fullmdp-rate-probe"></a>**FullMDP 61-update rate probe / FullMDP六十一轮吞吐探针**：按当前
-  recipe固定`2048 env × H48`，使用profiler-off的`10`轮warm-up + `50`轮measured + `1`轮tail诊断预算。
+  recipe固定`512 env × H48`，使用profiler-off的`10`轮warm-up + `50`轮measured + `1`轮tail诊断预算。
   既有`ba7225b2`的4096探针只作predecessor历史基线。只报告测量窗
   p50/p90、transitions/s和必要strata；一次update、带profile窗口或旧run平均不能代签。探针保持
   `diagnostic_unauthorized=true`，不取代25000长跑、学习质量或physics parity。

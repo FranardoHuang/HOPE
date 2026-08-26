@@ -10,6 +10,25 @@
 >
 > 阅读边界：current结论只认§16；§1--15保留为热墙定位与已做减法的历史证据，旧Reward20/PPO版本不得
 > 覆盖当前Reward28/PPO V5/Observation V3；Reward24只作V6历史。
+> 2026-08-27的现役候选已换为PPO V6；V5数值只作历史，当前速度结论见§17。
+
+<a id="fullmdp-v8-rate-current"></a>
+
+## 17. V7 active业务速度翻转与V8低延迟shape
+
+V7启动balance-only前缀的Mu/Isaac mean约`5.36/8.42 s/H48`不能外推到active业务。固定到Mu
+ACK0..9815与Isaac update0..4459后，最近50 profiler-off完整iteration mean/p50分别为
+`9.457/9.400 s`与`25.638/25.505 s`；后者console中collection约`20--30 s`，learning约`1.3--3.1 s`。
+两端此时已有大规模playback/launch，故性能翻转是真实业务occupancy，不是日志还没热身。
+
+Isaac每条ACK约`293 kB`，run.log与durable WAL均已约`1.3 GB`；完整逐shot JSON应移到显式diagnostic/offline
+consumer，但这不是全部collection主墙，不能承诺删JSON即可到6秒。`cq_n_iters=8/4`fixed-tape又已改变题目
+语义，继续拒绝作为等价加速。
+
+V8先采用[`PPO V6`](../../DEFINITIONS.md#fullmdp-ppo-v6)的`512×H48/MB1`，相对V5保持总transition、
+24,576-row minibatch、500,000 optimizer step与transition-save cadence，把单次采样规模缩为1/4并让policy
+刷新快4倍。它是可审计的算法/迭代速度取舍，不声称kernel fixed-tape等价。512-shape的两端61-update
+profiler-off rate、active-strata wall与短学习均尚未运行；未得到Pod数字前不得用线性比例推算成绩。
 
 ## 1. 采用、延后、拒绝
 
