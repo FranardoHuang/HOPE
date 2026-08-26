@@ -1169,16 +1169,24 @@ def test_full_a_production_shape_and_snapshot_schedule_are_exact(
     monkeypatch, tmp_path,
 ):
     module = _load()
-    assert module._snapshot_indices(25_000, 500) == (
-        *range(0, 25_000, 500), 24_999,
+    recipe = module.FULL_MDP_PPO_RECIPE
+    assert module._snapshot_indices(
+        recipe.max_iterations, recipe.save_interval
+    ) == (
+        *range(0, recipe.max_iterations, recipe.save_interval),
+        recipe.max_iterations - 1,
     )
     monkeypatch.setattr(
         module, "_rsl3_runner",
         lambda: pytest.fail("shape validation must precede RSL construction"),
     )
-    with pytest.raises(ValueError, match="2048x48x25000"):
+    expected_shape = (
+        f"{recipe.num_envs}x{recipe.num_steps_per_env}x"
+        f"{recipe.max_iterations}"
+    )
+    with pytest.raises(ValueError, match=expected_shape):
         module.main(
-            num_envs=2, num_updates=25_000,
+            num_envs=2, num_updates=recipe.max_iterations,
             full_a_mode=True, evidence_jsonl=str(tmp_path / "updates.jsonl"),
             snapshot_dir=str(tmp_path), completion_json=str(tmp_path / "seal.json"),
             source_commit=SOURCE_COMMIT, run_namespace=RUN_NAMESPACE,
