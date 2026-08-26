@@ -82,3 +82,25 @@ def test_legacy_yaml_without_noise_std_type_keeps_scalar_semantics(monkeypatch):
     kwargs = ppo_cfg.runner_kwargs(params, "legacy-scalar-test")
 
     assert kwargs["policy"].noise_std_type == "scalar"
+
+
+def test_fixed_schedule_preserves_none_desired_kl(monkeypatch):
+    ppo_cfg = _load_ppo_cfg(monkeypatch)
+    params = copy.deepcopy(ppo_cfg.load_ppo_params(str(PPO_YAML)))
+    params["algorithm"]["schedule"] = "fixed"
+    params["algorithm"]["desired_kl"] = None
+
+    kwargs = ppo_cfg.runner_kwargs(params, "fixed-schedule-test")
+
+    assert kwargs["algorithm"].schedule == "fixed"
+    assert kwargs["algorithm"].desired_kl is None
+
+
+def test_numeric_desired_kl_keeps_legacy_float_conversion(monkeypatch):
+    ppo_cfg = _load_ppo_cfg(monkeypatch)
+    params = copy.deepcopy(ppo_cfg.load_ppo_params(str(PPO_YAML)))
+    params["algorithm"]["desired_kl"] = "0.02"
+
+    kwargs = ppo_cfg.runner_kwargs(params, "adaptive-schedule-test")
+
+    assert kwargs["algorithm"].desired_kl == 0.02

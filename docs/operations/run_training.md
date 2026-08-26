@@ -140,6 +140,8 @@ V8 fresh-only launcher必须从code-owned typed recipe读取[`PPO V6`](../DEFINI
 argv、task YAML和MuJoCo CLI不得复制或覆盖这些值。相对V7的2048/U25000/MB4，总transition、minibatch
 大小、optimizer-step数和按transition save cadence保持，但policy刷新快4倍；只能fresh，不能resume，也
 不能称语义等价加速。
+shared `runner_kwargs()`在materialize RSL config时必须原样保留fixed-schedule的`desired_kl=None`；只对
+非null legacy值做float转换，禁止用任意伪KL数值绕过类型错误。
 
 actor/critic必须分别绑定`action_ball_full_mdp_semantic_actor_v3` 215-D与
 `action_ball_full_mdp_semantic_critic_v3` 231-D；完整顺序只认

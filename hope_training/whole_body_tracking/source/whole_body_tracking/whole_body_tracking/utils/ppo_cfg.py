@@ -77,7 +77,11 @@ def runner_kwargs(params: dict, experiment_name: str) -> dict:
             schedule=str(a["schedule"]),
             gamma=float(a["gamma"]),
             lam=float(a["lam"]),
-            desired_kl=float(a["desired_kl"]),
+            desired_kl=(
+                None
+                if a["desired_kl"] is None
+                else float(a["desired_kl"])
+            ),
             max_grad_norm=float(a["max_grad_norm"]),
         ),
     )

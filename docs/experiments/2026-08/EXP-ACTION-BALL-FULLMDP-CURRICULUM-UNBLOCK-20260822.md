@@ -935,3 +935,8 @@ V8最小因果包因此只采用[`PPO V6`](../../DEFINITIONS.md#fullmdp-ppo-v6)�
 save cadence保持；刷新快4倍是显式算法取舍。Reward28、Observation V3、课程、plant、physics和
 `cq_n_iters=12`不变。先验证LR不再被early balance吞掉及迭代wall；若未来固定窗paddle真实误差仍不降，
 才把Build4的强direct-paddle权重作为独立下一轴，不在同一版本混入warm-start/replay/sigma/新obs或Stage。
+
+首次V8 Isaac rate启动在environment construction前又暴露一个materialization遗漏：typed recipe的fixed
+schedule正确给出`desired_kl=None`，shared `runner_kwargs()`仍执行`float(None)`。这证明recipe和launcher
+identity测试不能代替最终RSL cfg构造。修复只落在唯一转换边界：null保持null，非null仍显式转float；失败
+namespace永久封存，新source必须重跑两端exact rate，不能沿用修复前Mu receipt。

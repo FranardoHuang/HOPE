@@ -1,5 +1,12 @@
 # 简短进度记录
 
+## 2026-08-27 — PPO V6 fixed-schedule materialization修复（branch diagnostic）
+
+- V8首次exact Pod Isaac rate在environment construction前fail-closed：typed recipe正确给出
+  `desired_kl=None`，shared `runner_kwargs()`却无条件执行`float(None)`。唯一转换边界现保留exact null，
+  同时继续把legacy数值显式转float；两个方向均有反例测试。失败namespace永久封存，修复后source必须
+  重跑双端exact rate和fresh launch，修复前Mu receipt不代签新source。
+
 ## 2026-08-27 — FullMDP V7负结果与PPO V6 fixed-LR替代（branch diagnostic）
 
 - 固定只读前缀Mu ACK0..9815 / Isaac update0..4459分别约`965M/438M` transitions；累计launch=
