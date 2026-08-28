@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Deterministic lexicographic search for a measured-conditioned safe ready.
+"""Deterministic constrained search for a measured-conditioned safe ready.
 
 This module is deliberately plant-agnostic.  The caller owns the exact-model
 contact LP and returns named *physical slacks* for every sampled state.  Exact
 measured frame 0 is preferred and returned unchanged when it already clears
 every gate.  Only when that direct state is unsafe does the fallback search
-maximize the worst normalized safety slack and then minimize measured-frame-0
-root/joint/racket error while constraining every safety slack to remain at the
-stage-1 optimum (up to one explicit numerical lock tolerance).
+find the fixed, named robust feasible set and then minimize measured-frame-0
+root/joint/racket error inside it.  Safety is a constraint, not an objective:
+extra distance from the teacher cannot be justified by unused margin.
 
 Consequently no weighted tracking objective can buy its way through a safety
 gate.  This is an unauthorized host diagnostic, not an Isaac hold or hardware
@@ -155,6 +155,7 @@ class WholeBodySearchConfig:
     joint_weight: float = 1.0
     racket_position_weight: float = 25.0
     racket_rotation_weight: float = 4.0
+    fallback_minimum_slacks: Mapping[str, float] | None = None
 
     def __post_init__(self) -> None:
         names = tuple(str(name) for name in self.movable_joint_names)
@@ -189,6 +190,18 @@ class WholeBodySearchConfig:
                 raise ValueError(f"{name} must be finite and positive")
         if self.stage1_max_iterations < 1 or self.stage2_max_iterations < 1:
             raise ValueError("optimizer iteration limits must be positive")
+        minimums = self.fallback_minimum_slacks
+        if minimums is not None:
+            copied = {str(name): float(value) for name, value in minimums.items()}
+            if set(copied) != set(REQUIRED_SAFETY_SLACK_NAMES) or not all(
+                math.isfinite(value) for value in copied.values()
+            ):
+                raise ValueError(
+                    "fallback_minimum_slacks must cover every named safety slack"
+                )
+            object.__setattr__(
+                self, "fallback_minimum_slacks", MappingProxyType(copied)
+            )
 
 
 @dataclass(frozen=True)
@@ -230,7 +243,7 @@ def solve_measured_conditioned_whole_body_safe_ready(
     slack_scales: Mapping[str, float] = DEFAULT_SLACK_SCALES,
     config: WholeBodySearchConfig | None = None,
 ) -> WholeBodySafeReadyResult:
-    """Run the two-stage lexical search and freshly re-evaluate its winner."""
+    """Return the best robust-feasible state found by fixed local starts."""
 
     cfg = WholeBodySearchConfig() if config is None else config
     lower = np.asarray(position_lower, np.float64)
@@ -274,6 +287,28 @@ def solve_measured_conditioned_whole_body_safe_ready(
             np.minimum(upper[movable], measured_state.joint_pos[movable] + cfg.joint_delta_bound_rad),
         )
     )
+    # A historical/shared ready may be supplied only as a deterministic search
+    # start.  Do not clip that known feasible start out of the search box: doing
+    # so silently turns "optimizer start only" into an unusable label.  Exact
+    # joint limits and the evaluator's named physical constraints remain the
+    # authority for every selected state.
+    for initial_state in initial_states:
+        initial_roll, initial_pitch, _initial_yaw = _rotation_to_rpy(
+            _quat_to_rotation(initial_state.root_quat_wxyz)
+        )
+        initial_values = np.concatenate(
+            (
+                np.asarray(
+                    [initial_state.root_pos_w[2], initial_roll, initial_pitch],
+                    np.float64,
+                ),
+                np.asarray(initial_state.joint_pos[movable], np.float64),
+            )
+        )
+        variable_lower = np.minimum(variable_lower, initial_values)
+        variable_upper = np.maximum(variable_upper, initial_values)
+    variable_lower[3:] = np.maximum(variable_lower[3:], lower[movable])
+    variable_upper[3:] = np.minimum(variable_upper[3:], upper[movable])
     if np.any(variable_lower >= variable_upper):
         raise WholeBodySafeReadyError("whole-body variable box is empty", code="EMPTY_SEARCH_BOX")
 
@@ -325,6 +360,25 @@ def solve_measured_conditioned_whole_body_safe_ready(
     def worst(value: np.ndarray) -> float:
         return float(np.min(evaluate(value)[2]))
 
+    # The fallback is allowed to differ from the teacher only because the
+    # teacher is physically infeasible.  Therefore it must meet the same named
+    # reserve that would admit teacher frame 0; accepting a merely-positive
+    # numerical interior here would turn the word "robust" into an unchecked
+    # label and leave exploration noise to discover the missing margin during
+    # training.
+    fallback_minimum_slacks = (
+        dict(DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS)
+        if cfg.fallback_minimum_slacks is None
+        else dict(cfg.fallback_minimum_slacks)
+    )
+    required_normalized = np.asarray(
+        [
+            fallback_minimum_slacks[name] / scales[name]
+            for name in REQUIRED_SAFETY_SLACK_NAMES
+        ],
+        np.float64,
+    )
+
     def stage1_feasibility_restoration_key(
         value: np.ndarray,
     ) -> tuple[float, ...]:
@@ -346,9 +400,8 @@ def solve_measured_conditioned_whole_body_safe_ready(
         """
 
         normalized = evaluate(value)[2]
-        gate = float(cfg.positive_gate_normalized_slack)
-        unsafe_count = float(np.count_nonzero(normalized <= gate))
-        deficits = np.maximum(gate - normalized, 0.0)
+        unsafe_count = float(np.count_nonzero(normalized < required_normalized))
+        deficits = np.maximum(required_normalized - normalized, 0.0)
         with np.errstate(over="ignore", invalid="ignore"):
             bounded_deficits = 1.0 - 1.0 / (1.0 + deficits)
         bounded_deficits = np.nan_to_num(
@@ -357,7 +410,9 @@ def solve_measured_conditioned_whole_body_safe_ready(
             posinf=1.0,
             neginf=0.0,
         )
-        clipped_margins = np.clip(normalized - gate, -1.0, 1.0)
+        clipped_margins = np.clip(
+            normalized - required_normalized, -1.0, 1.0
+        )
         return (
             unsafe_count,
             float(bounded_deficits @ bounded_deficits),
@@ -621,6 +676,9 @@ def solve_measured_conditioned_whole_body_safe_ready(
             "accepted_steps": accepted,
         }
 
+    def robust_feasible(value: np.ndarray) -> bool:
+        return bool(np.all(evaluate(value)[2] >= required_normalized))
+
     stage1_rows: list[dict[str, Any]] = []
     stage1_candidates: list[np.ndarray] = list(unique_starts)
     for start_index, start in enumerate(unique_starts):
@@ -645,23 +703,31 @@ def solve_measured_conditioned_whole_body_safe_ready(
             }
         )
     # Search navigation may temporarily trade one unsafe margin for progress
-    # on another.  The lexical stage-1 authority is therefore selected from
-    # every exact evaluation, not merely the navigation endpoints.
+    # on another.  Candidate selection considers every exact evaluation, not
+    # merely navigation endpoints.
     stage1_candidates.extend(
         np.frombuffer(key, dtype=np.float64).copy() for key in cache
     )
-    stage1_value = max(stage1_candidates, key=worst)
-    stage1_worst = worst(stage1_value)
-    if stage1_worst <= cfg.positive_gate_normalized_slack:
+    feasible_stage1 = [
+        value for value in stage1_candidates if robust_feasible(value)
+    ]
+    if not feasible_stage1:
+        stage1_value = max(stage1_candidates, key=worst)
         state, row, normalized = evaluate(stage1_value)
         raise WholeBodySafeReadyError(
-            "whole-body stage 1 found no strictly positive all-gate safety state",
-            code="NO_POSITIVE_SAFETY_INTERIOR",
+            "whole-body stage 1 found no state meeting the named robust constraints",
+            code="NO_ROBUST_FEASIBLE_STATE",
             report={
                 "best_state_sha256": grounded.state_digest(state),
                 "best_slacks": dict(row.slacks),
                 "best_normalized_slacks": dict(zip(REQUIRED_SAFETY_SLACK_NAMES, normalized.tolist())),
-                "worst_normalized_slack": stage1_worst,
+                "worst_normalized_slack": float(np.min(normalized)),
+                "required_normalized_slacks": dict(
+                    zip(
+                        REQUIRED_SAFETY_SLACK_NAMES,
+                        required_normalized.tolist(),
+                    )
+                ),
                 "stage1_runs": stage1_rows,
                 "stage1_navigation_objective": (
                     "minimize_count_and_bounded_dimensionless_deficit_of_"
@@ -670,15 +736,6 @@ def solve_measured_conditioned_whole_body_safe_ready(
                 "evaluation_count": evaluation_count,
             },
         )
-    # The numerical lock may relax the stage-1 optimum, but it must never
-    # relax the caller's original admission gate.  Otherwise a thin stage-1
-    # interior (smaller than the lock tolerance) lets the tracking objective
-    # purchase a final state that the original gate would reject.
-    locked = max(
-        cfg.positive_gate_normalized_slack,
-        stage1_worst - cfg.stage1_lock_tolerance_normalized,
-    )
-
     def secondary(value: np.ndarray) -> float:
         state, row, _normalized = evaluate(value)
         joint_delta = state.joint_pos - measured_state.joint_pos
@@ -698,12 +755,12 @@ def solve_measured_conditioned_whole_body_safe_ready(
             + cfg.racket_rotation_weight * (racket_rotation_delta @ racket_rotation_delta)
         )
 
+    stage1_value = min(feasible_stage1, key=secondary)
+    stage1_worst = worst(stage1_value)
+    locked = float(np.min(required_normalized))
+
     def locked_feasible(value: np.ndarray) -> bool:
-        normalized = evaluate(value)[2]
-        return bool(
-            np.all(normalized >= locked)
-            and np.all(normalized > cfg.positive_gate_normalized_slack)
-        )
+        return robust_feasible(value)
 
     stage2 = coordinate_search(
         stage1_value,
@@ -728,12 +785,12 @@ def solve_measured_conditioned_whole_body_safe_ready(
         for name in REQUIRED_SAFETY_SLACK_NAMES
     }
     final_worst = min(final_normalized.values())
-    if (
-        final_worst <= cfg.positive_gate_normalized_slack
-        or final_worst < locked
+    if any(
+        final_eval.slacks[name] < fallback_minimum_slacks[name]
+        for name in REQUIRED_SAFETY_SLACK_NAMES
     ):
         raise WholeBodySafeReadyError(
-            "fresh final evaluator did not preserve the original and locked safety gates",
+            "fresh final evaluator did not preserve the named robust constraints",
             code="FINAL_REAUDIT_FAILED",
         )
 
@@ -762,20 +819,30 @@ def solve_measured_conditioned_whole_body_safe_ready(
         evaluator_evidence=MappingProxyType(dict(final_eval.evidence)),
         optimizer_report=MappingProxyType(
             {
-                "algorithm": "two_stage_deterministic_coordinate_local_lexicographic",
+                "algorithm": "deterministic_coordinate_local_robust_constrained_bridge",
                 "global_optimum_claimed": False,
-                "stage1_objective": "maximize_min_normalized_physical_safety_slack",
+                "stage1_objective": "find_named_robust_constraint_feasible_set",
                 "stage1_navigation_objective": (
                     "minimize_count_and_bounded_dimensionless_deficit_of_"
                     "uncleared_physical_gates"
                 ),
-                "stage2_objective": "minimize_weighted_root_31q_racket_error",
+                "stage2_objective": (
+                    "minimize_weighted_root_31q_racket_error_inside_"
+                    "named_robust_constraints"
+                ),
                 "racket_reference_authority": racket_reference_authority,
                 "safety_weighted_against_tracking": False,
                 "stage1_runs": stage1_rows,
                 "stage1_worst_normalized_slack": float(stage1_worst),
                 "stage1_lock_tolerance_normalized": cfg.stage1_lock_tolerance_normalized,
                 "stage1_locked_worst_normalized_slack": float(locked),
+                "fallback_minimum_slacks": dict(fallback_minimum_slacks),
+                "required_normalized_slacks": dict(
+                    zip(
+                        REQUIRED_SAFETY_SLACK_NAMES,
+                        required_normalized.tolist(),
+                    )
+                ),
                 "stage2_success": bool(stage2["success"]),
                 "stage2_status": int(stage2["status"]),
                 "stage2_message": str(stage2["message"]),

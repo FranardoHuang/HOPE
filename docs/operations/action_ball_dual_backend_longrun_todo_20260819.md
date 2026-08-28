@@ -1,9 +1,9 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`V8-stopped-read-only / V9-dual-fresh-running / branch-scoped / diagnostic_unauthorized`
+> 状态：`V9-dual-fresh-running-read-only / R8-rate-complete-performance-optimizing / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-28
+> 更新：2026-08-29
 >
 > `origin/main:docs/NOW.md` 是全项目唯一优先级权威。本页只维护
 > [FullMDP](../DEFINITIONS.md)（完整球路、击球、落点与恢复状态机）单动作双后端
@@ -12,9 +12,115 @@
 
 <a id="fullmdp-v6-todo-current"></a>
 
-## 0.5 2026-08-28 current：V8反例与V9同源重叠课程替代源
+## 0.6 2026-08-29 current：同一 A3P0807、robust physical birth 与可解释的双后端差异
 
-本节是本页唯一现役局部执行合同；它不改变`origin/main:docs/NOW.md`的统一优先级。V5 source
+本节是唯一现役局部执行合同；`origin/main:docs/NOW.md`仍是项目优先级权威。当前V9两个长期namespace、
+exact source和证据root继续只读，不hot-patch、不resume、不复用。R8只有在下列独立事实闭合后才替换它们；
+有限probe、nominal hold、rate或文档状态均不单独授权长跑、promotion、physics parity、部署或真机。
+
+### 已证根因，不再归为“Pod整体装坏”
+
+- V9 MuJoCo实际选择的是legacy `a3_pingpong/a3_pingpong.xml`（SHA-256 `70c4fd65…36c0a`），而本轮
+  teacher、runtime plant和Jiayi所谓0807对照需要`a3p_pingpong_0807/a3p_pingpong_0807.xml`
+  （`7bbda723…bcae1`）。run name里的`0807/genesisfix`不是plant身份；当前probe已让错误root在import
+  边界直接拒绝，并要求所选root在导入所有Mu合同前成为唯一环境绑定。
+- pinned IsaacLab/Kit、sealed RSL、USD、mjlab和MuJoCo-Warp都能在Pod1构造、训练并连续写ACK；因此没有
+  generic installation corruption证据。曾有ignored EPA48/RSL3恢复缺口，但它在首ACK前fail-closed，
+  不能解释运行后的动作响应。
+- R8 artifact中心导出的`512×H48×31` tape已经排除joint order、actor center、decoder和qdes：
+  initial q/dq逐位相同，root/racket位置只差`7.8e-7/4.1e-6 m`量级，每tick qdes最大差
+  `5.96e-8 rad`；但首个20 ms后q/dq已差`.00973 rad/.89084 rad/s`，tick47 joint/root/racket最大差
+  `.13028 rad/.07872 m/.05263 m`。Isaac编译后clock为`.005 s×4=.020 s`，Mu为
+  `.001 s×20=.020 s`、Euler/Newton/iterations100/noslip0。这把剩余原因收敛到编译后的
+  plant/controller/integrator/contact响应，
+  不是“动作输入对不上”；它仍只是first-divergence定位，不是physics parity裁决。
+
+### 出生点合同的自查纠正
+
+teacher frame0继续是不可改写的模仿目标，但当前0807 plant下它不可作为physical birth：仅
+`waist_pitch`静态hold就需要约`-49.155 Nm`，而可执行position-control authority约`-21.704 Nm`。
+正确结构是`immutable teacher reference + robust-feasible physical birth + policy-learned bridge`，不是
+瞬移到老师，也不是让历史seed变成权威。
+
+首版R7搜索虽名为`robust constrained`，实际fallback默认只要求数值上刚好大于零；新工件的右脚接触、
+support与torque slack只有`6.98e-6 m / 5.68e-5 m / 1.263 Nm`，低于代码自己声明的robust reserve。
+这是一项实现错误，不应靠训练时hard-edge Gate兜底。R8已改为：精确frame0只有满足全部具名reserve才直接
+采用；否则旧ready只作确定性optimizer start，搜索每一项都达到同一reserve的固定可行域，再只在域内最小化
+root/31q/racket到teacher的距离。fresh backend cache-miss重验和真实PhysX nonterminal prefix继续保留；
+它们分别验证静态plant事实与有限运行事实，不代签学习成功。
+
+### 学习与课程判读
+
+课程仍为`balance → mimic → hit → landing`的自然重叠，不增加硬Stage。上一阶段开始基本成形时，下一阶段
+必须已有非零eligible分母：mimic按playback行的teacher-achieved paddle误差，hit按
+`selected contact / launch`及target误差，landing按`opponent landing / selected contact`。缺eligible写
+`未测`，已有分母的零结果写`0/denominator`；return和安全计数都不能代替这些行为证据。
+
+R7弱裕量工件的MuJoCo 61-update profiler-off canary只达到rate/health证据：p50/p90=
+`6.963/7.021 s/H48`，first10→recent10 episode mean=`131.66→129.20`，hard-edge=
+`5.389%→2.323%`，但paddle四项误差均略恶化，contact=`0/launch`、landing=`未测`，所以不能称mimic成功。
+Isaac同工件canary的p50/p90=`18.45/27.233 s/H48`，first10→recent10 episode mean=
+`111.85→113.16`、hard-edge=`6.13%→6.79%`、contact=`0/1,242 launch`，terminal几乎全为
+`base_fell_tilt/robot_hit_table`；这正是“仅正数裕量不是robust出生”的反例，只作冻结失败，不代表R8。
+
+R8 MuJoCo 61-update profiler-off canary已自然完成：p50/p90=`6.962/7.018 s/H48`，first10→recent10
+episode mean=`135.31→138.44`，actual-hard-edge rows=`4.96%→8.73%`；paddle position/velocity误差
+`.1745→.1841 m / 1.156→1.217 mps`变差，face/long-axis `.3210→.3047 / .2605→.2548 rad`
+略好，contact=`0/6,523 launch`。这是finite、可迭代、非灾难启动，但不是mimic成功或长期学习裁决。
+
+R8 Isaac同口径61-update窗也已自然完成：p50/p90=`21.455/27.455 s/H48`，first10→recent10 episode
+mean=`97.26→107.96 tick`；paddle position/velocity/long-axis误差`.2724→.2512 m / 1.1946→1.0959 mps /
+.4755→.4548 rad`改善，face `.2893→.3721 rad`变差。全窗due/playback/launch/contact=
+`14,221/13,555/461/0`，actual-hard-edge joint-sample fraction=`5.93%→6.69%`，terminal以
+tilt/table=`8,064/5,868`为主。它证明mimic与physical launch入口已自然重叠，也明确证明当前Isaac墙钟
+不可接受；`0/461`只作早期hit读数，不能用61 updates覆盖长期学习时间尺度。
+
+旧V9 Mu的长窗也暴露了证据口径错误：先前写的`7,139/517,214`来自generic `racket_contact_rows`，不是课程
+合同的`selected_contact_rows`。冻结前缀中首次selected contact是update473；最佳selected-rate 50窗仅
+`36/6,926=.520%`，当前累计`188/538,008 launch=.0349%`，landing=`0/188 selected contact`。raw contact
+的`96.15%`其实是edge；recent50又塌到episode mean=`105.59 tick`、launch=0。它只证明旧错误plant谱系曾
+产生极稀疏selected hit后又遗忘，不能移签R8，也不能把update61零contact误写成不可学。
+
+`observed_at=2026-08-28T17:49Z`的active V9只读窗已经是明确negative、不是正常交接：Mu recent50 episode
+mean=`105.59 tick`且launch=0，四项mimic误差全面恶化；Isaac recent50 episode mean=`141.58 tick`，累计
+`0/144,824 launch` selected contact，四项中仅position近似持平、其余恶化，landing无eligible分母。
+V9两端继续只读只为保存反例；因为Mu plant身份错误，这些数不能裁决R8，但足以拒绝继续等待V9自然恢复。
+
+Observation V3 `215/231`保持不变：现有四组同clock teacher-minus-achieved heading residual已经是对直接
+paddle目标的最小可观测闭环；本轮没有新增冗余obs，也没有向policy暴露不可观测未来量。当前阻塞在physical
+birth/control response，不在缺少另一个观测字段。
+
+结构审计确认当前核心6文件约`68k`行，且`check_table_obstacle_scene.py`同时保留legacy exact-frame0
+`200/800`、endpoint equality与R8 learned-bridge两套consumer；这会放大修改与审计成本。当前R8只消费后者，
+所以不在短训中混入大重构。replacement取得连续ACK后，下一项维护工作是把`physical birth / immutable
+teacher / bounded prefix`提成一个dependency-light typed合同，删除迁移完毕的same-writer回声与legacy
+procedural blockers；plant/file identity、fresh live recompute、真实write、finite/joint/table、WAL/fsync等
+跨事实源边界必须保留。目标是减少owner和Gate，而不是放宽必要事实。
+
+### 当前唯一执行顺序
+
+1. [x] 固定V9只读学习前缀并核对实际plant，而不是相信namespace名称。
+2. [x] 修正Isaac唯一reset owner、所选Mu root导入顺序、fixed tape单一actor-center真源与编译后clock/options遥测。
+3. [x] Pod1已重物化全部13项达到具名reserve的R8 local candidate；真实PhysX
+   `60 policy / 240 physics / 1.2 s` prefix双足接触率`1.0`、无terminal/当前或substep hard-edge，
+   最小最终hard gap=`.21966 rad`。它只证明稳定learning prefix；frame0拍心误差最多`.23289 m`，不冒充mimic。
+4. [x] 用R8工件重跑Isaac/Mu固定tape与两条`512×H48×61` profiler-off rate canary，逐端报告balance、
+   mimic、launch/contact/landing分母、hard-edge、terminal mix和p50/p90；双fixed tape与双rate均已自然完成，
+   短窗不判学习成败。
+5. [ ] D05真实未决row逐轮压缩已实现并通过dense-reference projection与downstream prepared-record逐tensor
+   bitwise parity；3轮/18+1 RNG、candidate IDs、reason/counter/safety、100-step RK4与最终cell均保持。当前
+   实测round1/2/3消费者=`3,584/290/22`；Pod profiler-off净墙钟尚待测，最多3个`nonzero`同步若抵消收益就
+   撤回，不能用减少的numeric rows代签加速。
+6. [ ] 两端replacement均finite且无灾难性启动分布后，冻结最终clean commit和fresh namespace，再按exact
+   PID/startticks/PGID/cwd/source/namespace停止V9并发射双长期run。后续只按预注册未来窗判断自然课程交接。
+7. [ ] replacement连续ACK后做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的
+   exact-only/self-echo procedural branches，并用相同artifact/固定tape/receipt反例证明语义未变。
+
+<a id="fullmdp-v9-superseded"></a>
+
+## 0.5 2026-08-28 historical：V8反例与V9同源重叠课程替代源
+
+本节已由§0.6取代，只保留历史证据；它不改变`origin/main:docs/NOW.md`的统一优先级。V5 source
 `39f9481950a660e198dedac7fd402806d648906b`及其namespace保持只读，禁止hot-patch、resume或复用。
 `9d333b0b`（语义`ba7225b2`）只是Observation/PPO最终裁决前的predecessor；V6 clean/pushed source
 `caddecb76727ea55b0ce089453eea91cb5a9f8ea`的两个namespace已经被大分母证伪并在精确身份复核后停止；
@@ -416,7 +522,7 @@ kernels + 一个telemetry funnel”，每次删除self-proof都必须同时保�
 
 ## HISTORICAL / FROZEN — 0.4 2026-08-23 V4最终冻结与V5第一性原理自查
 
-本节是V5历史合同；当前执行只认§0.5。V4两条run均已停止并最终冻结；
+本节是V5历史合同；当前执行只认§0.6。V4两条run均已停止并最终冻结；
 V5已从clean `39f9481950a660e198dedac7fd402806d648906b`在Pod1以fresh namespace启动Isaac与MuJoCo，
 仍只是`diagnostic_unauthorized` implementation lineage，不是新PPO算法、课程Stage、checkpoint兼容或
 晋级等级。学习配方继续是H48、GAE

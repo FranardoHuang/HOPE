@@ -16282,6 +16282,7 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
     import torch
 
     module = _load_action_ball_full_mdp_cross_engine_tape_module()
+    source_identity_at_start = module.source_identity()
     tape_np, config, _config_sha, tape_sha = module.action_tape_numpy()
     if (
         int(runtime_env.num_envs) != config["num_envs"]
@@ -16382,9 +16383,17 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
         backend="isaac",
         arrays=arrays,
         joint_names=list(robot.data.joint_names),
+        source_identity_at_start=source_identity_at_start,
         runtime_identity={
             "kind": "isaac_full_mdp_fixed_action_runtime_v3",
             "device": str(env.device),
+            "compiled_policy_clock": {
+                "physics_dt_s": float(runtime_env.physics_dt),
+                "decimation": int(
+                    round(float(runtime_env.step_dt) / float(runtime_env.physics_dt))
+                ),
+                "step_dt_s": float(runtime_env.step_dt),
+            },
             "action_tape_sha256": tape_sha,
             "action_center_kind": config["action_tape"]["center"]["kind"],
         },

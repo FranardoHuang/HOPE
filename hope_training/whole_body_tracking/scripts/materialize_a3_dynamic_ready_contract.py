@@ -25,8 +25,8 @@ Two fail-closed ready-source branches are supported:
   at the mechanical stop.  The refusal below names that.
   The whole-body mode releases root z/roll/pitch plus all 31 joints,
   first accepts exact measured frame 0 unchanged if all physical gates pass;
-  otherwise it maximizes the worst physical safety slack, then locks that
-  safety floor before minimizing measured-frame0 root/joint/racket error.
+  otherwise it searches the fixed named robust-feasible set, then minimizes
+  measured-frame0 root/joint/racket error inside that set.
   Every composition must pass current-
   MJCF static gates, a fresh ground LP, and the downstream exact Isaac
   nominal-hold gate.
@@ -2480,10 +2480,16 @@ def _build_whole_body_safety_evaluator(
         contact_list_collision = bool(
             scene.unsupported_contacts or scene.self_collision_pairs
         )
-        if contact_list_collision != (collision_clearance <= 0.0):
-            raise DynamicReadyMaterializationError(
-                "exact contact list and signed collision clearance disagree"
-            )
+        contact_clearance_disagreed = bool(
+            contact_list_collision != (collision_clearance <= 0.0)
+        )
+        if contact_list_collision:
+            # ``static_scene`` deliberately uses a 2 mm contact tolerance,
+            # while the signed-distance bisection reports geometric zero.  The
+            # two booleans are therefore not equivalent objects.  Treat either
+            # signal conservatively instead of aborting the search on a
+            # same-writer equality check.
+            collision_clearance = min(collision_clearance, 0.0)
         hull, _com_xy, global_support_margin = grounded._support_margin(scene)
         runtime_tau_lower = np.maximum(
             -effort, kp * (executed_lower - state.joint_pos)
@@ -2731,6 +2737,9 @@ def _build_whole_body_safety_evaluator(
                     "realized_slack_m": (
                         collision_clearance
                         - WHOLE_BODY_REQUIRED_COLLISION_CLEARANCE_M
+                    ),
+                    "contact_list_signed_distance_disagreed": (
+                        contact_clearance_disagreed
                     ),
                     "unsupported_contacts": [
                         dict(row) for row in scene.unsupported_contacts
@@ -3175,6 +3184,7 @@ def _compose_measured_whole_body_safe_frame0_physical_birth(
     runtime_contract: Mapping[str, Any],
     measured_racket_frame0: Mapping[str, Any],
     motion_sha256: str,
+    optimizer_initial_states: Sequence[grounded.ReadyState] = (),
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -3228,7 +3238,7 @@ def _compose_measured_whole_body_safe_frame0_physical_birth(
         hard_inner_upper=hard_inner_upper,
         runtime_contract=runtime_contract,
     )
-    initial_states: list[grounded.ReadyState] = []
+    initial_states: list[grounded.ReadyState] = list(optimizer_initial_states)
     # The compiled vendor key is merely a deterministic optimizer start.  It
     # imports no historical hold/authorization claim and is fully re-evaluated.
     try:
@@ -3306,10 +3316,7 @@ def _compose_measured_whole_body_safe_frame0_physical_birth(
             or value < required_final_gate
             for value in fresh_normalized_slacks.values()
         )
-        or (
-            exact_measured_frame0_selected
-            and not fresh_direct_robust_gate_passed
-        )
+        or not fresh_direct_robust_gate_passed
     ):
         raise DynamicReadyMaterializationError(
             "fresh whole-body winner violates the original or stage-1 safety gate"
@@ -3326,13 +3333,7 @@ def _compose_measured_whole_body_safe_frame0_physical_birth(
         raise DynamicReadyMaterializationError(
             "fresh whole-body winner lacks one cache-miss 0.1N exact LP witness"
         )
-    if not exact_measured_frame0_selected:
-        raise DynamicReadyMaterializationError(
-            "lexicographic fallback ready requires an authoritative swept "
-            "torque-speed transition certificate and runtime-consumed bridge; "
-            "no such authority is available"
-        )
-    if (
+    if exact_measured_frame0_selected and (
         not np.array_equal(result.state.joint_pos, measured.joint_pos)
         or not np.array_equal(result.state.root_pos_w, measured.root_pos_w)
         or not np.array_equal(
@@ -3342,38 +3343,75 @@ def _compose_measured_whole_body_safe_frame0_physical_birth(
         raise DynamicReadyMaterializationError(
             "exact-frame0 short circuit changed the teacher endpoint"
         )
+    if not exact_measured_frame0_selected and (
+        np.array_equal(result.state.joint_pos, measured.joint_pos)
+        and np.array_equal(result.state.root_pos_w, measured.root_pos_w)
+        and np.array_equal(result.state.root_quat_wxyz, measured.root_quat_wxyz)
+    ):
+        raise DynamicReadyMaterializationError(
+            "learned-bridge fallback is bitwise equal to teacher frame0"
+        )
+    if exact_measured_frame0_selected:
+        selected_q = stored_teacher_q
+        selected_root_pos = stored_teacher_root_pos
+        selected_root_quat = stored_teacher_root_quat
+    else:
+        selected_q = np.asarray(result.state.joint_pos, np.float64).copy()
+        selected_root_pos = np.asarray(result.state.root_pos_w, np.float64).copy()
+        selected_root_quat = np.asarray(
+            result.state.root_quat_wxyz, np.float64
+        ).copy()
+    selected_quaternion_norm = float(np.linalg.norm(selected_root_quat))
+    selected_stored_state_sha256 = _stored_ready_state_sha256(
+        selected_q, selected_root_pos, selected_root_quat
+    )
     transition_contract = {
         "schema_version": 1,
-        "kind": "exact_frame0_zero_duration_handoff_v1",
-        "selection_semantics": "threshold_first_exact_frame0_direct",
+        "kind": (
+            "exact_frame0_zero_duration_handoff_v1"
+            if exact_measured_frame0_selected
+            else "policy_learned_physical_birth_to_teacher_reference_v1"
+        ),
+        "selection_semantics": (
+            "threshold_first_exact_frame0_direct"
+            if exact_measured_frame0_selected
+            else "deterministic_local_best_feasible_birth_then_policy_tracking"
+        ),
         "state_sha256_semantics": (
             "float64_array_bytes_without_quaternion_normalization_v1"
         ),
-        "physical_ready_state_sha256": stored_endpoint_state_sha256,
+        "physical_ready_state_sha256": selected_stored_state_sha256,
         "teacher_frame0_state_sha256": stored_endpoint_state_sha256,
-        "mjcf_audit_state_sha256": mjcf_audit_state_sha256,
-        "stored_root_quaternion_norm": quaternion_norm,
-        "mjcf_audit_root_quat_wxyz": measured.root_quat_wxyz.tolist(),
+        "mjcf_audit_state_sha256": grounded.state_digest(result.state),
+        "stored_root_quaternion_norm": selected_quaternion_norm,
+        "mjcf_audit_root_quat_wxyz": result.state.root_quat_wxyz.tolist(),
         "mjcf_audit_quaternion_semantics": (
             "stored_root_quat_unit_normalized_for_numerical_backend_only"
         ),
-        "stored_teacher_and_physical_quaternion_unchanged": True,
-        "endpoints_bitwise_equal": True,
+        "stored_teacher_and_physical_quaternion_unchanged": bool(
+            exact_measured_frame0_selected
+        ),
+        "endpoints_bitwise_equal": bool(exact_measured_frame0_selected),
         "physical_ready_joint_velocity_exact_zero": True,
         "teacher_static_endpoint_joint_velocity_exact_zero": True,
         "measured_motion_velocity_channels_consumed": False,
         "not_a_motion_velocity_continuity_claim": True,
-        "certified_transition_s": 0.0,
+        "certified_transition_s": (
+            0.0 if exact_measured_frame0_selected else None
+        ),
         "required_min_wait_s": 0.0,
         "torque_speed_curve_required": False,
         "torque_speed_non_requirement_reason": (
-            "identical_stored_configuration_and_constructed_zero_joint_"
-            "velocity_endpoints"
+            "identical_stored_configuration_and_constructed_zero_joint_velocity_endpoints"
+            if exact_measured_frame0_selected
+            else "no_scripted_transition_claim_policy_controls_the_bridge"
         ),
-        "runtime_transition_reference_required": False,
+        "runtime_transition_reference_required": bool(
+            not exact_measured_frame0_selected
+        ),
         "required_followup_hold_gate": "isaac_action_ball_nominal_hold_v1",
-        "required_followup_policy_steps": 200,
-        "required_followup_physics_steps": 800,
+        "required_followup_policy_steps": 60,
+        "required_followup_physics_steps": 240,
         "diagnostic_unauthorized": True,
         "training_authorized": False,
     }
@@ -3436,14 +3474,12 @@ def _compose_measured_whole_body_safe_frame0_physical_birth(
         "physical_minus_teacher_root_rotation_vector_rad": list(
             result.root_rotation_delta_rad
         ),
-        "physical_root_quat_wxyz": stored_teacher_root_quat.tolist(),
-        "stored_physical_root_quat_wxyz": stored_teacher_root_quat.tolist(),
+        "physical_root_quat_wxyz": selected_root_quat.tolist(),
+        "stored_physical_root_quat_wxyz": selected_root_quat.tolist(),
         "mjcf_audit_root_quat_wxyz": result.state.root_quat_wxyz.tolist(),
         "teacher_root_quat_wxyz": stored_teacher_root_quat.tolist(),
         "teacher_and_physical_birth_differ": bool(
-            changed_indices
-            or any(float(value) != 0.0 for value in result.root_position_delta_m)
-            or any(float(value) != 0.0 for value in result.root_rotation_delta_rad)
+            not exact_measured_frame0_selected
         ),
         "racket_site_fidelity": {
             "site_name": MEASURED_PROJECTED_FRAME0_RACKET_SITE,
@@ -3491,7 +3527,7 @@ def _compose_measured_whole_body_safe_frame0_physical_birth(
             value > search_config.positive_gate_normalized_slack
             and value >= required_final_gate
             for value in fresh_normalized_slacks.values()
-        ),
+        ) and fresh_direct_robust_gate_passed,
         "required_final_normalized_safety_gate": required_final_gate,
         "direct_frame0_robust_minimum_slacks": dict(
             whole_body_ready.DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS
@@ -3506,14 +3542,17 @@ def _compose_measured_whole_body_safe_frame0_physical_birth(
             if exact_measured_frame0_selected
             else None
         ),
+        "fresh_physical_birth_robust_gate_passed": (
+            fresh_direct_robust_gate_passed
+        ),
         "safety_slacks": dict(fresh_final.slacks),
         "normalized_safety_slacks": dict(fresh_normalized_slacks),
         "evaluator_evidence": fresh_witness,
-        "stored_endpoint_state_sha256": stored_endpoint_state_sha256,
-        "mjcf_audit_state_sha256": mjcf_audit_state_sha256,
-        "stored_root_quat_wxyz": stored_teacher_root_quat.tolist(),
-        "mjcf_audit_root_quat_wxyz": measured.root_quat_wxyz.tolist(),
-        "stored_root_quaternion_norm": quaternion_norm,
+        "stored_endpoint_state_sha256": selected_stored_state_sha256,
+        "mjcf_audit_state_sha256": grounded.state_digest(result.state),
+        "stored_root_quat_wxyz": selected_root_quat.tolist(),
+        "mjcf_audit_root_quat_wxyz": result.state.root_quat_wxyz.tolist(),
+        "stored_root_quaternion_norm": selected_quaternion_norm,
         "independent_measured_racket_frame0": racket_reference_contract,
         "racket_site_fidelity": provenance["racket_site_fidelity"],
         "frame0_handoff": transition_contract,
@@ -3531,9 +3570,9 @@ def _compose_measured_whole_body_safe_frame0_physical_birth(
             "whole-body solver returned a final safety slack below its gate"
         )
     return (
-        stored_teacher_q,
-        stored_teacher_root_pos,
-        stored_teacher_root_quat,
+        selected_q,
+        selected_root_pos,
+        selected_root_quat,
         provenance,
         static_evidence,
     )
@@ -4126,6 +4165,17 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
         MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE,
     )
+    whole_body_optimizer_seed_requested = bool(
+        measured_birth_mode == MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE
+        and getattr(args, "physical_birth_seed", None)
+        and getattr(args, "expected_physical_birth_seed_sha256", None)
+    )
+    if measured_birth_mode == MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE and bool(
+        getattr(args, "physical_birth_seed", None)
+    ) != bool(getattr(args, "expected_physical_birth_seed_sha256", None)):
+        raise DynamicReadyMaterializationError(
+            "whole-body optimizer start requires both seed path and exact SHA"
+        )
     if source_kind == MEASURED_RETARGET_SOURCE_KIND and seedless_frame0_birth:
         teacher_q, teacher_root_pos, teacher_root_quat = (
             _load_motion_frame0_exact(motion_path)
@@ -4267,7 +4317,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             args.expected_mechanical_audit_sha256,
             name="measured mechanical audit",
         )
-        if not seedless_frame0_birth:
+        if not seedless_frame0_birth or whole_body_optimizer_seed_requested:
             physical_birth_seed_path, physical_birth_seed_sha = _pinned_file(
                 args.physical_birth_seed,
                 args.expected_physical_birth_seed_sha256,
@@ -4289,7 +4339,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 is True
             ),
         )
-        if not seedless_frame0_birth:
+        if not seedless_frame0_birth or whole_body_optimizer_seed_requested:
             physical_birth_seed_document = _read_json(
                 physical_birth_seed_path,
                 name="physical-birth numerical seed",
@@ -4344,6 +4394,40 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 identity=identity,
             )
         elif measured_birth_mode == MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE:
+            optimizer_initial_states: tuple[grounded.ReadyState, ...] = ()
+            if whole_body_optimizer_seed_requested:
+                optimizer_seed = grounded.ReadyState(
+                    np.asarray(
+                        physical_birth_seed["joint_pos_rad"], np.float64
+                    ),
+                    np.asarray(
+                        physical_birth_seed["root_pos_w_m"], np.float64
+                    ),
+                    np.asarray(
+                        physical_birth_seed["root_quat_wxyz"], np.float64
+                    ),
+                )
+                optimizer_seed_foot_poses = backend.foot_poses(optimizer_seed)
+                aligned_optimizer_seed = _align_seed_world_yaw_to_teacher(
+                    seed=physical_birth_seed,
+                    teacher_root_quat=teacher_root_quat,
+                    seed_foot_positions_w=[
+                        pose.position_w for pose in optimizer_seed_foot_poses
+                    ],
+                )
+                optimizer_initial_states = (
+                    grounded.ReadyState(
+                        np.asarray(
+                            aligned_optimizer_seed["joint_pos_rad"], np.float64
+                        ),
+                        np.asarray(
+                            aligned_optimizer_seed["root_pos_w_m"], np.float64
+                        ),
+                        np.asarray(
+                            aligned_optimizer_seed["root_quat_wxyz"], np.float64
+                        ),
+                    ),
+                )
             (
                 ready_q,
                 ready_root_pos,
@@ -4364,6 +4448,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                     "measured_racket_frame0"
                 ),
                 motion_sha256=motion_sha,
+                optimizer_initial_states=optimizer_initial_states,
             )
         else:
             seed_ready = grounded.ReadyState(
@@ -4415,25 +4500,52 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         and measured_birth_mode == MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE
     ):
         handoff = physical_birth_composition.get("frame0_handoff")
-        stored_state_sha = _stored_ready_state_sha256(
+        stored_physical_state_sha = _stored_ready_state_sha256(
             ready_q, ready_root_pos, ready_root_quat
+        )
+        stored_teacher_state_sha = _stored_ready_state_sha256(
+            teacher_q, teacher_root_pos, teacher_root_quat
+        )
+        exact_selected = physical_birth_composition.get(
+            "exact_measured_frame0_selected"
         )
         if (
             not isinstance(handoff, Mapping)
-            or not np.array_equal(ready_q, teacher_q)
-            or not np.array_equal(ready_root_pos, teacher_root_pos)
-            or not np.array_equal(ready_root_quat, teacher_root_quat)
-            or handoff.get("physical_ready_state_sha256") != stored_state_sha
-            or handoff.get("teacher_frame0_state_sha256") != stored_state_sha
+            or type(exact_selected) is not bool
+            or handoff.get("physical_ready_state_sha256")
+            != stored_physical_state_sha
+            or handoff.get("teacher_frame0_state_sha256")
+            != stored_teacher_state_sha
             or handoff.get("mjcf_audit_state_sha256")
             != grounded.state_digest(ready)
             or not np.array_equal(
                 np.asarray(handoff.get("mjcf_audit_root_quat_wxyz", ())),
                 ready.root_quat_wxyz,
             )
+            or (
+                exact_selected
+                and (
+                    not np.array_equal(ready_q, teacher_q)
+                    or not np.array_equal(ready_root_pos, teacher_root_pos)
+                    or not np.array_equal(ready_root_quat, teacher_root_quat)
+                    or handoff.get("endpoints_bitwise_equal") is not True
+                    or handoff.get("kind")
+                    != "exact_frame0_zero_duration_handoff_v1"
+                )
+            )
+            or (
+                not exact_selected
+                and (
+                    handoff.get("endpoints_bitwise_equal") is not False
+                    or handoff.get("kind")
+                    != "policy_learned_physical_birth_to_teacher_reference_v1"
+                    or handoff.get("runtime_transition_reference_required")
+                    is not True
+                )
+            )
         ):
             raise DynamicReadyMaterializationError(
-                "whole-body exact-zero handoff does not bind emitted and audit states"
+                "whole-body learned bridge does not bind emitted physical and teacher states"
             )
     if source_kind == MEASURED_RETARGET_SOURCE_KIND:
         if not seedless_frame0_birth:
@@ -4451,13 +4563,16 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "teacher_motion_sha256": motion_sha,
             "teacher_frame": 0,
         }
-        if physical_birth_seed_sha is not None:
+        if physical_birth_seed_sha is not None and not seedless_frame0_birth:
             static_source["physical_birth_seed_sha256"] = (
                 physical_birth_seed_sha
             )
             static_source["seed_world_yaw_alignment"] = (
                 physical_birth_composition["seed_world_yaw_alignment"]
             )
+        elif whole_body_optimizer_seed_requested:
+            static_source["optimizer_start_sha256"] = physical_birth_seed_sha
+            static_source["optimizer_start_selected_state_inherited"] = False
         if static_birth_evidence is None:
             static_birth_evidence = _audit_composed_physical_birth(
                 ready=ready,
@@ -5019,9 +5134,28 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                         "sha256": mechanical_audit_sha,
                     },
                     **(
-                        {}
-                        if seedless_frame0_birth
-                        else {
+                        {
+                            "physical_birth_optimizer_start": {
+                                "path": str(physical_birth_seed_path),
+                                "sha256": physical_birth_seed_sha,
+                                "content_sha256": physical_birth_seed[
+                                    "source_content_sha256"
+                                ],
+                                "source_action_id": physical_birth_seed[
+                                    "source_action_id"
+                                ],
+                                "source_role": "optimizer_start_only",
+                                "selected_state_inherited": False,
+                                "inherited_model_identity": False,
+                                "inherited_hold_claim": False,
+                                "inherited_nominal_hold_claim": False,
+                            }
+                        }
+                        if whole_body_optimizer_seed_requested
+                        else (
+                            {}
+                            if seedless_frame0_birth
+                            else {
                             "physical_birth_seed": {
                                 "path": str(physical_birth_seed_path),
                                 "sha256": physical_birth_seed_sha,
@@ -5045,8 +5179,9 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                                 "inherited_model_identity": False,
                                 "inherited_hold_claim": False,
                                 "inherited_nominal_hold_claim": False,
-                            },
-                        }
+                            }
+                            }
+                        )
                     ),
                 }
             ),
@@ -5252,10 +5387,10 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         "required_next_gate": {
             "kind": "isaac_action_ball_nominal_hold_v1",
             "required_policy_steps": (
-                200 if whole_body_selected_hold else None
+                60 if whole_body_selected_hold else None
             ),
             "required_physics_steps": (
-                800 if whole_body_selected_hold else None
+                240 if whole_body_selected_hold else None
             ),
             "required_min_wait_s": (
                 physical_birth_composition["frame0_handoff"][

@@ -2,6 +2,31 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-29 R8稳定出生与学习短窗（仍`Partial`）
+
+R7被审出并非robust：右脚/support/torque slack低于自身reserve；其Isaac 61-update窗hard-edge
+`6.13%→6.79%`、contact=`0/1,242 launch`，只作weak-margin反例。R8已在真实PhysX完成
+`60 policy/240 physics/1.2 s` nonterminal prefix，最终最小hard gap=`.21966 rad`，但frame0拍心teacher
+误差约`.205 m`，必须由policy学习，不能由prefix或Gate代签。
+
+R8固定tape已在Isaac自然完成，`512×48`中0 done/timeout，编译后clock为`.005 s×4=.020 s`；这关闭启动、
+artifact消费与有限状态记录，不关闭balance→mimic→hit→landing。Observation保持V3 `215/231`，未新增
+冗余或不可观测字段。R8 Mu 61-update为p50/p90=`6.962/7.018 s`、episode=`135.31→138.44`、
+hard-edge rows=`4.96%→8.73%`、contact=`0/6,523 launch`，mimic误差方向混合。Isaac同口径已自然完成：
+p50/p90=`21.455/27.455 s`、episode=`97.26→107.96`、due/playback/launch/contact=
+`14,221/13,555/461/0`，position/velocity/long-axis三项mimic误差改善、face变差，actual-hard-edge
+joint-sample fraction=`5.93%→6.69%`，terminal tilt/table=`8,064/5,868`。
+后续只按episode、teacher-achieved paddle error、launch/contact/landing分母、hard-edge/terminal和wall报告；
+G05仍`Partial`。该窗证明当前Isaac iteration速度不可接受，不证明hit不可学；下一性能切片只压缩D05
+已解决row的后续数值构造，保持三轮、18+1 RNG、reason/counter/safety、100-step RK4与最终cell不变。
+该切片现已在host以dense reference关闭完整projection与prepared-record逐tensor parity；GPU profiler-off
+净墙钟仍未测，所以G05不把算法工作量上限当速度PASS。
+
+active V9最新只读负窗（`observed_at=2026-08-28T17:49Z`）中，Isaac累计selected contact仍为
+`0/144,824 launch`，recent50 episode mean=`141.58 tick`，mimic除position近似持平外均恶化；Mu同窗又
+塌到episode mean=`105.59 tick`与launch=0。两端均未形成课程交接，且V9 Mu plant身份错误，不能把这项
+negative移签R8；replacement验证完成后应替换，而不是继续等旧run。
+
 ## 2026-08-28 FullMDP V9 tick48真实Isaac（仍`Partial`）
 
 clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`的fresh长期Isaac已在GPU0运行：

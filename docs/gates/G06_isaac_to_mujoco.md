@@ -2,6 +2,18 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+## 2026-08-29 R8 matched first-divergence（仍`Partial`）
+
+旧V9不是matched 0807实验：Mu实际载入legacy root。R8固定带现从同一clean commit、同一0807 plant身份、
+同一artifact actor center、同一joint order与`512×H48×31` tape运行；两端initial q/dq exact、0 done/timeout，
+逐tick qdes最大差`5.96e-8 rad`。Isaac clock=`.005 s×4`，Mu clock=`.001 s×20`，共同policy step为`.020 s`。
+
+首个20 ms后q/dq已差`.00973 rad/.89084 rad/s`，tick47 q/root/racket差
+`.13028 rad/.07872 m/.05263 m`。因此shared decoder/order与Pod通用安装损坏均无证据，剩余是backend
+plant/controller/integrator/contact response；若继续归因，下一最小实验应记录contact-free与standing-contact
+下的substep effort/clamp、constraint impulse及同torque tape，而不是增加task Gate。fixed tape没有physics
+PASS阈值，行为接近也不等于数值parity；G06仍`Partial / diagnostic_unauthorized=true`。
+
 ## 2026-08-28 V9同源课程双端复核（仍`Partial`）
 
 clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`的双fresh长期replacement已在Pod1运行。

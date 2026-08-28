@@ -932,6 +932,226 @@ def _whole_body_racket_fidelity(
     return value, reference
 
 
+def _whole_body_learned_bridge_contract(
+    document: Mapping[str, Any],
+    *,
+    joint_names: tuple[str, ...],
+    motion_sha256: str,
+    physical: Mapping[str, Any],
+) -> tuple[
+    tuple[float, ...],
+    tuple[float, ...],
+    tuple[float, ...],
+    bool,
+]:
+    """Consume a feasible physical birth without pretending it is teacher frame 0.
+
+    This intentionally validates a narrow cross-writer contract.  Optimizer
+    transcripts and same-writer echoes remain telemetry; the live hold path
+    independently checks the plant, writes this physical state, and records
+    bounded nonterminal-prefix evidence.
+    """
+
+    teacher = document.get("teacher_reference")
+    composition = document.get("physical_birth_composition")
+    static = document.get("physical_birth_static_evidence")
+    ready_source = document.get("ready_source")
+    sources = document.get("sources")
+    handoff = document.get("frame0_handoff")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (teacher, composition, static, ready_source, sources, handoff)
+    ):
+        raise TableSmokeReceiptError(
+            "learned-bridge physical-birth authority fields are incomplete"
+        )
+    assert isinstance(teacher, Mapping)
+    assert isinstance(composition, Mapping)
+    assert isinstance(static, Mapping)
+    assert isinstance(ready_source, Mapping)
+    assert isinstance(sources, Mapping)
+    assert isinstance(handoff, Mapping)
+
+    physical_q = _finite_tuple(
+        physical.get("joint_pos_rad"), 31, "learned-bridge physical q"
+    )
+    physical_root = _finite_tuple(
+        physical.get("root_pos_w_m"), 3, "learned-bridge physical root"
+    )
+    physical_quat = _finite_tuple(
+        physical.get("root_quat_wxyz"), 4, "learned-bridge physical quaternion"
+    )
+    physical_velocity = _finite_tuple(
+        physical.get("joint_vel_radps"), 31, "learned-bridge physical velocity"
+    )
+    teacher_q = _finite_tuple(
+        teacher.get("joint_pos_rad"), 31, "learned-bridge teacher q"
+    )
+    teacher_root = _finite_tuple(
+        teacher.get("root_pos_w_m"), 3, "learned-bridge teacher root"
+    )
+    teacher_quat = _finite_tuple(
+        teacher.get("root_quat_wxyz"), 4, "learned-bridge teacher quaternion"
+    )
+    delta_q = _finite_tuple(
+        composition.get("physical_minus_teacher_joint_pos_rad"),
+        31,
+        "learned-bridge joint delta",
+    )
+    delta_root = _finite_tuple(
+        composition.get("physical_minus_teacher_root_pos_m"),
+        3,
+        "learned-bridge root delta",
+    )
+    delta_rotation = _finite_tuple(
+        composition.get("physical_minus_teacher_root_rotation_vector_rad"),
+        3,
+        "learned-bridge root rotation delta",
+    )
+    physical_norm = _whole_body_vector_norm(physical_quat)
+    teacher_norm = _whole_body_vector_norm(teacher_quat)
+    if physical_norm <= 1.0e-12 or teacher_norm <= 1.0e-12:
+        raise TableSmokeReceiptError("learned-bridge quaternion is degenerate")
+    orientation_angle = 2.0 * math.acos(
+        max(
+            0.0,
+            min(
+                1.0,
+                abs(_whole_body_dot(physical_quat, teacher_quat))
+                / (physical_norm * teacher_norm),
+            ),
+        )
+    )
+    expected_delta_q = tuple(
+        actual - reference for actual, reference in zip(physical_q, teacher_q)
+    )
+    expected_delta_root = tuple(
+        actual - reference
+        for actual, reference in zip(physical_root, teacher_root)
+    )
+    changed_indices = [
+        index for index, value in enumerate(expected_delta_q) if value != 0.0
+    ]
+    optimizer_start = sources.get("physical_birth_optimizer_start")
+    physical_state_sha = _whole_body_state_sha256(
+        physical_q, physical_root, physical_quat
+    )
+    teacher_state_sha = _whole_body_state_sha256(
+        teacher_q, teacher_root, teacher_quat
+    )
+    audit_quat = tuple(value / physical_norm for value in physical_quat)
+    audit_state_sha = _whole_body_state_sha256(
+        physical_q, physical_root, audit_quat
+    )
+    safety_slacks = _whole_body_named_numbers(
+        static.get("safety_slacks"),
+        expected=_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS,
+        label="learned-bridge physical feasibility slacks",
+    )
+    robust_minimums = _whole_body_named_numbers(
+        static.get("direct_frame0_robust_minimum_slacks"),
+        expected=_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS,
+        label="learned-bridge robust minimum slacks",
+    )
+    optimizer = composition.get("optimizer_report")
+    if not isinstance(optimizer, Mapping):
+        raise TableSmokeReceiptError(
+            "learned-bridge optimizer report is missing"
+        )
+    optimizer_minimums = _whole_body_named_numbers(
+        optimizer.get("fallback_minimum_slacks"),
+        expected=_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS,
+        label="learned-bridge optimizer minimum slacks",
+    )
+    witness = static.get("evaluator_evidence")
+    if (
+        teacher.get("semantics") != "exact_motion_bytes_frame0_reference"
+        or teacher.get("motion_sha256") != motion_sha256
+        or teacher.get("frame_index") != 0
+        or composition.get("semantics")
+        != MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS
+        or composition.get("teacher_reference_unchanged") is not True
+        or composition.get("historical_physical_birth_seed_consumed") is not False
+        or composition.get("exact_measured_frame0_selected") is not False
+        or composition.get("teacher_and_physical_birth_differ") is not True
+        or composition.get("safety_weighted_against_tracking") is not False
+        or composition.get("training_authorized") is not False
+        or composition.get("deployment_authorized") is not False
+        or composition.get("hardware_authorized") is not False
+        or tuple(composition.get("released_joint_names", ())) != joint_names
+        or composition.get("changed_joint_indices") != changed_indices
+        or tuple(composition.get("changed_joint_names", ()))
+        != tuple(joint_names[index] for index in changed_indices)
+        or any(value != 0.0 for value in physical_velocity)
+        or any(
+            not _whole_body_close(actual, expected, tolerance=2.0e-10)
+            for actual, expected in zip(delta_q, expected_delta_q)
+        )
+        or any(
+            not _whole_body_close(actual, expected, tolerance=2.0e-10)
+            for actual, expected in zip(delta_root, expected_delta_root)
+        )
+        or not _whole_body_close(
+            _whole_body_vector_norm(delta_rotation),
+            orientation_angle,
+            tolerance=2.0e-9,
+        )
+        or ready_source.get("teacher_and_physical_birth_same") is not False
+        or ready_source.get("physical_birth_semantics")
+        != MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS
+        or sources.get("physical_birth_seed") is not None
+        or not isinstance(optimizer_start, Mapping)
+        or optimizer_start.get("source_role") != "optimizer_start_only"
+        or optimizer_start.get("selected_state_inherited") is not False
+        or optimizer_start.get("inherited_model_identity") is not False
+        or optimizer_start.get("inherited_hold_claim") is not False
+        or optimizer_start.get("inherited_nominal_hold_claim") is not False
+        or handoff.get("kind")
+        != "policy_learned_physical_birth_to_teacher_reference_v1"
+        or handoff.get("selection_semantics")
+        != "deterministic_local_best_feasible_birth_then_policy_tracking"
+        or handoff.get("physical_ready_state_sha256") != physical_state_sha
+        or handoff.get("teacher_frame0_state_sha256") != teacher_state_sha
+        or handoff.get("mjcf_audit_state_sha256") != audit_state_sha
+        or handoff.get("endpoints_bitwise_equal") is not False
+        or handoff.get("certified_transition_s") is not None
+        or handoff.get("runtime_transition_reference_required") is not True
+        or handoff.get("training_authorized") is not False
+        or static.get("authority")
+        != "fresh_current_exact_mjcf_whole_body_lexicographic_search"
+        or static.get("selected_hold_witness_authority")
+        != "new_backend_new_solver_final_state_cache_miss"
+        or static.get("exact_contact_lp_reused") is not False
+        or static.get("all_safety_slacks_meet_original_and_locked_gate") is not True
+        or static.get("fresh_physical_birth_robust_gate_passed") is not True
+        or robust_minimums
+        != _WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS
+        or optimizer.get("algorithm")
+        != "deterministic_coordinate_local_robust_constrained_bridge"
+        or optimizer.get("global_optimum_claimed") is not False
+        or optimizer.get("safety_weighted_against_tracking") is not False
+        or optimizer_minimums
+        != _WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS
+        or static.get("stored_endpoint_state_sha256") != physical_state_sha
+        or static.get("mjcf_audit_state_sha256") != audit_state_sha
+        or any(
+            safety_slacks[name] < robust_minimums[name]
+            for name in safety_slacks
+        )
+        or not isinstance(witness, Mapping)
+        or witness.get("lp_feasible") is not True
+        or witness.get("exact_state_lp_cache_hit") is not False
+        or witness.get("evaluated_state_sha256") != audit_state_sha
+    ):
+        raise TableSmokeReceiptError(
+            "learned-bridge physical-birth contract is invalid"
+        )
+    _whole_body_racket_fidelity(
+        composition.get("racket_site_fidelity"), motion_sha256=motion_sha256
+    )
+    return teacher_root, teacher_quat, teacher_q, True
+
+
 def _whole_body_threshold_first_contract(
     document: Mapping[str, Any],
     *,
@@ -945,6 +1165,18 @@ def _whole_body_threshold_first_contract(
     bool,
 ]:
     """Accept only the materializer's seedless exact-frame0 short circuit."""
+
+    composition_probe = document.get("physical_birth_composition")
+    if (
+        isinstance(composition_probe, Mapping)
+        and composition_probe.get("exact_measured_frame0_selected") is False
+    ):
+        return _whole_body_learned_bridge_contract(
+            document,
+            joint_names=joint_names,
+            motion_sha256=motion_sha256,
+            physical=physical,
+        )
 
     teacher = document.get("teacher_reference")
     composition = document.get("physical_birth_composition")

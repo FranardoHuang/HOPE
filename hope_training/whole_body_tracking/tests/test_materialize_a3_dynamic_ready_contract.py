@@ -1834,7 +1834,7 @@ def test_whole_body_threshold_first_exact_frame0_seals_robust_single_witness(
     )
     with pytest.raises(
         materializer.DynamicReadyMaterializationError,
-        match="authoritative swept torque-speed transition certificate",
+        match="learned-bridge fallback is bitwise equal",
     ):
         materializer._compose_measured_whole_body_safe_frame0_physical_birth(
             teacher_q=teacher_q,

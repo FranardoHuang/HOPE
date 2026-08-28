@@ -912,12 +912,15 @@ mocap position only; the fresh contract below supersedes that source split.
 
 Fresh N=1 ActionBall runs may opt into the
 [action-specific dynamic ready](../DEFINITIONS.md#action-specific-dynamic-ready) reset contract.
-The physical robot state and teacher frame 0 remain the exact motion bytes, while the action manager,
-`last_action`, processed/pre-clamp qdes buffers and fresh actor output-layer bias all start from the
-same nominal-hold-certified qdes. Raw policy-history validity remains false across reset, so this
-initialization cannot masquerade as a sampled transition. The policy action remains the same 31-D
-unbounded Gaussian output followed by the existing affine decoder and finite qdes projection; no
-observation or action width changes.
+Teacher frame 0 remains the exact immutable motion bytes. The physical robot state uses that frame
+only when it satisfies the current plant's named robust constraints; otherwise it uses the closest
+state found inside the same robust-feasible set, with any historical ready serving only as an
+optimizer start. The action manager, `last_action`, processed/pre-clamp qdes buffers and fresh actor
+output-layer bias all start from the selected physical birth's live-prefix-validated hold target.
+The policy—not a scripted or zero-duration bridge—then tracks the independent teacher reference.
+Raw policy-history validity remains false across reset, so this initialization cannot masquerade as
+a sampled transition. The policy action remains the same 31-D unbounded Gaussian output followed by
+the existing affine decoder and finite qdes projection; no observation or action width changes.
 
 ### N=1 ActionBall frame and table-state semantics
 

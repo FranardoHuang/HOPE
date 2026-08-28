@@ -1,4 +1,4 @@
-"""Host-only tests for measured-conditioned lexical whole-body ready search."""
+"""Host-only tests for measured-conditioned constrained whole-body ready search."""
 
 from __future__ import annotations
 
@@ -61,7 +61,20 @@ def _independent_racket_reference() -> dict[str, np.ndarray]:
     }
 
 
-def test_two_stage_search_locks_safety_before_frame0_fidelity() -> None:
+def _synthetic_positive_minima(value: float = 1.0e-6) -> dict[str, float]:
+    """Give dimensionless fixtures an explicit feasible set.
+
+    Production uses the named physical-unit robust reserve.  These toy
+    evaluators intentionally use one synthetic unit for every field and must
+    not accidentally redefine that production contract.
+    """
+
+    return {
+        name: float(value) for name in safe_ready.REQUIRED_SAFETY_SLACK_NAMES
+    }
+
+
+def test_search_minimizes_frame0_gap_inside_fixed_feasible_set() -> None:
     measured = _state()
     safe_seed = _state(root_z=1.0, waist_yaw=0.1)
     result = safe_ready.solve_measured_conditioned_whole_body_safe_ready(
@@ -78,19 +91,20 @@ def test_two_stage_search_locks_safety_before_frame0_fidelity() -> None:
             stage1_max_iterations=100,
             stage2_max_iterations=120,
             stage1_lock_tolerance_normalized=1.0e-4,
+            fallback_minimum_slacks=_synthetic_positive_minima(),
         ),
     )
 
     waist_index = grounded.RUNTIME_JOINT_NAMES.index("waist_yaw_joint")
-    assert result.safety_slacks["left_contact_load_slack_n"] > 0.049
-    assert result.safety_slacks["right_contact_load_slack_n"] > 0.049
-    assert result.safety_slacks["root_height_slack_m"] > 0.049
-    assert result.safety_slacks["root_tilt_slack_rad"] > 0.049
+    assert result.safety_slacks["left_contact_load_slack_n"] > 1.0e-6
+    assert result.safety_slacks["right_contact_load_slack_n"] > 1.0e-6
+    assert result.safety_slacks["root_height_slack_m"] > 1.0e-6
+    assert result.safety_slacks["root_tilt_slack_rad"] > 1.0e-6
     assert result.worst_normalized_safety_slack >= (
         result.stage1_locked_worst_normalized_slack - 1.0e-9
     )
-    assert result.state.joint_pos[waist_index] == pytest.approx(0.1, abs=2.0e-3)
-    assert result.state.root_pos_w[2] == pytest.approx(1.0, abs=2.0e-3)
+    assert 0.05 < result.state.joint_pos[waist_index] < 0.06
+    assert 0.95 < result.state.root_pos_w[2] < 0.96
     assert result.changed_joint_mask[waist_index] is True
     assert sum(result.changed_joint_mask) == 1
     assert result.racket_position_delta_m != (0.0, 0.0, 0.0)
@@ -184,6 +198,10 @@ def test_positive_but_nonrobust_measured_frame0_does_not_short_circuit() -> None
         config=safe_ready.WholeBodySearchConfig(
             stage1_max_iterations=40,
             stage2_max_iterations=40,
+            fallback_minimum_slacks={
+                name: value + 0.19
+                for name, value in thin_margin(measured).slacks.items()
+            },
         ),
     )
 
@@ -211,7 +229,7 @@ def test_search_fails_closed_without_positive_all_gate_interior() -> None:
 
     with pytest.raises(
         safe_ready.WholeBodySafeReadyError,
-        match="no strictly positive all-gate",
+        match="no state meeting the named robust constraints",
     ) as caught:
         safe_ready.solve_measured_conditioned_whole_body_safe_ready(
             _state(),
@@ -229,7 +247,7 @@ def test_search_fails_closed_without_positive_all_gate_interior() -> None:
                 stage2_max_iterations=30,
             ),
         )
-    assert caught.value.code == "NO_POSITIVE_SAFETY_INTERIOR"
+    assert caught.value.code == "NO_ROBUST_FEASIBLE_STATE"
     assert caught.value.report["best_slacks"]["table_clearance_slack_m"] < 0.0
 
 
@@ -295,6 +313,7 @@ def test_stage1_restores_feasibility_across_ground_lp_sentinel_plateau() -> None
         config=safe_ready.WholeBodySearchConfig(
             stage1_max_iterations=40,
             stage2_max_iterations=40,
+            fallback_minimum_slacks=_synthetic_positive_minima(),
         ),
     )
 
@@ -361,11 +380,14 @@ def test_stage2_lock_cannot_relax_below_original_positive_gate() -> None:
             stage1_max_iterations=30,
             stage2_max_iterations=60,
             joint_weight=1.0e12,
+            fallback_minimum_slacks=_synthetic_positive_minima(
+                np.nextafter(gate, np.inf)
+            ),
         ),
     )
 
     assert result.optimizer_report["stage1_worst_normalized_slack"] > gate
-    assert result.stage1_locked_worst_normalized_slack == gate
+    assert result.stage1_locked_worst_normalized_slack > gate
     assert result.worst_normalized_safety_slack > gate
     assert all(value > gate for value in result.normalized_safety_slacks.values())
 
@@ -407,10 +429,13 @@ def test_stage2_rejects_exact_original_gate_and_keeps_safe_fallback() -> None:
             stage1_max_iterations=30,
             stage2_max_iterations=60,
             joint_weight=1.0e12,
+            fallback_minimum_slacks=_synthetic_positive_minima(
+                np.nextafter(gate, np.inf)
+            ),
         ),
     )
 
-    assert result.stage1_locked_worst_normalized_slack == gate
+    assert result.stage1_locked_worst_normalized_slack > gate
     assert result.worst_normalized_safety_slack > gate
     assert result.state.joint_pos[waist_index] > 0.0
 

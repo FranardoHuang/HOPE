@@ -320,6 +320,7 @@ class _DueMotion:
     def project_current_action_epoch_rows(self):
         return SimpleNamespace(
             common_step=1,
+            episode_tick=torch.ones(2, dtype=torch.int64),
             reveal_due=torch.ones(2, dtype=torch.bool),
             closed_mask=torch.zeros(2, dtype=torch.bool),
             close_reason=torch.zeros(2, dtype=torch.int64),
@@ -763,6 +764,7 @@ def test_k0_epoch_return_skips_question_numeric_writers_and_second_projection(
                 raise AssertionError("idle path requested a second Motion projection")
             return SimpleNamespace(
                 common_step=1,
+                episode_tick=torch.ones(2, dtype=torch.int64),
                 reveal_due=torch.zeros(2, dtype=torch.bool),
                 closed_mask=torch.zeros(2, dtype=torch.bool),
                 close_reason=torch.zeros(2, dtype=torch.int64),
@@ -827,19 +829,23 @@ def test_hot_sources_allow_only_the_profiled_question_compaction_boundary():
     question_source = question_path.read_text(encoding="utf-8")
 
     # Cadence and transaction ownership remain static full-row surfaces.  The
-    # sole exception is the question composer's explicit mask-first seam: one
-    # dynamic row list is allowed to avoid sending all 4096 rows through the
-    # much larger LM/exact/Physical numeric stack.  Its synchronization cost is
-    # intentionally visible to the bounded real-run profiler and no second
-    # compaction may spread into the hot path unnoticed.
+    # sole exception is the question composer's explicit unresolved-prefix
+    # seam.  Production may compact once per each of the three fixed redraw
+    # rounds; the dense-reference branch has one separate test-only compaction.
+    # These synchronization costs remain visible to the bounded real-run
+    # profiler and may not spread into cadence or transaction ownership.
     for source in (transaction_source, cadence_source):
         for forbidden in ("masked_select", "torch.nonzero", ".nonzero("):
             assert forbidden not in source
     assert "masked_select" not in question_source
     assert "torch.nonzero" not in question_source
-    assert question_source.count(".nonzero(") == 1
+    assert question_source.count(".nonzero(") == 2
     assert (
-        "active_index = construction_mask.nonzero(as_tuple=False).reshape(-1)"
+        "dense_rows = clean_row.nonzero(as_tuple=False).reshape(-1)"
+        in question_source
+    )
+    assert (
+        "round_rows = attempted[:, round_index_value].nonzero("
         in question_source
     )
 

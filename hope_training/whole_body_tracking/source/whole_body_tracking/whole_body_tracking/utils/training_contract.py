@@ -777,7 +777,23 @@ _ACTION_BALL_DYNAMIC_READY_ROW_KEYS = frozenset(
     }
 )
 _ACTION_BALL_DYNAMIC_READY_ROW_V2_KEYS = frozenset(
-    {*_ACTION_BALL_DYNAMIC_READY_ROW_KEYS, "runtime_plant_identity"}
+    {
+        *_ACTION_BALL_DYNAMIC_READY_ROW_KEYS,
+        "runtime_plant_identity",
+        "nonterminal_prefix_evidence",
+    }
+)
+_ACTION_BALL_DYNAMIC_READY_PREFIX_EVIDENCE_KEYS = frozenset(
+    {
+        "completed_policy_steps",
+        "completed_physics_steps",
+        "completed_duration_s",
+        "active_terminations",
+        "joint_safety_complete",
+        "current_actual_hard_edge_joint_count",
+        "substep_actual_hard_edge_joint_count",
+        "frame0_fidelity_telemetry",
+    }
 )
 _ACTION_BALL_DYNAMIC_READY_PLANT_V2_KEYS = frozenset(
     {
@@ -5936,6 +5952,57 @@ def _validate_action_ball_dynamic_ready_pin(
     }
 
 
+def _validate_action_ball_nonterminal_prefix_evidence(
+    value: object, *, name: str
+) -> dict:
+    evidence = _require_exact_mapping_keys(
+        value,
+        _ACTION_BALL_DYNAMIC_READY_PREFIX_EVIDENCE_KEYS,
+        name=name,
+    )
+    policy_steps = evidence["completed_policy_steps"]
+    physics_steps = evidence["completed_physics_steps"]
+    duration = evidence["completed_duration_s"]
+    active = evidence["active_terminations"]
+    fidelity = evidence["frame0_fidelity_telemetry"]
+    if (
+        type(policy_steps) is not int
+        or policy_steps != 60
+        or type(physics_steps) is not int
+        or physics_steps != 240
+        or isinstance(duration, bool)
+        or type(duration) not in (int, float)
+        or not math.isclose(float(duration), 1.2, rel_tol=0.0, abs_tol=1.0e-9)
+        or active
+        != [
+            "time_out",
+            "base_fell_tilt",
+            "base_too_low",
+            "robot_hit_table",
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
+        ]
+        or evidence["joint_safety_complete"] is not True
+        or evidence["current_actual_hard_edge_joint_count"] != 0
+        or evidence["substep_actual_hard_edge_joint_count"] != 0
+        or not isinstance(fidelity, Mapping)
+        or fidelity.get("formal_thresholds_adopted") is not False
+    ):
+        raise ValueError(
+            f"{name} must be one exact 60/240 bounded nonterminal prefix"
+        )
+    return {
+        "completed_policy_steps": policy_steps,
+        "completed_physics_steps": physics_steps,
+        "completed_duration_s": float(duration),
+        "active_terminations": list(active),
+        "joint_safety_complete": True,
+        "current_actual_hard_edge_joint_count": 0,
+        "substep_actual_hard_edge_joint_count": 0,
+        "frame0_fidelity_telemetry": deepcopy(dict(fidelity)),
+    }
+
+
 def validate_action_ball_dynamic_ready_runtime_binding(
     value: object, *, expected_action_count: int | None = None
 ) -> dict:
@@ -6025,6 +6092,14 @@ def validate_action_ball_dynamic_ready_runtime_binding(
             name="action-ball dynamic-ready runtime plant identity",
         )
     )
+    prefix_evidence = (
+        None
+        if schema_version == 1
+        else _validate_action_ball_nonterminal_prefix_evidence(
+            row["nonterminal_prefix_evidence"],
+            name="action-ball bounded nonterminal-prefix evidence",
+        )
+    )
     actual_binding_sha = action_ball_dynamic_ready_binding_sha256(binding)
     expected_binding_sha = _action_ball_bootstrap_sha256(
         binding["binding_sha256"],
@@ -6051,6 +6126,11 @@ def validate_action_ball_dynamic_ready_runtime_binding(
                 **(
                     {"runtime_plant_identity": runtime_plant_identity}
                     if runtime_plant_identity is not None
+                    else {}
+                ),
+                **(
+                    {"nonterminal_prefix_evidence": prefix_evidence}
+                    if prefix_evidence is not None
                     else {}
                 ),
             }
@@ -6308,6 +6388,8 @@ def load_action_ball_dynamic_ready_runtime_binding(
     receipt_artifact = receipt.get("artifact")
     delay_runtime = receipt.get("control_step_action_delay_runtime")
     delay_runtime_valid = True
+    prefix_evidence = None
+    prefix_evidence_valid = True
     if artifact_schema == 2:
         expected_delay = runtime_plant_identity["control_step_action_delay"]
         histogram = (
@@ -6326,6 +6408,40 @@ def load_action_ball_dynamic_ready_runtime_binding(
             and isinstance(histogram, Mapping)
             and sum(histogram.values()) == 1
         )
+        joint_safety = receipt.get("joint_safety_telemetry")
+        fidelity = receipt.get("frame0_fidelity_telemetry")
+        prefix_evidence_valid = bool(
+            receipt.get("requested_duration_s") == 1.2
+            and receipt.get("completed_duration_s") == 1.2
+            and receipt.get("completed_policy_steps") == 60
+            and receipt.get("completed_physics_steps") == 240
+            and receipt.get("active_terminations")
+            == [
+                "time_out",
+                "base_fell_tilt",
+                "base_too_low",
+                "robot_hit_table",
+                "joint_qdes_forbidden",
+                "joint_actual_forbidden",
+            ]
+            and isinstance(joint_safety, Mapping)
+            and joint_safety.get("complete") is True
+            and joint_safety.get("current_actual_hard_edge_joint_count") == 0
+            and joint_safety.get("substep_actual_hard_edge_joint_count") == 0
+            and isinstance(fidelity, Mapping)
+            and fidelity.get("formal_thresholds_adopted") is False
+        )
+        if prefix_evidence_valid:
+            prefix_evidence = {
+                "completed_policy_steps": 60,
+                "completed_physics_steps": 240,
+                "completed_duration_s": 1.2,
+                "active_terminations": list(receipt["active_terminations"]),
+                "joint_safety_complete": True,
+                "current_actual_hard_edge_joint_count": 0,
+                "substep_actual_hard_edge_joint_count": 0,
+                "frame0_fidelity_telemetry": deepcopy(dict(fidelity)),
+            }
     if (
         receipt.get("schema_version") != 1
         or receipt.get("kind") != ACTION_BALL_DYNAMIC_READY_NOMINAL_HOLD_KIND
@@ -6340,6 +6456,7 @@ def load_action_ball_dynamic_ready_runtime_binding(
         or receipt_artifact.get("sha256") != artifact_file_sha
         or receipt_artifact.get("content_sha256") != artifact_content_sha
         or not delay_runtime_valid
+        or not prefix_evidence_valid
     ):
         raise ValueError(
             "nominal-hold receipt does not certify this exact dynamic-ready artifact"
@@ -6372,6 +6489,11 @@ def load_action_ball_dynamic_ready_runtime_binding(
                 **(
                     {"runtime_plant_identity": runtime_plant_identity}
                     if runtime_plant_identity is not None
+                    else {}
+                ),
+                **(
+                    {"nonterminal_prefix_evidence": prefix_evidence}
+                    if prefix_evidence is not None
                     else {}
                 ),
             }

@@ -86,8 +86,25 @@ class _Recorder:
 
 
 class _Physical:
-    def publish_action_epoch_post_physics(self, _stamp=None):
+    def __init__(self, epoch):
+        self._action_epoch_owner = epoch
+
+    def capture_post_physics_facts(self, _stamp=None):
         return None
+
+    def publish_action_epoch_post_physics(self, _stamp=None):
+        return self.capture_post_physics_facts(_stamp)
+
+
+class _R06:
+    def __init__(self, epoch):
+        self._action_ball_full_mdp_epoch_owner = epoch
+
+    def _close_action_ball_full_mdp_epoch_reward_rows_impl(self):
+        return None
+
+    def close_action_ball_full_mdp_epoch_reward_rows(self):
+        return self._close_action_ball_full_mdp_epoch_reward_rows_impl()
 
 
 class _R07Owner:
@@ -108,6 +125,18 @@ class _Epoch:
     def settle_d05_transaction(self, *args, **kwargs):
         return args, kwargs
 
+    def _milestone_after_business_write(self, *args, **kwargs):
+        return args, kwargs
+
+    def prepare_drain(self):
+        return (0, 1)
+
+    def materialize_drain(self, *, start, end):
+        return start, end
+
+    def acknowledge_drain(self, *, start, end):
+        return start, end
+
 
 class _PlantAdapter:
     def read(self):
@@ -125,16 +154,35 @@ class _Motion:
         return None
 
 
+class _PhysicalQuestionCore:
+    def issue_horizon_for_test(self, batch):
+        return batch
+
+    def project_horizon_for_test(self, receipt):
+        return receipt
+
+    def finalize_exact_ticks_for_test(self, receipt, **kwargs):
+        return receipt, kwargs
+
+
+class _QuestionBundle:
+    def __init__(self):
+        self._physical_owner = _PhysicalQuestionCore()
+
+    def compose_r05_candidate_bank_inside_prepare(self, _context):
+        return None
+
+
 class _R05:
     def __init__(self, epoch, motion):
         self._diagnostic_epoch_owner = epoch
         self._diagnostic_motion_owner = motion
-        self._internal_question_compose = self._compose
+        self._question_bundle = _QuestionBundle()
+        self._internal_question_compose = (
+            self._question_bundle.compose_r05_candidate_bank_inside_prepare
+        )
         self._num_envs = 4
         self._prepared_records = {}
-
-    def _compose(self, _context):
-        return None
 
     def advance_action_ball_full_mdp_rows(self):
         return None
@@ -169,9 +217,10 @@ class _R07Bundle:
 
 class _RuntimeOwner:
     def __init__(self):
-        self._physical_ball = _Physical()
         self._motion = _Motion()
         self._r07_recovery = _R07Bundle(self._motion)
+        self._physical_ball = _Physical(self.epoch_owner)
+        self._r06_landing_outcome = _R06(self.epoch_owner)
         self._r05_runtime = _R05(self.epoch_owner, self._motion)
 
     @property
@@ -183,6 +232,8 @@ class _RuntimeOwner:
         return (
             ("r05_runtime", self._r05_runtime),
             ("motion", self._motion),
+            ("physical_ball", self._physical_ball),
+            ("r06_landing_outcome", self._r06_landing_outcome),
             ("r07_recovery", self._r07_recovery),
         )
 
@@ -292,6 +343,26 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert env._full_mdp_runtime_owner._full_mdp_profile_runtime_call(
         "r07_idle_stamp", idle_snapshot
     ) == "profiled"
+    runtime = env._full_mdp_runtime_owner
+    assert vars(type(runtime._physical_ball))[
+        "publish_action_epoch_post_physics"
+    ] is runtime._physical_ball.publish_action_epoch_post_physics.__func__
+    assert vars(type(runtime._r06_landing_outcome))[
+        "close_action_ball_full_mdp_epoch_reward_rows"
+    ] is (
+        runtime._r06_landing_outcome
+        .close_action_ball_full_mdp_epoch_reward_rows.__func__
+    )
+    runtime._physical_ball.publish_action_epoch_post_physics()
+    runtime._r06_landing_outcome.close_action_ball_full_mdp_epoch_reward_rows()
+    runtime.epoch_owner._milestone_after_business_write("owner", "method")
+    core = runtime._r05_runtime._question_bundle._physical_owner
+    receipt = core.issue_horizon_for_test("batch")
+    core.project_horizon_for_test(receipt)
+    core.finalize_exact_ticks_for_test(receipt, ticks=1)
+    start, end = runtime.epoch_owner.prepare_drain()
+    runtime.epoch_owner.materialize_drain(start=start, end=end)
+    runtime.epoch_owner.acknowledge_drain(start=start, end=end)
     payload = profiler.emit_update(
         update=7,
         collection_time_s=22.0,
@@ -334,6 +405,18 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert payload["segments"]["r07_idle_epoch_snapshot"]["calls"] == 1
     assert payload["segments"]["r07_idle_support_read"]["calls"] == 0
     assert payload["segments"]["r07_idle_state_store"]["calls"] == 1
+    for segment in (
+        "physical_active_flight_capture",
+        "r06_reward_close_impl",
+        "epoch_milestone_write",
+        "d05_rk4_horizon_discovery",
+        "d05_physical_horizon_projection",
+        "d05_rk4_exact_finalize",
+        "ppo_drain_prepare",
+        "ppo_drain_materialize_d2h_decode",
+        "ppo_drain_ack",
+    ):
+        assert payload["segments"][segment]["calls"] == 1
     selected_reset = payload["segments"]["selected_reset_total"]
     assert selected_reset["calls"] == 1
     assert selected_reset["env_count"] == 2
@@ -347,6 +430,14 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
         r07.action_epoch_owner.__dict__
     )
     assert "stamp_action_epoch_idle_observation" not in r07.owner.__dict__
+    assert "capture_post_physics_facts" not in runtime._physical_ball.__dict__
+    assert (
+        "_close_action_ball_full_mdp_epoch_reward_rows_impl"
+        not in runtime._r06_landing_outcome.__dict__
+    )
+    assert "_milestone_after_business_write" not in runtime.epoch_owner.__dict__
+    assert "materialize_drain" not in runtime.epoch_owner.__dict__
+    assert "issue_horizon_for_test" not in core.__dict__
     assert "_full_mdp_profile_runtime_call" not in (
         env._full_mdp_runtime_owner.__dict__
     )
@@ -436,6 +527,22 @@ def test_partial_install_failure_restores_every_bound_method(monkeypatch):
     assert profiler.closed
     assert "step" not in env.__dict__
     assert "compute" not in env.reward_manager.__dict__
+
+
+def test_install_rejects_instance_replaced_leaf_and_restores_runtime_hook(
+    monkeypatch,
+):
+    _install_exact_module(monkeypatch)
+    env = _ExactEnv()
+    runtime = env._full_mdp_runtime_owner
+    runtime._physical_ball.capture_post_physics_facts = lambda _stamp=None: None
+    profiler = P.FullMdpUpdateProfiler(requested_updates=1)
+
+    with pytest.raises(RuntimeError, match="Physical/R06 identities"):
+        profiler.install(env)
+
+    assert profiler.closed
+    assert "_full_mdp_profile_runtime_call" not in runtime.__dict__
 
 
 def test_runner_wires_bounded_profiler_only_through_exact_opt_in():

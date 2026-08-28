@@ -18,8 +18,8 @@ import pytest
 PROJECT = Path(__file__).resolve().parents[1]
 SCRIPT = PROJECT / "scripts" / "launch_mujoco_full_mdp_successor.py"
 READY_POSE = PROJECT / (
-    "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/"
-    "take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json"
+    "configs/action_ball_n1_measured_a3p0807_20260828/"
+    "take061.local_closest_robust_feasible.dynamic_ready.v2.json"
 )
 PLANT_XML = PROJECT / (
     "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"

@@ -21,7 +21,8 @@ actor_obs_contract: null
 registry_name: null
 registry_name_2: null
 
-# Fresh A/C share one Take061 physical-ready, hold-q_des and teacher source.
+# Fresh A/C bind one Take061 action identity, while physical birth/hold-q_des
+# and the immutable teacher frame remain explicitly separate authorities.
 # The dependency-free typed PPO recipe owns every policy number and
 # parameterization; YAML only selects the already validated bootstrap
 # transformation.

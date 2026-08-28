@@ -527,6 +527,7 @@ class _SingleRowFaultQuestion:
             _draw_u01,
             candidate_identity,
             _construction_mask,
+            _previous_cell_index,
             bank_sequence,
         ) = r05._consume_internal_question_context(internal_context, self)
         rounds = r05.INTERNAL_QUESTION_REDRAW_ROUNDS
@@ -537,20 +538,61 @@ class _SingleRowFaultQuestion:
             cadence.selected_count, dtype=torch.int64, device=device
         )
         source_fault[self.bad_row] = self._SOURCE_FAULT
+        attempted = torch.ones(
+            (cadence.selected_count, 1, support),
+            dtype=torch.bool,
+            device=device,
+        )
+        attempted[self.bad_row] = False
+        attempted = torch.cat(
+            (
+                attempted,
+                torch.zeros(
+                    (cadence.selected_count, rounds - 1, support),
+                    dtype=torch.bool,
+                    device=device,
+                ),
+            ),
+            dim=1,
+        )
         chronology = r05.DeviceQuestionRoundChronology(
-            action_uid=torch.ones(prefix, dtype=torch.int64, device=device),
-            contact_tick=torch.full(
-                prefix, 12, dtype=torch.int64, device=device
-            ),
-            launch_tick=torch.full(
-                prefix, 11, dtype=torch.int64, device=device
-            ),
-            chosen_horizon_ticks=torch.ones(
-                prefix, dtype=torch.int64, device=device
-            ),
-            task_close_tick=torch.full(
-                prefix, 20, dtype=torch.int64, device=device
-            ),
+            action_uid=torch.where(
+                attempted,
+                torch.ones(prefix, dtype=torch.int64, device=device),
+                torch.full(prefix, -1, dtype=torch.int64, device=device),
+            ).contiguous(),
+            contact_tick=torch.where(
+                attempted,
+                torch.full(prefix, 12, dtype=torch.int64, device=device),
+                torch.full(prefix, -1, dtype=torch.int64, device=device),
+            ).contiguous(),
+            launch_tick=torch.where(
+                attempted,
+                torch.full(prefix, 11, dtype=torch.int64, device=device),
+                torch.full(prefix, -1, dtype=torch.int64, device=device),
+            ).contiguous(),
+            chosen_horizon_ticks=torch.where(
+                attempted,
+                torch.ones(prefix, dtype=torch.int64, device=device),
+                torch.full(prefix, -1, dtype=torch.int64, device=device),
+            ).contiguous(),
+            task_close_tick=torch.where(
+                attempted,
+                torch.full(prefix, 20, dtype=torch.int64, device=device),
+                torch.full(prefix, -1, dtype=torch.int64, device=device),
+            ).contiguous(),
+        )
+        construction_reason = torch.full(
+            prefix,
+            r05.QUESTION_CONSTRUCTION_REASON_INVALID_PRODUCER,
+            dtype=torch.int64,
+            device=device,
+        )
+        construction_reason[:, 0] = (
+            r05.QUESTION_CONSTRUCTION_REASON_ADMITTED
+        )
+        construction_reason[self.bad_row] = (
+            r05.QUESTION_CONSTRUCTION_REASON_INVALID_PRODUCER
         )
         return r05.DeviceQuestionProjection(
             cadence_receipt_identity=cadence_receipt,
@@ -562,12 +604,7 @@ class _SingleRowFaultQuestion:
             support_size=support,
             round_bank=r05.DeviceR05CandidateRoundBank(
                 candidate_identity=mutated_identity.contiguous(),
-                construction_reason=torch.full(
-                    prefix,
-                    r05.QUESTION_CONSTRUCTION_REASON_ADMITTED,
-                    dtype=torch.int64,
-                    device=device,
-                ),
+                construction_reason=construction_reason.contiguous(),
                 producer_fault=torch.zeros(
                     (cadence.selected_count, rounds),
                     dtype=torch.int64,

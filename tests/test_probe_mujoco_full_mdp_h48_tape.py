@@ -163,3 +163,23 @@ def test_cli_is_public_and_source_calls_real_full_a_boundary():
     assert M.REWARD_TERM_COUNT == len(M.reward_contract.MANAGER_NAMES)
     assert M.OBSERVATION_KIND == "action_ball_full_mdp_semantic_observation_v3"
     assert (M.ACTOR_WIDTH, M.CRITIC_WIDTH) == (215, 231)
+
+
+def test_cross_engine_probe_binds_and_restores_selected_plant(monkeypatch, tmp_path):
+    selected = tmp_path / "selected.xml"
+    observed = {}
+
+    def fake_probe(output_root, ready_pose, plant_xml):
+        observed["environment"] = M.os.environ.get("A3_PINGPONG_XML")
+        observed["arguments"] = (output_root, ready_pose, plant_xml)
+        return {"ok": True}
+
+    monkeypatch.setenv("A3_PINGPONG_XML", "/prior.xml")
+    monkeypatch.setattr(M, "_cross_engine_probe", fake_probe)
+    result = M._cross_engine_probe_with_selected_plant(
+        tmp_path / "out", tmp_path / "ready.json", selected
+    )
+    assert result == {"ok": True}
+    assert observed["environment"] == str(selected)
+    assert observed["arguments"][2] == selected
+    assert M.os.environ["A3_PINGPONG_XML"] == "/prior.xml"

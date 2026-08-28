@@ -1,5 +1,37 @@
 # 简短进度记录
 
+## 2026-08-29 — 0807 wrong-object根因、R8 robust birth与matched first-divergence
+
+- V9 Mu长期run虽名为`0807/genesisfix`，实际载入legacy MJCF `70c4fd65…36c0a`；新probe在import前绑定显式
+  root并拒绝该输入。Pod pinned双运行栈均能真实构造/训练/ACK，故没有generic installation corruption证据。
+- R7 fallback把数值正slack误叫robust；R8改为13项固定reserve可行域。Pod真实PhysX `60/240/1.2 s` prefix
+  双足接触率`1.0`、无terminal/hard-edge，最终最小hard gap=`.21966 rad`；teacher不变，physical birth到
+  teacher的约`.205 m`拍心差交给policy学习，不伪造零时长transition certificate。
+- clean diagnostic commit=`47517a4c7759e76e84f71c622a0e83f5e2f6e912`的Pod focused=`154 passed`。
+  R8双端`512×H48×31` fixed tape为0 done/timeout、initial q/dq exact、qdes最大差`5.96e-8 rad`；首20 ms
+  q/dq已差`.00973/.89084`，tick47 q/root/racket差`.13028 rad/.07872 m/.05263 m`，故剩余首差定位为
+  backend plant/controller/integrator/contact response，不是shared action decoder或关节顺序。
+- R8双端61-update profiler-off canary已在GPU1串行自然完成。Mu p50/p90=`6.962/7.018 s`、episode=
+  `135.31→138.44`、hard-edge rows=`4.96%→8.73%`、contact=`0/6,523 launch`，mimic四误差两好两坏；
+  Isaac p50/p90=`21.455/27.455 s`、episode=`97.26→107.96`、launch/contact=`461/0`，position/velocity/
+  long-axis改善而face变差。旧V9 GPU0/2、source、namespace和证据root继续只读，尚未signal/kill/hotpatch。
+  Gate G04/G05/G06保持`Partial`，短prefix与rate不授权学习、parity或部署。
+- Isaac墙钟因此明确不合格；按profiler实测round1/2/3消费者=`3,584/290/22`，下一项只压缩已解决row的
+  后续数值构造，保留三轮、18+1 RNG、reason/counter/safety、100-step RK4和最终cell语义；dense reference、
+  fixed tape与profiler-off wall是验收面，不新增success/safety Gate。
+- D05 attempted-prefix实现已通过mixed round1/2/3、全拒绝、numeric/structural fault与previous-cell两态；
+  incremental/dense完整projection和downstream prepared record逐tensor bitwise一致。隔离相关host suites
+  全绿；最多3个`nonzero`同步的GPU净收益仍待Pod profiler-off验证，未把理论numeric-row减少写成速度PASS。
+- V9 Mu长期证据口径自查纠正：先前`7,139/517,214`是generic `racket_contact_rows`，不是课程合同的
+  selected contact。首次selected在update473，最佳rate 50窗仅`36/6,926=.520%`；当前累计=
+  `188/538,008 launch=.0349%`，landing=`0/188 selected contact`，raw contact中`96.15%`是edge；
+  recent50 episode mean已塌到`105.59 tick`且launch=0。旧错误plant谱系只证明极稀疏hit曾可达后遗忘，
+  不能移签R8，也不能用generic contact冒充课程交接。
+- active V9最新只读窗（`observed_at=2026-08-28T17:49Z`）继续恶化：Mu recent50 episode mean=
+  `105.59 tick`且launch=0，mimic四误差全面变差；Isaac累计selected contact=`0/144,824 launch`，recent50
+  mimic除position近似持平外均变差。两端不符合balance→mimic→hit→landing交接；错误Mu plant使该negative
+  不能移签R8，但已足以拒绝继续等待V9自然恢复。
+
 ## 2026-08-28 — FullMDP V9同源初态与tick48重叠课程（branch diagnostic）
 
 - clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`已在Pod1发射两条fresh长期

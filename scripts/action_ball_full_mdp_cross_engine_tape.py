@@ -22,8 +22,8 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs/fixtures/action_ball_full_mdp_cross_engine_tape_v2.json"
-CONFIG_SHA256 = "415cb41a3388c8ec74024e0d8bae330334660e5d9d47f61bc90f12b40173155e"
+CONFIG = ROOT / "configs/fixtures/action_ball_full_mdp_cross_engine_tape_v3.json"
+CONFIG_SHA256 = "c4c393b5ff4e56d25a96e90a3b04af832405666e1a5196356b865a7ff156e954"
 ARRAYS_NAME = "portable_state.npz"
 SUMMARY_NAME = "summary.json"
 MASK64 = (1 << 64) - 1
@@ -94,14 +94,14 @@ def load_config() -> tuple[dict, str]:
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise CrossEngineTapeError("cross-engine tape config is not JSON") from exc
     if (
-        config.get("schema_version") != 2
-        or config.get("probe_id") != "action_ball_full_mdp_cross_engine_tape_v2"
+        config.get("schema_version") != 3
+        or config.get("probe_id") != "action_ball_full_mdp_cross_engine_tape_v3"
         or config.get("num_envs") != 512
         or config.get("num_ticks") != 48
         or config.get("action_width") != 31
         or config.get("environment_seed") != 0
         or config.get("action_tape", {}).get("generator")
-        != "splitmix64_u24_uniform_about_take061_ready_v1"
+        != "splitmix64_u24_uniform_about_pinned_dynamic_ready_v2"
         or config.get("scientific_scope")
         != {
             "diagnostic_unauthorized": True,
@@ -122,10 +122,6 @@ def load_config() -> tuple[dict, str]:
     }:
         raise CrossEngineTapeError("cross-engine initial-state contract differs")
     tape = config["action_tape"]
-    center = tape.get("center")
-    center_values = (
-        center.get("normalized_actor_action") if isinstance(center, dict) else None
-    )
     if (
         type(tape.get("seed")) is not int
         or not 0 <= tape["seed"] <= MASK64
@@ -138,26 +134,65 @@ def load_config() -> tuple[dict, str]:
         <= float(tape["delta_low"])
         < float(tape["delta_high"])
         <= 1.0
-        or not isinstance(center, dict)
-        or set(center) != {
-            "kind",
-            "dynamic_ready_artifact_sha256",
-            "normalized_actor_action",
-        }
-        or center.get("kind")
-        != "take061_dynamic_ready_normalized_actor_action_v1"
-        or center.get("dynamic_ready_artifact_sha256")
-        != "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
-        or not isinstance(center_values, list)
-        or len(center_values) != config["action_width"]
-        or any(
-            type(value) not in (int, float) or not math.isfinite(float(value))
-            for value in center_values
-        )
-        or not any(float(value) != 0.0 for value in center_values)
     ):
         raise CrossEngineTapeError("cross-engine action tape parameters differ")
+    _action_center(config)
     return config, digest
+
+
+def _action_center(config: dict) -> tuple[float, ...]:
+    """Read the tape centre from the one pinned runtime birth artifact.
+
+    The fixture owns the perturbation seed and envelope, while the dynamic-ready
+    artifact owns the actor mean.  Keeping a second copied vector in the fixture
+    made the diagnostic stale whenever the physical birth changed.
+    """
+
+    center = config.get("action_tape", {}).get("center")
+    if (
+        not isinstance(center, dict)
+        or set(center)
+        != {"kind", "dynamic_ready_artifact_path", "dynamic_ready_artifact_sha256"}
+        or center.get("kind") != "pinned_dynamic_ready_normalized_actor_action_v2"
+    ):
+        raise CrossEngineTapeError("cross-engine action centre contract differs")
+    relative = center.get("dynamic_ready_artifact_path")
+    expected_sha = center.get("dynamic_ready_artifact_sha256")
+    if (
+        type(relative) is not str
+        or not relative
+        or Path(relative).is_absolute()
+        or Path(relative).parts != tuple(part for part in relative.split("/") if part)
+        or any(part in (".", "..") for part in Path(relative).parts)
+        or type(expected_sha) is not str
+        or len(expected_sha) != 64
+    ):
+        raise CrossEngineTapeError("cross-engine action centre pin differs")
+    artifact_path = ROOT / relative
+    payload = _stable_bytes(artifact_path, "dynamic-ready action centre artifact")
+    if hashlib.sha256(payload).hexdigest() != expected_sha:
+        raise CrossEngineTapeError("dynamic-ready action centre artifact SHA differs")
+    try:
+        artifact = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CrossEngineTapeError(
+            "dynamic-ready action centre artifact is not JSON"
+        ) from exc
+    values = artifact.get("hold_candidate", {}).get("normalized_actor_action")
+    if (
+        artifact.get("schema_version") != 2
+        or artifact.get("kind") != "agibot_a3_action_dynamic_ready_candidate_v2"
+        or artifact.get("action_id") != "take_061_unit04_bh"
+        or not isinstance(values, list)
+        or len(values) != config.get("action_width")
+        or any(
+            type(value) not in (int, float) or not math.isfinite(float(value))
+            for value in values
+        )
+        or not any(float(value) != 0.0 for value in values)
+    ):
+        raise CrossEngineTapeError("dynamic-ready action centre payload differs")
+    return tuple(float(value) for value in values)
 
 
 def generate_action_bytes(config: dict) -> tuple[bytes, str]:
@@ -165,7 +200,7 @@ def generate_action_bytes(config: dict) -> tuple[bytes, str]:
     state = tape["seed"]
     low = float(tape["delta_low"])
     span = float(tape["delta_high"]) - low
-    center = tuple(float(value) for value in tape["center"]["normalized_actor_action"])
+    center = _action_center(config)
     count = config["num_ticks"] * config["num_envs"] * config["action_width"]
     payload = bytearray()
     for flat_index in range(count):
@@ -212,10 +247,7 @@ def require_live_action_center(live_action, config: dict):
 
     import numpy as np
 
-    expected = np.asarray(
-        config["action_tape"]["center"]["normalized_actor_action"],
-        dtype="<f4",
-    )
+    expected = np.asarray(_action_center(config), dtype="<f4")
     actual = np.asarray(live_action, dtype="<f4")
     if actual.shape != expected.shape or not np.array_equal(actual, expected):
         raise CrossEngineTapeError(
@@ -315,11 +347,20 @@ def write_probe_record(
     arrays: dict,
     joint_names: list[str] | tuple[str, ...],
     runtime_identity: dict,
+    source_identity_at_start: dict,
 ) -> dict:
     import numpy as np
 
     if backend not in ("isaac", "mujoco"):
         raise CrossEngineTapeError("backend must be isaac or mujoco")
+    if (
+        not isinstance(source_identity_at_start, dict)
+        or set(source_identity_at_start) != {"commit", "dirty"}
+        or type(source_identity_at_start.get("commit")) is not str
+        or not source_identity_at_start["commit"]
+        or type(source_identity_at_start.get("dirty")) is not bool
+    ):
+        raise CrossEngineTapeError("portable probe start-source identity differs")
     tape, config, config_sha, tape_sha = action_tape_numpy()
     expected = _required_shapes(config)
     if set(arrays) != set(expected) or any(
@@ -370,7 +411,7 @@ def write_probe_record(
         "promotion_authority": False,
         "physics_parity_authority": False,
         "backend": backend,
-        "source": source_identity(),
+        "source": dict(source_identity_at_start),
         "runtime_identity": runtime_identity,
         "config_sha256": config_sha,
         "action_tape_sha256": tape_sha,

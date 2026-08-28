@@ -1,0 +1,33 @@
+{
+  "action_tape": {
+    "center": {
+      "dynamic_ready_artifact_path": "configs/action_ball_n1_measured_a3p0807_20260828/take061.local_closest_robust_feasible.dynamic_ready.v2.json",
+      "dynamic_ready_artifact_sha256": "b88d93c311b439bd61296b3b3a84198200d9c6938980471071992ec52d8df18f",
+      "kind": "pinned_dynamic_ready_normalized_actor_action_v2"
+    },
+    "delta_high": 0.02,
+    "delta_low": -0.02,
+    "generator": "splitmix64_u24_uniform_about_pinned_dynamic_ready_v2",
+    "seed": 14716765212983923748
+  },
+  "action_width": 31,
+  "environment_seed": 0,
+  "initial_state": {
+    "joint_position_noise_rad": 0.0,
+    "joint_velocity_noise_rad_s": 0.0,
+    "mode": "production_full_mdp_deterministic_reset",
+    "root_xy_noise_m": 0.0,
+    "root_yaw_noise_rad": 0.0
+  },
+  "num_envs": 512,
+  "num_ticks": 48,
+  "probe_id": "action_ball_full_mdp_cross_engine_tape_v3",
+  "schema_version": 3,
+  "scientific_scope": {
+    "checkpoint_authority": false,
+    "diagnostic_unauthorized": true,
+    "physics_parity_authority": false,
+    "promotion_authority": false,
+    "training_authorized": false
+  }
+}

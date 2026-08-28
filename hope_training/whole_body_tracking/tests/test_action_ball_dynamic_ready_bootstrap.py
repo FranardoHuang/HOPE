@@ -238,6 +238,31 @@ def _upgrade_inputs_to_schema2(rows):
         "initialized_env_count": 1,
         "lag_histogram": {"0": 0, "1": 1, "2": 0},
     }
+    receipt.update(
+        {
+            "requested_duration_s": 1.2,
+            "completed_duration_s": 1.2,
+            "completed_policy_steps": 60,
+            "completed_physics_steps": 240,
+            "active_terminations": [
+                "time_out",
+                "base_fell_tilt",
+                "base_too_low",
+                "robot_hit_table",
+                "joint_qdes_forbidden",
+                "joint_actual_forbidden",
+            ],
+            "joint_safety_telemetry": {
+                "complete": True,
+                "current_actual_hard_edge_joint_count": 0,
+                "substep_actual_hard_edge_joint_count": 0,
+            },
+            "frame0_fidelity_telemetry": {
+                "formal_thresholds_adopted": False,
+                "maximum_absolute_joint_error_rad": 0.5,
+            },
+        }
+    )
     receipt = _sealed(receipt)
     rows["receipt"] = receipt
     rows["receipt_sha"] = _write_json(rows["receipt_path"], receipt)

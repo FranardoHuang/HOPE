@@ -35,13 +35,10 @@ def test_tracked_cross_engine_tape_is_recomputable():
     payload, tape_sha = M.generate_action_bytes(config)
     assert digest == M.CONFIG_SHA256
     assert len(payload) == 512 * 48 * 31 * 4
-    assert tape_sha == "beb542097a709565b8b2ab73a4a326c3812232bb8d3b4538db2f8250f3ee46df"
-    assert payload[:20].hex() == "2270683e069a0f3c5d529e3cd3c581bef3502d3f"
+    assert tape_sha == "b633da891b8a935d21cb647285d2ad1c14b7d6500dcd4d91a7056b9012d3def8"
+    assert payload[:20].hex() == "b3680cbe9944863e444c9f3e4a44273eb0d1febd"
     tape, _config, _config_sha, _tape_sha = M.action_tape_numpy()
-    center = np.asarray(
-        config["action_tape"]["center"]["normalized_actor_action"],
-        dtype=np.float32,
-    )
+    center = np.asarray(M._action_center(config), dtype=np.float32)
     assert np.max(np.abs(tape[0] - center)) <= 0.02
     np.testing.assert_array_equal(M.require_live_action_center(center, config), center)
     with pytest.raises(M.CrossEngineTapeError, match="actor mean"):
@@ -57,6 +54,7 @@ def test_comparison_separates_initial_from_post_step_difference(tmp_path):
         backend="isaac",
         arrays=_arrays(),
         joint_names=names,
+        source_identity_at_start={"commit": "isaac-test", "dirty": False},
         runtime_identity={"kind": "test"},
     )
     M.write_probe_record(
@@ -64,6 +62,7 @@ def test_comparison_separates_initial_from_post_step_difference(tmp_path):
         backend="mujoco",
         arrays=_arrays(initial_delta=0.25, tick_delta=0.5),
         joint_names=names,
+        source_identity_at_start={"commit": "mujoco-test", "dirty": False},
         runtime_identity={"kind": "test"},
     )
     output = tmp_path / "comparison.json"

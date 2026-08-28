@@ -12781,6 +12781,7 @@ class MotionCommand(CommandTerm):
         }
         if schema_version == 2:
             expected_row_keys.add("runtime_plant_identity")
+            expected_row_keys.add("nonterminal_prefix_evidence")
         expected_physical_keys = {
             "root_pos_w_m",
             "root_quat_wxyz",

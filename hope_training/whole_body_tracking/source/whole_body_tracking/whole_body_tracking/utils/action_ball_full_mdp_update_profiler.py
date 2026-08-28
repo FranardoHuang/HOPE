@@ -38,6 +38,7 @@ _SEGMENT_NAMES = (
     "scene_update",
     "post_physics_publish",
     "physical_epoch_postphysics",
+    "physical_active_flight_capture",
     "r07_idle_stamp",
     "r07_idle_epoch_snapshot",
     "r07_idle_support_read",
@@ -48,12 +49,17 @@ _SEGMENT_NAMES = (
     "termination_compute",
     "reward_compute",
     "after_reward_close",
+    "r06_reward_close_impl",
+    "epoch_milestone_write",
     "selected_reset_total",
     "command_compute",
     "after_command_to_observation_gap",
     "d05_total",
     "d05_prepare",
     "d05_question_compose",
+    "d05_rk4_horizon_discovery",
+    "d05_physical_horizon_projection",
+    "d05_rk4_exact_finalize",
     "d05_preview",
     "d05_build_transaction",
     "d05_epoch_settle",
@@ -63,6 +69,9 @@ _SEGMENT_NAMES = (
     "event_apply",
     "observation_compute",
     "recorder_callbacks",
+    "ppo_drain_prepare",
+    "ppo_drain_materialize_d2h_decode",
+    "ppo_drain_ack",
 )
 
 
@@ -92,6 +101,19 @@ def _batch_size(value: object) -> int:
     if type(size) is not int or size < 0:
         raise RuntimeError("profiled reset batch size differs")
     return size
+
+
+def _is_exact_bound_method(owner: object, method_name: str) -> bool:
+    """Reject inherited, instance-replaced, or foreign leaf callpoints."""
+
+    function = vars(type(owner)).get(method_name)
+    bound = getattr(owner, method_name, None)
+    return bool(
+        callable(function)
+        and callable(bound)
+        and getattr(bound, "__self__", None) is owner
+        and getattr(bound, "__func__", None) is function
+    )
 
 
 class FullMdpUpdateProfiler:
@@ -272,21 +294,70 @@ class FullMdpUpdateProfiler:
             components = dict(runtime_owner.component_identities)
             r05 = components.get("r05_runtime")
             motion = components.get("motion")
+            physical = components.get("physical_ball")
+            r06 = components.get("r06_landing_outcome")
             r07 = components.get("r07_recovery")
+            epoch = runtime_owner.epoch_owner
             r07_epoch = getattr(r07, "action_epoch_owner", None)
             r07_owner = getattr(r07, "owner", None)
             if (
-                r07_epoch is not runtime_owner.epoch_owner
+                r07_epoch is not epoch
                 or getattr(r07_owner, "_diagnostic_n2_bundle", None) is not r07
             ):
                 raise RuntimeError("FullMDP profiler R07 identities differ")
             if (
+                physical is None
+                or r06 is None
+                or getattr(physical, "_action_epoch_owner", None) is not epoch
+                or getattr(r06, "_action_ball_full_mdp_epoch_owner", None)
+                is not epoch
+                or not _is_exact_bound_method(
+                    physical, "capture_post_physics_facts"
+                )
+                or not _is_exact_bound_method(
+                    r06, "_close_action_ball_full_mdp_epoch_reward_rows_impl"
+                )
+                or not _is_exact_bound_method(
+                    epoch, "_milestone_after_business_write"
+                )
+                or any(
+                    not _is_exact_bound_method(epoch, method)
+                    for method in (
+                        "prepare_drain",
+                        "materialize_drain",
+                        "acknowledge_drain",
+                    )
+                )
+            ):
+                raise RuntimeError("FullMDP profiler Physical/R06 identities differ")
+            question_compose = getattr(r05, "_internal_question_compose", None)
+            question_bundle = getattr(question_compose, "__self__", None)
+            question_core = getattr(question_bundle, "_physical_owner", None)
+            compose_function = getattr(question_compose, "__func__", None)
+            if (
                 r05 is None
                 or motion is None
                 or getattr(r05, "_diagnostic_epoch_owner", None)
-                is not runtime_owner.epoch_owner
+                is not epoch
                 or getattr(r05, "_diagnostic_motion_owner", None) is not motion
-                or not callable(getattr(r05, "_internal_question_compose", None))
+                or question_bundle is None
+                or not _is_exact_bound_method(
+                    question_bundle,
+                    "compose_r05_candidate_bank_inside_prepare",
+                )
+                or compose_function
+                is not vars(type(question_bundle)).get(
+                    "compose_r05_candidate_bank_inside_prepare"
+                )
+                or question_core is None
+                or any(
+                    not _is_exact_bound_method(question_core, method)
+                    for method in (
+                        "issue_horizon_for_test",
+                        "project_horizon_for_test",
+                        "finalize_exact_ticks_for_test",
+                    )
+                )
             ):
                 raise RuntimeError("FullMDP profiler D05 identities differ")
         except (AttributeError, TypeError, ValueError) as exc:
@@ -332,8 +403,44 @@ class FullMdpUpdateProfiler:
             ),
             (unwrapped.reward_manager, "compute", "reward_compute", None),
             (unwrapped.command_manager, "compute", "command_compute", None),
+            (
+                physical,
+                "capture_post_physics_facts",
+                "physical_active_flight_capture",
+                None,
+            ),
+            (
+                r06,
+                "_close_action_ball_full_mdp_epoch_reward_rows_impl",
+                "r06_reward_close_impl",
+                None,
+            ),
+            (
+                epoch,
+                "_milestone_after_business_write",
+                "epoch_milestone_write",
+                None,
+            ),
             (r05, "_prepare_many_impl", "d05_prepare", None),
             (r05, "_internal_question_compose", "d05_question_compose", None),
+            (
+                question_core,
+                "issue_horizon_for_test",
+                "d05_rk4_horizon_discovery",
+                None,
+            ),
+            (
+                question_core,
+                "project_horizon_for_test",
+                "d05_physical_horizon_projection",
+                None,
+            ),
+            (
+                question_core,
+                "finalize_exact_ticks_for_test",
+                "d05_rk4_exact_finalize",
+                None,
+            ),
             (r05, "_preview_impl", "d05_preview", None),
             (r05, "_build_row_transaction", "d05_build_transaction", None),
             (
@@ -361,6 +468,14 @@ class FullMdpUpdateProfiler:
                 "r07_idle_state_store",
                 None,
             ),
+            (epoch, "prepare_drain", "ppo_drain_prepare", None),
+            (
+                epoch,
+                "materialize_drain",
+                "ppo_drain_materialize_d2h_decode",
+                None,
+            ),
+            (epoch, "acknowledge_drain", "ppo_drain_ack", None),
         )
 
         def d05_round_attempt_counts(token: object) -> dict[str, int]:

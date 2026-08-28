@@ -41,20 +41,18 @@ PINNED_A3_USD_SHA256 = (
     "a3cd382943ff9f70beecf88c729a6cc1c052a3c0a0cbffe91003ec319ab78140"
 )
 DYNAMIC_READY_ARTIFACT_RELATIVE = Path(
-    "configs/action_ball_n1_measured_20260803/"
-    "evidence_holdpass_robust20n_20260803/"
-    "take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json"
+    "configs/action_ball_n1_measured_a3p0807_20260828/"
+    "take061.local_closest_robust_feasible.dynamic_ready.v2.json"
 )
 DYNAMIC_READY_ARTIFACT_SHA256 = (
-    "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
+    "b88d93c311b439bd61296b3b3a84198200d9c6938980471071992ec52d8df18f"
 )
 DYNAMIC_READY_RECEIPT_RELATIVE = Path(
-    "configs/action_ball_n1_measured_20260803/"
-    "evidence_holdpass_robust20n_20260803/"
-    "take061.robust20n.nominal_hold.v1.json"
+    "configs/action_ball_n1_measured_a3p0807_20260828/"
+    "take061.local_closest_robust_feasible.nominal_hold.v1.json"
 )
 DYNAMIC_READY_RECEIPT_SHA256 = (
-    "c8b92a28203cbf9b9a4f6dee784d6cc08f3f279672d8a9fc886aa6d92b5bb19b"
+    "b861e09db8482ecec2ceb5cea2c794d1c1afb23d92295b414078ce50e9b14c6c"
 )
 LD_LIBRARY_PATH = (
     "/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/"

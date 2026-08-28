@@ -286,6 +286,7 @@ def _probe(output_root: Path, ready_pose: Path) -> dict:
 def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) -> dict:
     """Run the tracked 512xH48 tape through the real MuJoCo FullMDP env."""
 
+    source_identity_at_start = cross_engine_tape.source_identity()
     root = _fresh_root(output_root)
     runner = _load_source(RUNNER, "_hope_cross_engine_mujoco_runner")
     runtime_preimport = runner._epa48_runtime_module().verify_runtime_stack_preimport()
@@ -426,9 +427,23 @@ def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) ->
         backend="mujoco",
         arrays=arrays,
         joint_names=list(env._action_joint_names),
+        source_identity_at_start=source_identity_at_start,
         runtime_identity={
             "kind": "mujoco_full_mdp_fixed_action_runtime_v4",
             "runtime_stack": runtime,
+            "compiled_policy_clock": {
+                "physics_dt_s": float(env.physics_dt),
+                "decimation": int(env.decimation),
+                "step_dt_s": float(env.step_dt),
+            },
+            "compiled_options": {
+                "timestep_s": float(env.mj_model.opt.timestep),
+                "integrator": int(env.mj_model.opt.integrator),
+                "solver": int(env.mj_model.opt.solver),
+                "iterations": int(env.mj_model.opt.iterations),
+                "noslip_iterations": int(env.mj_model.opt.noslip_iterations),
+                "cone": int(env.mj_model.opt.cone),
+            },
             "plant_xml": str(plant_xml),
             "plant_xml_sha256": hashlib.sha256(
                 _stable_bytes(plant_xml, "MuJoCo plant XML")
@@ -439,6 +454,22 @@ def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) ->
         },
     )
     return {**summary, "record_root": str(record_root)}
+
+
+def _cross_engine_probe_with_selected_plant(
+    output_root: Path, ready_pose: Path, plant_xml: Path
+) -> dict:
+    """Give every imported MuJoCo contract the same selected root MJCF."""
+
+    prior = os.environ.get("A3_PINGPONG_XML")
+    os.environ["A3_PINGPONG_XML"] = str(plant_xml)
+    try:
+        return _cross_engine_probe(output_root, ready_pose, plant_xml)
+    finally:
+        if prior is None:
+            os.environ.pop("A3_PINGPONG_XML", None)
+        else:
+            os.environ["A3_PINGPONG_XML"] = prior
 
 def _load_record(root: Path):
     import numpy as np
@@ -542,7 +573,9 @@ def main(argv: list[str] | None = None) -> int:
             _probe(args.output_root, args.ready_pose)
             if args.mode == "probe"
             else (
-                _cross_engine_probe(args.output_root, args.ready_pose, args.plant_xml)
+                _cross_engine_probe_with_selected_plant(
+                    args.output_root, args.ready_pose, args.plant_xml
+                )
                 if args.mode == "cross-engine-probe"
                 else _compare(args.baseline_root, args.candidate_root, args.output)
             )

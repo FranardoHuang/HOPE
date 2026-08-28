@@ -328,7 +328,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
     def _bind_full_a_dynamic_ready_policy_prior(
         self, *, ready_pose_payload, ready_pose_path
     ) -> None:
-        """Close physical birth, hold q_des and Take061 teacher identity."""
+        """Bind one action identity while keeping birth and teacher distinct."""
 
         if ready_pose_payload is None:
             source = Path(ready_pose_path) if ready_pose_path is not None else Path(
@@ -359,7 +359,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             )
         ):
             raise RuntimeError(
-                "Full-A physical ready, actor prior and teacher are not one Take061 source"
+                "Full-A birth/actor prior and teacher do not bind one Take061 action"
             )
         action = self._torch.tensor(
             normalized, dtype=self.action_offset.dtype, device=self.device

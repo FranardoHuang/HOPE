@@ -2,6 +2,22 @@
 
 Status: Partial
 
+## 2026-08-29 A3P0807对象身份与R8 physical birth（仍`Partial`）
+
+V9 MuJoCo长期run实际载入legacy root `70c4fd65…36c0a`，不是合同要求的A3P0807
+`7bbda723…bcae1`；这是wrong-object实现错误，不是run name能证明的身份。新的probe在import前绑定显式root，
+legacy输入直接拒绝。pinned IsaacLab/Kit/RSL/USD与Mu runtime均能在Pod1构造、训练、写ACK，因此目前没有
+generic installation corruption证据。
+
+R8把immutable teacher frame0与physical birth分开：旧ready仅作optimizer start，13项具名reserve是固定
+可行域，不再用数值正slack冒充robust。Pod真实PhysX `60/240/1.2 s` prefix双足接触率`1.0`、无terminal或
+hard-edge、最终最小hard gap=`.21966 rad`；它只证明有限稳定出生，不证明mimic或formal安全。
+
+同一R8 `512×H48×31` tape的两端initial q/dq exact、qdes最大差`5.96e-8 rad`，但首20 ms后q/dq已差
+`.00973/.89084`，tick47 q/root/racket差`.13028 rad/.07872 m/.05263 m`。这把首差定位到backend
+plant/controller/integrator/contact response，却不提供physics parity阈值。G04保留独立plant、geometry、
+finite和真实write事实，拒绝same-writer echo、task成功或额外rollout安全Gate，故仍为`Partial`。
+
 ## 2026-08-28 V9同源初态与课程纠正（仍`Partial`）
 
 Pod1的pinned `/opt/IsaacLab-8320e0be`、Kit、sealed RSL与A3 USD已在真实训练中工作；当前没有“Pod安装
