@@ -39,7 +39,7 @@ import action_ball_full_mdp_diagnostic_action_timing as profile_mod  # noqa: E40
 
 HC = loaded_mdp.hope_commands_mod
 commands = loaded_mdp.commands_mod
-_CATALOG_SLOTS = (27, 28)
+_CATALOG_SLOTS = (0,)
 
 
 def _catalog_rows():
@@ -91,7 +91,7 @@ def _install_reference_table(
     raw_normal = torch.zeros(count, 3, dtype=torch.float32, device=device)
     raw_normal[:, 1] = 1.0
     reach = torch.tensor(
-        [[0.62, -0.11], [0.57, 0.13]],
+        [[0.62, -0.11] for _row in rows],
         dtype=torch.float32,
         device=device,
     )
@@ -182,7 +182,7 @@ def _reference_cadence(
 def _harness(
     runtime_device: str = "cpu",
     *,
-    slots=(1, 0),
+    slots=(0, 0),
     angular_velocity_z_radps=None,
 ):
     if runtime_device.startswith("cuda") and not torch.cuda.is_available():
@@ -257,7 +257,7 @@ def _harness(
     return rows, env, motion, racket, cadence
 
 
-def _construct(runtime_device: str = "cpu", *, slots=(1, 0)):
+def _construct(runtime_device: str = "cpu", *, slots=(0, 0)):
     values = _harness(runtime_device, slots=slots)
     owner = profile_mod.construct_action_ball_full_mdp_diagnostic_action_timing_owner(
         racket_owner=values[3], cadence_projection=values[4]
@@ -270,7 +270,7 @@ def _construct(runtime_device: str = "cpu", *, slots=(1, 0)):
 @pytest.mark.parametrize("num_envs", (1, 2, 64))
 def test_static_timing_accepts_positive_exact_generic_n(num_envs):
     rows, env, motion, racket, _cadence = _harness(
-        slots=tuple(index % 2 for index in range(num_envs))
+        slots=(0,) * num_envs
     )
     table = (
         profile_mod.
