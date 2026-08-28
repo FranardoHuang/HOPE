@@ -79,6 +79,7 @@ MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS = (
 )
 MEASURED_BIRTH_SHARED_LOWER_MODE = "shared_lower_teacher_nonleg"
 MEASURED_BIRTH_FULL_SEED_MODE = "full_seed"
+MEASURED_BIRTH_HOLDABLE_FULL_SEED_MODE = "full_seed_contact_free_hold_projection"
 MEASURED_BIRTH_DIRECT_FRAME0_MODE = "direct_teacher_frame0"
 MEASURED_BIRTH_PROJECTED_FRAME0_MODE = "projected_teacher_frame0_grounded"
 MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE = (
@@ -89,6 +90,10 @@ MEASURED_BIRTH_SHARED_LOWER_SEMANTICS = (
 )
 MEASURED_BIRTH_FULL_SEED_SEMANTICS = (
     "teacher_yaw_aligned_full_seed_plus_exact_teacher_reference"
+)
+MEASURED_BIRTH_HOLDABLE_FULL_SEED_SEMANTICS = (
+    "teacher_yaw_aligned_seed_plus_contact_free_hold_projection_plus_exact_"
+    "teacher_reference"
 )
 MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS = (
     "exact_measured_teacher_frame0_root_joint_physical_birth"
@@ -1919,6 +1924,75 @@ def _compose_measured_full_seed_physical_birth(
         "seed_world_yaw_alignment": dict(alignment),
     }
     return seed_q.copy(), root_pos, root_quat, provenance
+
+
+def nearest_feasible_scalar_boundary(
+    *,
+    current: float,
+    lower: float,
+    upper: float,
+    initial_step: float,
+    slack_at: Any,
+) -> tuple[float, dict[str, Any]]:
+    """Find the nearest exact feasible scalar without assuming a derivative.
+
+    ``slack_at(q) >= 0`` means feasible.  Both directions are bracketed because
+    gravity torque can change faster than the PD torque envelope; the tempting
+    ``shortfall / kp`` direction is therefore not generally correct.
+    """
+
+    if not lower < current < upper or initial_step <= 0.0:
+        raise DynamicReadyMaterializationError(
+            "scalar hold projection received an invalid search interval"
+        )
+    origin_slack = float(slack_at(current))
+    if not math.isfinite(origin_slack) or origin_slack >= 0.0:
+        raise DynamicReadyMaterializationError(
+            "scalar hold projection requires one finite infeasible origin"
+        )
+    candidates: list[tuple[float, float, int, float]] = []
+    for direction, limit in ((-1, lower), (1, upper)):
+        infeasible = current
+        step = initial_step
+        evaluations = 1
+        for _ in range(32):
+            trial = current + direction * step
+            trial = max(lower, trial) if direction < 0 else min(upper, trial)
+            slack = float(slack_at(trial))
+            evaluations += 1
+            if not math.isfinite(slack):
+                raise DynamicReadyMaterializationError(
+                    "scalar hold projection encountered non-finite exact slack"
+                )
+            if slack >= 0.0:
+                feasible = trial
+                for _ in range(60):
+                    midpoint = 0.5 * (infeasible + feasible)
+                    if float(slack_at(midpoint)) >= 0.0:
+                        feasible = midpoint
+                    else:
+                        infeasible = midpoint
+                candidates.append(
+                    (abs(feasible - current), feasible, evaluations + 60, slack)
+                )
+                break
+            infeasible = trial
+            if trial == limit:
+                break
+            step *= 2.0
+    if not candidates:
+        raise DynamicReadyMaterializationError(
+            "no contact-free hold boundary exists inside the executed qdes envelope"
+        )
+    distance, value, evaluations, bracket_slack = min(candidates)
+    return value, {
+        "origin_slack_nm": origin_slack,
+        "selected_delta_rad": value - current,
+        "selected_boundary_rad": value,
+        "absolute_delta_rad": distance,
+        "exact_slack_evaluations": evaluations,
+        "outer_feasible_bracket_slack_nm": bracket_slack,
+    }
 
 
 def _compose_measured_direct_frame0_physical_birth(
@@ -3973,6 +4047,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
     if measured_birth_mode not in (
         MEASURED_BIRTH_SHARED_LOWER_MODE,
         MEASURED_BIRTH_FULL_SEED_MODE,
+        MEASURED_BIRTH_HOLDABLE_FULL_SEED_MODE,
         MEASURED_BIRTH_DIRECT_FRAME0_MODE,
         MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
         MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE,
@@ -4001,7 +4076,11 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             robust_contact_normal_n > 0.0
             and (
                 source_kind != MEASURED_RETARGET_SOURCE_KIND
-                or measured_birth_mode != MEASURED_BIRTH_FULL_SEED_MODE
+                or measured_birth_mode
+                not in (
+                    MEASURED_BIRTH_FULL_SEED_MODE,
+                    MEASURED_BIRTH_HOLDABLE_FULL_SEED_MODE,
+                )
             )
         )
     ):
@@ -4456,22 +4535,36 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         raise DynamicReadyMaterializationError(
             "physical ready lies outside the executed qdes envelope"
         )
-    runtime_tau_lower = np.maximum(
-        -plant["effort"], plant["kp"] * (executed_qdes_lower - ready_q)
-    )
-    runtime_tau_upper = np.minimum(
-        plant["effort"], plant["kp"] * (executed_qdes_upper - ready_q)
-    )
-    runtime_tau_lower_model = np.empty_like(runtime_tau_lower)
-    runtime_tau_upper_model = np.empty_like(runtime_tau_upper)
-    runtime_tau_lower_model[model_row_for_runtime] = runtime_tau_lower
-    runtime_tau_upper_model[model_row_for_runtime] = runtime_tau_upper
-    hold_tau_lower_model = np.maximum(
-        model_tau_lower, runtime_tau_lower_model
-    )
-    hold_tau_upper_model = np.minimum(
-        model_tau_upper, runtime_tau_upper_model
-    )
+    def hold_envelope(joint_pos: np.ndarray) -> tuple[np.ndarray, ...]:
+        runtime_lower = np.maximum(
+            -plant["effort"],
+            plant["kp"] * (executed_qdes_lower - joint_pos),
+        )
+        runtime_upper = np.minimum(
+            plant["effort"],
+            plant["kp"] * (executed_qdes_upper - joint_pos),
+        )
+        runtime_lower_model = np.empty_like(runtime_lower)
+        runtime_upper_model = np.empty_like(runtime_upper)
+        runtime_lower_model[model_row_for_runtime] = runtime_lower
+        runtime_upper_model[model_row_for_runtime] = runtime_upper
+        return (
+            runtime_lower,
+            runtime_upper,
+            runtime_lower_model,
+            runtime_upper_model,
+            np.maximum(model_tau_lower, runtime_lower_model),
+            np.minimum(model_tau_upper, runtime_upper_model),
+        )
+
+    (
+        runtime_tau_lower,
+        runtime_tau_upper,
+        runtime_tau_lower_model,
+        runtime_tau_upper_model,
+        hold_tau_lower_model,
+        hold_tau_upper_model,
+    ) = hold_envelope(ready_q)
     if np.any(hold_tau_lower_model >= 0.0) or np.any(
         hold_tau_upper_model <= 0.0
     ):
@@ -4512,17 +4605,215 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         )
     else:
         assert solver is not None
-        solution = solver.solve(
-            qpos,
-            np.zeros(int(backend.model.nv), np.float64),
-            np.zeros(int(backend.model.nv), np.float64),
-            actuated,
-            hold_tau_lower_model,
-            hold_tau_upper_model,
-            np.full(int(backend.model.nv), 1.0e6, np.float64),
-            path_tangent=np.zeros(int(backend.model.nv), np.float64),
-            lp_objective=LP_OBJECTIVE,
+        project_contact_free = (
+            source_kind == MEASURED_RETARGET_SOURCE_KIND
+            and measured_birth_mode
+            == MEASURED_BIRTH_HOLDABLE_FULL_SEED_MODE
         )
+        projection_origin = ready_q.copy()
+        projection_origin_feet = (
+            backend.foot_poses(ready) if project_contact_free else None
+        )
+        projection_history: list[dict[str, Any]] = []
+        for projection_iteration in range(9):
+            solution = solver.solve(
+                qpos,
+                np.zeros(int(backend.model.nv), np.float64),
+                np.zeros(int(backend.model.nv), np.float64),
+                actuated,
+                hold_tau_lower_model,
+                hold_tau_upper_model,
+                np.full(int(backend.model.nv), 1.0e6, np.float64),
+                path_tangent=np.zeros(int(backend.model.nv), np.float64),
+                lp_objective=LP_OBJECTIVE,
+            )
+            if solution.feasible or not project_contact_free:
+                break
+            if projection_iteration == 8:
+                raise DynamicReadyMaterializationError(
+                    "full-seed contact-free hold projection did not converge in 8 exact LP corrections"
+                )
+            contact_free_runtime = contact_free_actuated_rows(
+                backend.model, np.asarray(actuated, np.int64)
+            )[model_row_for_runtime]
+            bias = static_hold_required_generalized_force(
+                backend.model, qpos
+            )
+            records = contact_free_hold_torque_shortfall(
+                joint_names=list(plant["joint_names"]),
+                contact_free=contact_free_runtime,
+                required_nm=bias[np.asarray(actuated, np.int64)][
+                    model_row_for_runtime
+                ],
+                tau_lower_nm=hold_tau_lower_model[model_row_for_runtime],
+                tau_upper_nm=hold_tau_upper_model[model_row_for_runtime],
+                kp=plant["kp"],
+                ready_q_rad=ready_q,
+                executed_qdes_lower_rad=executed_qdes_lower,
+                executed_qdes_upper_rad=executed_qdes_upper,
+                motor_effort_nm=plant["effort"],
+            )
+            if not records:
+                raise DynamicReadyMaterializationError(
+                    "full-seed hold projection cannot repair a ground-loaded or friction-cone LP refusal"
+                )
+            record = records[0]
+            joint_name = str(record["joint"])
+            joint_index = list(plant["joint_names"]).index(joint_name)
+            if (
+                joint_index in physical_birth_seed["leg_joint_indices"]
+                or record.get("binding_authority")
+                != "kp_times_available_qdes_travel"
+            ):
+                raise DynamicReadyMaterializationError(
+                    "contact-free projection refuses leg or non-PD-travel shortfalls"
+                )
+            binding_side = str(record["binding_side"])
+
+            def exact_row_slack(candidate: float) -> float:
+                trial_q = ready_q.copy()
+                trial_q[joint_index] = candidate
+                trial = grounded.ReadyState(
+                    trial_q, ready_root_pos, backend_ready_root_quat
+                )
+                trial_qpos = backend._qpos(trial)
+                trial_bias = static_hold_required_generalized_force(
+                    backend.model, trial_qpos
+                )
+                trial_lower, trial_upper = hold_envelope(trial_q)[4:]
+                required = trial_bias[np.asarray(actuated, np.int64)][
+                    model_row_for_runtime
+                ][joint_index]
+                low = trial_lower[model_row_for_runtime][joint_index]
+                high = trial_upper[model_row_for_runtime][joint_index]
+                return float(
+                    required - low
+                    if binding_side == "lower"
+                    else high - required
+                )
+
+            projected, boundary = nearest_feasible_scalar_boundary(
+                current=float(ready_q[joint_index]),
+                lower=float(
+                    np.nextafter(
+                        executed_qdes_lower[joint_index],
+                        executed_qdes_upper[joint_index],
+                    )
+                ),
+                upper=float(
+                    np.nextafter(
+                        executed_qdes_upper[joint_index],
+                        executed_qdes_lower[joint_index],
+                    )
+                ),
+                initial_step=max(
+                    abs(float(record["shortfall_nm"]))
+                    / float(record["kp"]),
+                    1.0e-5,
+                ),
+                slack_at=exact_row_slack,
+            )
+            ready_q = ready_q.copy()
+            ready_q[joint_index] = projected
+            applied = [
+                {
+                    "joint": joint_name,
+                    "joint_index": joint_index,
+                    "source_shortfall_nm": float(record["shortfall_nm"]),
+                    **boundary,
+                }
+            ]
+            projection_history.append(
+                {
+                    "iteration": projection_iteration,
+                    "attributed_shortfalls": records,
+                    "applied_corrections": applied,
+                }
+            )
+            ready = grounded.ReadyState(
+                ready_q, ready_root_pos, backend_ready_root_quat
+            )
+            qpos = backend._qpos(ready)
+            (
+                runtime_tau_lower,
+                runtime_tau_upper,
+                runtime_tau_lower_model,
+                runtime_tau_upper_model,
+                hold_tau_lower_model,
+                hold_tau_upper_model,
+            ) = hold_envelope(ready_q)
+        if project_contact_free and solution.feasible:
+            assert projection_origin_feet is not None
+            projected_feet = backend.foot_poses(ready)
+            foot_delta = max(
+                max(
+                    float(
+                        np.max(np.abs(after.position_w - before.position_w))
+                    ),
+                    float(
+                        np.max(np.abs(after.rotation_w - before.rotation_w))
+                    ),
+                )
+                for before, after in zip(
+                    projection_origin_feet, projected_feet, strict=True
+                )
+            )
+            if foot_delta > 1.0e-12:
+                raise DynamicReadyMaterializationError(
+                    "contact-free hold projection changed a support-foot pose"
+                )
+            delta = ready_q - projection_origin
+            changed = np.flatnonzero(delta != 0.0)
+            physical_birth_composition.update(
+                {
+                    "semantics": (
+                        MEASURED_BIRTH_HOLDABLE_FULL_SEED_SEMANTICS
+                    ),
+                    "seed_all_joints_exactly_preserved": False,
+                    "seed_root_and_leg_joints_exactly_preserved": True,
+                    "physical_minus_seed_joint_pos_rad": delta.tolist(),
+                    "physical_minus_teacher_joint_pos_rad": (
+                        ready_q - teacher_q
+                    ).tolist(),
+                    "contact_free_hold_projection": {
+                        "schema_version": 1,
+                        "semantics": (
+                            "iterated_exact_bias_contact_free_pd_travel_projection"
+                        ),
+                        "root_changed": False,
+                        "leg_joints_changed": False,
+                        "support_foot_pose_max_abs_delta": foot_delta,
+                        "changed_joint_indices": changed.tolist(),
+                        "changed_joint_names": [
+                            str(plant["joint_names"][index])
+                            for index in changed
+                        ],
+                        "joint_delta_rad": delta.tolist(),
+                        "maximum_abs_joint_delta_rad": float(
+                            np.max(np.abs(delta))
+                        ),
+                        "l2_joint_delta_rad": float(np.linalg.norm(delta)),
+                        "iterations": projection_history,
+                        "final_exact_ground_lp_feasible": True,
+                    },
+                }
+            )
+            static_birth_evidence = _audit_composed_physical_birth(
+                ready=ready,
+                backend=backend,
+                identity=identity,
+                source={
+                    "mode": physical_birth_composition["semantics"],
+                    "teacher_motion_sha256": motion_sha,
+                    "teacher_frame": 0,
+                    "physical_birth_seed_sha256": physical_birth_seed_sha,
+                    "seed_world_yaw_alignment": (
+                        physical_birth_composition[
+                            "seed_world_yaw_alignment"
+                        ]
+                    ),
+                },
+            )
     if not solution.feasible:
         # 人话:光说"没有解"没人能修。腰/臂/头这些关节地面根本使不上力,
         # 它们要多大力矩是唯一确定的,所以这里直接把"哪个关节、差多少 N·m、
@@ -5049,6 +5340,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=(
             MEASURED_BIRTH_SHARED_LOWER_MODE,
             MEASURED_BIRTH_FULL_SEED_MODE,
+            MEASURED_BIRTH_HOLDABLE_FULL_SEED_MODE,
             MEASURED_BIRTH_DIRECT_FRAME0_MODE,
             MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
             MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE,
@@ -5057,7 +5349,8 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "measured branch only: overlay teacher non-leg joints on the seed, "
             "or preserve the full high-margin seed as physical birth while the "
-            "measured motion remains the exact teacher, or use exact teacher "
+            "measured motion remains the exact teacher, or project only named "
+            "contact-free PD-travel hold shortfalls from that seed, or use exact teacher "
             "frame0 root/joints directly without consuming a historical seed, "
             "or ground frame0 by projecting only leg12 while preserving root, "
             "non-leg joints, and exact racket-site FK, or run the measured-"

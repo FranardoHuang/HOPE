@@ -1403,6 +1403,34 @@ def test_full_seed_birth_preserves_all_seed_joints_and_exact_teacher() -> None:
     ).tolist()
 
 
+def test_scalar_hold_projection_finds_nearest_exact_boundary_both_directions() -> None:
+    # The positive direction gets worse, like the observed 0807 waist gravity
+    # slope; the feasible boundary is therefore opposite shortfall/kp.
+    value, evidence = materializer.nearest_feasible_scalar_boundary(
+        current=0.0,
+        lower=-0.5,
+        upper=0.5,
+        initial_step=0.002,
+        slack_at=lambda q: -0.1 - 5.0 * q,
+    )
+    assert value == pytest.approx(-0.02, abs=1.0e-12)
+    assert evidence["selected_delta_rad"] == pytest.approx(-0.02)
+
+
+def test_scalar_hold_projection_refuses_when_interval_has_no_root() -> None:
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="no contact-free hold boundary",
+    ):
+        materializer.nearest_feasible_scalar_boundary(
+            current=0.0,
+            lower=-0.5,
+            upper=0.5,
+            initial_step=0.002,
+            slack_at=lambda q: -1.0,
+        )
+
+
 def test_direct_frame0_birth_preserves_exact_teacher_and_consumes_no_seed() -> None:
     teacher_q = np.linspace(-0.3, 0.3, 31, dtype=np.float64)
     teacher_root = np.asarray([-0.001, -0.002, 0.891], np.float64)
@@ -2176,6 +2204,18 @@ def test_mechanical_limit_inner_guard_and_parser_source_defaults() -> None:
     )
     assert measured.ready_source_kind == materializer.MEASURED_RETARGET_SOURCE_KIND
     assert measured.allow_mechanical_unknown_diagnostic is True
+    projected_seed = parser.parse_args(
+        [
+            *common,
+            "--ready-source-kind",
+            materializer.MEASURED_RETARGET_SOURCE_KIND,
+            "--physical-birth-composition-mode",
+            materializer.MEASURED_BIRTH_HOLDABLE_FULL_SEED_MODE,
+        ]
+    )
+    assert projected_seed.physical_birth_composition_mode == (
+        materializer.MEASURED_BIRTH_HOLDABLE_FULL_SEED_MODE
+    )
     direct = parser.parse_args(
         [
             *common,
