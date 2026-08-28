@@ -6823,6 +6823,8 @@ physical-ready projection。首版多加一次`train.py` reset被第二次reset�
 也逐格一致，故physical-birth实现错误已闭合。但v1 raw-zero tape实际命令asset-default而非fresh
 dynamic-ready actor mean，导致每8 tick全量terminal/reset；当前已改成围绕live Take061 mean的确定性tape，
 clean `3343fe90` centered record两端48 tick均无Done，却显示Isaac相对初态joint/root/racket最大漂移
-`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`。下一版record只增加真实executable
-`joint_qdes`以区分decoder与PD/plant，不新增安全Gate；该callpoint、有限学习与长期fresh尚未完成。
+`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`。v3 record显示tick0--34 actual executable
+`joint_qdes`跨端最大差仅`5.96e-8 rad`，但q从首个20 ms步已分叉；tick35后guard分叉是Isaac waist-roll
+先逼近hard-inner的后果。shared decoder错误已排除。旧nominal-hold PASS末端其实已是
+`waist_roll=-.3205 rad, dq=-1.19 rad/s`，今后只称60-tick nonterminal prefix，不称稳定hold/readiness。
 G05继续`Partial`且`diagnostic_unauthorized=true`。

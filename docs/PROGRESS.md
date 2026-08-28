@@ -79,9 +79,11 @@
   `512/512`环境每8 tick统一终止/重置。它可裁决birth，却不能代表fresh policy或teacher mimic动力学。
   centered record已在clean `3343fe90`完成：两端初态与terminal继续对齐且48 tick均无Done，但Isaac相对
   初态的joint/root/racket最大漂移为`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`；两端
-  joint差从tick0的`.0059 rad`增长到tick47的`.3480 rad`。这证明真实fresh邻域存在动力学分叉，但尚不能
-  区分action decoder与plant。诊断记录现只增加post-step 31-D executable `joint_qdes`，下一exact Pod同带先
-  裁决decoder；q_des同则再查PD effort/gain/substep，不同则修桥接。长跑继续HOLD，不新增physics/safety Gate。
+  joint差从tick0的`.0059 rad`增长到tick47的`.3480 rad`。v3 record已把decoder排除：tick0--34跨端
+  executable `joint_qdes`最大只差一个float32 ULP（`5.96e-8 rad`），但q在首个20 ms步已经分叉；tick35后
+  Isaac腰滚先接近hard-inner才让guard改写q_des，这是后果。旧nominal-hold PASS也早已记录60 tick末
+  `waist_roll=-.3205 rad, dq=-1.19 rad/s`；它只证明未终止，不是稳态。剩余差异属于backend plant/controller
+  response，不支持“Pod安装坏了”或physics parity；也不新增physics/safety Gate。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 

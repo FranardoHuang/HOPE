@@ -231,9 +231,11 @@ slice和Mu native pose adapter两处实现错误；最终
       max=`0.467 mm`，done/time-out逐格相同。但首版raw-zero tape距live Take061 actor mean最大`16.32`，
       实际测的是default-qdes阶跃且每8 tick全量reset，不能裁决fresh policy动力学。tape已改为同一tracked
       Take061 live actor mean中心的`±.02`扰动。clean `3343fe90` centered record两端均无Done，但Isaac
-      joint/root/racket相对初态最大漂移`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`；分叉已从
-      “是否存在”缩到decoder或plant。当前record只新增31-D executable `joint_qdes`，先完成同带callpoint
-      对账；若相同再查PD effort/gain/substep，若不同先修decoder。该证据闭合前不勾选或发V9长跑。
+      joint/root/racket相对初态最大漂移`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`。v3
+      `joint_qdes`对账已完成：tick0--34跨端最大只差`5.96e-8 rad`而q在首个20 ms步已分叉；tick35后
+      Isaac waist-roll先触发hard-inner guard才改写q_des。故shared decoder/action order闭合，剩余差异是
+      backend plant/controller response，不再把physics parity错设成长训Gate。旧nominal-hold PASS也降级为
+      60-tick nonterminal prefix；其末端已是`waist_roll=-.3205 rad, dq=-1.19 rad/s`，不得写成稳定ready。
 
 replacement已完成exact Pod target tests、双rate与fresh启动；fixed-tape的`cq_n_iters=12`结论沿用同一
 未变physics合同。hard-edge、paddle误差单调性、active-strata wall和短学习未来窗仍未闭合，现役namespace

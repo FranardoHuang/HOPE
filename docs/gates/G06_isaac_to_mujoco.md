@@ -2145,9 +2145,10 @@ dynamic-ready，initial joint/root/racket-position最大差为`1.5199 rad/.1778 
 两端拉向asset-default q_des，并每8 tick全量终止/reset。当前tape改为同一tracked live actor mean中心的
 `±.02`扰动。clean `3343fe90` centered exact compare中两端48 tick均无Done，但Isaac相对初态joint/root/
 racket最大漂移`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`；跨端joint max差从tick0
-`.0059 rad`增至tick47 `.3480 rad`。下一record只加入实际executable `joint_qdes`来先裁决decoder，q_des
-相同才继续比较PD effort/gain/substep/plant。不得用birth修复、同步Done或该分叉包络宣布cross-engine parity、
-训练成功、transfer或部署；G06保持`Partial`。
+`.0059 rad`增至tick47 `.3480 rad`。v3 record已把shared decoder排除：tick0--34 actual q_des最大只差
+`5.96e-8 rad`，而q在首个20 ms步已经分叉；tick35后Isaac腰滚先接近hard-inner才触发guard q_des分叉。
+剩余是backend plant/controller response，不能偷换成Pod安装损坏；也不得用birth修复、同步Done或该分叉
+包络宣布cross-engine parity、训练成功、transfer或部署。G06保持`Partial`。
 
 ### 2026-07-14 evaluator parity red-team closure (source gate only)
 

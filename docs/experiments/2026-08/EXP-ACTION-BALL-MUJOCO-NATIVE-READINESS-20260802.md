@@ -61,10 +61,12 @@ q/dq逐位相同，root/racket-position最大差降为`4.1e-7 m/.467 mm`，done/
 每8 tick全量终止/reset；它只授权birth结论。当前v2 tape改为同一tracked live actor mean中心的`±.02`
 扰动，并要求两个backend的live mean逐位匹配。clean `3343fe90` centered compare中两端48 tick均无Done，
 但Isaac相对初态的joint/root/racket最大漂移为`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`；
-跨端joint max差从tick0 `.0059 rad`增至tick47 `.3480 rad`。所以分叉真实存在，却还不能归因给Pod安装或
-engine：当前记录升版只加入实际送入关节控制器的31-D executable `joint_qdes`。若q_des已分叉，修decoder/
-bridge；若逐位相同，再比较applied effort、gain与substep/plant。该调用点闭合前不发V9长期namespace，也
-不把同步Done写成physics parity。
+跨端joint max差从tick0 `.0059 rad`增至tick47 `.3480 rad`。v3 record显示tick0--34实际executable
+`joint_qdes`最大只差一个float32 ULP（`5.96e-8 rad`），而q在首个20 ms控制步已经分叉；tick35后
+Isaac waist-roll逼近hard-inner才让guard改写q_des，这是plant分叉的后果。shared decoder错误已排除。
+旧Isaac nominal-hold PASS本身也记录60 tick末`waist_roll=-.3205 rad, dq=-1.19 rad/s`；因此它只能称
+60-tick nonterminal prefix，不能称静态hold/readiness。剩余差异属于backend plant/controller response；
+它不阻止两端分别学习balance，但不授权physics parity，也不支持“Pod安装坏了”。
 
 结构裁决不新增安全Gate：把catalog变成一个typed原子安装对象、把bootstrap归给唯一owner、把backend留作
 薄adapter；保留plant/full-key/optimizer/durable事实边界。warm-start、replay、双LR、sigma、Build4数值、

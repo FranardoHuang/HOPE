@@ -1119,6 +1119,11 @@ physical-ready拉向asset-default q_des，`512/512`行在tick`7/15/23/31/39/47`�
 Take061 actor mean作为tape center、叠加`±.02`确定性扰动，并要求两个backend的live bootstrap action与center
 逐位一致。clean `3343fe90` centered record中两端48 tick均无terminal，initial q/dq仍exact；但Isaac相对
 初态的joint/root/racket最大漂移为`.349 rad/.092 m/.170 m`，Mu只有`.012 rad/.008 m/.010 m`，跨端joint
-最大差从tick0 `.0059 rad`扩大到tick47 `.3480 rad`。这不是课程阶段结论，而是decoder/plant二选一的真实
-首差范围。下一record只增加实际executed `joint_qdes`：若不同先修动作解码/桥接；若相同再查PD effort、gain、
-substep与plant。调用点证据闭合前V9长跑继续HOLD。
+最大差从tick0 `.0059 rad`扩大到tick47 `.3480 rad`。v3 record进一步证明tick0--34实际executable
+`joint_qdes`跨端最大只差`5.96e-8 rad`，但q在首个20 ms步已经分叉；tick35后Isaac腰滚先碰hard-inner
+才让guard改写q_des。故decoder/动作顺序已排除，差异在backend plant/controller response。
+
+这也翻转旧“nominal hold PASS”的人话：原收据60 tick末已经是`waist_roll=-.3205 rad, dq=-1.19 rad/s`，
+PASS只表示尚未触发terminal，不是“保持在ready”。它足以证明tick48前没有硬终止，却不能充当balance/mimic
+readiness Gate。V9允许两端分别从该prefix学习balance并在tick48自然公开mimic；因此physics parity不再
+冒充长训启动门，同时继续禁止用该差异声称Pod安装损坏或transfer成立。
