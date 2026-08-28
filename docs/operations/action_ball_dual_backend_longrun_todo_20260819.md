@@ -107,14 +107,16 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
 4. [x] 用R8工件重跑Isaac/Mu固定tape与两条`512×H48×61` profiler-off rate canary，逐端报告balance、
    mimic、launch/contact/landing分母、hard-edge、terminal mix和p50/p90；双fixed tape与双rate均已自然完成，
    短窗不判学习成败。
-5. [ ] D05真实未决row逐轮压缩已实现并通过dense-reference projection与downstream prepared-record逐tensor
-   bitwise parity；3轮/18+1 RNG、candidate IDs、reason/counter/safety、100-step RK4与最终cell均保持。当前
-   实测round1/2/3消费者=`3,584/290/22`；Pod profiler-off净墙钟尚待测，最多3个`nonzero`同步若抵消收益就
-   撤回，不能用减少的numeric rows代签加速。首个profile尝试在step0前因诊断器试图shadow slotted Physical
-   leaf而fail-closed；已删除这3个非法leaf wrapper，保留D05总段与可合法绑定分段，失败root只读。
-6. [ ] 两端replacement均finite且无灾难性启动分布后，冻结最终clean commit和fresh namespace，再按exact
+5. [x] 逐轮未决row压缩虽通过完整bitwise parity，但Pod profile2得到D05 question累计
+   `98.72 s/12 updates`、collection中位`16.17 s`，相对旧dense profile的`18.16 s/8.05 s`严重回归；小batch、
+   多次动态`nonzero`与kernel launch破坏GPU并行，已撤回。密度`3,584/290/22`保留为事实，不再推出该算法。
+   首个非法shadow slotted Physical leaf的profiler也已删除，两个失败/归因root均只读且不作速度PASS。
+6. [ ] 保持单一mask-first compaction和三轮一次性dense compose；下一性能候选必须在dense kernel内部减少重复
+   工作或改善批处理/融合，并先用同R8 source的profile-on归因、再用profiler-off rate验收，不能增加逐轮
+   host/device控制流、缩RK4或降solver精度冒充等价优化。
+7. [ ] 两端replacement均finite且无灾难性启动分布后，冻结最终clean commit和fresh namespace，再按exact
    PID/startticks/PGID/cwd/source/namespace停止V9并发射双长期run。后续只按预注册未来窗判断自然课程交接。
-7. [ ] replacement连续ACK后做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的
+8. [ ] replacement连续ACK后做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的
    exact-only/self-echo procedural branches，并用相同artifact/固定tape/receipt反例证明语义未变。
 
 <a id="fullmdp-v9-superseded"></a>

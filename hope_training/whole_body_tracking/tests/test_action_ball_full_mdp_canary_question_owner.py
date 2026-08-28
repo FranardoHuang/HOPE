@@ -150,9 +150,6 @@ def _direct_projection(
     construction_mask: torch.Tensor | None = None,
     action_slot: torch.Tensor | None = None,
     cadence_producer_fault: torch.Tensor | None = None,
-    previous_cell_index: torch.Tensor | None = None,
-    dense_reference: bool = False,
-    draw_u01: torch.Tensor | None = None,
 ):
     harness = _bundle_harness(num_envs=num_envs)
     source_row = torch.tensor(source_rows, dtype=torch.int64)
@@ -199,14 +196,10 @@ def _direct_projection(
     # the normalized ContinuousQuestionCfg draws for v=(-3.5, 0.0, -0.3)
     # m/s and zero spin; row-binding tests must not fail earlier in the
     # production numerical solver because their arbitrary tape was singular.
-    draw = (
-        torch.tensor(
-            (0.4, 0.5, 7.0 / 15.0, 0.5, 0.5, 0.5),
-            dtype=torch.float32,
-        ).expand(k, rounds, width).contiguous()
-        if draw_u01 is None
-        else draw_u01
-    )
+    draw = torch.tensor(
+        (0.4, 0.5, 7.0 / 15.0, 0.5, 0.5, 0.5),
+        dtype=torch.float32,
+    ).expand(k, rounds, width).contiguous()
     candidate_identity = torch.arange(
         1, 1 + k * rounds * 3, dtype=torch.int64
     ).reshape(k, rounds, 3)
@@ -219,12 +212,7 @@ def _direct_projection(
 
     torch._assert_async = compatible_assert_async
     try:
-        compose = (
-            owner_mod._compose_recurring_question_projection_dense_reference_for_test
-            if dense_reference
-            else owner_mod._compose_recurring_question_projection
-        )
-        projection = compose(
+        projection = owner_mod._compose_recurring_question_projection(
             bundle=harness.bundle,
             cadence_receipt=object(),
             cadence=cadence,
@@ -238,109 +226,11 @@ def _direct_projection(
                 if construction_mask is None
                 else construction_mask
             ),
-            previous_cell_index=(
-                torch.full((k,), -1, dtype=torch.int64)
-                if previous_cell_index is None
-                else previous_cell_index
-            ),
             bank_sequence=1,
         )
     finally:
         torch._assert_async = original_assert_async
     return projection, harness, cadence
-
-
-class _DenseBundleAuthority:
-    def __init__(self, bundle):
-        self.bundle = bundle
-
-    def compose_r05_candidate_bank_inside_prepare(self, internal_context):
-        (
-            cadence_receipt,
-            cadence,
-            profile_projection,
-            device,
-            support,
-            draw_u01,
-            candidate_identity,
-            construction_mask,
-            previous_cell_index,
-            bank_sequence,
-        ) = d05_test.r05._consume_internal_question_context(
-            internal_context, self
-        )
-        return owner_mod._compose_recurring_question_projection_dense_reference_for_test(
-            bundle=self.bundle,
-            cadence_receipt=cadence_receipt,
-            cadence=cadence,
-            profile=profile_projection,
-            device=device,
-            support=support,
-            draw_u01=draw_u01,
-            candidate_identity=candidate_identity,
-            construction_mask=construction_mask,
-            previous_cell_index=previous_cell_index,
-            bank_sequence=bank_sequence,
-        )
-
-
-def _runtime_owner(question_authority, harness, *, num_envs):
-    r05 = d05_test.r05
-    device = torch.device("cpu")
-    genesis = d05_test._Genesis(device, num_envs)
-    cadence_authority = d05_test._Cadence(device, num_envs)
-    reveal = d05_test._Reveal(device)
-    children = tuple(d05_test._Child(kind) for kind in r05.CHILD_OWNER_ORDER)
-    reveal.bind_children(children)
-    reset = d05_test._Reset(device, num_envs)
-    owner = r05.DeviceR05Owner(
-        harness.profile_owner,
-        harness.profile_receipt,
-        seed=12345,
-        num_envs=num_envs,
-        journal_capacity=64,
-        max_reveal_epochs_per_drain=64,
-        genesis_authority=genesis,
-        genesis_receipt=genesis.receipt,
-        cadence_authority=cadence_authority,
-        question_authority=question_authority,
-        reveal_boundary_authority=reveal,
-        child_completion_authorities=children,
-        true_reset_authority=reset,
-    )
-    reveal.bind_owner(owner)
-    reset.bind_owner(owner)
-    return owner
-
-
-def _tensor_tree(value, prefix=""):
-    if type(value) is torch.Tensor:
-        return {prefix: value}
-    fields = getattr(type(value), "__dataclass_fields__", None)
-    if fields is not None:
-        result = {}
-        for name in fields:
-            result.update(
-                _tensor_tree(
-                    getattr(value, name),
-                    f"{prefix}.{name}" if prefix else name,
-                )
-            )
-        return result
-    if type(value) in (tuple, list):
-        result = {}
-        for index, item in enumerate(value):
-            result.update(_tensor_tree(item, f"{prefix}[{index}]"))
-        return result
-    return {}
-
-
-def _assert_tensor_tree_exact(actual, expected):
-    actual_tensors = _tensor_tree(actual)
-    expected_tensors = _tensor_tree(expected)
-    assert actual_tensors.keys() == expected_tensors.keys()
-    for name in actual_tensors:
-        assert torch.equal(actual_tensors[name], expected_tensors[name]), name
 
 
 @pytest.mark.parametrize("num_envs", (1, 2, 64))
@@ -513,7 +403,6 @@ def test_mask_first_fixed_tape_matches_dense_reference(mask_values):
         num_envs=4,
         source_rows=(0, 1, 2, 3),
         selected_env_index=torch.arange(4, dtype=torch.int64),
-        dense_reference=True,
     )
     actual, harness, _ = _direct_projection(
         num_envs=4,
@@ -525,187 +414,6 @@ def test_mask_first_fixed_tape_matches_dense_reference(mask_values):
     assert actual.round_bank.candidate_identity.shape == (4, 3, 3)
     assert actual.round_chronology.contact_tick.shape == (4, 3, 3)
     assert harness.physical_owner._pending == {}
-
-
-def test_previous_cell_changes_prefix_without_changing_fixed_tape():
-    half = torch.full((6,), 0.5, dtype=torch.float32)
-    success = torch.zeros(6, dtype=torch.float32)
-    reject = torch.ones(6, dtype=torch.float32)
-    draw = torch.stack((half, success, reject)).reshape(1, 3, 6)
-    common = dict(
-        num_envs=1,
-        source_rows=(0,),
-        selected_env_index=torch.tensor((0,), dtype=torch.int64),
-        draw_u01=draw,
-    )
-    fresh, _fresh_harness, _ = _direct_projection(
-        **common,
-        previous_cell_index=torch.tensor((-1,), dtype=torch.int64),
-    )
-    repeated, _repeat_harness, _ = _direct_projection(
-        **common,
-        previous_cell_index=torch.tensor((0,), dtype=torch.int64),
-    )
-    fresh_dense, _fresh_dense_harness, _ = _direct_projection(
-        **common,
-        previous_cell_index=torch.tensor((-1,), dtype=torch.int64),
-        dense_reference=True,
-    )
-    repeated_dense, _repeat_dense_harness, _ = _direct_projection(
-        **common,
-        previous_cell_index=torch.tensor((0,), dtype=torch.int64),
-        dense_reference=True,
-    )
-    _assert_tensor_tree_exact(fresh, fresh_dense)
-    _assert_tensor_tree_exact(repeated, repeated_dense)
-    assert fresh.round_chronology.action_uid.ne(-1).any(dim=2).tolist() == [
-        [True, False, False]
-    ]
-    assert repeated.round_chronology.action_uid.ne(-1).any(dim=2).tolist() == [
-        [True, True, False]
-    ]
-
-
-def test_mixed_prefix_dense_and_prepared_record_tensor_parity(monkeypatch):
-    questions = sys.modules[f"{_PKG}.continuous_questions"]
-    original_solver = questions.solve_proposals_device
-
-    def inject_numeric_fault(*args, **kwargs):
-        solved = original_solver(*args, **kwargs)
-        marker = args[2][:, 0].sub(-3.0).abs().lt(1.0e-6)
-        solved.producer_fault_bits.masked_fill_(marker, 1)
-        return solved
-
-    monkeypatch.setattr(
-        questions, "solve_proposals_device", inject_numeric_fault
-    )
-    success = torch.zeros(6, dtype=torch.float32)
-    reject = torch.ones(6, dtype=torch.float32)
-    numeric_fault = torch.tensor(
-        (0.6, 1.0, 1.0, 1.0, 1.0, 1.0), dtype=torch.float32
-    )
-    half = torch.full((6,), 0.5, dtype=torch.float32)
-    draw = reject.reshape(1, 1, 6).expand(8, 3, 6).clone()
-    draw[0, 0] = success
-    draw[1, 1] = success
-    draw[2, 2] = success
-    draw[4, 0] = numeric_fault
-    draw[5, 1] = numeric_fault
-    draw[7, 0] = half
-    draw[7, 1] = success
-    previous = torch.tensor(
-        (-1, -1, -1, -1, -1, -1, -1, 0), dtype=torch.int64
-    )
-    source_fault = torch.tensor(
-        (0, 0, 0, 0, 0, 0, 1 << 40, 0), dtype=torch.int64
-    )
-    common = dict(
-        num_envs=8,
-        source_rows=tuple(range(8)),
-        selected_env_index=torch.arange(8, dtype=torch.int64),
-        cadence_producer_fault=source_fault,
-        previous_cell_index=previous,
-        draw_u01=draw,
-    )
-    incremental, harness, cadence = _direct_projection(**common)
-    dense, _dense_harness, _ = _direct_projection(
-        **common, dense_reference=True
-    )
-    _assert_tensor_tree_exact(incremental, dense)
-    assert incremental.round_chronology.action_uid.ne(-1).any(dim=2).sum(
-        dim=1
-    ).tolist() == [1, 2, 3, 3, 1, 2, 0, 2]
-    assert incremental.round_bank.producer_fault.ne(0).tolist() == [
-        [False, False, False],
-        [False, False, False],
-        [False, False, False],
-        [False, False, False],
-        [True, False, False],
-        [False, True, False],
-        [False, False, False],
-        [False, False, False],
-    ]
-
-    r05 = d05_test.r05
-    original_draw = r05._draw_internal_question_uniform01
-
-    def fixed_draw(state_lo, state_hi):
-        after_lo, after_hi, _ = original_draw(state_lo, state_hi)
-        return after_lo, after_hi, draw.to(device=state_lo.device)
-
-    monkeypatch.setattr(
-        r05, "_draw_internal_question_uniform01", fixed_draw
-    )
-    incremental_owner = _runtime_owner(
-        harness.bundle, harness, num_envs=8
-    )
-    dense_authority = _DenseBundleAuthority(harness.bundle)
-    dense_owner = _runtime_owner(dense_authority, harness, num_envs=8)
-    incremental_owner._previous_cell_index.copy_(previous)
-    dense_owner._previous_cell_index.copy_(previous)
-    construction_mask = torch.ones(8, dtype=torch.bool)
-    incremental_token = incremental_owner._prepare_many_impl(
-        object(),
-        question_receipt=object(),
-        internal_question_compose=(
-            harness.bundle.compose_r05_candidate_bank_inside_prepare
-        ),
-        internal_callback_started=[False],
-        owned_projection=cadence,
-        construction_mask=construction_mask,
-        transaction_ordinal=0,
-    )
-    dense_token = dense_owner._prepare_many_impl(
-        object(),
-        question_receipt=object(),
-        internal_question_compose=(
-            dense_authority.compose_r05_candidate_bank_inside_prepare
-        ),
-        internal_callback_started=[False],
-        owned_projection=cadence,
-        construction_mask=construction_mask,
-        transaction_ordinal=0,
-    )
-    incremental_record = incremental_owner._prepared_records[
-        incremental_token
-    ]
-    dense_record = dense_owner._prepared_records[dense_token]
-    _assert_tensor_tree_exact(incremental_record, dense_record)
-    assert incremental_record.rounds_attempted.tolist() == [
-        1,
-        2,
-        3,
-        3,
-        1,
-        2,
-        1,
-        2,
-    ]
-    assert torch.equal(
-        incremental_record.draw_after - incremental_record.draw_before,
-        torch.full(
-            (8,),
-            r05.INTERNAL_QUESTION_TOTAL_DRAW_WIDTH,
-            dtype=torch.int64,
-        ),
-    )
-    assert incremental_record.candidate_identity_highwater_after == (
-        incremental_record.candidate_identity_highwater_before + 8 * 3 * 3
-    )
-    assert torch.equal(
-        incremental_record.round_candidate_identity,
-        torch.arange(1, 1 + 8 * 3 * 3, dtype=torch.int64).reshape(8, 3, 3),
-    )
-    assert incremental_record.chosen_round.tolist() == [
-        1,
-        2,
-        3,
-        -1,
-        -1,
-        -1,
-        -1,
-        2,
-    ]
 
 
 def test_mask_first_dense_parity_includes_invalid_rows_slots_and_faults():
@@ -720,9 +428,7 @@ def test_mask_first_dense_parity_includes_invalid_rows_slots_and_faults():
         action_slot=slots,
         cadence_producer_fault=faults,
     )
-    dense, _dense_harness, _ = _direct_projection(
-        **kwargs, dense_reference=True
-    )
+    dense, _dense_harness, _ = _direct_projection(**kwargs)
     actual, harness, _ = _direct_projection(
         **kwargs,
         construction_mask=mask,
@@ -798,7 +504,7 @@ def test_mask_first_numeric_owners_see_only_active_cells(monkeypatch, mask_value
         selected_env_index=torch.arange(4, dtype=torch.int64),
         construction_mask=mask,
     )
-    numeric_cells = int(mask.sum()) * 3
+    numeric_cells = int(mask.sum()) * 3 * 3
     expected_batch = [] if numeric_cells == 0 else [numeric_cells]
     assert calls == {
         "solver": expected_batch,
@@ -811,12 +517,10 @@ def test_mask_first_numeric_owners_see_only_active_cells(monkeypatch, mask_value
     assert harness.physical_owner._pending == {}
 
 
-def test_incremental_path_has_one_unresolved_compaction_per_fixed_round():
-    hot = inspect.getsource(
-        owner_mod._compose_recurring_question_projection_impl
-    )
-    assert "for round_index_value in range(rounds):" in hot
-    assert "attempted[:, round_index_value].nonzero(" in hot
+def test_mask_first_documents_its_single_dynamic_cuda_sync_boundary():
+    hot = inspect.getsource(owner_mod._compose_recurring_question_projection)
+    assert hot.count("construction_mask.nonzero(") == 1
+    assert "synchronize while materializing its dynamic output size" in hot
 
 
 @pytest.mark.parametrize(
@@ -905,8 +609,6 @@ def test_recurring_path_has_no_parallel_receipt_rng_or_fixed_tape_owner():
         "construct_n2_no_save_canary_question_owner",
     ):
         assert not hasattr(owner_mod, dead)
-    hot = inspect.getsource(
-        owner_mod._compose_recurring_question_projection_impl
-    )
+    hot = inspect.getsource(owner_mod._compose_recurring_question_projection)
     for forbidden in (".item(", ".cpu(", ".tolist(", ".numpy(", "torch.equal("):
         assert forbidden not in hot

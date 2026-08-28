@@ -16,12 +16,10 @@
   Isaac p50/p90=`21.455/27.455 s`、episode=`97.26→107.96`、launch/contact=`461/0`，position/velocity/
   long-axis改善而face变差。旧V9 GPU0/2、source、namespace和证据root继续只读，尚未signal/kill/hotpatch。
   Gate G04/G05/G06保持`Partial`，短prefix与rate不授权学习、parity或部署。
-- Isaac墙钟因此明确不合格；按profiler实测round1/2/3消费者=`3,584/290/22`，下一项只压缩已解决row的
-  后续数值构造，保留三轮、18+1 RNG、reason/counter/safety、100-step RK4和最终cell语义；dense reference、
-  fixed tape与profiler-off wall是验收面，不新增success/safety Gate。
-- D05 attempted-prefix实现已通过mixed round1/2/3、全拒绝、numeric/structural fault与previous-cell两态；
-  incremental/dense完整projection和downstream prepared record逐tensor bitwise一致。隔离相关host suites
-  全绿；最多3个`nonzero`同步的GPU净收益仍待Pod profiler-off验证，未把理论numeric-row减少写成速度PASS。
+- Isaac墙钟因此明确不合格。逐轮未决row candidate虽通过incremental/dense完整projection与prepared-record
+  bitwise parity，却在Pod profile2使D05 question累计`18.16→98.72 s/12 updates`、collection中位
+  `8.05→16.17 s`，已撤回；恢复单一mask-first seam与三轮dense compose。下一刀只在dense kernel内部找
+  复用/融合，不用numeric-row理论代签速度，也不新增success/safety Gate。
 - 新profile首试在step0前因诊断器shadow slotted Physical leaf而fail-closed；production未执行。已删除3个非法
   leaf wrapper、保留D05总段与其他合法分段，失败root只读且不计速度/学习证据。
 - V9 Mu长期证据口径自查纠正：先前`7,139/517,214`是generic `racket_contact_rows`，不是课程合同的

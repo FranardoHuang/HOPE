@@ -17,10 +17,10 @@ p50/p90=`21.455/27.455 s`、episode=`97.26→107.96`、due/playback/launch/conta
 `14,221/13,555/461/0`，position/velocity/long-axis三项mimic误差改善、face变差，actual-hard-edge
 joint-sample fraction=`5.93%→6.69%`，terminal tilt/table=`8,064/5,868`。
 后续只按episode、teacher-achieved paddle error、launch/contact/landing分母、hard-edge/terminal和wall报告；
-G05仍`Partial`。该窗证明当前Isaac iteration速度不可接受，不证明hit不可学；下一性能切片只压缩D05
-已解决row的后续数值构造，保持三轮、18+1 RNG、reason/counter/safety、100-step RK4与最终cell不变。
-该切片现已在host以dense reference关闭完整projection与prepared-record逐tensor parity；GPU profiler-off
-净墙钟仍未测，所以G05不把算法工作量上限当速度PASS。
+G05仍`Partial`。该窗证明当前Isaac iteration速度不可接受，不证明hit不可学。逐轮未决row切片虽关闭
+完整projection与prepared-record bitwise parity，Pod profile2却使D05 question累计`18.16→98.72 s/12
+updates`、collection中位`8.05→16.17 s`，故已撤回并恢复单一mask-first seam与三轮dense compose。G05不把
+算法工作量上限或语义等价当速度PASS；下一候选只能在dense kernel内部做复用/融合，并由profiler-off裁决。
 首个Pod profile在step0前因profiler非法shadow slotted Physical leaf而fail-closed；删除该诊断wrapper后
 重新验证，不改变production路径，也不把失败namespace纳入Gate证据。
 

@@ -72,21 +72,20 @@ R8 Isaac 61-update profiler-off窗为p50/p90=`21.455/27.455 s/H48`，episode mea
 `97.26→107.96`；paddle position/velocity/long-axis三项改善、face变差。全窗
 due/playback/launch/contact=`14,221/13,555/461/0`，actual-hard-edge joint-sample fraction
 `5.93%→6.69%`，tilt/table terminal=`8,064/5,868`。因此课程入口与physical launch已打开，墙钟仍是
-确定瓶颈；该短窗不裁决hit可学性。已采用的下一刀只压缩D05第1轮成功后没有消费者的第2/3轮数值行，保留
-三轮语义、18+1 draws、最终cell、reason/counter/safety与100-step RK4；dense reference与fixed tape必须
-逐项相等，profiler-off wall才可作为速度证据。
-
-该切片已落地：R05只把clone-only previous cell加入私有上下文，共享纯helper定义attempted prefix；owner仍
-预生成同一18个round draws、全3轮candidate IDs和第19个final draw，只对真实未决row调用
-solver/exact/Physical。mixed fixed tape覆盖round1/2/3成功、全拒绝、numeric/structural fault与previous
-cell两态，完整projection及下游prepared record逐tensor bitwise相等。相关isolated host suites为
-`297 passed, 11 skipped`；GPU净墙钟仍未测。
-结构合同显式只允许这一处最多3次逐轮`nonzero`，不允许compaction扩散到cadence/transaction。
+确定瓶颈；该短窗不裁决hit可学性。曾实现的逐轮未决row压缩保持了三轮、18+1 draws、最终cell、
+reason/counter/safety与100-step RK4，且mixed fixed tape的完整projection及prepared record逐tensor bitwise
+相等；但Pod真实profile否决了它：12 updates的D05 question累计从旧dense的`18.16 s`回归到`98.72 s`，
+collection中位从`8.05 s`回归到`16.17 s`。减少numeric rows不等于GPU加速；小batch、最多3次动态
+`nonzero`与额外kernel launch破坏并行。该实现已撤回，恢复单一mask-first seam与三轮一次性dense compose。
 
 Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝试给带`__slots__`、无instance
 `__dict__`的`PhysicalQuestionNumericCore`安装3个leaf wrapper。production/profile-off不受影响；修复是删除
 非法wrapper并继续由既有`d05_question_compose`总段归因，而不是放宽对象身份或改class。失败namespace只读，
 不计速度或学习证据。
+
+修正后的profile2已自然完成12/12，但只作归因：round1/2/3 attempted=`3,056/224/20`，D05 question仍占
+`98.72/187.37 s` collection，是明确回归而非收益。下一候选必须在dense kernel内部做复用/融合；先同R8
+profile定位，再用profiler-off rate裁决，拒绝逐轮host/device控制流、缩RK4或降solver精度。
 
 采用/延后/拒绝如下：
 
@@ -96,6 +95,7 @@ Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝�
   Observation V3四组三维同clock paddle residual已经覆盖当前直接目标，本轮阻塞不是不可观测状态。
 - **拒绝：**把namespace当plant身份、把Pod泛化为“安装坏了”、把teacher frame0强行teleport成出生点、把
   数值正slack冒充robust、用同writer echo或task成功新增“安全Gate”、以及用61-update短窗宣告学习成败。
+  同时拒绝已实测回归的逐轮未决row compaction；bitwise等价不是速度等价。
 
 ## 2026-08-28 current correction
 

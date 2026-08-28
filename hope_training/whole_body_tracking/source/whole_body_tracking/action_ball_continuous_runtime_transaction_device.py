@@ -127,7 +127,6 @@ MOTION_TASK_F32_FIELDS = (
 QUESTION_CONSTRUCTION_REASON_ADMITTED = -1
 QUESTION_CONSTRUCTION_REASON_MIN_REJECT = 0
 QUESTION_CONSTRUCTION_REASON_MAX_REJECT = 13
-QUESTION_CONSTRUCTION_REASON_INVALID_PRODUCER = 12
 QUESTION_CONSTRUCTION_REASON_FULL_SUFFIX_CROSSES_NEXT_REVEAL = 13
 RACKET_F32_FIELDS = (
     "racket_site_target_env_x",
@@ -661,7 +660,6 @@ def _consume_internal_question_context(
     DeviceProfileProjection,
     torch.device,
     int,
-    torch.Tensor,
     torch.Tensor,
     torch.Tensor,
     torch.Tensor,
@@ -1528,56 +1526,6 @@ def _bitwise_or_rounds(value: torch.Tensor) -> torch.Tensor:
     for round_index in range(value.shape[1]):
         result = torch.bitwise_or(result, value[:, round_index])
     return result.contiguous()
-
-
-def _derive_internal_question_attempted_prefix(
-    construction_reason: torch.Tensor,
-    producer_fault: torch.Tensor,
-    construction_mask: torch.Tensor,
-    previous_cell_index: torch.Tensor,
-    source_structural_fault: torch.Tensor,
-) -> tuple[
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-]:
-    """Derive the device-only numeric prefix shared by producer and consumer.
-
-    A clean row attempts rounds until the first round that either admits a
-    cell other than the previously selected cell or raises a numeric producer
-    fault.  Source-structural rows perform no numeric work: D05 still accounts
-    their fail-stop journal as one attempted round later in prepare.
-    """
-
-    support = construction_reason.shape[2]
-    round_feasible = construction_reason.eq(
-        QUESTION_CONSTRUCTION_REASON_ADMITTED
-    ) & construction_mask.reshape(-1, 1, 1)
-    cells = torch.arange(
-        support, dtype=torch.int64, device=construction_reason.device
-    )
-    round_eligible = round_feasible & cells.reshape(1, 1, support).ne(
-        previous_cell_index.reshape(-1, 1, 1)
-    )
-    round_success = round_eligible.any(dim=2)
-    numeric_round_fault = producer_fault.ne(0)
-    event = round_success | numeric_round_fault
-    prior_event = (
-        torch.cumsum(event.to(torch.int64), dim=1)
-        - event.to(torch.int64)
-    ).ne(0)
-    attempted = (
-        construction_mask.reshape(-1, 1)
-        & source_structural_fault.eq(0).reshape(-1, 1)
-        & ~prior_event
-    ).contiguous()
-    return (
-        round_feasible.contiguous(),
-        round_eligible.contiguous(),
-        round_success.contiguous(),
-        attempted,
-    )
 
 
 def _u64_mul_u31_high(
@@ -2893,9 +2841,6 @@ class DeviceR05Owner:
                 candidate_identity_highwater_before + candidate_count
             )
             bank_sequence = transaction_ordinal + 1
-            previous_cell_for_question = self._previous_cell_index[
-                index
-            ].clone()
             with _ACTIVE_INTERNAL_QUESTION_CONTEXTS_LOCK:
                 _ACTIVE_INTERNAL_QUESTION_CONTEXTS[internal_context] = (
                     self._question_authority,
@@ -2907,7 +2852,6 @@ class DeviceR05Owner:
                     question_draw_u01,
                     candidate_identity,
                     construction_mask.clone(),
-                    previous_cell_for_question,
                     bank_sequence,
                 )
             callback_failed = False
@@ -3076,6 +3020,11 @@ class DeviceR05Owner:
         structural_round_fault = torch.zeros(
             (k, rounds), dtype=torch.int64, device=self._device
         )
+        structural_round_fault = torch.bitwise_or(
+            structural_round_fault,
+            round_bank.producer_fault.lt(0).to(torch.int64)
+            * PRODUCER_FAULT_QUESTION_CHRONOLOGY,
+        ).contiguous()
         chronology = None
         if internal_round_bank:
             chronology = DeviceQuestionRoundChronology(
@@ -3110,75 +3059,9 @@ class DeviceR05Owner:
             candidate_identity_fault = round_bank.candidate_identity.ne(
                 expected_candidate_identity
             ).any(dim=2)
-            previous = self._previous_cell_index[index].clone()
-            (
-                _prefix_round_feasible,
-                _prefix_round_eligible,
-                _prefix_round_success,
-                numeric_attempted_round,
-            ) = _derive_internal_question_attempted_prefix(
-                round_bank.construction_reason,
-                round_bank.producer_fault,
-                construction_mask,
-                previous,
-                source_structural_fault_bits,
-            )
-            unattempted_round = ~numeric_attempted_round
-            suffix_contract_fault = (
-                candidate_identity_fault
-                | round_bank.construction_reason.ne(
-                    QUESTION_CONSTRUCTION_REASON_INVALID_PRODUCER
-                ).any(dim=2)
-                | round_bank.producer_fault.ne(0)
-                | round_bank.motion_task_f32.reshape(
-                    k, rounds, -1
-                ).ne(0).any(dim=2)
-                | round_bank.racket_task_f32.reshape(
-                    k, rounds, -1
-                ).ne(0).any(dim=2)
-                | round_bank.physical_state_f32.reshape(
-                    k, rounds, -1
-                ).ne(0).any(dim=2)
-                | torch.stack(
-                    tuple(
-                        getattr(chronology, name).ne(-1).any(dim=2)
-                        for name in DeviceQuestionRoundChronology.__dataclass_fields__
-                    ),
-                    dim=2,
-                ).any(dim=2)
-            ) & unattempted_round
-            attempted_contract_fault = (
-                candidate_identity_fault | round_bank.producer_fault.lt(0)
-            ) & numeric_attempted_round
             structural_round_fault = torch.bitwise_or(
                 structural_round_fault,
-                attempted_contract_fault.to(torch.int64)
-                * PRODUCER_FAULT_QUESTION_CHRONOLOGY,
-            ).contiguous()
-            prefix_terminal_round = (
-                numeric_attempted_round.sum(dim=1, dtype=torch.int64)
-                .clamp(min=1)
-                .sub(1)
-            )
-            suffix_fault_at_terminal = (
-                suffix_contract_fault.any(dim=1).reshape(k, 1)
-                & torch.arange(
-                    rounds, dtype=torch.int64, device=self._device
-                ).reshape(1, rounds).eq(prefix_terminal_round.reshape(k, 1))
-            )
-            structural_round_fault = torch.bitwise_or(
-                structural_round_fault,
-                suffix_fault_at_terminal.to(torch.int64)
-                * PRODUCER_FAULT_QUESTION_CHRONOLOGY,
-            ).contiguous()
-        else:
-            previous = self._previous_cell_index[index].clone()
-            numeric_attempted_round = torch.ones(
-                (k, 1), dtype=torch.bool, device=self._device
-            )
-            structural_round_fault = torch.bitwise_or(
-                structural_round_fault,
-                round_bank.producer_fault.lt(0).to(torch.int64)
+                candidate_identity_fault.to(torch.int64)
                 * PRODUCER_FAULT_QUESTION_CHRONOLOGY,
             ).contiguous()
         if chronology is not None:
@@ -3191,7 +3074,7 @@ class DeviceR05Owner:
                 | chronology.chosen_horizon_ticks.ne(
                     chronology.contact_tick - chronology.launch_tick
                 )
-            ).any(dim=2) & numeric_attempted_round
+            ).any(dim=2)
             structural_round_fault = torch.bitwise_or(
                 structural_round_fault,
                 chronology_fault.to(torch.int64)
@@ -3214,7 +3097,7 @@ class DeviceR05Owner:
                 task_close_invalid
                 | (suffix_reason & ~suffix_crosses)
                 | (admitted & suffix_crosses)
-            ).any(dim=2) & numeric_attempted_round
+            ).any(dim=2)
             structural_round_fault = torch.bitwise_or(
                 structural_round_fault,
                 chronology_reason_fault.to(torch.int64)
@@ -3227,7 +3110,7 @@ class DeviceR05Owner:
             | round_bank.construction_reason.gt(
                 QUESTION_CONSTRUCTION_REASON_MAX_REJECT
             )
-        ).any(dim=2) & numeric_attempted_round
+        ).any(dim=2)
         structural_round_fault = torch.bitwise_or(
             structural_round_fault,
             reason_domain_fault.to(torch.int64)
@@ -3314,25 +3197,9 @@ class DeviceR05Owner:
             raise DeviceR05ConflictError(
                 "internal round bank cannot carry legacy digest identity"
             )
-        if internal_round_bank:
-            round_feasible = _prefix_round_feasible
-            round_eligible = _prefix_round_eligible
-            round_success = _prefix_round_success
-        else:
-            round_feasible = round_bank.construction_reason.eq(
-                QUESTION_CONSTRUCTION_REASON_ADMITTED
-            ) & construction_mask.reshape(k, 1, 1)
-            cells = torch.arange(
-                self._profile.support_size,
-                dtype=torch.int64,
-                device=self._device,
-            )
-            round_eligible = torch.logical_and(
-                round_feasible,
-                cells.reshape(1, 1, support)
-                != previous.reshape(k, 1, 1),
-            )
-            round_success = round_eligible.any(dim=2)
+        round_feasible = round_bank.construction_reason.eq(
+            QUESTION_CONSTRUCTION_REASON_ADMITTED
+        ) & construction_mask.reshape(k, 1, 1)
         # ActionEpoch owns the only row-wise chronology and settlement log.
         slot = -1
 
@@ -3340,11 +3207,21 @@ class DeviceR05Owner:
         before_hi = question_rng_before_hi
         draw_before = self._draw_count[index].clone()
         generation_before = self._target_generation[index].clone()
+        previous = self._previous_cell_index[index].clone()
+        cells = torch.arange(
+            self._profile.support_size,
+            dtype=torch.int64,
+            device=self._device,
+        )
+        round_eligible = torch.logical_and(
+            round_feasible,
+            cells.reshape(1, 1, support)
+            != previous.reshape(k, 1, 1),
+        )
         round_eligible_count = torch.sum(
             round_eligible, dim=2, dtype=torch.int64
         )
-        if not internal_round_bank:
-            round_success = round_eligible_count.gt(0)
+        round_success = round_eligible_count.gt(0)
         numeric_round_fault = round_bank.producer_fault.ne(0)
         event = round_success | numeric_round_fault
         has_event = event.any(dim=1)

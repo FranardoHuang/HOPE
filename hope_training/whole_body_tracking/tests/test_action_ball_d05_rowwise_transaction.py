@@ -829,23 +829,19 @@ def test_hot_sources_allow_only_the_profiled_question_compaction_boundary():
     question_source = question_path.read_text(encoding="utf-8")
 
     # Cadence and transaction ownership remain static full-row surfaces.  The
-    # sole exception is the question composer's explicit unresolved-prefix
-    # seam.  Production may compact once per each of the three fixed redraw
-    # rounds; the dense-reference branch has one separate test-only compaction.
-    # These synchronization costs remain visible to the bounded real-run
-    # profiler and may not spread into cadence or transaction ownership.
+    # sole exception is the question composer's explicit mask-first seam: one
+    # dynamic row list is allowed to avoid sending all 4096 rows through the
+    # much larger LM/exact/Physical numeric stack.  Its synchronization cost is
+    # intentionally visible to the bounded real-run profiler and no second
+    # compaction may spread into the hot path unnoticed.
     for source in (transaction_source, cadence_source):
         for forbidden in ("masked_select", "torch.nonzero", ".nonzero("):
             assert forbidden not in source
     assert "masked_select" not in question_source
     assert "torch.nonzero" not in question_source
-    assert question_source.count(".nonzero(") == 2
+    assert question_source.count(".nonzero(") == 1
     assert (
-        "dense_rows = clean_row.nonzero(as_tuple=False).reshape(-1)"
-        in question_source
-    )
-    assert (
-        "round_rows = attempted[:, round_index_value].nonzero("
+        "active_index = construction_mask.nonzero(as_tuple=False).reshape(-1)"
         in question_source
     )
 
