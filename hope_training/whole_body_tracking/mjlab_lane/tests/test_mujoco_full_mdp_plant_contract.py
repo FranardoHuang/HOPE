@@ -5,6 +5,7 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
+import tempfile
 
 import pytest
 
@@ -213,10 +214,13 @@ def test_geometry_source_is_exact_checkout_only(tmp_path):
     assert module.verify_geometry_source(expected) == (
         module.TRUSTED_GEOMETRY_SOURCE_SHA256
     )
-    hardlink = tmp_path / "geometry.py"
-    os.link(expected, hardlink)
-    with pytest.raises(module.PlantContractError, match="path differs"):
-        module.verify_geometry_source(hardlink)
+    with tempfile.TemporaryDirectory(
+        prefix="fullmdp-geometry-hardlink-", dir=expected.parent
+    ) as raw:
+        hardlink = Path(raw) / "geometry.py"
+        os.link(expected, hardlink)
+        with pytest.raises(module.PlantContractError, match="path differs"):
+            module.verify_geometry_source(hardlink)
 
 
 def test_manifest_hardlink_matches_canonical_policy_but_symlink_and_drift_fail(
@@ -224,11 +228,14 @@ def test_manifest_hardlink_matches_canonical_policy_but_symlink_and_drift_fail(
 ):
     module = _load()
     source = module.expected_manifest_path()
-    hardlink = tmp_path / source.name
-    os.link(source, hardlink)
-    assert module.load_pinned_manifest(hardlink)["root_filename"] == (
-        "a3p_pingpong_0807.xml"
-    )
+    with tempfile.TemporaryDirectory(
+        prefix="fullmdp-manifest-hardlink-", dir=source.parent
+    ) as raw:
+        hardlink = Path(raw) / source.name
+        os.link(source, hardlink)
+        assert module.load_pinned_manifest(hardlink)["root_filename"] == (
+            "a3p_pingpong_0807.xml"
+        )
 
     symlink = tmp_path / "manifest-link.json"
     symlink.symlink_to(source)

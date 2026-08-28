@@ -18,7 +18,7 @@ import torch
 LANE = Path(__file__).resolve().parents[1]
 PLANT_XML = LANE.parents[2] / (
     "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
-    "a3_pingpong/a3_pingpong.xml"
+    "a3p_pingpong_0807/a3p_pingpong_0807.xml"
 )
 SOURCE_COMMIT = "a" * 40
 RUN_NAMESPACE = "mujoco-full-a-runner-v2-test"

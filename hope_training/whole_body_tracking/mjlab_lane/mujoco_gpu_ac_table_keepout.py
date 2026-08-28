@@ -51,6 +51,19 @@ def _load_table_scene():
     return module
 
 
+def _load_full_mdp_plant_contract():
+    path = _HERE / "mujoco_full_mdp_plant_contract.py"
+    spec = importlib.util.spec_from_file_location(
+        "_mujoco_gpu_ac_full_mdp_plant_contract", path
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load FullMDP plant contract from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _quat_rotate_wxyz(quat: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
     scalar = quat[..., :1]
     xyz = quat[..., 1:]
@@ -609,12 +622,21 @@ class DeviceExactTableKeepout:
         scene = _load_table_scene()
         rows = scene.action_ball_policy_obstacle_geometry()
         contract = scene.action_ball_policy_geometry_contract(rows)
+        plant_contract = _load_full_mdp_plant_contract()
+        source_plant = plant_contract.expected_plant_model_identity()["source_plant"]
+        registered_plant = {
+            "root_mjcf_sha256": source_plant["root_mjcf_sha256"],
+            "identity_manifest_path": plant_contract.expected_manifest_path(),
+            "identity_manifest_sha256": source_plant["manifest_sha256"],
+            "portable_identity_sha256": source_plant["portable_identity_sha256"],
+        }
         authority = _authority.ExactRobotTableGuard(
             mujoco,
             model,
             contract,
             mjcf_path=mjcf_path,
             body_name_prefix="robot/",
+            registered_plant=registered_plant,
         )
         identity = authority.identity_receipt
         identity_keys = (

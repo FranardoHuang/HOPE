@@ -96,16 +96,14 @@ EXPECTED_ISAAC_ACTION_LATCH_SEMANTIC_AST_SHA256 = (
 CANONICAL_MJCF = (
     REPO_ROOT
     / "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
-    "a3p_pingpong_0807/a3p_pingpong_0807.xml"
+    "a3_pingpong/a3_pingpong.xml"
 )
 EXPECTED_CANONICAL_MJCF_SHA256 = (
-    "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1"
+    "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a"
 )
-MUJOCO_IDENTITY_MANIFEST = (
-    REPO_ROOT / "configs/a3p_p1_0807_mujoco_identity_v1_20260828.json"
-)
+MUJOCO_IDENTITY_MANIFEST = REPO_ROOT / "configs/a3_mujoco_identity_v2_20260803.json"
 EXPECTED_MUJOCO_IDENTITY_MANIFEST_SHA256 = (
-    "9bc32cff7fe125284dd93a811d773bcf88e35f98582851aa3cd60b5d6f4c3c6a"
+    "b8fc5deaaff8d213c2d077a0e7892b30d7f5a6c77c3d06dc029e3a2616d54d91"
 )
 CANONICAL_MUJOCO_IDENTITY_PY = (
     REPO_ROOT / "hope_training/whole_body_tracking/scripts/canonical_mujoco_identity.py"
@@ -114,7 +112,7 @@ EXPECTED_CANONICAL_MUJOCO_IDENTITY_PY_SHA256 = (
     "e43609988a371a76e5daab7545c608338ba159100c52cb50dc61b12a872fe2e1"
 )
 EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256 = (
-    "03e2590916f781e581c4a0ff6dbe305ab3a2471685b816cc32a015400816deba"
+    "472219ae346d9217b7d1af860d462a18d6ed8507c5cbb9c0f1ddcd6f964dfd7a"
 )
 COLLISION_PROXY_ARTIFACT = (
     REPO_ROOT
@@ -790,19 +788,60 @@ def _load_canonical_identity_module() -> Any:
     return module
 
 
-@lru_cache(maxsize=2)
+_REGISTERED_PLANT_KEYS = {
+    "root_mjcf_sha256",
+    "identity_manifest_path",
+    "identity_manifest_sha256",
+    "portable_identity_sha256",
+}
+
+
+def _registered_plant(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Normalize one atomic plant-generation join for the live guard."""
+
+    row = (
+        {
+            "root_mjcf_sha256": EXPECTED_CANONICAL_MJCF_SHA256,
+            "identity_manifest_path": MUJOCO_IDENTITY_MANIFEST,
+            "identity_manifest_sha256": EXPECTED_MUJOCO_IDENTITY_MANIFEST_SHA256,
+            "portable_identity_sha256": EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256,
+        }
+        if value is None
+        else dict(value)
+    )
+    if set(row) != _REGISTERED_PLANT_KEYS:
+        raise TableTerminationContractError(
+            "registered MuJoCo plant identity surface differs"
+        )
+    for key in _REGISTERED_PLANT_KEYS - {"identity_manifest_path"}:
+        if (
+            type(row[key]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", row[key]) is None
+        ):
+            raise TableTerminationContractError(
+                "registered MuJoCo plant identity digest differs"
+            )
+    row["identity_manifest_path"] = Path(row["identity_manifest_path"])
+    return row
+
+
+@lru_cache(maxsize=4)
 def _verified_registered_owner_frames(
-    mujoco: Any, selected_root: str
+    mujoco: Any,
+    selected_root: str,
+    identity_manifest_path: str,
+    identity_manifest_sha256: str,
+    portable_identity_sha256: str,
 ) -> tuple[dict[str, Any], str, str]:
     """Compile the registered base once per process/toolchain and retain no model."""
 
     identity_module = _load_canonical_identity_module()
     verified = identity_module.verify_exact_mujoco_identity(
         mjcf_path=selected_root,
-        expected_manifest_path=MUJOCO_IDENTITY_MANIFEST,
-        trusted_expected_manifest_sha256=EXPECTED_MUJOCO_IDENTITY_MANIFEST_SHA256,
+        expected_manifest_path=identity_manifest_path,
+        trusted_expected_manifest_sha256=identity_manifest_sha256,
     )
-    if verified.portable_identity_sha256 != EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256:
+    if verified.portable_identity_sha256 != portable_identity_sha256:
         raise TableTerminationContractError(
             "portable MuJoCo plant identity SHA-256 drifted"
         )
@@ -820,21 +859,25 @@ def bind_pre_registered_owner_frames(
     mjcf_path: Path | str,
     *,
     body_name_prefix: str = "",
+    registered_plant: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind the live augmented scene to the registered base plant and OBB frames."""
 
     selected_root = Path(mjcf_path).expanduser().resolve()
+    registered = _registered_plant(registered_plant)
     # A one-shot run snapshots the plant into a fresh namespace.  Its absolute
     # path is not plant identity; exact root bytes, portable source closure and
     # live owner-local frames below are the three independent authorities.
     if (
         _sha256_file(selected_root, "canonical root MJCF")
-        != EXPECTED_CANONICAL_MJCF_SHA256
+        != registered["root_mjcf_sha256"]
     ):
         raise TableTerminationContractError("selected root MJCF SHA-256 drifted")
     if (
-        _sha256_file(MUJOCO_IDENTITY_MANIFEST, "MuJoCo identity manifest")
-        != EXPECTED_MUJOCO_IDENTITY_MANIFEST_SHA256
+        _sha256_file(
+            registered["identity_manifest_path"], "MuJoCo identity manifest"
+        )
+        != registered["identity_manifest_sha256"]
     ):
         raise TableTerminationContractError("MuJoCo identity manifest SHA-256 drifted")
     try:
@@ -845,6 +888,9 @@ def bind_pre_registered_owner_frames(
         ) = _verified_registered_owner_frames(
             mujoco,
             str(selected_root),
+            str(registered["identity_manifest_path"]),
+            registered["identity_manifest_sha256"],
+            registered["portable_identity_sha256"],
         )
     except TableTerminationContractError:
         raise
@@ -858,9 +904,9 @@ def bind_pre_registered_owner_frames(
     _assert_owner_frame_contract_equal(expected_frames, observed_frames)
     return {
         "root_mjcf_path": str(selected_root),
-        "root_mjcf_sha256": EXPECTED_CANONICAL_MJCF_SHA256,
-        "identity_manifest_path": str(MUJOCO_IDENTITY_MANIFEST),
-        "identity_manifest_sha256": EXPECTED_MUJOCO_IDENTITY_MANIFEST_SHA256,
+        "root_mjcf_sha256": registered["root_mjcf_sha256"],
+        "identity_manifest_path": str(registered["identity_manifest_path"]),
+        "identity_manifest_sha256": registered["identity_manifest_sha256"],
         "identity_verifier_path": str(CANONICAL_MUJOCO_IDENTITY_PY),
         "identity_verifier_sha256": EXPECTED_CANONICAL_MUJOCO_IDENTITY_PY_SHA256,
         "portable_identity_sha256": portable_identity_sha256,
@@ -1358,6 +1404,7 @@ class ExactRobotTableGuard:
         *,
         mjcf_path: Path | str,
         body_name_prefix: str = "",
+        registered_plant: Mapping[str, Any] | None = None,
     ):
         self.source_receipt = verify_isaac_source_authority()
         self.identity_receipt = bind_pre_registered_owner_frames(
@@ -1365,6 +1412,7 @@ class ExactRobotTableGuard:
             model,
             mjcf_path,
             body_name_prefix=body_name_prefix,
+            registered_plant=registered_plant,
         )
         self.components = load_collision_components()
         self.aabb_lo, self.aabb_hi = _validated_table_aabbs(geometry_contract)

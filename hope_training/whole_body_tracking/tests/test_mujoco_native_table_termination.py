@@ -549,7 +549,13 @@ def test_same_bytes_fresh_snapshot_binds_registered_owner_frames(
     expected_frames = term._owner_frame_contract(_FakeMujoco, model)
     seen = {}
 
-    def verified(mujoco, selected_root):
+    def verified(
+        mujoco,
+        selected_root,
+        _manifest_path,
+        _manifest_sha256,
+        _portable_sha256,
+    ):
         seen["mujoco"] = mujoco
         seen["selected_root"] = selected_root
         return expected_frames, "portable", "verification"
@@ -581,7 +587,11 @@ def test_attached_robot_namespace_binds_same_registered_owner_frames(
     monkeypatch.setattr(
         term,
         "_verified_registered_owner_frames",
-        lambda mujoco, selected_root: (expected_frames, "portable", "verification"),
+        lambda mujoco, selected_root, *_identity: (
+            expected_frames,
+            "portable",
+            "verification",
+        ),
     )
     receipt = term.bind_pre_registered_owner_frames(
         _FakeMujoco,

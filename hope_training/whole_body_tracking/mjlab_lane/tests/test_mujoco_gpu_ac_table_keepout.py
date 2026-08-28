@@ -159,9 +159,13 @@ def test_construction_exposes_only_path_free_plant_receipt(monkeypatch):
         aabb_hi=np.ones((1, 3), dtype=np.float64),
         racket_body_index=31,
     )
-    monkeypatch.setattr(
-        keepout._authority, "ExactRobotTableGuard", lambda *_args, **_kwargs: authority
-    )
+    captured = {}
+
+    def fake_guard(*_args, **kwargs):
+        captured.update(kwargs)
+        return authority
+
+    monkeypatch.setattr(keepout._authority, "ExactRobotTableGuard", fake_guard)
     monkeypatch.setattr(
         keepout,
         "_load_table_scene",
@@ -176,6 +180,13 @@ def test_construction_exposes_only_path_free_plant_receipt(monkeypatch):
     )
     assert dict(bound.plant_identity_receipt) == digests
     assert all("path" not in key for key in bound.plant_identity_receipt)
+    registered = captured["registered_plant"]
+    assert registered["root_mjcf_sha256"] == (
+        "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1"
+    )
+    assert registered["identity_manifest_path"].name == (
+        "a3p_p1_0807_mujoco_identity_v1_20260828.json"
+    )
 
 
 def _empty_corner_discriminator(device: str, dtype):
