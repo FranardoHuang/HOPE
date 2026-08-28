@@ -1,15 +1,16 @@
 # EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822
 
-> 问题：为什么两条 [FullMDP](../../DEFINITIONS.md#fullmdp-v6-candidate) H48 长跑已经学会站立，却没有进入可学习的 mimic/击球链；怎样用最少状态和单一真源修复后 fresh 重启？
+> 问题：为什么两条 [FullMDP](../../DEFINITIONS.md#fullmdp-v9-candidate) H48 长跑没有形成可学习的
+> balance→mimic→hit链；怎样用最少状态和单一真源修复后fresh重启？
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`V6 stopped negative frozen / V7 dual-fresh running / no authorized formal run`
+> 状态：`V8 dual-fresh read-only / V9 same-source overlap validating / no authorized formal run`
 > 证据边界：`diagnostic_unauthorized=true`；本记录不授权 resume、promotion、export、部署或真机。
 
-> **阅读边界（2026-08-25）：**§1--§9保留课程故障发现、V4/V5运行和被替换实现史，不是现役执行真源；
-> 当前契约与未闭合项只认§10。尤其是旧文中“hidden都用reset-ready”“11项row fault”和“V2 203/219
-> 唯一现役合同”均已supersede，不能反向覆盖PPO V5、Observation V3或当前证据边界。
+> **阅读边界（2026-08-28）：**§1--§10保留课程故障发现、旧运行和被替换实现史；当前结论只认§11。
+> 尤其是旧文中tick295首次曝光、混源Take058/Take061和“V8只需更多step”均已supersede，不能反向覆盖
+> V9同源ready→teacher、tick48重叠课程或当前证据边界。
 
 ## 1. 旧 live 事实与裁决
 
@@ -955,3 +956,73 @@ replacement ready后只按exact PID/startticks/PGID/cwd/source/namespace停止V7
 mean length仍约百步、未到首个due tick295，因此launch/contact/paddle-error/landing当前均是零eligible的
 `未测`，符合balance起点，不能提前写成hit negative。下一结论只看预注册未来窗中的survival-to-due、
 paddle真实误差与contact/landing分母。
+
+## 11. 2026-08-28 current：V8混源反例与V9自然重叠修复
+
+### 11.1 不是“Pod装坏了”，而是可执行训练配方与已验证范围被写错
+
+V8两条进程继续保持只读；合计已观察`941,116`次physical launch而selected contact仍为0。这个结果不能
+再归因为step不足。源码、artifact与runtime input交叉审计发现：teacher动作、physical-ready、dynamic-ready
+artifact和最终YAML override并非同一动作/同一owner，Take058 teacher与Take061 ready被混入一个N1谱系；
+同时bootstrap构造出的ready→frame0 bridge会被legacy override再次覆盖。另一个独立错误是catalog attachment
+只安装motion/family/phase/sign，遗漏`clip_names_per_clip`，造成motion catalog `N=1`而action identity
+catalog `N=0`。两处都是实现/结构错误，不是课程目标本身有问题。
+
+当前固定Isaac执行边界`/opt/IsaacLab-8320e0be`、Kit Python、sealed RSL wheel和A3 USD在真实启动、训练与
+durable ACK中工作；没有证据支持“Pod安装损坏”。`/workspace/IsaacLab`是另一个可变checkout，不能混进
+当前run身份，也不能用它与Jiayi电脑的行为作未经控制的比较。若要裁决“机器人动作在sim里对不上”，最小
+实验是同一Take061、同一joint order、同一physical birth/teacher frame0桥、同一policy clock的固定轨迹逐帧
+对比；现在的零contact只能证伪旧配方，不能单独证明engine或Pod安装错。
+
+“老师第0帧已经调过”也不能推出raw teleport可执行。现有nominal收据明确区分physical birth与teacher
+frame0，只证明从physical-ready出发的桥在60 policy tick内名义可维持；收据末尾`waist_roll=-0.3205 rad`、
+速度约`-1.19 rad/s`，距`-0.3491 rad`限位已很近。把这个1.2秒收据外推为tick295（5.9秒）前都只学
+balance没有证据，旧fresh policy又普遍在tick77--82倾倒，所以它永远看不到任务。
+
+### 11.2 最小修复与采用/延后/拒绝
+
+采用：Take061的physical-ready→teacher frame0同源bridge成为唯一bootstrap owner；N1 catalog的motion与
+action identity一次原子安装；首次due改为tick48，六次机会为`48/233/418/603/788/973`，185-tick间隔仍
+覆盖task close、77-tick recovery和2-tick hidden gap。tick48恰是一轮H48 rollout且位于60-tick实测窗内，
+所以fresh policy先收到完整balance梯度，随后自然获得mimic分母；mimic基本形成后同一任务链自然走到launch/
+contact，hit形成后自然进入landing，不加入硬Stage或learned-success Gate。
+
+延后：warm-start、replay、双LR、sigma`.19`、Build4 `14/14/5`权重、新observation和DR。本轮没有出现
+same-observation/different-required-action反例，Observation V3已直接给出同clock的teacher-achieved最小
+残差；继续加可推导量、raw ball/aim、action ID或部署不可观测oracle只会增加ABI与policy负担。
+
+拒绝：放松base/joint/table Done以“让任务出现”、把task success变成启动/安全Gate、把60-tick收据冒充
+长期稳定、继续等待V8、或用aggregate return遮掉contact零分母。真正安全边界仍是独立plant finite、joint/
+table/contact几何、full-key/generation、optimizer成功与WAL/fsync/ACK；它们不替代清晰的状态机。
+
+### 11.3 当前Pod证据与下一裁决
+
+source链为`651c305e`（原子action identity）→`cbf0aae3`（tick48）→`e3cbe9fc`（保持generic future-tick
+fixture中性）。本地/Pod active-schedule聚焦矩阵为`53 passed`；更广矩阵的4个失败是旧Reward ordinal与fake
+Motion epoch字段fixture不一致，未吞成production失败或伪装为PASS。tick295的真实Isaac 61-update rate probe
+自然完成，p50/p90=`6.635/7.153 s/H48`且due=0，说明速度接近约6秒目标但课程仍死锁。
+
+tick48真实Isaac到update4已有`due/selected/accepted=512/512/511`，Take061 action UID
+`5527597793770800`为`511/511`，unknown 1 row按合同拒绝，playback started=`248`。完整61-update窗累计
+`due/selected/accepted/rejected=18,432/18,432/18,419/13`、playback=`9,120`；`18,431`个terminal全部
+base tilt，first10→last10 episode mean length=`79.310→81.916`，physical launch=0。paddle position
+误差`.464→.496 m`而face/long-axis从`.995→.914`、`1.282→1.080 rad`，短窗趋势混合，不能称mimic成功。
+active-task rate p50/p90=`10.470/13.863 s/H48`，因此空业务接近6秒不能代表现役iteration速度，task热路
+必须继续profile和做结构减法。逐update对账进一步得到wall与due row数相关系数约`.771`：due=`512`的20轮
+mean/p50=`12.10/12.35 s`，due=`0`的9轮=`6.85/6.85 s`，满任务cohort约多`5.25 s`，但相关性不能替代
+callpoint attribution。
+
+同源码MuJoCo 61-update窗也已自然完成，p50/p90=`6.644/6.854 s/H48`，scheduled/reveal=
+`10,861/10,860`、launch=`6,658`、missed launch=0、R03 present/physically-valid=`5,107/5,107`，
+selected contact=`0/6,658`、landing=0。episode mean first10→last10=`135.78→139.98`；paddle position/
+velocity误差`.373→.378 m`、`1.106→1.149 m/s`没有改善，face/long-axis仅微降`1.189→1.176`、
+`1.128→1.112 rad`，仍不能称mimic成功。首个fresh Mu root因ignored EPA48/RSL3 bundle未恢复在首ACK前
+fail-closed；按`setup_local_sync`固定三文件SHA恢复后r2成功，故这是clean-checkout同步缺口，不解释后续
+学习行为。
+
+两端已证明同一任务合同可执行，却没有证明相同plant行为：Isaac约82 tick、全base tilt且launch=0；Mu约
+140 tick、table/tilt混合且launch非零。该分叉既不能直接归咎“Pod安装坏了”，也不能以“原生后端不同”豁免；
+下一固定实验必须从同一physical-ready、同一joint order、同一q/dq与同一固定31-D action tape逐policy tick
+比较q、dq、base、racket和terminal first divergence。当前只能说balance→mimic交接实现闭合；mimic、hit、
+landing与physics parity均未闭合。V8继续只读，V9长期replacement暂不发；所有结果继续
+`diagnostic_unauthorized=true`。

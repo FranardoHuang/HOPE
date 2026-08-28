@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`V7-stopped-negative-frozen / V8-dual-fresh-running / no-authorized-formal-run`
+- 状态：`V8-dual-fresh-read-only / V9-same-source-overlap-validating / no-authorized-formal-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -8,17 +8,51 @@
 - 复核/决策负责人：Franco
 - 本 successor 当前最高证据等级：最终V3/PPO V6两端各自runtime/rate与fresh prefix达到诊断`E2`；
   跨引擎physics parity、formal learning与promotion仍低于`E2`，历史negative-control的`E3`不向新系统传递
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-27
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-28
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 `origin/main:docs/NOW.md`；功能分支内的 `docs/NOW.md` 只能是待合入提案。
 
-> **阅读规则：**当前执行合同只认“2026-08-26 current correction”、紧随其后的adoption table与
+> **阅读规则：**当前执行合同只认“2026-08-28 current correction”、紧随其后的adoption table与
 > [双后端TODO §0.5](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)。从
 > “2026-08-21 portable successor事实纠正”起的229/399、211/319、H24、`history=8`与旧schema/gate结论
 > 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
+
+## 2026-08-28 current correction
+
+**环境与实现必须分层：**当前pinned `/opt/IsaacLab-8320e0be`、Isaac Sim Kit Python、sealed RSL wheel和
+A3 USD已经在Pod1完成真实environment construction、训练与durable ACK；没有证据支持“Pod安装损坏”。
+`/workspace/IsaacLab`是另一个可变checkout，不能混入当前run身份，也不能用它解释Jiayi本机差异。当前已证
+错误在训练配方/接线：V8混用了Take058 teacher、Take061 physical-ready与被legacy YAML再次覆盖的bootstrap；
+catalog attachment又漏装action order，导致motion `N=1`而action identity `N=0`。所以“起始动作错”确实
+属于当前sim训练实现问题，但不能偷换成整个Pod或physics engine安装坏了。
+
+raw teacher frame0与可执行初态也不是同一事实。现有Take061 nominal收据只证明physical-ready→teacher
+frame0 bridge可在60 policy tick内维持；末端`waist_roll=-0.3205 rad`且仍以约`-1.19 rad/s`向
+`-0.3491 rad`限位运动。旧first reveal tick295把1.2秒收据外推到5.9秒，而fresh policy在tick77--82已
+倾倒，故旧配方看不到mimic不是设计上必须多等step，而是课程时钟写错。
+
+V9最小修复把Take061 ready、teacher与action identity原子绑定，首次due改为tick48，六次due为
+`48/233/418/603/788/973`；185-tick完整task/recovery cadence、Reward28、Observation V3和PPO V6不变。
+真实Isaac在update4得到`due/selected/accepted=512/512/511`、Take061身份`511/511`、playback=`248`，
+完整61-update窗累计`18,432/18,432/18,419/13` due/selected/accepted/rejected与`9,120` playback；
+terminal `18,431/18,431`均为base tilt，recent10 episode mean=`81.916 tick`，physical launch=0。
+active-task p50/p90=`10.470/13.863 s/H48`，而tick295空业务为`6.635/7.153 s/H48`，说明真实task热路仍
+需大砍。同源码MuJoCo有限窗p50/p90=`6.644/6.854 s/H48`，scheduled/reveal=`10,861/10,860`、
+launch=`6,658`、R03 valid=`5,107/5,107`、selected contact=`0/6,658`；paddle位置/速度误差也未改善。
+两端有限窗因此只证明balance→mimic入口已修，不证明mimic成功、hit/landing成功或跨引擎parity。
+
+环境诊断保持分层：首个Mu root因clean checkout未恢复ignored EPA48/RSL3 bundle在首ACK前失败；按现有
+`setup_local_sync`固定SHA恢复后r2自然完成。这是资产同步问题，不是运行后机器人动力学分叉的解释。当前
+Isaac约82 tick全base tilt且无launch，Mu约140 tick、table/tilt混合且有大量launch；必须用同一初态与固定
+31-D action tape逐tick对齐后，才能判断Jiayi本机、Pod、Isaac与Mu哪个callpoint先偏。所有证据继续
+`diagnostic_unauthorized=true`。
+
+结构裁决不新增安全Gate：把catalog变成一个typed原子安装对象、把bootstrap归给唯一owner、把backend留作
+薄adapter；保留plant/full-key/optimizer/durable事实边界。warm-start、replay、双LR、sigma、Build4数值、
+新observation与DR均延后，直到当前同源课程产生可归因的未来窗。
 
 ## 2026-08-26 current correction
 
@@ -98,17 +132,17 @@ record往返，milestone也改为按term批处理。静态payload只能说明删
 profiling仍须覆盖PPO-boundary完整业务重放。只保留学习、分层聚合、独立事实与durability
 真正需要的最小状态；不得把臃肿owner graph原样翻译到C++，也不得用新Gate补偿目标函数缺项。
 
-### 2026-08-26 current adoption table
+### 2026-08-28 current adoption table
 
 | 项 | 当前裁决 | 原因 |
 | --- | --- | --- |
-| learner | replacement保留`2048/H48/MB4/E5`作第一因果包；per-minibatch adaptive-KL独立复核 | H48、lambda `.98`、sigma `.05`无旧值漂移；LR在`1e-5..1e-2`频繁振荡，但不能与Reward修复捆绑猜数 |
+| learner | 采用PPO V6 `512/H48/MB1/E5`、fixed LR`1e-4`；总transition/minibatch/optimizer step与transition-save cadence保持 | V7 adaptive-KL在task曝光前耗尽到`1e-5`；512-env让policy刷新快4倍是显式算法取舍，不冒充等价加速 |
 | Reward | 采用Reward28：shared action-rate/qdes-projection/qdes-limit/actual-limit经济、真实paddle误差账和固定composite核 | V6在巨大launch分母下contact为0且硬边恶化；这是目标漏洞，不是课程尚未开放或需新增Gate |
 | actor/critic | 采用Observation V3 `215/231`；V2只作旧ABI/paired control | 同producer最小残差关闭representation gap；拒绝raw ball/aim/history/ID扩张 |
-| cadence | 采用四个真实due与耗尽`-1` sentinel | 不给policy不存在的第五机会；双backend同义 |
-| Build4 | 采用direct-paddle objective/correction-information与Build1 `action_rate_l2`的可解释原则；延后warm-start/replay/双LR/sigma与具体权重 | mandatory actor warm-start排除fresh-from-zero比较；不复制混杂配方或把Build4写成formal证明 |
-| performance | 采用milestone batching和Motion窄projection；compact shot drain继续待profile | active Mu/Isaac约`9.10/32.06 s/H48`，真实迭代率失败；保留跨writer事实与WAL/ACK，不保留无用完整record往返 |
-| authority | V6只读negative；replacement仍`diagnostic_unauthorized`，G04/G05/G06 `Partial` | contact、landing、physics parity、replacement exact Pod短学习与transfer均未闭合 |
+| cadence | 采用tick`48/233/418/603/788/973`六次真实due与耗尽`-1` sentinel | 一轮H48先学balance，随后在60-tick实测ready窗内打开mimic；完整185-tick task/recovery cadence不变 |
+| Build4 | 采用早期连续曝光、direct-paddle objective/correction-information原则；延后warm-start/replay/双LR/sigma与具体权重 | mandatory actor warm-start排除fresh-from-zero比较；tick48来自本系统H48/60-tick证据，不复制混杂数值 |
+| performance | active-task Isaac p50/p90=`10.470/13.863 s/H48`；due count与wall相关系数约`.77`，先profile task construction/ACK热路 | tick295空业务`6.635/7.153`不能代表现役速度；保留跨writer事实与WAL/ACK，不保留无用完整record往返 |
+| authority | V8只读negative；V9双端有限窗仍`diagnostic_unauthorized`，G04/G05/G06 `Partial` | mimic趋势混合、launch/contact/landing、Mu同源窗、physics parity与transfer均未闭合 |
 
 ## HISTORICAL / FROZEN — 2026-08-23 current correction
 

@@ -166,6 +166,13 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   同一因果包复制Build4的`14/14/5`权重、warm-start、replay或双LR。若未来固定窗的真实paddle误差仍不降，
   才独立提高direct-paddle经济。该名称仍是`diagnostic_unauthorized`，不是课程Stage或部署授权。
 
+- <a id="fullmdp-v9-candidate"></a>**`fullmdp-a-h48-v9-*` / FullMDP第九批同源ready与重叠课程替代谱系**：
+  保持PPO V6、Reward28、Observation V3、plant与六次shot预算；修复active action、physical-ready、
+  hold-qdes和measured teacher此前不同源，以及FullMDP composition覆盖split-ready、catalog漏装action identity、
+  legacy与FullMDP双重policy bootstrap等实现错误。首个reveal从未经验证的tick295改为tick48：每个episode先给
+  一整轮H48 balance前缀，随后在既有60-tick nominal-hold实测窗内自然打开mimic/task；不是新Stage、
+  success Gate、physics parity或部署授权。旧V8在replacement闭合前保持只读运行，不允许hot-patch或resume。
+
 - <a id="fullmdp-rate-probe"></a>**FullMDP 61-update rate probe / FullMDP六十一轮吞吐探针**：按当前
   recipe固定`512 env × H48`，使用profiler-off的`10`轮warm-up + `50`轮measured + `1`轮tail诊断预算。
   既有`ba7225b2`的4096探针只作predecessor历史基线。只报告测量窗

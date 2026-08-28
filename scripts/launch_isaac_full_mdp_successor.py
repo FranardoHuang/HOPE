@@ -77,6 +77,8 @@ RATE_PROBE_BUDGET = (
 )
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 RATE_PROBE_MARKER_TOKEN = "FULLMDP_H48_RATE_PROBE:"
+PROFILE_PROBE_MARKER_TOKEN = "FULLMDP_H48_PROFILE_PROBE:"
+PROFILE_JSON_PREFIX = "HOPE_ACTION_BALL_FULL_MDP_PROFILE_JSON="
 PPO_RECIPE_MARKER_TOKEN = "full-MDP PPO recipe:"
 LEARNING_ITERATION_RE = re.compile(
     r"^\s*Learning iteration\s+([0-9]+)/([0-9]+)\s*$"
@@ -189,6 +191,17 @@ def _expected_rate_probe_marker() -> str:
         f"measured={RATE_PROBE_MEASURED_UPDATES} "
         f"tail={RATE_PROBE_TAIL_UPDATES} "
         "profiler=off formal_evidence=false checkpoint_authority=false"
+    )
+
+
+def _expected_profile_probe_marker(updates: int) -> str:
+    return (
+        "[train.py] FULLMDP_H48_PROFILE_PROBE: "
+        "diagnostic_unauthorized=true "
+        f"updates={updates} "
+        "profiler=host-inclusive-no-cuda-sync "
+        "speed_evidence=false formal_evidence=false "
+        "checkpoint_authority=false"
     )
 
 
@@ -419,6 +432,7 @@ def _paths(root: Path) -> dict[str, Path]:
         "xdg_state": root / "xdg_state",
         "runtime_receipt": root / "train-runtime.receipt",
         "rate_receipt": root / "diagnostic-rate-probe.json",
+        "profile_receipt": root / "diagnostic-profile-probe.json",
         "run_log": root / "run.log",
         "launch_state": root / "kit_boot.launch",
         "training": root / "training",
@@ -475,6 +489,7 @@ def _child_argv(
     hydra_run_dir: Path,
     *,
     diagnostic_rate_probe: bool = False,
+    diagnostic_profile_probe: bool = False,
 ) -> list[str]:
     argv = [
         str(isaac_python),
@@ -515,6 +530,8 @@ def _child_argv(
     ]
     if diagnostic_rate_probe:
         argv.append("task.action_ball_full_mdp_rate_probe=true")
+    if diagnostic_profile_probe:
+        argv.append("task.action_ball_full_mdp_profile_probe=true")
     return argv
 
 
@@ -581,7 +598,7 @@ def _runtime_env(
 
 
 def _launcher_env(
-    paths: dict[str, Path], *, diagnostic_rate_probe: bool = False
+    paths: dict[str, Path], *, finite_probe: bool = False
 ) -> dict[str, str]:
     result = {
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
@@ -595,9 +612,9 @@ def _launcher_env(
         "KIT_BOOT_STALE_TIMEOUT_S": "180",
         "KIT_BOOT_POLL_S": "5",
         "KIT_BOOT_STATE_FILE": str(paths["launch_state"]),
-        "KIT_WAIT_FOR_COMPLETION": "1" if diagnostic_rate_probe else "0",
+        "KIT_WAIT_FOR_COMPLETION": "1" if finite_probe else "0",
     }
-    if diagnostic_rate_probe:
+    if finite_probe:
         result["KIT_COMPLETION_TIMEOUT_S"] = str(
             RATE_PROBE_COMPLETION_TIMEOUT_S
         )
@@ -722,7 +739,7 @@ def _verify_started(
 
 
 def _verify_completed(paths: dict[str, Path]) -> tuple[int, int]:
-    """Require one natural, clean completion after the 61-update probe."""
+    """Require one natural, clean completion after a finite diagnostic."""
 
     fields = _state_fields(paths["launch_state"])
     try:
@@ -739,7 +756,7 @@ def _verify_completed(paths: dict[str, Path]) -> tuple[int, int]:
         or fields.get("terminal_kind") != "clean_completion"
         or fields.get("terminal_exit_code") != "0"
     ):
-        raise LaunchError("diagnostic rate probe did not complete naturally")
+        raise LaunchError("finite diagnostic probe did not complete naturally")
     if any(
         key in fields
         for key in (
@@ -749,7 +766,7 @@ def _verify_completed(paths: dict[str, Path]) -> tuple[int, int]:
             "kill_identity_evidence",
         )
     ):
-        raise LaunchError("diagnostic rate probe completion used a stop path")
+        raise LaunchError("finite diagnostic probe completion used a stop path")
     try:
         runtime_receipt = paths["runtime_receipt"].read_bytes()
     except OSError as exc:
@@ -860,7 +877,87 @@ def _rate_probe_payload(
     }
 
 
-def _write_rate_probe_receipt(path: Path, payload: dict[str, object]) -> None:
+def _profile_probe_payload(
+    *,
+    run_log: Path,
+    source_commit: str,
+    namespace: str,
+    gpu_index: int,
+    gpu_uuid: str,
+    requested_updates: int,
+) -> dict[str, object]:
+    """Validate and retain exact bounded inclusive host-wall profile rows."""
+
+    try:
+        raw = run_log.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise LaunchError("cannot read completed diagnostic profile log") from exc
+    lines = [ANSI_RE.sub("", line) for line in raw.splitlines()]
+    markers = [line for line in lines if PROFILE_PROBE_MARKER_TOKEN in line]
+    if markers != [_expected_profile_probe_marker(requested_updates)]:
+        raise LaunchError("diagnostic profile probe budget marker differs")
+    recipe_markers = [line for line in lines if PPO_RECIPE_MARKER_TOKEN in line]
+    if recipe_markers != [_expected_ppo_recipe_marker()]:
+        raise LaunchError("diagnostic profile probe recipe identity differs")
+    profiles: list[dict[str, object]] = []
+    for line in lines:
+        if not line.startswith(PROFILE_JSON_PREFIX):
+            continue
+        try:
+            payload = json.loads(line.removeprefix(PROFILE_JSON_PREFIX))
+            json.dumps(payload, allow_nan=False)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise LaunchError("diagnostic profile row is not finite JSON") from exc
+        except ValueError as exc:
+            raise LaunchError("diagnostic profile row is not finite JSON") from exc
+        if not isinstance(payload, dict):
+            raise LaunchError("diagnostic profile row is not a mapping")
+        profiles.append(payload)
+    expected_ordinals = list(range(1, requested_updates + 1))
+    if (
+        len(profiles) != requested_updates
+        or [row.get("profile_update_ordinal") for row in profiles]
+        != expected_ordinals
+        or [row.get("update") for row in profiles]
+        != list(range(requested_updates))
+        or any(
+            row.get("schema_version") != 2
+            or row.get("requested_profile_updates") != requested_updates
+            or row.get("rollout_call_count_exact") is not True
+            or row.get("speed_evidence_eligible") is not False
+            or not isinstance(row.get("segments"), dict)
+            for row in profiles
+        )
+    ):
+        raise LaunchError("diagnostic profile probe rows differ")
+    return {
+        "kind": "action_ball_isaac_full_mdp_h48_profile_probe_v1",
+        "schema_version": 1,
+        "diagnostic_unauthorized": True,
+        "formal_evidence": False,
+        "speed_evidence": False,
+        "safety_gate": False,
+        "source_commit": source_commit,
+        "namespace": namespace,
+        "gpu": {"index": gpu_index, "uuid": gpu_uuid},
+        "learning_recipe_sha256": (
+            FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
+        ),
+        "shape": {
+            "num_envs": FULL_MDP_PPO_RECIPE.num_envs,
+            "num_steps_per_env": FULL_MDP_PPO_RECIPE.num_steps_per_env,
+            "updates": requested_updates,
+        },
+        "timing_source": (
+            "inclusive nested host perf_counter spans without CUDA sync; "
+            "profile rows are attribution-only"
+        ),
+        "profiles": profiles,
+        "run_log": {"path": str(run_log), "sha256": _sha256(run_log)},
+    }
+
+
+def _write_diagnostic_receipt(path: Path, payload: dict[str, object]) -> None:
     try:
         body = (
             json.dumps(
@@ -873,7 +970,7 @@ def _write_rate_probe_receipt(path: Path, payload: dict[str, object]) -> None:
             + "\n"
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
-        raise LaunchError("diagnostic rate probe receipt is not finite JSON") from exc
+        raise LaunchError("diagnostic receipt is not finite JSON") from exc
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     try:
         descriptor = os.open(path, flags, 0o600)
@@ -885,7 +982,7 @@ def _write_rate_probe_receipt(path: Path, payload: dict[str, object]) -> None:
             offset += written
         os.fsync(descriptor)
     except OSError as exc:
-        raise LaunchError("cannot no-clobber diagnostic rate receipt") from exc
+        raise LaunchError("cannot no-clobber diagnostic receipt") from exc
     finally:
         if "descriptor" in locals():
             os.close(descriptor)
@@ -918,9 +1015,15 @@ def launch(args: argparse.Namespace) -> int:
         raise LaunchError("expected-gpu-uuid format differs")
     if not 0 <= args.profile_updates <= 50:
         raise LaunchError("profile-updates must be between 0 and 50")
+    if args.diagnostic_rate_probe and args.diagnostic_profile_probe:
+        raise LaunchError("diagnostic probes are mutually exclusive")
     if args.diagnostic_rate_probe and args.profile_updates:
         raise LaunchError(
             "diagnostic-rate-probe and profile-updates are mutually exclusive"
+        )
+    if args.diagnostic_profile_probe and args.profile_updates == 0:
+        raise LaunchError(
+            "diagnostic-profile-probe requires positive profile-updates"
         )
     cpu_affinity, cpu_ids = _cpu_affinity(args.cpu_affinity)
     if cpu_affinity is not None:
@@ -932,6 +1035,7 @@ def launch(args: argparse.Namespace) -> int:
         args.namespace,
         paths["hydra"],
         diagnostic_rate_probe=args.diagnostic_rate_probe,
+        diagnostic_profile_probe=args.diagnostic_profile_probe,
     )
     runtime_env = _runtime_env(
         gpu_uuid=args.expected_gpu_uuid,
@@ -946,7 +1050,11 @@ def launch(args: argparse.Namespace) -> int:
             "source_commit": commit,
             "argv": child_argv,
             "launcher_env": _launcher_env(
-                paths, diagnostic_rate_probe=args.diagnostic_rate_probe
+                paths,
+                finite_probe=(
+                    args.diagnostic_rate_probe
+                    or args.diagnostic_profile_probe
+                ),
             ),
             "runtime_env": runtime_env,
             "run_root": str(root),
@@ -997,7 +1105,11 @@ def launch(args: argparse.Namespace) -> int:
                 command,
                 cwd=REPO_ROOT,
                 env=_launcher_env(
-                    paths, diagnostic_rate_probe=args.diagnostic_rate_probe
+                    paths,
+                    finite_probe=(
+                        args.diagnostic_rate_probe
+                        or args.diagnostic_profile_probe
+                    ),
                 ),
                 stdin=subprocess.DEVNULL,
                 check=False,
@@ -1007,8 +1119,9 @@ def launch(args: argparse.Namespace) -> int:
             raise LaunchError("cannot start the Kit boot launcher") from exc
         if result.returncode != 0:
             raise LaunchError(f"Kit boot launcher failed rc={result.returncode}")
-        if args.diagnostic_rate_probe:
+        if args.diagnostic_rate_probe or args.diagnostic_profile_probe:
             pid, pgid = _verify_completed(paths)
+        if args.diagnostic_rate_probe:
             rate_payload = _rate_probe_payload(
                 run_log=paths["run_log"],
                 source_commit=commit,
@@ -1016,13 +1129,29 @@ def launch(args: argparse.Namespace) -> int:
                 gpu_index=args.gpu_index,
                 gpu_uuid=args.expected_gpu_uuid,
             )
-            _write_rate_probe_receipt(paths["rate_receipt"], rate_payload)
+            _write_diagnostic_receipt(paths["rate_receipt"], rate_payload)
+            profile_payload = None
             status = "DIAGNOSTIC_RATE_PROBE_COMPLETE"
+        elif args.diagnostic_profile_probe:
+            profile_payload = _profile_probe_payload(
+                run_log=paths["run_log"],
+                source_commit=commit,
+                namespace=args.namespace,
+                gpu_index=args.gpu_index,
+                gpu_uuid=args.expected_gpu_uuid,
+                requested_updates=args.profile_updates,
+            )
+            _write_diagnostic_receipt(
+                paths["profile_receipt"], profile_payload
+            )
+            rate_payload = None
+            status = "DIAGNOSTIC_PROFILE_PROBE_COMPLETE"
         else:
             pid, pgid = _verify_started(
                 paths, gpu_lock=gpu_lock, lock_file=args.lock_file
             )
             rate_payload = None
+            profile_payload = None
             status = "RUNNING"
         print(json.dumps({
             "diagnostic_unauthorized": True,
@@ -1042,6 +1171,14 @@ def launch(args: argparse.Namespace) -> int:
                     "update_seconds_p90": rate_payload["update_seconds_p90"],
                 }
                 if rate_payload is not None
+                else {}
+            ),
+            **(
+                {
+                    "profile_receipt": str(paths["profile_receipt"]),
+                    "profile_updates": args.profile_updates,
+                }
+                if profile_payload is not None
                 else {}
             ),
         }, sort_keys=True, separators=(",", ":")))
@@ -1074,6 +1211,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lock-file", type=Path, required=True)
     parser.add_argument("--profile-updates", type=int, default=0)
     parser.add_argument("--diagnostic-rate-probe", action="store_true")
+    parser.add_argument("--diagnostic-profile-probe", action="store_true")
     parser.add_argument("--cpu-affinity")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)

@@ -15103,6 +15103,7 @@ _ACTION_BALL_STRIKE_FACT_SUCCESSOR_RECEIPT_ATTR = (
 )
 _ACTION_BALL_FULL_MDP_RUNTIME_FLAG = "action_ball_full_mdp_runtime"
 _ACTION_BALL_FULL_MDP_RATE_PROBE_FLAG = "action_ball_full_mdp_rate_probe"
+_ACTION_BALL_FULL_MDP_PROFILE_PROBE_FLAG = "action_ball_full_mdp_profile_probe"
 _ACTION_BALL_FULL_MDP_RATE_PROBE_UPDATES = 61
 _ACTION_BALL_FULL_MDP_RATE_PROBE_WARMUP_UPDATES = 10
 _ACTION_BALL_FULL_MDP_RATE_PROBE_MEASURED_UPDATES = 50
@@ -16160,6 +16161,52 @@ def _action_ball_full_mdp_rate_probe_requested(task) -> bool:
     return True
 
 
+def _action_ball_full_mdp_profile_probe_updates(task) -> int:
+    """Resolve one bounded profiler-on budget that exits without a stop path."""
+
+    if not _contains_key(task, _ACTION_BALL_FULL_MDP_PROFILE_PROBE_FLAG):
+        return 0
+    requested = _get(task, _ACTION_BALL_FULL_MDP_PROFILE_PROBE_FLAG)
+    if type(requested) is not bool:
+        raise _OverrideError(
+            "task.action_ball_full_mdp_profile_probe must be an exact explicit "
+            f"boolean; got type={type(requested).__name__}"
+        )
+    if not requested:
+        return 0
+    if not _action_ball_full_mdp_runtime_requested(task):
+        raise _OverrideError(
+            "task.action_ball_full_mdp_profile_probe=true requires "
+            "task.action_ball_full_mdp_runtime=true"
+        )
+    if _get(task, _ACTION_BALL_FULL_MDP_RATE_PROBE_FLAG, False) is True:
+        raise _OverrideError(
+            "FullMDP diagnostic rate and profile probes are mutually exclusive"
+        )
+    legacy_profile = os.environ.get("HOPE_ACTION_BALL_UPDATE_PROFILE")
+    if legacy_profile not in (None, "0"):
+        raise _OverrideError(
+            "FullMDP profile probe rejects the legacy ActionBall profiler"
+        )
+    raw = os.environ.get("HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES")
+    if (
+        raw is None
+        or not raw.isascii()
+        or not raw.isdecimal()
+        or raw.startswith("0")
+    ):
+        raise _OverrideError(
+            "FullMDP profile probe requires a canonical positive "
+            "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES"
+        )
+    updates = int(raw)
+    if updates < 1 or updates > 50:
+        raise _OverrideError(
+            "FullMDP profile probe update budget must be between 1 and 50"
+        )
+    return updates
+
+
 def _resolve_action_ball_full_mdp_policy_bootstrap_config(
     task, *, requested: bool
 ) -> dict | None:
@@ -16254,6 +16301,7 @@ def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
 
     task = _get(cfg, "task")
     _action_ball_full_mdp_rate_probe_requested(task)
+    _action_ball_full_mdp_profile_probe_updates(task)
     requested = _get(task, "action_ball_full_mdp_runtime")
     if requested is None or requested is False:
         return
@@ -20303,6 +20351,9 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     action_ball_full_mdp_rate_probe = (
         _action_ball_full_mdp_rate_probe_requested(cfg.task)
     )
+    action_ball_full_mdp_profile_probe_updates = (
+        _action_ball_full_mdp_profile_probe_updates(cfg.task)
+    )
     raw_num_envs = (
         cfg.num_envs
         if cfg.num_envs is not None
@@ -20511,6 +20562,17 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
             f"measured={_ACTION_BALL_FULL_MDP_RATE_PROBE_MEASURED_UPDATES} "
             f"tail={_ACTION_BALL_FULL_MDP_RATE_PROBE_TAIL_UPDATES} "
             "profiler=off formal_evidence=false checkpoint_authority=false",
+            flush=True,
+        )
+    if action_ball_full_mdp_profile_probe_updates:
+        agent_cfg.max_iterations = action_ball_full_mdp_profile_probe_updates
+        print(
+            "[train.py] FULLMDP_H48_PROFILE_PROBE: "
+            "diagnostic_unauthorized=true "
+            f"updates={action_ball_full_mdp_profile_probe_updates} "
+            "profiler=host-inclusive-no-cuda-sync "
+            "speed_evidence=false formal_evidence=false "
+            "checkpoint_authority=false",
             flush=True,
         )
     if cfg.run_name is not None:

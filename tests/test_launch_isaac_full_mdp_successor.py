@@ -205,6 +205,23 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
         "checkpoint_tolerant=false",
         "checkpoint_allow_missing_contract=false",
         "checkpoint_allow_contract_mismatch=false",
+        "action_ball_dynamic_ready_bootstrap=true",
+        (
+            "action_ball_dynamic_ready_artifact_path="
+            f"{(rig.repo / rig.module.DYNAMIC_READY_ARTIFACT_RELATIVE).resolve()}"
+        ),
+        (
+            "action_ball_dynamic_ready_artifact_sha256="
+            f"{rig.module.DYNAMIC_READY_ARTIFACT_SHA256}"
+        ),
+        (
+            "action_ball_dynamic_ready_nominal_receipt_path="
+            f"{(rig.repo / rig.module.DYNAMIC_READY_RECEIPT_RELATIVE).resolve()}"
+        ),
+        (
+            "action_ball_dynamic_ready_nominal_receipt_sha256="
+            f"{rig.module.DYNAMIC_READY_RECEIPT_SHA256}"
+        ),
         f"hydra.run.dir={rig.root / 'training' / 'hydra'}",
     ]
     joined = " ".join(payload["argv"])
@@ -251,6 +268,45 @@ def test_dry_run_can_bind_bounded_full_mdp_profiler(
     assert payload["runtime_env"][
         "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES"
     ] == "5"
+    assert not rig.root.exists()
+
+
+def test_dry_run_profile_probe_is_explicit_finite_completion_mode(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.module.main(
+        rig.argv(dry=True)
+        + ["--diagnostic-profile-probe", "--profile-updates", "12"]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["argv"][-1] == (
+        "task.action_ball_full_mdp_profile_probe=true"
+    )
+    assert payload["runtime_env"][
+        "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES"
+    ] == "12"
+    assert payload["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "1"
+    assert payload["launcher_env"]["KIT_COMPLETION_TIMEOUT_S"] == "7200"
+    assert not rig.root.exists()
+
+
+def test_profile_probe_requires_budget_and_is_rate_exclusive_before_root(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.module.main(
+        rig.argv(dry=True) + ["--diagnostic-profile-probe"]
+    ) == 2
+    assert "requires positive" in capsys.readouterr().err
+    assert rig.module.main(
+        rig.argv(dry=True)
+        + [
+            "--diagnostic-rate-probe",
+            "--diagnostic-profile-probe",
+            "--profile-updates",
+            "1",
+        ]
+    ) == 2
+    assert "mutually exclusive" in capsys.readouterr().err
     assert not rig.root.exists()
 
 
@@ -382,10 +438,78 @@ def test_rate_probe_receipt_parses_exact_10_plus_50_and_is_no_clobber(
     assert payload["update_seconds_p90"] == pytest.approx(1.541)
 
     receipt = tmp_path / "rate.json"
-    rig.module._write_rate_probe_receipt(receipt, payload)
+    rig.module._write_diagnostic_receipt(receipt, payload)
     assert json.loads(receipt.read_text()) == payload
     with pytest.raises(rig.module.LaunchError, match="no-clobber"):
-        rig.module._write_rate_probe_receipt(receipt, payload)
+        rig.module._write_diagnostic_receipt(receipt, payload)
+
+
+def test_profile_probe_receipt_requires_exact_rows_and_marker(
+    rig, tmp_path: Path
+) -> None:
+    rows = [
+        rig.module._expected_profile_probe_marker(2),
+        rig.module._expected_ppo_recipe_marker(),
+    ]
+    profiles = []
+    for update in range(2):
+        profile = {
+            "schema_version": 2,
+            "update": update,
+            "profile_update_ordinal": update + 1,
+            "requested_profile_updates": 2,
+            "rollout_call_count_exact": True,
+            "speed_evidence_eligible": False,
+            "segments": {"env_step_total": {"calls": 48}},
+        }
+        profiles.append(profile)
+        rows.append(
+            rig.module.PROFILE_JSON_PREFIX
+            + json.dumps(profile, separators=(",", ":"), sort_keys=True)
+        )
+    log = tmp_path / "profile.log"
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    payload = rig.module._profile_probe_payload(
+        run_log=log,
+        source_commit="c" * 40,
+        namespace=NAMESPACE,
+        gpu_index=0,
+        gpu_uuid=UUID,
+        requested_updates=2,
+    )
+    assert payload["kind"] == "action_ball_isaac_full_mdp_h48_profile_probe_v1"
+    assert payload["diagnostic_unauthorized"] is True
+    assert payload["formal_evidence"] is False
+    assert payload["speed_evidence"] is False
+    assert payload["profiles"] == profiles
+
+    rows.pop()
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    with pytest.raises(rig.module.LaunchError, match="rows differ"):
+        rig.module._profile_probe_payload(
+            run_log=log,
+            source_commit="c" * 40,
+            namespace=NAMESPACE,
+            gpu_index=0,
+            gpu_uuid=UUID,
+            requested_updates=2,
+        )
+
+    rows.append(
+        rig.module.PROFILE_JSON_PREFIX
+        + json.dumps(profiles[-1], separators=(",", ":"), sort_keys=True)
+        .replace('"schema_version":2', '"bad":NaN,"schema_version":2')
+    )
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    with pytest.raises(rig.module.LaunchError, match="not finite JSON"):
+        rig.module._profile_probe_payload(
+            run_log=log,
+            source_commit="c" * 40,
+            namespace=NAMESPACE,
+            gpu_index=0,
+            gpu_uuid=UUID,
+            requested_updates=2,
+        )
 
 
 @pytest.mark.parametrize("missing", ("update", "recipe"))

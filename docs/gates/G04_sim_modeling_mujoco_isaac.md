@@ -2,6 +2,25 @@
 
 Status: Partial
 
+## 2026-08-28 V9同源初态与课程纠正（仍`Partial`）
+
+Pod1的pinned `/opt/IsaacLab-8320e0be`、Kit、sealed RSL与A3 USD已在真实训练中工作；当前没有“Pod安装
+损坏”的证据。V8真正的实现错误是Take058 teacher、Take061 ready与legacy bootstrap覆盖混源，以及N1
+catalog漏装action identity。V9把Take061 physical-ready→teacher frame0 bridge归给唯一owner并原子安装
+catalog，首次due从tick295改为tick48。真实Isaac已产生`512/512/511` due/selected/accepted和Take061
+playback分母；同源码Mu有限窗又产生`6,658`次launch和`5,107`次R03 valid，但selected contact仍为
+`0/6,658`。这关闭起始/课程接线，不关闭teacher逐帧tracking、contact/landing或MuJoCo↔Isaac physics
+parity。G04保持`Partial`与`diagnostic_unauthorized=true`。
+
+raw teacher frame0不是可执行plant birth的同义词；60-tick nominal收据也不能授权外推到295 tick。若要裁决
+Jiayi本机与Pod动作是否真的不同，必须用同一Take061、joint order、birth→frame0 bridge和policy clock做
+固定轨迹逐帧对比，而不是从旧run零contact反推engine坏了。安全边界只保留独立plant/geometry/finite事实，
+不为procedural wiring错误新增下游same-writer Gate。
+
+首个Mu clean root因ignored EPA48/RSL3未恢复在首ACK前fail-closed，按固定SHA恢复后r2自然完成；这是资产
+同步缺口，不是runtime physics错误的证据。当前Isaac约82 tick全tilt、零launch，而Mu约140 tick且table/tilt
+混合、launch非零，故同初态固定31-D action tape的first-divergence parity是本Gate未闭合的必要实验。
+
 ## 2026-08-27 FullMDP V8 learner替代源（仍`Partial`）
 
 V6 source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`的native plant路径仍成立：真实Pod已证明

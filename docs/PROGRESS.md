@@ -1,5 +1,24 @@
 # 简短进度记录
 
+## 2026-08-28 — FullMDP V9同源初态与tick48重叠课程（branch diagnostic）
+
+- V8只读证据两端合计已到`941,116`次launch且selected contact仍为0；审计确认不是“再多等step”：Take058
+  teacher、Take061 ready与legacy bootstrap覆盖混源，catalog attachment又形成motion `N=1`/action
+  identity `N=0`。修复链`651c305e→cbf0aae3→e3cbe9fc`将Take061 ready→frame0桥与动作身份原子绑定，
+  first due改为tick48并保留六次185-tick完整task/recovery机会；不新增Stage或task-success安全Gate。
+- Pod1 active-schedule聚焦=`53 passed`。tick295 Isaac 61-update rate p50/p90=`6.635/7.153 s/H48`但due=0；
+  tick48真实Isaac在update4得到`due/selected/accepted=512/512/511`、Take061身份`511/511`、playback=`248`，
+  完整窗累计`18,432/18,432/18,419/13`与`9,120` playback；`18,431`个terminal全为base tilt，recent10
+  episode mean=`81.916 tick`、launch=0。active-task p50/p90=`10.470/13.863 s/H48`，说明空业务约6秒
+  掩盖task热路成本；当前只证明balance→mimic入口已修，mimic成功、hit与landing仍待未来窗。
+- 同源码MuJoCo 61-update窗自然完成，p50/p90=`6.644/6.854 s/H48`；scheduled/reveal=
+  `10,861/10,860`、launch=`6,658`、R03 physically-valid=`5,107/5,107`、selected contact=`0/6,658`。
+  episode mean first10→last10=`135.78→139.98`，paddle position/velocity误差未降，不能称mimic成功。
+- 当前pinned `/opt/IsaacLab-8320e0be`、Kit、sealed RSL和USD能真实训练并durable ACK，没有Pod安装损坏证据；
+  首个Mu root因clean checkout缺ignored EPA48/RSL3 bundle在首ACK前fail-closed，按固定SHA恢复后r2成功，这是
+  同步缺口而非physics解释。Isaac全tilt/零launch、Mu table+tilt/大量launch的分叉要求同一初态和固定动作逐帧
+  parity；最终双fresh替换暂不发，G04/G05/G06保持`Partial`和`diagnostic_unauthorized=true`。
+
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 
 - clean source=`0ad85ae1dfae13f617dc102a15bf99dba6b9ebf6`在Pod1目标矩阵通过

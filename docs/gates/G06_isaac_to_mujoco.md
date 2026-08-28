@@ -2,6 +2,16 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+## 2026-08-28 V9同源课程双端复核（仍`Partial`）
+
+V9已在Isaac真实Kit证明tick48自然打开Take061 task/playback；旧V8混源和tick295外推不再是跨引擎合同。
+MuJoCo同一source有限窗已自然完成：p50/p90=`6.644/6.854 s/H48`，reveal=`10,860`、launch=`6,658`、
+R03 valid=`5,107`、selected contact=`0/6,658`。Isaac对应窗却约82 tick全base tilt且launch=0，Mu约140 tick
+并为table/tilt混合；这是真实behavior divergence，不是physics parity，也尚不能归因“Pod physics错”。
+下一步必须同physical-ready、joint order、q/dq和固定31-D action tape逐tick寻找first divergence。G06保持
+`Partial`、`diagnostic_unauthorized=true`；
+task success不是parity/safety Gate，独立plant identity、fixed tape、finite与durable边界继续保留。
+
 ## 2026-08-27 FullMDP V8双后端replacement（仍`Partial`）
 
 V7共享候选合同是PPO V5、Reward28、Observation V3 `215/231`、四个真实due/耗尽clock、Mu wire

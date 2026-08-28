@@ -237,6 +237,49 @@ def test_full_mdp_rate_probe_keeps_the_typed_cli_budget_authority(monkeypatch):
         )
 
 
+def test_full_mdp_profile_probe_is_bounded_profiler_on_and_rate_exclusive(
+    monkeypatch,
+):
+    task = {
+        "action_ball_full_mdp_runtime": True,
+        "action_ball_full_mdp_rate_probe": False,
+        "action_ball_full_mdp_profile_probe": True,
+    }
+    monkeypatch.delenv("HOPE_ACTION_BALL_UPDATE_PROFILE", raising=False)
+    monkeypatch.setenv("HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES", "12")
+    assert train_mod._action_ball_full_mdp_profile_probe_updates(task) == 12
+
+    task["action_ball_full_mdp_rate_probe"] = True
+    with pytest.raises(train_mod._OverrideError, match="mutually exclusive"):
+        train_mod._action_ball_full_mdp_profile_probe_updates(task)
+    task["action_ball_full_mdp_rate_probe"] = False
+
+    monkeypatch.setenv("HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES", "01")
+    with pytest.raises(train_mod._OverrideError, match="canonical positive"):
+        train_mod._action_ball_full_mdp_profile_probe_updates(task)
+    monkeypatch.setenv("HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES", "51")
+    with pytest.raises(train_mod._OverrideError, match="between 1 and 50"):
+        train_mod._action_ball_full_mdp_profile_probe_updates(task)
+
+
+def test_full_mdp_profile_probe_requires_exact_boolean_and_runtime(monkeypatch):
+    monkeypatch.setenv("HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES", "1")
+    with pytest.raises(train_mod._OverrideError, match="exact explicit boolean"):
+        train_mod._action_ball_full_mdp_profile_probe_updates(
+            {
+                "action_ball_full_mdp_runtime": True,
+                "action_ball_full_mdp_profile_probe": 1,
+            }
+        )
+    with pytest.raises(train_mod._OverrideError, match="requires.*runtime=true"):
+        train_mod._action_ball_full_mdp_profile_probe_updates(
+            {
+                "action_ball_full_mdp_runtime": False,
+                "action_ball_full_mdp_profile_probe": True,
+            }
+        )
+
+
 def test_fresh_flag_routes_around_the_obsolete_successor_partial_probe():
     env_cfg = types.SimpleNamespace(
         _action_ball_strike_fact_successor_receipt={}

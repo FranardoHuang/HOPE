@@ -2,6 +2,23 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-28 FullMDP V9 tick48真实Isaac（仍`Partial`）
+
+V8两端合计已有`941,116`次launch而selected contact仍为0；同源/override审计已将它从“继续等”翻转为
+训练实现negative。V9 source链`651c305e→cbf0aae3→e3cbe9fc`修复N1 action identity、Take061唯一
+bootstrap owner和tick48首次曝光，active-schedule聚焦测试=`53 passed`。tick295 predecessor rate probe
+p50/p90=`6.635/7.153 s/H48`，但61轮due=0，只能裁决速度。
+
+tick48真实Isaac在update4得到`due/selected/accepted=512/512/511`、Take061身份`511/511`、playback
+started=`248`。完整61-update窗累计due/selected/accepted/rejected=`18,432/18,432/18,419/13`、
+playback=`9,120`，所有`18,431`个terminal均为base tilt，recent10 episode mean=`81.916 tick`，launch=0。
+当前阶段是“balance梯度后已经开始mimic”，不是mimic成功；hit/landing仍`未测`。active-task rate
+p50/p90=`10.470/13.863 s/H48`，旧空业务`6.635/7.153`不能代表现役iteration速度。
+本Gate不把task success、ACCEPT或延长寿命变成安全Gate，仍只依赖finite、plant terminal、full-key、
+optimizer与durable ACK事实。wall与due row数相关系数约`.771`，满512-row due update比空due p50约多
+`5.50 s`；已新增自然退出的有限profile入口以定位具体callpoint，不把profiler结果算正式速度。MuJoCo同源
+有限窗已完成但Isaac/Mu行为明显分叉，mimic/hit/landing及parity未闭合，故保持`Partial`。
+
 ## 2026-08-27 FullMDP V8 Isaac replacement（仍`Partial`）
 
 V7 fresh候选采用[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)、

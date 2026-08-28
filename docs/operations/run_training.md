@@ -150,8 +150,8 @@ V2 203/219只允许旧checkpoint解析和paired control，不得作为fresh fall
 [`Reward28`](../DEFINITIONS.md#fullmdp-reward28)：四项paddle composite与四项action/joint连续成本均从
 shared contract materialize，不能由backend复制另一套数值。Mu update/completion/summary wire为`10/5/6`，
 Isaac milestone为schema8；新增teacher-achieved paddle error必须有finite/sum/sumsq，不能沿用旧schema
-伪兼容。四个due是
-`295/588/881/1174`，V3 `[208]`在第四次消费后发布raw`-1` exhausted sentinel。
+伪兼容。V9六个due是`48/233/418/603/788/973`；一轮H48 balance后自然重叠开放mimic，185-tick cadence
+覆盖task close、recovery与hidden gap。旧V8的`295/588/881/1174`只作混源反例，不能再用于fresh启动。
 
 两端rate diagnostic仍是`10 warm-up + 50 measured + 1 tail`，但必须按当前recipe跑
 `512 env × H48 × 61 update`、profiler-off、fresh process和`diagnostic_unauthorized=true`。Mu使用
@@ -160,6 +160,13 @@ Isaac milestone为schema8；新增teacher-achieved paddle error必须有finite/s
 边界安装。V8 source `0ad85ae1…`实测Mu p50/p90=`3.796/3.999 s/H48`、Isaac=
 `6.835/7.612 s/H48`；Mu达到约6秒方向，Isaac大砍但未达到严格6秒。该差异包含PPO尺度取舍，不是语义等价热路
 对拍；probe不能自动转成长跑或代签学习质量。
+
+需要定位任务激活后的host热路时，Isaac launcher可显式组合
+`--diagnostic-profile-probe --profile-updates N`：前者表示“到N轮自然退出的有限profile诊断”，后者给出
+`1..50`轮预算；两者均属于[`diagnostic_unauthorized`](../DEFINITIONS.md#diagnostic-unauthorized)。该入口
+把runner预算临时收为N轮，等待Kit clean completion并写no-clobber `diagnostic-profile-probe.json`；不靠
+signal停止，也不转成长跑。各span为嵌套inclusive host wall且不做CUDA sync，固定标记
+`speed_evidence=false`，只能定位callpoint，不能与profiler-off rate混报。
 
 `9d333b0b`（语义`ba7225b2`）只是pre-V3/pre-PPO-V5 predecessor；V6 exact source=
 `caddecb76727ea55b0ce089453eea91cb5a9f8ea`已被大分母零接触与hard-edge反升证伪并停止。V7 exact source=

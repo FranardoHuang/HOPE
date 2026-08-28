@@ -15,6 +15,7 @@ action_ball_full_mdp_runtime: true
 # diagnostic described in the operations TODO.  It never changes the typed
 # 100,000-update learning recipe or authorizes a checkpoint lineage.
 action_ball_full_mdp_rate_probe: false
+action_ball_full_mdp_profile_probe: false
 actor_obs_contract: null
 registry_name: null
 registry_name_2: null
