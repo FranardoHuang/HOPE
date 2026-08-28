@@ -1019,6 +1019,14 @@ child退出。profile-on median collection/learning=`8.042/.334 s`，inclusive r
 与due rows相关系数`.885`，而与terminal reset为`-.550`。因此下一刀只把既有profiler细分为D05 total、
 question compose、preview、epoch settle和Motion publish；不新增runtime owner/Gate，也不把嵌套span相加。
 
+第一次D05细分件`2a91062e`在首个environment step、PPO update前自然RC1：诊断wrapper替换了
+`advance_action_ball_full_mdp_rows`这个被LeanRuntime按class function identity认证的方法，现有保护正确拒绝
+`construction-bound component lacks exact advance_action_ball_full_mdp_rows`。该root冷封存且不复用；这不是
+physics、asset或learner反例。successor不删除/放宽身份检查，只在认证后的原bound method调用外使用既有
+opt-in runtime host-clock；内部prepare/question/preview/build/settle保持可逆计时，并新增“R05 advance与
+Motion publish的class/bound identity不变”测试。Motion publish不再单独替换方法，其wall包含在D05 total
+残差中。
+
 同源码MuJoCo 61-update窗也已自然完成，p50/p90=`6.644/6.854 s/H48`，scheduled/reveal=
 `10,861/10,860`、launch=`6,658`、missed launch=0、R03 present/physically-valid=`5,107/5,107`，
 selected contact=`0/6,658`、landing=0。episode mean first10→last10=`135.78→139.98`；paddle position/

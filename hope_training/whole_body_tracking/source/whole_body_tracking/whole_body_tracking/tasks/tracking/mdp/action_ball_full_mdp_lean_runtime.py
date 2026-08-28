@@ -1236,7 +1236,14 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     "advance_action_ball_full_mdp_rows",
                 )
                 try:
-                    if settle() is not None:
+                    profile_call = getattr(
+                        self, "_full_mdp_profile_runtime_call", None
+                    )
+                    if profile_call is None:
+                        settle_result = settle()
+                    else:
+                        settle_result = profile_call("d05_total", settle)
+                    if settle_result is not None:
                         raise ActionBallFullMdpLeanRuntimeError(
                             "D05 row-wise settlement must return None"
                         )

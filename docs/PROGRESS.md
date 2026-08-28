@@ -2,6 +2,10 @@
 
 ## 2026-08-28 — FullMDP V9同源初态与tick48重叠课程（branch diagnostic）
 
+- D05细分profile首个Pod namespace在首个environment step、PPO update前fail-closed：profiler把
+  `advance_action_ball_full_mdp_rows`替换成instance wrapper，破坏LeanRuntime既有exact bound-method
+  身份检查。失败root只读且不复用；修复不放宽检查，而是在LeanRuntime已认证的调用点用既有opt-in
+  host-clock callback包住原bound method，并新增R05/Motion production方法身份保持反例。
 - V8只读证据两端合计已到`941,116`次launch且selected contact仍为0；审计确认不是“再多等step”：Take058
   teacher、Take061 ready与legacy bootstrap覆盖混源，catalog attachment又形成motion `N=1`/action
   identity `N=0`。修复链`651c305e→cbf0aae3→e3cbe9fc`将Take061 ready→frame0桥与动作身份原子绑定，

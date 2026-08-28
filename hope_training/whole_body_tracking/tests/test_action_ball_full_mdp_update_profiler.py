@@ -353,6 +353,39 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert observed == payload
 
 
+def test_profiler_preserves_exact_r05_and_motion_method_identity(monkeypatch):
+    _install_exact_module(monkeypatch)
+    env = _ExactEnv()
+    runtime = env._full_mdp_runtime_owner
+    r05 = runtime._r05_runtime
+    motion = runtime._motion
+    profiler = P.install_full_mdp_update_profiler(
+        env,
+        requested_updates=1,
+        clock_ns=_Clock(),
+        emit_line=lambda _line: None,
+    )
+
+    assert vars(type(r05))["advance_action_ball_full_mdp_rows"] is (
+        r05.advance_action_ball_full_mdp_rows.__func__
+    )
+    assert vars(type(motion))[
+        "publish_action_ball_full_mdp_post_d05_observation"
+    ] is motion.publish_action_ball_full_mdp_post_d05_observation.__func__
+    assert runtime._full_mdp_profile_runtime_call(
+        "d05_total", r05.advance_action_ball_full_mdp_rows
+    ) is None
+    assert profiler._segments["d05_total"]["calls"] == 1
+    assert "_prepare_many_impl" in r05.__dict__
+    assert "_internal_question_compose" in r05.__dict__
+
+    profiler.close()
+    assert "advance_action_ball_full_mdp_rows" not in r05.__dict__
+    assert "publish_action_ball_full_mdp_post_d05_observation" not in (
+        motion.__dict__
+    )
+
+
 def test_partial_install_failure_restores_every_bound_method(monkeypatch):
     _install_exact_module(monkeypatch)
     env = _ExactEnv()
