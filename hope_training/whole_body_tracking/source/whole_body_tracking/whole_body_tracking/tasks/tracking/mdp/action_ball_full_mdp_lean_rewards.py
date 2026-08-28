@@ -16,7 +16,7 @@ for decoding them as infrastructure evidence.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import importlib
 import math
 import types
@@ -183,6 +183,16 @@ class _FrozenR06RewardCycle:
 
 
 @dataclass(frozen=True)
+class _SealedRegularizationHotPath:
+    """Construction-bound dynamic sources plus shared static geometry."""
+
+    action_manager: object
+    action: object
+    data: object
+    barrier_geometry: regularization._PreparedSoftLimitBarrierV2
+
+
+@dataclass(frozen=True)
 class _SealedEnvRewardHotPath:
     """Construction-bound dispatcher and evaluator identities for one env."""
 
@@ -195,6 +205,35 @@ class _SealedEnvRewardHotPath:
     lifecycle_payment_count: int
     paddle_first_ordinal: int
     regularization_first_ordinal: int
+    regularization: _SealedRegularizationHotPath | None = None
+
+    def bind_regularization(self, env: object) -> "_SealedEnvRewardHotPath":
+        """Complete the seal after Isaac has constructed ActionManager."""
+
+        if self.regularization is not None:
+            raise LeanRewardConstructionHold(
+                "regularization hot path is already bound"
+            )
+
+        action = _regularization_action_term(env)
+        action_manager = env.action_manager
+        data = _regularization_robot_data(env, action)
+        geometry = regularization._prepare_soft_limit_barrier_v2(
+            data.joint_pos,
+            data.soft_joint_pos_limits,
+            data.default_joint_pos,
+            data.joint_pos_limits,
+            freeze=True,
+        )
+        return replace(
+            self,
+            regularization=_SealedRegularizationHotPath(
+                action_manager=action_manager,
+                action=action,
+                data=data,
+                barrier_geometry=geometry,
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -1191,18 +1230,22 @@ def regularization_reward(env: object, *, ordinal: int) -> torch.Tensor:
     ):
         raise LeanRewardConstructionHold("regularization ordinal differs")
     spec = REGULARIZATION_SPECS[ordinal - REGULARIZATION_FIRST_ORDINAL]
-    action = _regularization_action_term(env)
-    data = _regularization_robot_data(env, action)
+    binding = _env_reward_hot_path(env).regularization
+    if type(binding) is not _SealedRegularizationHotPath:
+        raise LeanRewardConstructionHold(
+            "regularization hot path is not bound"
+        )
+    action_manager = binding.action_manager
+    action = binding.action
+    data = binding.data
     if spec.evaluator_name == "action_rate_l2":
         value = regularization.action_rate_l2(
-            env.action_manager.action, env.action_manager.prev_action
+            action_manager.action, action_manager.prev_action
         )
     elif spec.evaluator_name == "qdes_limit_barrier_v2":
-        value = regularization.soft_limit_barrier_v2(
+        value = regularization._soft_limit_barrier_v2_prepared(
             action.processed_actions,
-            data.soft_joint_pos_limits,
-            data.default_joint_pos,
-            data.joint_pos_limits,
+            binding.barrier_geometry,
         )
     elif spec.evaluator_name == "qdes_projection_penalty":
         value = regularization.qdes_projection_penalty(
@@ -1213,11 +1256,9 @@ def regularization_reward(env: object, *, ordinal: int) -> torch.Tensor:
             action.nominal_projected_qdes_valid,
         )
     elif spec.evaluator_name == "actual_joint_limit_barrier_v2":
-        value = regularization.soft_limit_barrier_v2(
+        value = regularization._soft_limit_barrier_v2_prepared(
             data.joint_pos,
-            data.soft_joint_pos_limits,
-            data.default_joint_pos,
-            data.joint_pos_limits,
+            binding.barrier_geometry,
         )
     else:
         raise LeanRewardConstructionHold(

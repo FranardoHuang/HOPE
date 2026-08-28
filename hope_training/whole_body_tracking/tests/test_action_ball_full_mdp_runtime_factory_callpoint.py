@@ -368,6 +368,24 @@ def _install_lean_observation_module(monkeypatch):
     return module.LeanActionEpochObservationSource
 
 
+def _install_lean_reward_module(monkeypatch):
+    """Keep construction-order tests independent of the real Reward graph."""
+
+    name = (
+        "whole_body_tracking.tasks.tracking.mdp."
+        "action_ball_full_mdp_lean_rewards"
+    )
+    module = types.ModuleType(name)
+
+    class HotPath:
+        def bind_regularization(self, env):
+            env.action_manager.get_term("joint_pos")
+            return self
+
+    module.seal_env_reward_hot_path = lambda _env, _graph: HotPath()
+    monkeypatch.setitem(sys.modules, name, module)
+
+
 def _atomic_lean_graph_inputs(
     env,
     motion,
@@ -458,7 +476,46 @@ def _manager_modules(trace, *, motion, racket, subject=M):
             trace.append("recorder")
             env.recorder_manager = object()
             trace.append("action")
-            env.action_manager = object()
+            joint_names = tuple(f"joint_{index}" for index in range(31))
+            zeros = torch.zeros((env.num_envs, 31), device=env.device)
+            limits = torch.empty(
+                (env.num_envs, 31, 2), dtype=torch.float32, device=env.device
+            )
+            limits[:, :, 0] = -1.0
+            limits[:, :, 1] = 1.0
+            data = types.SimpleNamespace(
+                joint_names=joint_names,
+                soft_joint_pos_limits=limits.clone(),
+                default_joint_pos=zeros.clone(),
+                joint_pos_limits=limits,
+                joint_pos=zeros.clone(),
+            )
+            action = types.SimpleNamespace(
+                _joint_names=joint_names,
+                _joint_ids=slice(None),
+                _asset=types.SimpleNamespace(data=data),
+                processed_actions=zeros.clone(),
+                pre_clamp_qdes=zeros.clone(),
+                nominal_projected_qdes=zeros.clone(),
+                nominal_projection_span=torch.ones_like(zeros),
+                pre_clamp_qdes_valid=torch.zeros(
+                    env.num_envs, dtype=torch.bool, device=env.device
+                ),
+                nominal_projected_qdes_valid=torch.zeros(
+                    env.num_envs, dtype=torch.bool, device=env.device
+                ),
+            )
+
+            def get_term(name):
+                assert name == "joint_pos"
+                trace.append("regularization")
+                return action
+
+            env.action_manager = types.SimpleNamespace(
+                action=zeros.clone(),
+                prev_action=zeros.clone(),
+                get_term=get_term,
+            )
             trace.append("observation")
             env.observation_manager = object()
 
@@ -508,6 +565,7 @@ def _install_success_builder(
     module = types.ModuleType(subject.FULL_MDP_RUNTIME_FACTORY_MODULE)
     authority = _GenesisAuthority(subject)
     observation_source_type = _install_lean_observation_module(monkeypatch)
+    _install_lean_reward_module(monkeypatch)
 
     def make_install_inputs(env):
         return _atomic_lean_graph_inputs(
@@ -674,6 +732,7 @@ def test_builder_runs_exactly_once_after_command_before_observation(monkeypatch)
         "recorder",
         "action",
         "observation",
+        "regularization",
         "termination",
         "reward",
         "curriculum",

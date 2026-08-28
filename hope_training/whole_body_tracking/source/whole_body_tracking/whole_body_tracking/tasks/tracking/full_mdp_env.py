@@ -1422,6 +1422,10 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             # ManagerBasedRLEnv loader.  It creates recorder/action/observation
             # managers in that order without constructing CommandManager twice.
             ManagerBasedEnv.load_managers(self)
+            reward_hot_path = self._action_ball_full_mdp_reward_hot_path
+            self._action_ball_full_mdp_reward_hot_path = (
+                reward_hot_path.bind_regularization(self)
+            )
 
             self.termination_manager = TerminationManager(
                 self.cfg.terminations, self

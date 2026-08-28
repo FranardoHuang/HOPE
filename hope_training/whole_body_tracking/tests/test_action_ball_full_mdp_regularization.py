@@ -24,6 +24,54 @@ def _limits(lower: float, upper: float) -> torch.Tensor:
     return torch.tensor([[lower, upper]] * R.JOINT_COUNT, dtype=torch.float32)
 
 
+def _legacy_soft_limit_barrier_v2(
+    positions: torch.Tensor,
+    soft_limits: torch.Tensor,
+    default_joint_pos: torch.Tensor,
+    hard_limits: torch.Tensor,
+) -> torch.Tensor:
+    """Exact pre-preparation formula retained only as the parity oracle."""
+
+    lower, upper = soft_limits[:, :, 0], soft_limits[:, :, 1]
+    hard_lower, hard_upper = hard_limits[:, :, 0], hard_limits[:, :, 1]
+    span = upper - lower
+    default_distance = torch.minimum(
+        default_joint_pos - lower, upper - default_joint_pos
+    ) / span
+    margin_eff = torch.clamp(
+        default_distance - R.STANCE_EPS_FRAC,
+        max=float(R.SOFT_LIMIT_MARGIN_FRAC),
+    )
+    row_finite = torch.all(torch.isfinite(positions), dim=1)
+    safe_positions = torch.where(
+        row_finite[:, None], positions, default_joint_pos
+    )
+    distance = torch.minimum(
+        safe_positions - lower, upper - safe_positions
+    ) / span
+    intrusion = torch.relu(margin_eff - distance) / margin_eff
+    band_rad = margin_eff * span
+    depth_rad = intrusion * band_rad
+    ramp = torch.where(
+        intrusion <= 1.0,
+        torch.square(depth_rad) / (2.0 * band_rad),
+        depth_rad - 0.5 * band_rad,
+    )
+    hard_excess = torch.relu(hard_lower - safe_positions) + torch.relu(
+        safe_positions - hard_upper
+    )
+    floor_rad = torch.where(
+        hard_excess > 0.0,
+        float(R.SOFT_LIMIT_PENALTY_FLOOR) * band_rad,
+        torch.zeros_like(ramp),
+    )
+    per_joint = torch.where(
+        intrusion > 0.0, ramp + floor_rad, torch.zeros_like(ramp)
+    )
+    value = torch.sum(per_joint, dim=1)
+    return -torch.where(row_finite, value, torch.zeros_like(value))
+
+
 def test_reward_contract_remains_dependency_light_without_torch_import():
     source_path = MDP / "action_ball_full_mdp_reward_contract.py"
     source = source_path.read_text(encoding="utf-8")
@@ -96,6 +144,71 @@ def test_soft_limit_v2_keeps_quadratic_band_linear_tail_and_invalid_row_finite()
     )
     assert value[3].item() == 0.0
     assert torch.isfinite(value).all()
+
+
+def test_prepared_soft_limit_geometry_is_bitwise_equal_across_dynamic_rows():
+    soft = _limits(-0.9, 0.9).unsqueeze(0).expand(8, -1, -1).clone()
+    hard = _limits(-1.0, 1.0).unsqueeze(0).expand(8, -1, -1).clone()
+    default = torch.zeros((8, R.JOINT_COUNT), dtype=torch.float32)
+    positions = torch.zeros_like(default)
+    band = 0.02 * 1.8
+    positions[1, 0] = 0.9 - band
+    positions[2, 1] = 0.9 - 0.5 * band
+    positions[3, 2] = 0.9 + 0.5 * band
+    positions[4, 3] = 1.05
+    positions[5, 4] = -1.05
+    positions[6, 5] = float("nan")
+    positions[7, 6] = float("inf")
+
+    prepared = R._prepare_soft_limit_barrier_v2(
+        positions, soft, default, hard, freeze=True
+    )
+    expected = _legacy_soft_limit_barrier_v2(
+        positions, soft, default, hard
+    )
+    actual = R._soft_limit_barrier_v2_prepared(positions, prepared)
+    assert torch.equal(actual, expected)
+    assert torch.equal(
+        R.soft_limit_barrier_v2(positions, soft, default, hard), expected
+    )
+
+    reset_positions = torch.zeros_like(positions)
+    reset_positions[0, 7] = -0.9 + 0.25 * band
+    reset_expected = _legacy_soft_limit_barrier_v2(
+        reset_positions, soft, default, hard
+    )
+    reset_actual = R._soft_limit_barrier_v2_prepared(
+        reset_positions, prepared
+    )
+    assert torch.equal(reset_actual, reset_expected)
+
+    soft.add_(0.1)
+    default.add_(0.1)
+    hard.add_(0.1)
+    assert torch.equal(
+        R._soft_limit_barrier_v2_prepared(reset_positions, prepared),
+        reset_expected,
+    )
+
+
+def test_prepared_soft_limit_geometry_keeps_static_validation_at_construction():
+    reference = torch.zeros((2, R.JOINT_COUNT), dtype=torch.float32)
+    default = torch.zeros(R.JOINT_COUNT, dtype=torch.float32)
+    hard = _limits(-1.0, 1.0)
+
+    nonfinite = _limits(-0.9, 0.9)
+    nonfinite[0, 0] = float("nan")
+    with pytest.raises(RuntimeError):
+        R._prepare_soft_limit_barrier_v2(
+            reference, nonfinite, default, hard
+        )
+
+    reversed_limits = _limits(-0.9, 0.9)
+    reversed_limits[0] = torch.tensor([0.5, -0.5])
+    with pytest.raises(RuntimeError):
+        R._prepare_soft_limit_barrier_v2(
+            reference, reversed_limits, default, hard
+        )
 
 
 def test_projection_v2_has_full_span_nonfinite_surrogate_and_invalid_reset_zero():

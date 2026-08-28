@@ -10,6 +10,8 @@ auditable component row per objective.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 
 try:
@@ -28,6 +30,22 @@ MARGIN_FLOOR_FRAC = reward_contract.REGULARIZATION_MARGIN_FLOOR_FRAC
 RegularizationRewardSpec = reward_contract.RegularizationRewardSpec
 REGULARIZATION_SPECS = reward_contract.REGULARIZATION_SPECS
 REGULARIZATION_NAMES = reward_contract.REGULARIZATION_NAMES
+
+
+@dataclass(frozen=True)
+class _PreparedSoftLimitBarrierV2:
+    """Construction-static geometry shared by the two live barrier rows."""
+
+    num_envs: int
+    lower: torch.Tensor
+    upper: torch.Tensor
+    default_q: torch.Tensor
+    hard_lower: torch.Tensor
+    hard_upper: torch.Tensor
+    span: torch.Tensor
+    margin_eff: torch.Tensor
+    band_rad: torch.Tensor
+    penalty_floor: float
 
 
 def _joint_rows(value: torch.Tensor, *, name: str) -> tuple[int, int]:
@@ -128,6 +146,102 @@ def action_rate_l2(
     return -torch.sum(torch.square(delta), dim=1)
 
 
+def _prepare_soft_limit_barrier_v2(
+    reference: torch.Tensor,
+    soft_limits: torch.Tensor,
+    default_joint_pos: torch.Tensor,
+    hard_limits: torch.Tensor,
+    *,
+    margin_frac: float = SOFT_LIMIT_MARGIN_FRAC,
+    penalty_floor: float = SOFT_LIMIT_PENALTY_FLOOR,
+    freeze: bool = False,
+) -> _PreparedSoftLimitBarrierV2:
+    """Validate geometry; optionally freeze its construction-owned sources."""
+
+    num_envs, _ = _joint_rows(reference, name="reference")
+    if not 0.0 < float(margin_frac) < 0.5:
+        raise ValueError("margin_frac must be in (0,0.5)")
+    if not 0.0 <= float(penalty_floor) < 1.0:
+        raise ValueError("penalty_floor must be in [0,1)")
+    lower, upper = _expanded_limits(
+        soft_limits, reference=reference, name="soft_limits"
+    )
+    hard_lower, hard_upper = _expanded_limits(
+        hard_limits, reference=reference, name="hard_limits"
+    )
+    default_q = _expanded_default(default_joint_pos, reference=reference)
+    if freeze:
+        lower = lower.clone()
+        upper = upper.clone()
+        default_q = default_q.clone()
+        hard_lower = hard_lower.clone()
+        hard_upper = hard_upper.clone()
+    span = upper - lower
+    default_distance = torch.minimum(default_q - lower, upper - default_q) / span
+    margin_eff = torch.clamp(
+        default_distance - STANCE_EPS_FRAC, max=float(margin_frac)
+    )
+    torch._assert_async(torch.all(margin_eff > MARGIN_FLOOR_FRAC))
+    band_rad = margin_eff * span
+    return _PreparedSoftLimitBarrierV2(
+        num_envs=num_envs,
+        lower=lower,
+        upper=upper,
+        default_q=default_q,
+        hard_lower=hard_lower,
+        hard_upper=hard_upper,
+        span=span,
+        margin_eff=margin_eff,
+        band_rad=band_rad,
+        penalty_floor=float(penalty_floor),
+    )
+
+
+def _soft_limit_barrier_v2_prepared(
+    positions: torch.Tensor, geometry: _PreparedSoftLimitBarrierV2
+) -> torch.Tensor:
+    """Evaluate only the dynamic half of the v2 barrier."""
+
+    num_envs, _ = _joint_rows(positions, name="positions")
+    if (
+        type(geometry) is not _PreparedSoftLimitBarrierV2
+        or num_envs != geometry.num_envs
+        or positions.dtype != geometry.lower.dtype
+        or positions.device != geometry.lower.device
+    ):
+        raise ValueError("positions must match the prepared barrier geometry")
+
+    row_finite = torch.all(torch.isfinite(positions), dim=1)
+    safe_positions = torch.where(
+        row_finite[:, None],
+        positions,
+        torch.broadcast_to(geometry.default_q, positions.shape),
+    )
+    distance = torch.minimum(
+        safe_positions - geometry.lower, geometry.upper - safe_positions
+    ) / geometry.span
+    intrusion = torch.relu(geometry.margin_eff - distance) / geometry.margin_eff
+    depth_rad = intrusion * geometry.band_rad
+    ramp = torch.where(
+        intrusion <= 1.0,
+        torch.square(depth_rad) / (2.0 * geometry.band_rad),
+        depth_rad - 0.5 * geometry.band_rad,
+    )
+    hard_excess = torch.relu(geometry.hard_lower - safe_positions) + torch.relu(
+        safe_positions - geometry.hard_upper
+    )
+    floor_rad = torch.where(
+        hard_excess > 0.0,
+        geometry.penalty_floor * geometry.band_rad,
+        torch.zeros_like(ramp),
+    )
+    per_joint = torch.where(
+        intrusion > 0.0, ramp + floor_rad, torch.zeros_like(ramp)
+    )
+    value = torch.sum(per_joint, dim=1)
+    return -torch.where(row_finite, value, torch.zeros_like(value))
+
+
 def soft_limit_barrier_v2(
     positions: torch.Tensor,
     soft_limits: torch.Tensor,
@@ -144,49 +258,15 @@ def soft_limit_barrier_v2(
     independent terminal/plant mechanism owns the non-finite consequence.
     """
 
-    _joint_rows(positions, name="positions")
-    if not 0.0 < float(margin_frac) < 0.5:
-        raise ValueError("margin_frac must be in (0,0.5)")
-    if not 0.0 <= float(penalty_floor) < 1.0:
-        raise ValueError("penalty_floor must be in [0,1)")
-    lower, upper = _expanded_limits(
-        soft_limits, reference=positions, name="soft_limits"
+    geometry = _prepare_soft_limit_barrier_v2(
+        positions,
+        soft_limits,
+        default_joint_pos,
+        hard_limits,
+        margin_frac=margin_frac,
+        penalty_floor=penalty_floor,
     )
-    hard_lower, hard_upper = _expanded_limits(
-        hard_limits, reference=positions, name="hard_limits"
-    )
-    default_q = _expanded_default(default_joint_pos, reference=positions)
-    span = upper - lower
-    default_distance = torch.minimum(default_q - lower, upper - default_q) / span
-    margin_eff = torch.clamp(default_distance - STANCE_EPS_FRAC, max=float(margin_frac))
-    torch._assert_async(torch.all(margin_eff > MARGIN_FLOOR_FRAC))
-
-    row_finite = torch.all(torch.isfinite(positions), dim=1)
-    safe_positions = torch.where(
-        row_finite[:, None], positions, torch.broadcast_to(default_q, positions.shape)
-    )
-    distance = torch.minimum(
-        safe_positions - lower, upper - safe_positions
-    ) / span
-    intrusion = torch.relu(margin_eff - distance) / margin_eff
-    band_rad = margin_eff * span
-    depth_rad = intrusion * band_rad
-    ramp = torch.where(
-        intrusion <= 1.0,
-        torch.square(depth_rad) / (2.0 * band_rad),
-        depth_rad - 0.5 * band_rad,
-    )
-    hard_excess = torch.relu(hard_lower - safe_positions) + torch.relu(
-        safe_positions - hard_upper
-    )
-    floor_rad = torch.where(
-        hard_excess > 0.0,
-        float(penalty_floor) * band_rad,
-        torch.zeros_like(ramp),
-    )
-    per_joint = torch.where(intrusion > 0.0, ramp + floor_rad, torch.zeros_like(ramp))
-    value = torch.sum(per_joint, dim=1)
-    return -torch.where(row_finite, value, torch.zeros_like(value))
+    return _soft_limit_barrier_v2_prepared(positions, geometry)
 
 
 def qdes_projection_penalty(

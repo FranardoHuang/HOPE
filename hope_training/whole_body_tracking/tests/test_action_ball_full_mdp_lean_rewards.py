@@ -228,6 +228,42 @@ class _ExactEnvRewardDispatcherRepresentation:
 
     def __init__(self, graph):
         self._test_reward_graph = graph
+        joint_names = tuple(f"joint_{index}" for index in range(31))
+        zeros = torch.zeros((graph.num_envs, 31), device=TEST_DEVICE)
+        limits = torch.empty(
+            (graph.num_envs, 31, 2), dtype=torch.float32, device=TEST_DEVICE
+        )
+        limits[:, :, 0] = -1.0
+        limits[:, :, 1] = 1.0
+        data = types.SimpleNamespace(
+            joint_names=joint_names,
+            soft_joint_pos_limits=limits.clone(),
+            default_joint_pos=zeros.clone(),
+            joint_pos_limits=limits,
+            joint_pos=zeros.clone(),
+        )
+        action = types.SimpleNamespace(
+            _joint_names=joint_names,
+            _joint_ids=slice(None),
+            _asset=types.SimpleNamespace(data=data),
+            processed_actions=zeros.clone(),
+            pre_clamp_qdes=zeros.clone(),
+            nominal_projected_qdes=zeros.clone(),
+            nominal_projection_span=torch.ones_like(zeros),
+            pre_clamp_qdes_valid=torch.zeros(
+                graph.num_envs, dtype=torch.bool, device=TEST_DEVICE
+            ),
+            nominal_projected_qdes_valid=torch.zeros(
+                graph.num_envs, dtype=torch.bool, device=TEST_DEVICE
+            ),
+        )
+        self.action_manager = types.SimpleNamespace(
+            action=zeros.clone(),
+            prev_action=zeros.clone(),
+            get_term=lambda name: action
+            if name == "joint_pos"
+            else (_ for _ in ()).throw(KeyError(name)),
+        )
         # The production seal resolves real IsaacLab evaluator modules once.
         # This focused CPU file deliberately stays dependency-light, so supply
         # inert callable surfaces only when the test's own monkeypatch did not
@@ -259,7 +295,9 @@ class _ExactEnvRewardDispatcherRepresentation:
             binding = R.seal_env_reward_hot_path(self, graph)
         finally:
             R.importlib.import_module = current_import
-        self.__dict__[R.ENV_REWARD_HOT_PATH_ATTR] = binding
+        self.__dict__[R.ENV_REWARD_HOT_PATH_ATTR] = (
+            binding.bind_regularization(self)
+        )
 
     def _action_ball_full_mdp_lean_reward_term(
         self,
@@ -1402,17 +1440,14 @@ def test_shared_reward_contract_keeps_only_supplied_upper_scope_without_held_wri
         )
 
 
-def test_regularization_wrapper_uses_sealed_unbound_dispatcher(monkeypatch):
+def test_regularization_wrapper_uses_sealed_unbound_dispatcher():
     graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
     env = _ExactEnvRewardDispatcherRepresentation(graph)
     env.num_envs = graph.num_envs
     env.action_manager = types.SimpleNamespace(
-        action=torch.zeros((graph.num_envs, 31), device=TEST_DEVICE),
-        prev_action=torch.zeros((graph.num_envs, 31), device=TEST_DEVICE),
-    )
-    monkeypatch.setattr(R, "_regularization_action_term", lambda _env: object())
-    monkeypatch.setattr(
-        R, "_regularization_robot_data", lambda _env, _action: object()
+        get_term=lambda _name: (_ for _ in ()).throw(
+            AssertionError("regularization binding was repeated")
+        )
     )
     for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT):
         graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
@@ -1426,6 +1461,83 @@ def test_regularization_wrapper_uses_sealed_unbound_dispatcher(monkeypatch):
         env, ordinal=R.REGULARIZATION_FIRST_ORDINAL
     )
     assert torch.equal(actual, torch.zeros(graph.num_envs, device=TEST_DEVICE))
+
+
+def test_regularization_seal_is_one_shot_and_unbound_consumer_fails_loud():
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
+    env = _ExactEnvRewardDispatcherRepresentation(graph)
+    binding = R._env_reward_hot_path(env)
+
+    with pytest.raises(R.LeanRewardConstructionHold, match="already bound"):
+        binding.bind_regularization(env)
+
+    env.__dict__[R.ENV_REWARD_HOT_PATH_ATTR] = R.replace(
+        binding, regularization=None
+    )
+    with pytest.raises(R.LeanRewardConstructionHold, match="not bound"):
+        R.regularization_reward(
+            env, ordinal=R.REGULARIZATION_FIRST_ORDINAL
+        )
+
+
+def test_regularization_binding_preserves_reset_rows_and_ordinal_dispatch(monkeypatch):
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
+    env = _ExactEnvRewardDispatcherRepresentation(graph)
+    env.num_envs = graph.num_envs
+    binding = R._env_reward_hot_path(env).regularization
+    assert binding is not None
+
+    # Reset semantics: action rate is zero, both barrier positions are neutral,
+    # and stale projection buffers are ignored while their valid bits are false.
+    binding.action.pre_clamp_qdes.fill_(float("nan"))
+    binding.action.nominal_projected_qdes.fill_(float("nan"))
+    binding.action.nominal_projection_span.fill_(float("nan"))
+    binding.action.pre_clamp_qdes_valid.zero_()
+    binding.action.nominal_projected_qdes_valid.zero_()
+
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT):
+        graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
+    for ordinal in range(
+        R.LIFECYCLE_PAYMENT_COUNT, R.REGULARIZATION_FIRST_ORDINAL
+    ):
+        value = torch.ones(graph.num_envs, device=TEST_DEVICE)
+        graph.record_common_dense(
+            ordinal, value, **_paddle_telemetry_kwargs(ordinal, value)
+        )
+
+    original_barrier = R.regularization._soft_limit_barrier_v2_prepared
+    original_projection = R.regularization.qdes_projection_penalty
+    monkeypatch.setattr(
+        R.regularization,
+        "_soft_limit_barrier_v2_prepared",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("later regularization row ran early")
+        ),
+    )
+    monkeypatch.setattr(
+        R.regularization,
+        "qdes_projection_penalty",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("projection row ran early")
+        ),
+    )
+    first = R.regularization_reward(
+        env, ordinal=R.REGULARIZATION_FIRST_ORDINAL
+    )
+    assert torch.equal(first, torch.zeros_like(first))
+    monkeypatch.setattr(
+        R.regularization, "_soft_limit_barrier_v2_prepared", original_barrier
+    )
+    monkeypatch.setattr(
+        R.regularization, "qdes_projection_penalty", original_projection
+    )
+
+    remaining = tuple(
+        R.regularization_reward(env, ordinal=ordinal)
+        for ordinal in range(R.REGULARIZATION_FIRST_ORDINAL + 1, R.MANAGER_TERM_COUNT)
+    )
+    assert all(torch.equal(value, torch.zeros_like(value)) for value in remaining)
+    assert graph.completed_cycle_count == 1
 
 
 def test_dense_rows_ignore_lifecycle_paid_bits_and_exist_when_lifecycle_is_zero():
