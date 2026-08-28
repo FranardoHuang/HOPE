@@ -608,6 +608,15 @@ def _verify_loaded_runtime_usd_bundle(
         if path.is_file():
             observed_paths.add(path.relative_to(bundle_root).as_posix())
     if observed_paths != expected_paths:
+        derived_markers = {
+            "DERIVATION_RECEIPT.json",
+            "source_bundle/model.usd",
+        }
+        if not derived_markers.issubset(observed_paths):
+            raise RuntimeError(
+                "robot_hit_table live USD bundle differs from the exact "
+                "six-file pin"
+            )
         bundle_root = _verified_derived_runtime_source_bundle(bundle_root)
     entries = []
     for relative, expected_sha256, expected_size in (
