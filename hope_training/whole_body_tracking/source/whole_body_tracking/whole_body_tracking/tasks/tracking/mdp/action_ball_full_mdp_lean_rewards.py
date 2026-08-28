@@ -876,7 +876,7 @@ def common_dense_reward(
     if spec.body_scope is None:
         if body_names is not None:
             raise LeanRewardConstructionHold("anchor dense body scope differs")
-    elif spec.body_scope == reward_contract.TRACKED_EXCEPT_HELD_WRIST:
+    elif spec.body_scope == reward_contract.UPPER_EXCEPT_HELD_WRIST:
         if (
             type(body_names) is not tuple
             or not body_names
@@ -1213,16 +1213,16 @@ REWARD_TERM_CALLABLES = LIFECYCLE_REWARD_TERM_CALLABLES + (
 ) * len(REGULARIZATION_SPECS)
 
 
-def _a3_tracked_except_held_wrist_body_names() -> tuple[str, ...]:
+def _a3_upper_except_held_wrist_body_names() -> tuple[str, ...]:
     try:
         robot_module = importlib.import_module(
             "whole_body_tracking.robots.agibot_a3"
         )
-        tracked = robot_module.A3_TRACKED_BODIES
-        return reward_contract.tracked_except_held_wrist_body_names(tracked)
+        upper = robot_module.A3_UPPER_TRACKED
+        return reward_contract.upper_except_held_wrist_body_names(upper)
     except Exception as exc:
         raise LeanRewardConstructionHold(
-            "A3 non-wrist tracked-body scope is unavailable"
+            "A3 non-wrist upper-body scope is unavailable"
         ) from exc
 
 
@@ -1287,9 +1287,9 @@ def materialize_reward_manager_cfg(
             )
             if spec.coarse_std is not None:
                 params["coarse_std"] = spec.coarse_std
-            if spec.body_scope == reward_contract.TRACKED_EXCEPT_HELD_WRIST:
+            if spec.body_scope == reward_contract.UPPER_EXCEPT_HELD_WRIST:
                 params["body_names"] = (
-                    _a3_tracked_except_held_wrist_body_names()
+                    _a3_upper_except_held_wrist_body_names()
                 )
             elif spec.body_scope is not None:
                 raise LeanRewardConstructionHold(

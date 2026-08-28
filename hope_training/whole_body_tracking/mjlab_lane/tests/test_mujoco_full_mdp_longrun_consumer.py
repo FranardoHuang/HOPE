@@ -38,7 +38,7 @@ PPO_RECIPE = _load_ppo_recipe()
 NUM_ENVS = PPO_RECIPE.num_envs
 STEPS_PER_UPDATE = PPO_RECIPE.num_steps_per_env
 TRANSITIONS = NUM_ENVS * STEPS_PER_UPDATE
-UID = 6907688916670928
+UID = 5527597793770800
 COMMIT = "a" * 40
 NAMESPACE = "mujoco-fullmdp-consumer-test-0001"
 MUJOCO_WARP_RUNTIME = {
@@ -314,14 +314,14 @@ def _base_record(module, index, *, identity=IDENTITY):
             "action_slot": 0,
             "action_uid": UID,
             "mount_normal_sign": 1,
-            "family": "forehand",
+            "family": "backhand",
             "family_source": "runner_pinned_identity",
             "observed_rows": TRANSITIONS,
             "slot0_rows": TRANSITIONS,
             "uid_rows": TRANSITIONS,
             "mount_sign_rows": TRANSITIONS,
             "identity_rows": TRANSITIONS,
-            "family_counts": {"forehand": TRANSITIONS, "backhand": 0},
+            "family_counts": {"forehand": 0, "backhand": TRANSITIONS},
         },
     }
 
@@ -579,8 +579,13 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
         "due_rows": 0, "accepted_rows": 0, "deferred_rows": 0,
         "accept_rate": None, "defer_rate": None,
     }
-    assert summary["action_coverage"]["backhand"] == {
+    assert summary["action_coverage"]["forehand"] == {
         "status": "未测", "observed_rows": 0, "denominator": 0,
+    }
+    assert summary["action_coverage"]["backhand"] == {
+        "status": "observed",
+        "observed_rows": 5 * TRANSITIONS,
+        "denominator": 5 * TRANSITIONS,
     }
     assert summary["hit_opportunity_r03"] == {
         "present_rows": 0,

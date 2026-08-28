@@ -22,10 +22,10 @@ def test_portable_fresh_cadence_freezes_due_ticks_not_verdicts():
     table = catalog.load_portable_action_center_table()
     cadence = catalog.derive_portable_fresh_cadence(table)
     assert cadence.first_reveal_tick == 295
-    assert cadence.cadence_ticks == 293
-    assert cadence.reference_due_ticks == (295, 588, 881, 1174)
+    assert cadence.cadence_ticks == 185
+    assert cadence.reference_due_ticks == (295, 480, 665, 850, 1035, 1220)
     assert len(cadence.reference_due_ticks) == catalog.FRESH_REFERENCE_DUE_COUNT
-    assert cadence.reference_due_ticks[-1] + cadence.cadence_ticks == 1467
+    assert cadence.reference_due_ticks[-1] + cadence.cadence_ticks == 1405
     assert (
         cadence.reference_due_ticks[-1] + cadence.cadence_ticks
         < cadence.episode_horizon_ticks
@@ -51,26 +51,26 @@ def test_portable_fresh_cadence_freezes_due_ticks_not_verdicts():
 def test_portable_catalog_preserves_legacy_columns_and_fresh_action_zero():
     legacy = catalog.load_action_ball_full_mdp_diagnostic_catalog_table()
     portable = catalog.load_portable_action_center_table()
-    assert len(legacy.action_order) == 73
-    assert len(portable.actions) == 73
+    assert len(legacy.action_order) == 1
+    assert len(portable.actions) == 1
     assert portable.manifest_file_sha256 == legacy.manifest_file_sha256
     assert portable.manifest_canonical_sha256 == legacy.manifest_canonical_sha256
     assert portable.fresh_action_slot == 0
     action = portable.fresh_action
     assert action.action_slot == 0
     assert action.action_id == legacy.action_order[0]
-    assert action.action_uid == legacy.action_uids[0] == 6907688916670928
+    assert action.action_uid == legacy.action_uids[0] == 5527597793770800
     assert action.motion_file == legacy.motion_files[0]
     assert action.motion_sha256 == legacy.motion_sha256[0]
-    assert action.family == legacy.clip_family_per_clip[0] == "forehand"
+    assert action.family == legacy.clip_family_per_clip[0] == "backhand"
     assert action.strike_phase == legacy.strike_phase_per_clip[0]
     assert action.mount_normal_sign == legacy.mount_normal_sign_per_clip[0]
 
 
 def test_portable_center_rows_are_finite_and_keep_unique_identity():
     portable = catalog.load_portable_action_center_table()
-    assert len({row.action_uid for row in portable.actions}) == 73
-    assert tuple(row.action_slot for row in portable.actions) == tuple(range(73))
+    assert len({row.action_uid for row in portable.actions}) == 1
+    assert tuple(row.action_slot for row in portable.actions) == (0,)
     for row in portable.actions:
         numeric = (
             *row.contact_offset_center_b_yaw_m,
@@ -112,23 +112,23 @@ def test_action_zero_reference_row_matches_frozen_cold_builder_values():
     action = catalog.load_portable_action_center_table().fresh_action
     expected = {
         "reference_racket_site_position_w_m": (
-            0.6866140365600586,
-            -0.5569199919700623,
-            0.9527190327644348,
+            0.688297688961029,
+            -0.2830958366394043,
+            1.054610013961792,
         ),
         "reference_racket_site_velocity_w_mps": (
-            2.8326847553253174,
-            1.0447025299072266,
-            -1.9873850345611572,
+            1.7597556114196777,
+            -0.30233636498451233,
+            0.6198316812515259,
         ),
         "reference_raw_face_normal_w": (
-            0.8461580872535706,
-            0.27271875739097595,
-            0.45786359906196594,
+            0.897560715675354,
+            -0.3738133907318115,
+            -0.23376573622226715,
         ),
         "reference_reach_offset_xy_m": (
-            0.5465314984321594,
-            -0.5838211178779602,
+            0.7324142456054688,
+            -0.27776747941970825,
         ),
     }
     for name, values in expected.items():

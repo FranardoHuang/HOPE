@@ -2636,9 +2636,9 @@ ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_WEIGHT_SOURCE = (
 ACTION_BALL_FULL_MDP_REGULARIZATION_WEIGHT_SOURCE = (
     "fixed_regularization_contract"
 )
-ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES = (
-    _full_mdp_reward_contract.tracked_except_held_wrist_body_names(
-        A3_TRACKED_BODIES
+ACTION_BALL_FULL_MDP_UPPER_NON_WRIST_BODY_NAMES = (
+    _full_mdp_reward_contract.upper_except_held_wrist_body_names(
+        A3_UPPER_TRACKED
     )
 )
 
@@ -2653,8 +2653,10 @@ def _action_ball_full_mdp_dense_fixed_func_params(
     ]
     if spec.coarse_std is not None:
         params.append(("coarse_std", spec.coarse_std))
-    if spec.body_scope == _full_mdp_reward_contract.TRACKED_EXCEPT_HELD_WRIST:
-        params.append(("body_names", ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES))
+    if spec.body_scope == _full_mdp_reward_contract.UPPER_EXCEPT_HELD_WRIST:
+        params.append(
+            ("body_names", ACTION_BALL_FULL_MDP_UPPER_NON_WRIST_BODY_NAMES)
+        )
     elif spec.body_scope is not None:
         raise RuntimeError("fresh full-MDP dense body scope differs")
     if spec.scale_in_strike_window is not None:
@@ -3189,7 +3191,7 @@ def _attach_action_ball_full_mdp_diagnostic_motion_profile(env_cfg):
 
 
 def _attach_action_ball_full_mdp_diagnostic_motion_catalog(env_cfg):
-    """Install the exact code-owned 73-action table before CommandManager.
+    """Install the exact code-owned active N=1 table before CommandManager.
 
     The returned metadata is diagnostic source membership only.  MotionCommand
     re-reads it at its real construction callpoint and gives the existing
@@ -3314,10 +3316,10 @@ class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
             self.events = fresh_events
 
         # One fresh episode must retain the same Motion cadence through the
-        # first deferred reveal, four accepted shots, and the fourth shot's
+        # first deferred reveal, six accepted shots, and the sixth shot's
         # retirement at the following reveal.  The inherited 10 s / 500-tick
         # horizon resets that state before the sequence can exist; 30 s is the
-        # narrow whole-second horizon above the 1467-tick retirement boundary.
+        # narrow whole-second horizon above the 1405-tick retirement boundary.
         self.episode_length_s = 30.0
         racket = self.commands.racket_target
         motion = self.commands.motion
@@ -3371,21 +3373,21 @@ class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
         )
         self.action_ball_full_mdp_capacity_receipt_sha256 = ""
 
-        # N=2 is the environment/plant capacity, not the action count.  The
-        # full diagnostic loads all 73 ordered measured actions.  These clips
-        # are professional captures, not ready-to-ready loops, so the old N=1
-        # physical-ready -> measured-frame0 bridge is intentionally inapplicable.
-        # D05/the hot Motion epoch still own first reveal and recovery; until
-        # they are installed construction remains HOLD.
+        # N=2 is the environment/plant flight capacity, not the action count.
+        # The current curriculum consumes one Take061 action, so load exactly
+        # that row and retain its independently certified physical-ready ->
+        # measured-frame0 seam.  Loading a 73-row cold bank while selecting
+        # only slot zero made ready, actor prior and teacher identity drift
+        # possible without adding any learnable capability.
         racket.action_ball_diagnostic_unauthorized = True
-        motion.action_ball_diagnostic_split_ready_teacher = False
+        motion.action_ball_diagnostic_split_ready_teacher = True
         motion.action_ball_single_stroke_timeout_enabled = False
-        motion.canonical_ready_mode = False
-        # The fresh schedule/hot epoch owns all waits and clip selection.  Do
-        # not inherit random legacy hold/RSI/reset mechanisms merely because
-        # canonical_ready_mode is correctly false for professional captures.
+        motion.canonical_ready_mode = True
+        # The fresh schedule/hot epoch owns all waits and the sole clip. Do not
+        # inherit random legacy hold/RSI/reset mechanisms around the explicit
+        # split-ready seam.
         motion.balanced_clip_sampling = True
-        motion.stand_start_prob = 1.0
+        motion.stand_start_prob = 0.0
         motion.stand_start_yaw_range = (0.0, 0.0)
         motion.hold_steps_range = (0, 0)
         motion.stand_start_min_hold = 0
@@ -3407,7 +3409,7 @@ class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
         }
         motion.velocity_range = dict(motion.pose_range)
         catalog = _attach_action_ball_full_mdp_diagnostic_motion_catalog(self)
-        if len(catalog.action_order) != 73:
+        if len(catalog.action_order) != 1:
             raise RuntimeError(
                 "fresh full-MDP diagnostic catalog action count differs"
             )
@@ -3428,7 +3430,7 @@ class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
 
         # Fresh Motion keeps the reviewed ready -> measured-frame0 bridge but
         # never turns one completed stroke into an episode timeout.
-        motion.action_ball_diagnostic_split_ready_teacher = False
+        motion.action_ball_diagnostic_split_ready_teacher = True
         motion.action_ball_single_stroke_timeout_enabled = False
 
         # The inherited A3 cfg setup needs temporary legacy reward/termination

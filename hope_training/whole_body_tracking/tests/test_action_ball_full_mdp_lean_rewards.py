@@ -982,9 +982,9 @@ def test_materializer_builds_exact_order_with_real_type_surface(monkeypatch):
         "import_module",
         lambda _name: types.SimpleNamespace(RewardTermCfg=RewardTermCfg),
     )
-    expected_body_names = ("pelvis", "left_ankle", "right_elbow")
+    expected_body_names = ("torso", "left_elbow", "right_elbow")
     monkeypatch.setattr(
-        R, "_a3_tracked_except_held_wrist_body_names", lambda: expected_body_names
+        R, "_a3_upper_except_held_wrist_body_names", lambda: expected_body_names
     )
     weights = dict(R.DIAGNOSTIC_N2_WEIGHTS)
     scales = {name: 0.5 for name in R.R03_NAMES}
@@ -1050,8 +1050,8 @@ def test_manager_cfg_and_each_callable_pickle_by_exact_module_global(monkeypatch
     )
     monkeypatch.setattr(
         R,
-        "_a3_tracked_except_held_wrist_body_names",
-        lambda: ("pelvis", "right_elbow"),
+        "_a3_upper_except_held_wrist_body_names",
+        lambda: ("torso", "right_elbow"),
     )
     weights = dict(R.DIAGNOSTIC_N2_WEIGHTS)
     scales = {name: 0.5 for name in R.R03_NAMES}
@@ -1305,22 +1305,22 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
         )
 
 
-def test_shared_reward_contract_removes_exactly_one_held_wrist_in_order():
+def test_shared_reward_contract_keeps_only_supplied_upper_scope_without_held_wrist():
     contract = R.reward_contract
-    tracked = (
-        "pelvis",
+    upper = (
+        "torso",
         contract.HELD_RACKET_WRIST_BODY_NAME,
         "right_elbow",
     )
-    assert contract.tracked_except_held_wrist_body_names(tracked) == (
-        "pelvis",
+    assert contract.upper_except_held_wrist_body_names(upper) == (
+        "torso",
         "right_elbow",
     )
     with pytest.raises(ValueError, match="held racket wrist"):
-        contract.tracked_except_held_wrist_body_names(("pelvis", "right_elbow"))
+        contract.upper_except_held_wrist_body_names(("torso", "right_elbow"))
     with pytest.raises(ValueError, match="held racket wrist"):
-        contract.tracked_except_held_wrist_body_names(
-            ("pelvis", contract.HELD_RACKET_WRIST_BODY_NAME, "pelvis")
+        contract.upper_except_held_wrist_body_names(
+            ("torso", contract.HELD_RACKET_WRIST_BODY_NAME, "torso")
         )
 
 

@@ -6,24 +6,30 @@ from typing import NamedTuple, Optional, Tuple
 
 
 HELD_RACKET_WRIST_BODY_NAME = "right_wrist_yaw_Link"
-TRACKED_EXCEPT_HELD_WRIST = "tracked_except_held_wrist"
+UPPER_EXCEPT_HELD_WRIST = "upper_except_held_wrist"
 
 
-def tracked_except_held_wrist_body_names(
-    tracked_body_names: object,
+def upper_except_held_wrist_body_names(
+    upper_body_names: object,
 ) -> Tuple[str, ...]:
-    """Return the configured tracked-body order with the held wrist removed."""
+    """Return the configured upper-body order with the held wrist removed.
 
-    if not isinstance(tracked_body_names, (tuple, list)):
-        raise ValueError("FullMDP tracked body names must be one tuple/list")
-    names = tuple(tracked_body_names)
+    The measured clips are a swing/style reference, not an executable lower-body
+    oracle.  Keeping pelvis/legs in the imitation average makes balance compete
+    with floating, wide-stance capture geometry.  The torso anchor remains a
+    separate term; this scope leaves the policy free to find a stable stance.
+    """
+
+    if not isinstance(upper_body_names, (tuple, list)):
+        raise ValueError("FullMDP upper body names must be one tuple/list")
+    names = tuple(upper_body_names)
     if (
         not names
         or any(type(name) is not str or not name for name in names)
         or len(set(names)) != len(names)
         or names.count(HELD_RACKET_WRIST_BODY_NAME) != 1
     ):
-        raise ValueError("FullMDP tracked body names lack one held racket wrist")
+        raise ValueError("FullMDP upper body names lack one held racket wrist")
     return tuple(name for name in names if name != HELD_RACKET_WRIST_BODY_NAME)
 
 
@@ -115,7 +121,7 @@ COMMON_DENSE_SPECS = (
         1.0,
         "motion",
         0.3,
-        body_scope=TRACKED_EXCEPT_HELD_WRIST,
+        body_scope=UPPER_EXCEPT_HELD_WRIST,
     ),
     DenseRewardSpec(
         "motion_body_ori",
@@ -123,7 +129,7 @@ COMMON_DENSE_SPECS = (
         1.0,
         "motion",
         0.4,
-        body_scope=TRACKED_EXCEPT_HELD_WRIST,
+        body_scope=UPPER_EXCEPT_HELD_WRIST,
         coarse_std=1.0,
     ),
     DenseRewardSpec(
@@ -132,7 +138,7 @@ COMMON_DENSE_SPECS = (
         1.0,
         "motion",
         1.0,
-        body_scope=TRACKED_EXCEPT_HELD_WRIST,
+        body_scope=UPPER_EXCEPT_HELD_WRIST,
     ),
     DenseRewardSpec(
         "motion_body_ang_vel",
@@ -140,7 +146,7 @@ COMMON_DENSE_SPECS = (
         1.0,
         "motion",
         3.14,
-        body_scope=TRACKED_EXCEPT_HELD_WRIST,
+        body_scope=UPPER_EXCEPT_HELD_WRIST,
     ),
 )
 
@@ -213,8 +219,8 @@ if len(set(MANAGER_NAMES)) != REWARD_TERM_COUNT:
 
 __all__ = [
     "HELD_RACKET_WRIST_BODY_NAME",
-    "TRACKED_EXCEPT_HELD_WRIST",
-    "tracked_except_held_wrist_body_names",
+    "UPPER_EXCEPT_HELD_WRIST",
+    "upper_except_held_wrist_body_names",
     "DenseRewardSpec",
     "RegularizationRewardSpec",
     "REGULARIZATION_JOINT_COUNT",

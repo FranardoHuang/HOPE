@@ -533,6 +533,124 @@ def test_schedule_telemetry_uses_existing_public_due_plus_terminal_overlap(
     assert "d05_public_due_rows" not in telemetry
 
 
+def test_compact_telemetry_keeps_exact_action_side_denominators_and_bounded_samples():
+    def opportunity(**overrides):
+        values = {
+            "action_uid": 11,
+            "action_slot": 0,
+            "stroke_family": "backhand",
+            "attribution_valid": True,
+            "selected": True,
+            "accepted": True,
+            "censored": False,
+            "rejected": False,
+            "deferred": False,
+        }
+        values.update(overrides)
+        return types.SimpleNamespace(**values)
+    strata = adapter._opportunity_strata(
+        (
+            opportunity(),
+            opportunity(selected=False, accepted=False, deferred=True),
+            opportunity(
+                action_uid=12,
+                action_slot=1,
+                stroke_family="forehand",
+                selected=False,
+                accepted=False,
+                rejected=True,
+            ),
+        )
+    )
+    assert strata == [
+        {
+            "action_uid": 11,
+            "action_slot": 0,
+            "stroke_family": "backhand",
+            "action_attribution_valid": True,
+            "opportunity_rows": 2,
+            "selected_rows": 1,
+            "accepted_rows": 1,
+            "censored_rows": 0,
+            "rejected_rows": 0,
+            "deferred_rows": 1,
+        },
+        {
+            "action_uid": 12,
+            "action_slot": 1,
+            "stroke_family": "forehand",
+            "action_attribution_valid": True,
+            "opportunity_rows": 1,
+            "selected_rows": 0,
+            "accepted_rows": 0,
+            "censored_rows": 0,
+            "rejected_rows": 1,
+            "deferred_rows": 0,
+        },
+    ]
+    sample = adapter._bounded_rows(
+        tuple(range(9)), limit=4, projector=lambda value: {"value": value}
+    )
+    assert sample == {
+        "row_count": 9,
+        "sample_limit": 4,
+        "sample_rows": [
+            {"value": 0}, {"value": 1}, {"value": 2}, {"value": 3}
+        ],
+        "dropped_row_count": 5,
+    }
+
+
+def test_compact_shot_strata_preserve_lifecycle_and_outcome_histograms():
+    def evidence(**overrides):
+        values = {
+            "lifecycle_bits": 0b101101,
+            "r03_valid_bits": 3,
+            "physical_valid_bits": 7,
+            "r06_valid_bits": 5,
+            "r06_outcome_code": 2,
+            "r06_predicate_bits": 9,
+        }
+        values.update(overrides)
+        return types.SimpleNamespace(**values)
+
+    def shot(**overrides):
+        values = {
+            "action_uid": 11,
+            "action_slot": 0,
+            "stroke_family": "backhand",
+            "attribution_valid": True,
+            "evidence": evidence(),
+            "motion_close_reason": 4,
+        }
+        values.update(overrides)
+        return types.SimpleNamespace(**values)
+    strata = adapter._shot_strata(
+        (shot(), shot(evidence=evidence(r06_outcome_code=3))),
+        lifecycle_flags=(
+            "reveal_committed",
+            "playback_started",
+            "motion_closed",
+            "physical_launched",
+            "outcome_settled",
+            "payment_recorded",
+        ),
+    )
+    assert len(strata) == 1
+    row = strata[0]
+    assert row["shot_rows"] == 2
+    assert row["lifecycle_flag_counts"] == {
+        "reveal_committed": 2,
+        "playback_started": 0,
+        "motion_closed": 2,
+        "physical_launched": 2,
+        "outcome_settled": 0,
+        "payment_recorded": 2,
+    }
+    assert row["r06_outcome_code_counts"] == {"2": 1, "3": 1}
+    assert row["motion_close_reason_counts"] == {"4": 2}
+
+
 def test_fake_imports_preserve_package_aware_torch_lazy_import(
     _fake_imports,
 ):
@@ -653,9 +771,9 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
         "action_ball_epoch_durable_ack_v2",
     ]
     assert rows[0]["pending_ack_telemetry"]["diagnostic_unauthorized"] is True
-    assert rows[0]["pending_ack_telemetry"]["schema_version"] == 12
+    assert rows[0]["pending_ack_telemetry"]["schema_version"] == 13
     assert rows[0]["pending_ack_telemetry"]["kind"] == (
-        "action_ball_epoch_optimizer_update_ack_telemetry_v12"
+        "action_ball_epoch_optimizer_update_ack_telemetry_v13"
     )
     assert {
         key: rows[0]["pending_ack_telemetry"][key]

@@ -551,9 +551,9 @@ def _fresh_motion_catalog_fixture(monkeypatch, *, family="A"):
         pass
 
     table = _Table()
-    table.action_order = tuple(f"action_{index:02d}" for index in range(73))
-    table.motion_files = tuple(f"/code/motion_{index:02d}.npz" for index in range(73))
-    table.motion_sha256 = tuple(f"{index + 1:064x}" for index in range(73))
+    table.action_order = ("take_061_unit04_bh",)
+    table.motion_files = ("/code/take061.npz",)
+    table.motion_sha256 = (f"{1:064x}",)
     table.manifest_file_sha256 = "a" * 64
     table.manifest_canonical_sha256 = "b" * 64
     kind = "action_ball_full_mdp_code_owned_diagnostic_catalog_v1"
@@ -578,6 +578,7 @@ def _fresh_motion_catalog_fixture(monkeypatch, *, family="A"):
 
     commands_module = types.SimpleNamespace(
         ActionBallFullMdpDiagnosticCatalogTable=_Table,
+        ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT=1,
         ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND=kind,
         require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings=(
             require_bindings
@@ -639,11 +640,11 @@ def test_fresh_motion_route_preserves_code_owned_order_and_skips_legacy(
     assert status == {
         "family": family,
         "kind": "action_ball_full_mdp_code_owned_diagnostic_catalog_v1",
-        "action_count": 73,
+        "action_count": 1,
         "manifest_file_sha256": "a" * 64,
         "manifest_canonical_sha256": "b" * 64,
-        "first_action": "action_00",
-        "last_action": "action_72",
+        "first_action": "take_061_unit04_bh",
+        "last_action": "take_061_unit04_bh",
         "diagnostic_unauthorized": True,
     }
 

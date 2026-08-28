@@ -284,7 +284,7 @@ def _fixed_reward_env():
         _fullmdp_body_ids=torch.arange(num_bodies),
         _fullmdp_body_root_ids=body_root_ids,
         _fullmdp_anchor_index=1,
-        _fullmdp_non_wrist_body_indices=torch.tensor([0, 1]),
+        _fullmdp_upper_non_wrist_body_indices=torch.tensor([0, 1]),
         _teacher_body_pos=teacher_pos,
         _teacher_body_quat=teacher_quat,
         _teacher_body_lin_vel=teacher_lin,
@@ -438,7 +438,7 @@ def test_host_reward28_matches_common_and_measured_paddle_formulas():
     quat = data.xquat[:, ids]
     lin, ang = wait_env.FullMdpInitialWaitVecEnv._body_com_velocities_w(env)
     anchor = env._fullmdp_anchor_index
-    non_wrist = env._fullmdp_non_wrist_body_indices
+    non_wrist = env._fullmdp_upper_non_wrist_body_indices
     aligned_pos = env._aligned_teacher_body_pos
     aligned_quat = env._aligned_teacher_body_quat
     quat_dot = torch.abs(torch.sum(aligned_quat * quat, dim=-1)).clamp(0.0, 1.0)
@@ -768,7 +768,7 @@ def test_reward28_two_transition_moving_anchor_uses_prior_alignment_cache():
     env = _fixed_reward_env()
     dtype = env._teacher_body_pos.dtype
     anchor = env._fullmdp_anchor_index
-    non_wrist = env._fullmdp_non_wrist_body_indices
+    non_wrist = env._fullmdp_upper_non_wrist_body_indices
     identity = torch.zeros((2, 3, 4), dtype=dtype)
     identity[..., 0] = 1.0
     teacher7 = torch.tensor(
@@ -1164,7 +1164,7 @@ def _host_full_a_lifecycle_env():
         _full_a_catalog=SimpleNamespace(
             fresh_action=SimpleNamespace(
                 action_slot=0,
-                action_uid=6907688916670928,
+                action_uid=5527597793770800,
                 mount_normal_sign=1,
             )
         ),
@@ -1972,6 +1972,9 @@ def test_host_full_a_reveal_launch_r03_one_shot_and_selected_clear_are_rowwise()
 def test_full_a_task_close_uses_real_slot_motion_duration_and_global_cadence():
     env = _host_full_a_lifecycle_env()
     row = wait_env.portable_catalog.load_portable_action_center_table().fresh_action
+    env._full_a_cadence = wait_env.portable_catalog.derive_portable_fresh_cadence(
+        wait_env.portable_catalog.load_portable_action_center_table()
+    )
     geometry = wait_env.racket_contact_geometry
 
     def reverse(contact, velocity, spin, tts, _params, **_kwargs):
@@ -2002,34 +2005,34 @@ def test_full_a_task_close_uses_real_slot_motion_duration_and_global_cadence():
     # The cadence scheduler is episode-relative and can differ rowwise after a
     # masked reset.  Epoch clocks remain monotonic common-step boundaries.
     env.episode_length_buf[:] = torch.tensor([294, 1])
-    env._full_a_next_reveal_tick[:] = torch.tensor([588, 295])
+    env._full_a_next_reveal_tick[:] = torch.tensor([480, 295])
     env._full_a_reveal_rows(torch.arange(2))
 
     assert env._full_a_teacher_rate.tolist() == pytest.approx(
-        [0.9996465265, 0.9996465265], rel=0.0, abs=2.0e-7
+        [0.9999625683, 0.9999625683], rel=0.0, abs=2.0e-7
     )
     assert torch.equal(
-        env._epoch_clock_ticks[:, 3], torch.full((2,), 1141)
+        env._epoch_clock_ticks[:, 3], torch.full((2,), 1101)
     )
     old_contact_plus_one_second = env._epoch_clock_ticks[:, 1] + 50
     assert torch.equal(
         old_contact_plus_one_second - env._epoch_clock_ticks[:, 3],
-        torch.full((2,), 6),
+        torch.full((2,), 41),
     )
     assert torch.equal(
-        env._epoch_clock_ticks[:, 4], torch.full((2,), 1293)
+        env._epoch_clock_ticks[:, 4], torch.full((2,), 1185)
     )
     assert not torch.equal(
         env._epoch_clock_ticks[:, 4], env._epoch_clock_ticks[:, 3] + 1
     )
 
-    # On the fourth ACCEPT the episode scheduler has already parked itself at
-    # horizon+1.  The accepted shot still owns one 293-tick cadence boundary.
-    env.common_step_counter = 1174
-    env.episode_length_buf[0] = 881
+    # On the sixth ACCEPT the episode scheduler has already parked itself at
+    # horizon+1. The accepted shot still owns one 185-tick cadence boundary.
+    env.common_step_counter = 1220
+    env.episode_length_buf[0] = 1035
     env._full_a_next_reveal_tick[0] = 1501
     env._full_a_reveal_rows(torch.tensor([0]))
-    assert env._epoch_clock_ticks[0, 4] == 1467
+    assert env._epoch_clock_ticks[0, 4] == 1405
     assert env._epoch_clock_ticks[0, 4] != 1501
 
 
@@ -3549,7 +3552,7 @@ def test_full_a_environment_consumes_the_measured_teacher_clock():
     assert torch.equal(env._teacher_body_quat, env._ready_teacher_body_quat)
     assert torch.equal(
         env._full_a_teacher_joint_pos,
-        env.action_offset.unsqueeze(0).repeat(2, 1),
+        env.q_ready.unsqueeze(0).repeat(2, 1),
     )
     assert torch.equal(
         env._teacher_racket_site_pos_w,
@@ -5016,7 +5019,7 @@ def test_completion_fault_is_rejected_once_at_pre_optimizer_boundary(
         action_slot=0,
         action_uid=action_uid,
         mount_normal_sign=1,
-        family="forehand",
+        family="backhand",
         initial_reset_generation=torch.ones(2, dtype=torch.long),
         run_identity={
             "source_commit": "0" * 40,
@@ -5565,7 +5568,7 @@ def _assert_full_a_step_surface(result, *, num_envs: int):
     assert torch.isfinite(reward).all()
     assert torch.isfinite(extras["reward_terms"]).all()
     assert torch.equal(extras["full_a_action_slot"], torch.zeros(num_envs, dtype=torch.long, device=extras["full_a_action_slot"].device))
-    assert torch.equal(extras["full_a_action_uid"], torch.full((num_envs,), 6907688916670928, dtype=torch.long, device=extras["full_a_action_uid"].device))
+    assert torch.equal(extras["full_a_action_uid"], torch.full((num_envs,), 5527597793770800, dtype=torch.long, device=extras["full_a_action_uid"].device))
     assert torch.equal(extras["full_a_mount_normal_sign"], torch.ones(num_envs, dtype=torch.int8, device=extras["full_a_mount_normal_sign"].device))
     assert tuple(extras["full_a_fact_integrity_fault_bits"].shape) == (num_envs,)
     assert tuple(extras["full_a_paddle_prior_playback"].shape) == (num_envs,)
@@ -6093,7 +6096,7 @@ def test_real_full_a_n1_returned_observation_tracks_motion_reference_lifecycle()
         )
         assert not bool(env._epoch_task_valid[0])
         assert env._full_a_motion_phase_code[0] == wait_env.READY_HOLD_PHASE_INDEX
-        assert torch.count_nonzero(env._full_a_teacher_joint_pos - env.action_offset) == 0
+        assert torch.count_nonzero(env._full_a_teacher_joint_pos - env.q_ready) == 0
         assert torch.count_nonzero(env._full_a_teacher_joint_vel) == 0
 
         _jump_real_full_a_clock_to_transition_before_first_due(env)

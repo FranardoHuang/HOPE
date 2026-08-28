@@ -163,9 +163,9 @@ RSL_RL_VERSION = "3.1.2"
 COMPLETION_SCHEMA_VERSION = 5
 NUM_STEPS_PER_ENV = FULL_MDP_PPO_RECIPE.num_steps_per_env
 READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
-FULL_A_ACTION_UID = 6907688916670928
+FULL_A_ACTION_UID = 5527597793770800
 FULL_A_MOUNT_NORMAL_SIGN = 1
-FULL_A_FAMILY = "forehand"
+FULL_A_FAMILY = "backhand"
 FULL_A_NUM_ENVS = FULL_MDP_PPO_RECIPE.num_envs
 FULL_A_NUM_UPDATES = FULL_MDP_PPO_RECIPE.max_iterations
 FULL_A_SAVE_INTERVAL = FULL_MDP_PPO_RECIPE.save_interval
@@ -553,8 +553,8 @@ def _snapshot_indices(num_updates: int, save_interval: int) -> tuple[int, ...]:
     return indices if indices[-1] == num_updates - 1 else indices + (num_updates - 1,)
 
 
-def _apply_full_a_policy_bootstrap(runner, torch_module) -> None:
-    """Install the fresh Isaac A/C zero-mean policy prior exactly once."""
+def _apply_full_a_policy_bootstrap(runner, torch_module, env) -> None:
+    """Install the same-source Take061 dynamic-ready mean exactly once."""
 
     policy = runner.alg.policy
     actor = getattr(policy, "actor", None)
@@ -563,6 +563,7 @@ def _apply_full_a_policy_bootstrap(runner, torch_module) -> None:
     ) else []
     output = children[-1] if children else None
     log_std = getattr(policy, "log_std", None)
+    bootstrap_action = getattr(env, "_full_a_policy_bootstrap_action", None)
     if (
         not isinstance(output, torch_module.nn.Linear)
         or output.out_features != 31
@@ -571,22 +572,27 @@ def _apply_full_a_policy_bootstrap(runner, torch_module) -> None:
         or tuple(log_std.shape) != (31,)
         or getattr(policy, "noise_std_type", None)
         != FULL_MDP_PPO_RECIPE.noise_std_type
+        or not torch_module.is_tensor(bootstrap_action)
+        or tuple(bootstrap_action.shape) != (31,)
+        or bootstrap_action.device != output.bias.device
+        or bootstrap_action.dtype != output.bias.dtype
+        or not bool(torch_module.isfinite(bootstrap_action).all())
     ):
         raise RuntimeError("MuJoCo Full-A policy bootstrap surface differs")
     with torch_module.no_grad():
         output.weight.zero_()
-        output.bias.zero_()
+        output.bias.copy_(bootstrap_action)
     expected_std = torch_module.full_like(
         log_std, FULL_MDP_PPO_RECIPE.init_noise_std
     )
     if (
         int(torch_module.count_nonzero(output.weight).item()) != 0
-        or int(torch_module.count_nonzero(output.bias).item()) != 0
+        or not torch_module.equal(output.bias, bootstrap_action)
         or not torch_module.allclose(
             torch_module.exp(log_std), expected_std, rtol=0.0, atol=1.0e-8
         )
     ):
-        raise RuntimeError("MuJoCo Full-A zero-head/log-std bootstrap differs")
+        raise RuntimeError("MuJoCo Full-A dynamic-ready-head/log-std bootstrap differs")
 
 
 def _wait_module():
@@ -1110,7 +1116,7 @@ def main(
     )
     _require_rsl3_runtime(distribution, runner, torch)
     if full_a_mode:
-        _apply_full_a_policy_bootstrap(runner, torch)
+        _apply_full_a_policy_bootstrap(runner, torch, env)
     runner.disable_logs = True
     # RSL-RL 3.1.2 initializes this field only when a logging writer exists,
     # but its stock save() reads it unconditionally before checking disable_logs.

@@ -212,7 +212,7 @@ EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 10,
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
     FULL_MDP_PPO_RECIPE.max_iterations, FULL_MDP_PPO_RECIPE.num_envs,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
-    6907688916670928)
+    5527597793770800)
 TRANSITIONS_PER_UPDATE = NUM_ENVS * STEPS_PER_UPDATE
 def _names(raw): return frozenset(raw.split())
 EVENT_KEYS = _names("""scheduled_due_rows due_terminal_overlap_rows reveal_rows reveal_due_rows reveal_deferred_rows launch_rows missed_launch_rows flight_terminal_rows
@@ -259,9 +259,9 @@ ACTION_CONTRACT = {
     "action_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
     "action_offset_source": "runtime_plant.default_joint_pos_rad",
     "action_offset_sha256": "1b638d7b2e1ac7e552aace2ac8c2b00980dd9daf691f930b5fe775cebc84af78",
-    "full_a_reset_joint_source": "runtime_plant.default_joint_pos_rad",
-    "full_a_reset_root_source": "AGIBOT_A3_CFG.init_state.pos/rot",
-    "full_a_policy_bootstrap": "a3_default_stand_zero_head_v1",
+    "full_a_reset_joint_source": "dynamic_ready.physical_ready.joint_pos_rad",
+    "full_a_reset_root_source": "dynamic_ready.physical_ready.root_pose",
+    "full_a_policy_bootstrap": "a3_take061_dynamic_ready_head_v1",
     "raw_action_clip": None,
     "executable_qdes_guard": "action_ball_shared_soft_hard_state_guard_v1",
     "transfer_authority": False, "matched_cross_backend_authority": False,
@@ -577,11 +577,11 @@ def _validate_record(row, index, run_identity):
     _keys(action, IDENTITY_KEYS, "action identity")
     expected_action = {
         "action_slot": 0, "action_uid": ACTION_UID, "mount_normal_sign": 1,
-        "family": "forehand", "family_source": "runner_pinned_identity",
+        "family": "backhand", "family_source": "runner_pinned_identity",
         "observed_rows": TRANSITIONS_PER_UPDATE, "slot0_rows": TRANSITIONS_PER_UPDATE,
         "uid_rows": TRANSITIONS_PER_UPDATE, "mount_sign_rows": TRANSITIONS_PER_UPDATE,
         "identity_rows": TRANSITIONS_PER_UPDATE,
-        "family_counts": {"forehand": TRANSITIONS_PER_UPDATE, "backhand": 0},
+        "family_counts": {"forehand": 0, "backhand": TRANSITIONS_PER_UPDATE},
     }
     if not _same(action, expected_action):
         _fail("action identity")
@@ -868,8 +868,8 @@ def consume(evidence_jsonl: Path, *, expected_updates: int, expected_source_comm
         },
         "action_coverage": {
             "slot0": {"status": "observed", "observed_rows": transitions, "denominator": transitions},
-            "forehand": {"status": "observed", "observed_rows": transitions, "denominator": transitions},
-            "backhand": {"status": "未测", "observed_rows": 0, "denominator": 0}},
+            "forehand": {"status": "未测", "observed_rows": 0, "denominator": 0},
+            "backhand": {"status": "observed", "observed_rows": transitions, "denominator": transitions}},
         "opportunity_d05": {"status": "not_produced", "denominator": None},
         "portable_reveal_opportunity": {
             "scheduled_rows": events["scheduled_due_rows"],

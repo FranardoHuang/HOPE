@@ -26,7 +26,7 @@ registry_name_2: null
 # free typed PPO recipe owns every policy number and parameterization; YAML only
 # selects the bootstrap transformation.
 action_ball_full_mdp_policy_bootstrap:
-  kind: a3_default_stand_zero_head_v1
+  kind: a3_take061_dynamic_ready_head_v1
 
 # Legacy one-ball drivers are not a substitute for the capacity-derived K-body
 # fresh scene.  The Python EnvCfg repeats and enforces these tombstones.

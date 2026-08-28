@@ -22,8 +22,8 @@ from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 
 
 RUN_MODE = "single_action_lean"
-TELEMETRY_SCHEMA_VERSION = 12
-TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v12"
+TELEMETRY_SCHEMA_VERSION = 13
+TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v13"
 TRAINING_CONTRACT_SCHEMA_VERSION = 3
 ACTOR_OBSERVATION_CONTRACT = "action_ball_full_mdp_semantic_actor_v3"
 ACTOR_OBSERVATION_WIDTH = 215
@@ -34,6 +34,8 @@ SNAPSHOT_RECEIPT_SCHEMA_VERSION = 2
 SNAPSHOT_RECEIPT_KIND = "action_ball_full_mdp_diagnostic_snapshot_receipt_v2"
 SNAPSHOT_PAYLOAD_KIND = "policy_optimizer_diagnostic_nonresumable_v2"
 _STDOUT_WARNING_PREFIX = "HOPE_NONAUTHORITATIVE_STDOUT_WARNING_JSON="
+_SHOT_SAMPLE_LIMIT = 4
+_RESET_SAMPLE_LIMIT = 8
 
 _SNAPSHOT_IDENTITY_KEYS = {
     "action_ball_full_mdp_snapshot_kind",
@@ -694,6 +696,130 @@ def _shot_row(shot: object, *, lifecycle_flags: tuple[str, ...]) -> dict:
     return row
 
 
+def _action_identity(row: object) -> tuple[int, int, str, bool]:
+    """Read the one owner-produced action/side identity used for strata."""
+
+    values = (
+        getattr(row, "action_uid", None),
+        getattr(row, "action_slot", None),
+        getattr(row, "stroke_family", None),
+        getattr(
+            row,
+            "attribution_valid",
+            getattr(row, "action_attribution_valid", None),
+        ),
+    )
+    if (
+        type(values[0]) is not int
+        or type(values[1]) is not int
+        or type(values[2]) is not str
+        or not values[2]
+        or type(values[3]) is not bool
+    ):
+        raise RuntimeError("FullMDP telemetry action stratum identity differs")
+    return values
+
+
+def _identity_payload(identity: tuple[int, int, str, bool]) -> dict:
+    return {
+        "action_uid": identity[0],
+        "action_slot": identity[1],
+        "stroke_family": identity[2],
+        "action_attribution_valid": identity[3],
+    }
+
+
+def _opportunity_strata(rows: tuple[object, ...]) -> list[dict]:
+    """Replace unbounded D05 rows with exact per-action/per-side counters."""
+
+    grouped: dict[tuple[int, int, str, bool], dict[str, int]] = {}
+    flags = ("selected", "accepted", "censored", "rejected", "deferred")
+    for row in rows:
+        identity = _action_identity(row)
+        counts = grouped.setdefault(
+            identity,
+            {"opportunity_rows": 0, **{name + "_rows": 0 for name in flags}},
+        )
+        counts["opportunity_rows"] += 1
+        for name in flags:
+            value = getattr(row, name, None)
+            if type(value) is not bool:
+                raise RuntimeError("FullMDP opportunity flag differs")
+            counts[name + "_rows"] += int(value)
+    return [
+        {**_identity_payload(identity), **grouped[identity]}
+        for identity in sorted(grouped)
+    ]
+
+
+def _increment_histogram(histogram: dict[str, int], value: int) -> None:
+    key = str(value)
+    histogram[key] = histogram.get(key, 0) + 1
+
+
+def _shot_strata(
+    rows: tuple[object, ...], *, lifecycle_flags: tuple[str, ...]
+) -> list[dict]:
+    """Keep exact lifecycle/bit denominators without serializing every shot."""
+
+    grouped: dict[tuple[int, int, str, bool], dict] = {}
+    for row in rows:
+        identity = _action_identity(row)
+        counts = grouped.setdefault(
+            identity,
+            {
+                "shot_rows": 0,
+                "lifecycle_flag_counts": {name: 0 for name in lifecycle_flags},
+                "r03_valid_bits_counts": {},
+                "physical_valid_bits_counts": {},
+                "r06_valid_bits_counts": {},
+                "r06_outcome_code_counts": {},
+                "r06_predicate_bits_counts": {},
+                "motion_close_reason_counts": {},
+            },
+        )
+        evidence = getattr(row, "evidence", None)
+        bits = getattr(evidence, "lifecycle_bits", None)
+        if type(bits) is not int:
+            raise RuntimeError("FullMDP shot lifecycle evidence differs")
+        counts["shot_rows"] += 1
+        for ordinal, name in enumerate(lifecycle_flags):
+            counts["lifecycle_flag_counts"][name] += int(
+                bool(bits & (1 << ordinal))
+            )
+        for field in (
+            "r03_valid_bits",
+            "physical_valid_bits",
+            "r06_valid_bits",
+            "r06_outcome_code",
+            "r06_predicate_bits",
+        ):
+            value = getattr(evidence, field, None)
+            if type(value) is not int:
+                raise RuntimeError("FullMDP shot evidence bit field differs")
+            _increment_histogram(counts[field + "_counts"], value)
+        close_reason = getattr(row, "motion_close_reason", None)
+        if type(close_reason) is not int:
+            raise RuntimeError("FullMDP shot close reason differs")
+        _increment_histogram(counts["motion_close_reason_counts"], close_reason)
+    return [
+        {**_identity_payload(identity), **grouped[identity]}
+        for identity in sorted(grouped)
+    ]
+
+
+def _bounded_rows(
+    rows: tuple[object, ...], *, limit: int, projector: Callable[[object], dict]
+) -> dict:
+    sample = [projector(row) for row in rows[:limit]]
+    return {
+        "row_count": len(rows),
+        "sample_limit": limit,
+        "sample_rows": sample,
+        "dropped_row_count": len(rows) - len(sample),
+    }
+
+
 def _telemetry(summary: object, runtime_module: object) -> dict:
     """Project one exact owner-produced summary without re-owning its facts."""
 
@@ -709,7 +835,7 @@ def _telemetry(summary: object, runtime_module: object) -> dict:
     rewards = importlib.import_module(
         "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_lean_rewards"
     )
-    reset_rows = [asdict(row) for row in summary.terminal_resets]
+    reset_rows = tuple(summary.terminal_resets)
     reset_counts = {
         "terminal_reset_reason_time_out_count": 0,
         "terminal_reset_reason_base_fell_tilt_count": 0,
@@ -717,7 +843,8 @@ def _telemetry(summary: object, runtime_module: object) -> dict:
         "terminal_reset_reason_joint_qdes_forbidden_count": 0,
         "terminal_reset_reason_robot_hit_table_count": 0,
     }
-    for row in reset_rows:
+    for reset in reset_rows:
+        row = asdict(reset)
         for name, bit in zip(reset_counts, (1, 2, 4, 8, 16)):
             reset_counts[name] += int(bool(row["reason_bits"] & bit))
     settlement = summary.settlement
@@ -766,16 +893,34 @@ def _telemetry(summary: object, runtime_module: object) -> dict:
         "awaiting_playback_after": continuation.awaiting_playback_after,
         "awaiting_outcome_after": continuation.awaiting_outcome_after,
         "awaiting_payment_after": continuation.awaiting_payment_after,
-        "action_opportunities": [asdict(row) for row in summary.action_opportunities],
-        "completed_shots": [
-            _shot_row(row, lifecycle_flags=lifecycle_flags)
-            for row in summary.completed_shots
-        ],
-        "terminal_shots": [
-            _shot_row(row, lifecycle_flags=lifecycle_flags)
-            for row in summary.terminal_shots
-        ],
-        "terminal_resets": reset_rows,
+        "action_opportunity_strata": _opportunity_strata(
+            summary.action_opportunities
+        ),
+        "completed_shot_strata": _shot_strata(
+            summary.completed_shots, lifecycle_flags=lifecycle_flags
+        ),
+        "terminal_shot_strata": _shot_strata(
+            summary.terminal_shots, lifecycle_flags=lifecycle_flags
+        ),
+        "completed_shot_diagnostic_sample": _bounded_rows(
+            summary.completed_shots,
+            limit=_SHOT_SAMPLE_LIMIT,
+            projector=lambda row: _shot_row(
+                row, lifecycle_flags=lifecycle_flags
+            ),
+        ),
+        "terminal_shot_diagnostic_sample": _bounded_rows(
+            summary.terminal_shots,
+            limit=_SHOT_SAMPLE_LIMIT,
+            projector=lambda row: _shot_row(
+                row, lifecycle_flags=lifecycle_flags
+            ),
+        ),
+        "terminal_reset_diagnostic_sample": _bounded_rows(
+            reset_rows,
+            limit=_RESET_SAMPLE_LIMIT,
+            projector=asdict,
+        ),
         "terminal_reset_rows": len(reset_rows),
         "milestone": summary.milestone.as_json(tuple(rewards.MANAGER_NAMES)),
         **reset_counts,

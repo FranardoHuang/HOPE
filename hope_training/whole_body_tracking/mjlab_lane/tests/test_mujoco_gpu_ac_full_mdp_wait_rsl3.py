@@ -135,9 +135,9 @@ ACTION_CONTRACT = {
     "action_offset_sha256": (
         "1b638d7b2e1ac7e552aace2ac8c2b00980dd9daf691f930b5fe775cebc84af78"
     ),
-    "full_a_reset_joint_source": "runtime_plant.default_joint_pos_rad",
-    "full_a_reset_root_source": "AGIBOT_A3_CFG.init_state.pos/rot",
-    "full_a_policy_bootstrap": "a3_default_stand_zero_head_v1",
+    "full_a_reset_joint_source": "dynamic_ready.physical_ready.joint_pos_rad",
+    "full_a_reset_root_source": "dynamic_ready.physical_ready.root_pose",
+    "full_a_policy_bootstrap": "a3_take061_dynamic_ready_head_v1",
     "raw_action_clip": None,
     "executable_qdes_guard": "action_ball_shared_soft_hard_state_guard_v1",
     "transfer_authority": False,
@@ -192,7 +192,7 @@ def _load_consumer():
     return module
 
 
-def test_full_a_policy_bootstrap_zeroes_only_output_head_and_pins_std():
+def test_full_a_policy_bootstrap_sets_ready_mean_and_pins_std():
     module = _load()
     actor = torch.nn.Sequential(
         torch.nn.Linear(3, 8), torch.nn.ELU(), torch.nn.Linear(8, 31)
@@ -213,12 +213,14 @@ def test_full_a_policy_bootstrap_zeroes_only_output_head_and_pins_std():
         noise_std_type=module.FULL_MDP_PPO_RECIPE.noise_std_type,
     )
     runner = types.SimpleNamespace(alg=types.SimpleNamespace(policy=policy))
+    ready_action = torch.linspace(-0.2, 0.4, 31)
+    env = types.SimpleNamespace(_full_a_policy_bootstrap_action=ready_action)
 
-    module._apply_full_a_policy_bootstrap(runner, torch)
+    module._apply_full_a_policy_bootstrap(runner, torch, env)
 
     assert torch.equal(actor[0].weight, hidden_before)
     assert torch.count_nonzero(actor[-1].weight) == 0
-    assert torch.count_nonzero(actor[-1].bias) == 0
+    assert torch.equal(actor[-1].bias, ready_action)
     torch.testing.assert_close(
         torch.exp(policy.log_std),
         torch.full((31,), module.FULL_MDP_PPO_RECIPE.init_noise_std),
@@ -548,6 +550,9 @@ def _install_fake_stack(
             self.common_step_counter = 0
             self.full_a_mode = full_a_mode
             self.device = torch.device("cpu")
+            self._full_a_policy_bootstrap_action = torch.linspace(
+                -0.2, 0.4, 31
+            )
             self.reset_generation = torch.zeros(num_envs, dtype=torch.long)
             self.episode_length_buf = torch.zeros(num_envs, dtype=torch.long)
             self.max_episode_length = 150

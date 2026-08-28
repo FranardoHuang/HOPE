@@ -61,11 +61,12 @@ for _stub_name in _TEMP_IMPORT_STUBS:
 
 
 class _Manager:
-    def __init__(self, term):
+    def __init__(self, term, *, name):
         self._term = term
+        self._name = name
 
     def get_term(self, name):
-        assert name == "joint_pos"
+        assert name == self._name
         return self._term
 
 
@@ -89,7 +90,7 @@ class _AgentCfg:
 
 
 def _config(**overrides):
-    value = {"kind": "a3_default_stand_zero_head_v1"}
+    value = {"kind": "a3_take061_dynamic_ready_head_v1"}
     value.update(overrides)
     return value
 
@@ -103,8 +104,6 @@ def _resolved_config():
 
 def _env(*, offset_delta=0.0, use_default_offset=True):
     default = torch.linspace(-0.3, 0.3, 31).repeat(2, 1)
-    # Row 1 differs so a scalar/nominal-only decoder cannot pass this fixture.
-    default[1] += 0.01
     offset = default.clone()
     offset[1, 7] += offset_delta
     scale = torch.linspace(0.05, 0.25, 31).repeat(2, 1)
@@ -120,15 +119,18 @@ def _env(*, offset_delta=0.0, use_default_offset=True):
             joint_names=[f"joint_{index}" for index in range(31)],
         )
     )
-
-    class _NoMotionAuthority:
-        def __getattr__(self, name):
-            raise AssertionError(f"bootstrap queried forbidden Motion authority: {name}")
+    normalized = torch.linspace(-0.2, 0.4, 31).reshape(1, 31)
+    hold_qdes = default[:1] + scale[:1] * normalized
+    motion = types.SimpleNamespace(
+        _action_ball_dynamic_ready_normalized_actor_action=normalized,
+        _action_ball_dynamic_ready_hold_qdes_joint_pos_rad=hold_qdes,
+        _action_ball_dynamic_ready_binding_sha256="d" * 64,
+    )
 
     return types.SimpleNamespace(
-        action_manager=_Manager(action),
+        action_manager=_Manager(action, name="joint_pos"),
         scene={"robot": robot},
-        command_manager=_NoMotionAuthority(),
+        command_manager=_Manager(motion, name="motion"),
     )
 
 
@@ -179,7 +181,7 @@ def _joint_safety_cfg(*, compact=False):
 def test_common_ac_config_pins_one_exact_full_mdp_bootstrap():
     source = COMMON_TASK_PATH.read_text(encoding="utf-8")
     assert source.count("action_ball_full_mdp_policy_bootstrap:") == 1
-    assert source.count("kind: a3_default_stand_zero_head_v1") == 1
+    assert source.count("kind: a3_take061_dynamic_ready_head_v1") == 1
     assert "init_noise_std:" not in source
     assert "noise_std_type:" not in source
     assert source.count("num_envs: 512") == 1
@@ -321,23 +323,24 @@ def test_algo_override_is_exact_and_happens_before_runner_cfg_parsing():
     ) < run_source.index("agent_cfg = RslRlOnPolicyRunnerCfg(")
 
 
-def test_contract_uses_live_per_row_default_offset_and_never_motion():
+def test_contract_closes_live_default_decoder_to_dynamic_ready_hold_qdes():
     contract = _contract()
-    assert contract["kind"] == "a3_default_stand_zero_head_v1"
+    assert contract["kind"] == "a3_take061_dynamic_ready_head_v1"
     assert contract["actor_output_dim"] == 31
     assert contract["initialization"]["output_layer_weight"] == "zeros"
-    assert contract["initialization"]["output_layer_bias"] == [0.0] * 31
+    assert contract["initialization"]["output_layer_bias"] == pytest.approx(
+        torch.linspace(-0.2, 0.4, 31).tolist(), abs=0.0
+    )
     assert contract["initialization"]["init_noise_std"] == (
         PPO_RECIPE.init_noise_std
     )
     assert contract["initialization"]["noise_std_type"] == (
         PPO_RECIPE.noise_std_type
     )
-    assert contract["decoder"]["zero_action_target"] == (
-        "robot.data.default_joint_pos[:,action_joint_ids]"
+    assert contract["decoder"]["bootstrap_action_target"] == (
+        "dynamic_ready.hold_qdes_joint_pos_rad"
     )
-    assert not any("sha" in key for key in contract)
-    assert "motion" not in repr(contract).lower()
+    assert contract["decoder"]["dynamic_ready_binding_sha256"] == "d" * 64
 
 
 def test_live_action_term_counterexamples_fail_independently():
@@ -353,7 +356,7 @@ def test_live_action_term_counterexamples_fail_independently():
         )
 
 
-def test_fresh_apply_zeros_real_actor_for_distinct_observations(capsys):
+def test_fresh_apply_sets_constant_dynamic_ready_mean_for_distinct_observations(capsys):
     runner = _runner()
     contract = _contract()
     assert train_mod._apply_action_ball_full_mdp_fresh_policy_bootstrap(
@@ -363,7 +366,8 @@ def test_fresh_apply_zeros_real_actor_for_distinct_observations(capsys):
     observations = torch.stack(
         (torch.zeros(6), torch.tensor([2.0, -3.0, 5.0, 7.0, -11.0, 13.0]))
     )
-    assert torch.equal(actor(observations), torch.zeros(2, 31))
+    expected = torch.tensor(contract["initialization"]["output_layer_bias"])
+    assert torch.equal(actor(observations), expected.repeat(2, 1))
     torch.testing.assert_close(
         torch.exp(runner.alg.policy.log_std),
         torch.full((31,), PPO_RECIPE.init_noise_std),
@@ -373,7 +377,10 @@ def test_fresh_apply_zeros_real_actor_for_distinct_observations(capsys):
     marker = capsys.readouterr().out
     assert marker.count("HOPE_ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_JSON=") == 1
     assert '"actor_output_weight_nonzero_count":0' in marker
-    assert '"actor_output_bias_nonzero_count":0' in marker
+    assert (
+        f'"actor_output_bias_nonzero_count":{int(torch.count_nonzero(expected))}'
+        in marker
+    )
 
 
 def test_actor_and_std_mutations_are_observed_from_real_tensors():
@@ -384,7 +391,7 @@ def test_actor_and_std_mutations_are_observed_from_real_tensors():
     )
     with torch.no_grad():
         runner.alg.policy.actor[-1].weight[0, 0] = 1.0
-    with pytest.raises(RuntimeError, match="differs from zero-head"):
+    with pytest.raises(RuntimeError, match="differs from dynamic-ready-head"):
         train_mod._inspect_action_ball_full_mdp_policy_bootstrap_runtime(
             runner, contract, require_initial_values=True
         )
@@ -439,7 +446,9 @@ def test_persisted_full_mdp_contract_contains_the_exact_bootstrap():
     )
     assert persisted["policy_bootstrap"] == bootstrap
     assert persisted["policy_bootstrap"] is not bootstrap
-    assert not any("sha" in key for key in persisted["policy_bootstrap"])
+    assert persisted["policy_bootstrap"]["decoder"][
+        "dynamic_ready_binding_sha256"
+    ] == "d" * 64
 
 
 def test_run_applies_fresh_before_load_and_validates_resume_after_load():

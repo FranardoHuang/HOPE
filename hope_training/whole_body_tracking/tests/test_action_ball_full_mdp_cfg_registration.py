@@ -579,7 +579,7 @@ def test_env_cfg_leaves_are_exact_role_projection_with_truthful_hold():
     )
 
 
-def test_fresh_a_c_episode_horizon_carries_four_shots_through_retirement():
+def test_fresh_a_c_episode_horizon_carries_six_shots_through_retirement():
     pytest.importorskip("isaaclab")
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
 
@@ -587,7 +587,7 @@ def test_fresh_a_c_episode_horizon_carries_four_shots_through_retirement():
     # control schedule.  It is not copied from a source-code receipt or an AST
     # fingerprint: a changed cfg must still satisfy these physical ticks.
     first_reveal_tick = 295
-    max_task_close_ticks = 214
+    max_task_close_ticks = 106
     recovery_ticks = 77
     deadline_offset_ticks = 2
     cadence_ticks = (
@@ -595,13 +595,13 @@ def test_fresh_a_c_episode_horizon_carries_four_shots_through_retirement():
     )
     accept_reveal_ticks = tuple(
         first_reveal_tick + cadence_ticks * index
-        for index in range(4)
+        for index in range(6)
     )
-    fourth_shot_retirement_tick = accept_reveal_ticks[-1] + cadence_ticks
+    sixth_shot_retirement_tick = accept_reveal_ticks[-1] + cadence_ticks
 
-    assert cadence_ticks == 293
-    assert accept_reveal_ticks == (295, 588, 881, 1174)
-    assert fourth_shot_retirement_tick == 1467
+    assert cadence_ticks == 185
+    assert accept_reveal_ticks == (295, 480, 665, 850, 1035, 1220)
+    assert sixth_shot_retirement_tick == 1405
 
     for cfg in _fresh_cfgs(H):
         step_dt_s = float(cfg.sim.dt) * int(cfg.decimation)
@@ -611,15 +611,15 @@ def test_fresh_a_c_episode_horizon_carries_four_shots_through_retirement():
         assert step_dt_s == pytest.approx(0.02)
         assert cfg.episode_length_s == pytest.approx(30.0)
         assert horizon_ticks == 1500
-        assert horizon_ticks > fourth_shot_retirement_tick
-        assert horizon_ticks - fourth_shot_retirement_tick == 33
+        assert horizon_ticks > sixth_shot_retirement_tick
+        assert horizon_ticks - sixth_shot_retirement_tick == 95
 
         # The inherited horizon is a real counterexample: it resets before the
-        # second accepted reveal and therefore cannot carry four shots or
-        # observe the fourth retirement in one episode.
+        # second accepted reveal and therefore cannot carry six shots or
+        # observe the sixth retirement in one episode.
         assert inherited_ten_second_ticks == 500
         assert inherited_ten_second_ticks < accept_reveal_ticks[1]
-        assert inherited_ten_second_ticks < fourth_shot_retirement_tick
+        assert inherited_ten_second_ticks < sixth_shot_retirement_tick
 
 
 def test_fresh_a_c_alone_install_exact_deterministic_robot_reset_event():
@@ -740,26 +740,23 @@ def test_official_contact_sensor_enables_processing_before_sim_attach():
     )
 
 
-def test_fresh_cfg_installs_exact_code_owned_73_action_motion_catalog():
+def test_fresh_cfg_installs_exact_code_owned_active_n1_motion_catalog():
     pytest.importorskip("isaaclab")
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking.mdp import commands as C
 
     left, right = _fresh_cfgs(H)
     table = C.load_action_ball_full_mdp_diagnostic_catalog_table()
-    assert table.action_order[0] == "take_058_unit02_fh"
-    assert table.action_order[-1] == "take_064_unit07_fh"
-    assert len(table.action_order) == len(set(table.action_order)) == 73
-    assert len(table.motion_files) == len(set(table.motion_files)) == 73
-    assert len(table.motion_sha256) == len(set(table.motion_sha256)) == 73
+    assert table.action_order == ("take_061_unit04_bh",)
+    assert len(table.action_order) == len(set(table.action_order)) == 1
+    assert len(table.motion_files) == len(set(table.motion_files)) == 1
+    assert len(table.motion_sha256) == len(set(table.motion_sha256)) == 1
     assert all(
-        "/assets/motions/chingmu73_measured_a3p0807_20260808/" in path
+        "/assets/motions/chingmu73_measured_v4_20260803/" in path
         for path in table.motion_files
     )
-    assert table.clip_family_per_clip.count("forehand") == 14
-    assert table.clip_family_per_clip.count("backhand") == 59
-    assert table.mount_normal_sign_per_clip.count(1.0) == 22
-    assert table.mount_normal_sign_per_clip.count(-1.0) == 51
+    assert table.clip_family_per_clip == ("backhand",)
+    assert table.mount_normal_sign_per_clip == (1.0,)
 
     for cfg in (left, right):
         motion = cfg.commands.motion
@@ -775,9 +772,9 @@ def test_fresh_cfg_installs_exact_code_owned_73_action_motion_catalog():
         assert motion.action_ball_full_mdp_diagnostic_catalog == (
             C.ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND
         )
-        assert motion.action_ball_diagnostic_split_ready_teacher is False
+        assert motion.action_ball_diagnostic_split_ready_teacher is True
         assert motion.action_ball_single_stroke_timeout_enabled is False
-        assert motion.canonical_ready_mode is False
+        assert motion.canonical_ready_mode is True
         assert racket.action_ball_diagnostic_unauthorized is True
         assert (
             cfg.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence
@@ -830,10 +827,8 @@ def test_fresh_catalog_cfg_rejects_caller_override_and_order_or_sign_swap():
     with pytest.raises(RuntimeError, match="caller-authored motion input"):
         H._attach_action_ball_full_mdp_diagnostic_motion_catalog(cfg)
 
-    swapped = list(cfg.commands.motion.motion_file)
-    swapped[0], swapped[1] = swapped[1], swapped[0]
-    cfg.commands.motion.motion_file = tuple(swapped)
-    with pytest.raises(ValueError, match="73-action diagnostic catalog"):
+    cfg.commands.motion.motion_file = ("/wrong/take061.npz",)
+    with pytest.raises(ValueError, match="active N=1 diagnostic catalog"):
         C.require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
             cfg.commands.motion,
             cfg.commands.racket_target,
@@ -844,7 +839,7 @@ def test_fresh_catalog_cfg_rejects_caller_override_and_order_or_sign_swap():
     signs = list(cfg.commands.racket_target.mount_normal_sign_per_clip)
     signs[0] *= -1.0
     cfg.commands.racket_target.mount_normal_sign_per_clip = tuple(signs)
-    with pytest.raises(ValueError, match="73-action diagnostic catalog"):
+    with pytest.raises(ValueError, match="active N=1 diagnostic catalog"):
         C.require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
             cfg.commands.motion,
             cfg.commands.racket_target,
@@ -874,7 +869,7 @@ def test_code_owned_catalog_rejects_motion_asset_fault(monkeypatch, fault: str):
 
 
 @pytest.mark.parametrize("device", ("cpu", "cuda:2"))
-def test_exact_73_row_motion_loader_cold_load(device: str):
+def test_exact_active_n1_motion_loader_cold_load(device: str):
     pytest.importorskip("isaaclab")
     np = pytest.importorskip("numpy")
     torch = pytest.importorskip("torch")
@@ -902,7 +897,7 @@ def test_exact_73_row_motion_loader_cold_load(device: str):
         device=device,
         allow_legacy_link_origin_velocity=False,
     )
-    assert loader.num_segments == 73
+    assert loader.num_segments == 1
     assert loader.kinematics_contract_exact is True
     assert loader.measured_racket_available is True
     assert tuple(
@@ -1071,9 +1066,10 @@ def test_reward_template_matches_exact_shared_reward28_contract():
     for ordinal, term in enumerate(terms[paddle_end:], start=paddle_end):
         assert term.weight_source == H.ACTION_BALL_FULL_MDP_REGULARIZATION_WEIGHT_SOURCE
         assert term.fixed_func_params == (("ordinal", ordinal),)
-    assert contract.HELD_RACKET_WRIST_BODY_NAME not in H.ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES
+    assert contract.HELD_RACKET_WRIST_BODY_NAME not in H.ACTION_BALL_FULL_MDP_UPPER_NON_WRIST_BODY_NAMES
+    assert set(H.ACTION_BALL_FULL_MDP_UPPER_NON_WRIST_BODY_NAMES) < set(H.A3_UPPER_TRACKED)
     for term in terms[lifecycle_count + 2 : common_end]:
-        assert dict(term.fixed_func_params)["body_names"] == H.ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES
+        assert dict(term.fixed_func_params)["body_names"] == H.ACTION_BALL_FULL_MDP_UPPER_NON_WRIST_BODY_NAMES
     for term in (
         *terms[lifecycle_count : lifecycle_count + 2],
         *terms[common_end:paddle_end],

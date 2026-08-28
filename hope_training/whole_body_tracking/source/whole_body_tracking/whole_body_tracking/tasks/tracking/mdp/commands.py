@@ -300,7 +300,7 @@ def require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
     ):
         raise ValueError(
             "fresh full-MDP Motion/Racket cfg differs from the code-owned "
-            "73-action diagnostic catalog"
+            "active N=1 diagnostic catalog"
         )
     return table
 
@@ -2147,15 +2147,15 @@ class MotionCommand(CommandTerm):
                 or str(getattr(racket_cfg, "target_mode", ""))
                 != "action_ball_full_mdp"
                 or diagnostic_unauthorized is not True
-                or canonical_ready_mode is not False
-                or diagnostic_split_ready_teacher is not False
+                or canonical_ready_mode is not True
+                or diagnostic_split_ready_teacher is not True
                 or single_stroke_timeout_enabled is not False
                 or getattr(self.cfg, "action_ball_dynamic_ready", None)
-                is not None
+                is None
                 or getattr(self.cfg, "allow_legacy_link_origin_velocity", None)
                 is not False
                 or getattr(self.cfg, "balanced_clip_sampling", None) is not True
-                or getattr(self.cfg, "stand_start_prob", None) != 1.0
+                or getattr(self.cfg, "stand_start_prob", None) != 0.0
                 or tuple(getattr(self.cfg, "stand_start_yaw_range", ()))
                 != (0.0, 0.0)
                 or tuple(getattr(self.cfg, "hold_steps_range", ())) != (0, 0)
@@ -2184,7 +2184,7 @@ class MotionCommand(CommandTerm):
             ):
                 raise ValueError(
                     "full-MDP diagnostic catalog is restricted to the exact fresh "
-                    "diagnostic EnvCfg and cannot enable canonical/split-ready semantics"
+                    "N=1 diagnostic EnvCfg with one dynamic split-ready binding"
                 )
             table = load_action_ball_full_mdp_diagnostic_catalog_table()
             if (
@@ -2205,7 +2205,7 @@ class MotionCommand(CommandTerm):
             ):
                 raise ValueError(
                     "fresh full-MDP Motion/Racket table differs from the code-owned "
-                    "73-action diagnostic catalog"
+                    "active N=1 diagnostic catalog"
                 )
             self._action_ball_full_mdp_diagnostic_catalog_table = table
         # 起点扰动斜坡必须在 canonical-ready 复位守卫之前解析:那道守卫要知道
@@ -2293,7 +2293,7 @@ class MotionCommand(CommandTerm):
             ):
                 raise ValueError(
                     "fresh full-MDP diagnostic MotionLoader did not adopt the exact "
-                    "73-row schema-2/measured-racket catalog"
+                    "active N=1 schema-2/measured-racket catalog"
                 )
         if (
             bool(
@@ -2360,7 +2360,7 @@ class MotionCommand(CommandTerm):
         # legitimately yaw tens of degrees at swing frame 0 while the pelvis
         # and every measured world-space racket channel are already +X
         # grounded.  Checking the torso here produced false turn-and-walk
-        # warnings for the exact 73-row measured bank.
+        # warnings for the exact active N=1 measured row.
         configured_body_names = tuple(str(name) for name in self.cfg.body_names)
         robot_body_names = tuple(str(name) for name in self.robot.body_names)
         if (
@@ -20485,7 +20485,7 @@ class MotionCommandCfg(CommandTermCfg):
     action_ball_diagnostic_split_ready_teacher: bool = False
     # Internal route marker for the exact fresh full-MDP EnvCfg.  It is not
     # accepted from task YAML and is not admission: the live Motion constructor
-    # re-reads the pinned table and snapshots all 73 exact NPZ payloads before
+    # re-reads the pinned table and snapshots the exact active NPZ payload before
     # handing them to the existing MotionLoader.
     action_ball_full_mdp_diagnostic_catalog: str | None = None
     # Diagnostic single-stroke lifecycle switch.  Exact true keeps the historical measured-N1

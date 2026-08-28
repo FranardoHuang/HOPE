@@ -40,6 +40,22 @@ PINNED_KIT_PYTHON_SHA256 = (
 PINNED_A3_USD_SHA256 = (
     "a3cd382943ff9f70beecf88c729a6cc1c052a3c0a0cbffe91003ec319ab78140"
 )
+DYNAMIC_READY_ARTIFACT_RELATIVE = Path(
+    "configs/action_ball_n1_measured_20260803/"
+    "evidence_holdpass_robust20n_20260803/"
+    "take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json"
+)
+DYNAMIC_READY_ARTIFACT_SHA256 = (
+    "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
+)
+DYNAMIC_READY_RECEIPT_RELATIVE = Path(
+    "configs/action_ball_n1_measured_20260803/"
+    "evidence_holdpass_robust20n_20260803/"
+    "take061.robust20n.nominal_hold.v1.json"
+)
+DYNAMIC_READY_RECEIPT_SHA256 = (
+    "c8b92a28203cbf9b9a4f6dee784d6cc08f3f279672d8a9fc886aa6d92b5bb19b"
+)
 LD_LIBRARY_PATH = (
     "/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/"
     "x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e"
@@ -478,6 +494,23 @@ def _child_argv(
         "checkpoint_tolerant=false",
         "checkpoint_allow_missing_contract=false",
         "checkpoint_allow_contract_mismatch=false",
+        "action_ball_dynamic_ready_bootstrap=true",
+        (
+            "action_ball_dynamic_ready_artifact_path="
+            f"{(REPO_ROOT / DYNAMIC_READY_ARTIFACT_RELATIVE).resolve()}"
+        ),
+        (
+            "action_ball_dynamic_ready_artifact_sha256="
+            f"{DYNAMIC_READY_ARTIFACT_SHA256}"
+        ),
+        (
+            "action_ball_dynamic_ready_nominal_receipt_path="
+            f"{(REPO_ROOT / DYNAMIC_READY_RECEIPT_RELATIVE).resolve()}"
+        ),
+        (
+            "action_ball_dynamic_ready_nominal_receipt_sha256="
+            f"{DYNAMIC_READY_RECEIPT_SHA256}"
+        ),
         f"hydra.run.dir={hydra_run_dir}",
     ]
     if diagnostic_rate_probe:

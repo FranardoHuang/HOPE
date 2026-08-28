@@ -17,6 +17,8 @@ of R06 settlement; neither fact is a readiness claim for Full MuJoCo A.
 
 from __future__ import annotations
 
+import json
+import math
 from pathlib import Path
 import sys
 
@@ -77,9 +79,7 @@ FULL_A_RECOVERY_END_AGE_TICK = portable_outcome.RECOVERY_END_AGE_TICK
 FULL_A_PLACEMENT_BROAD_SIGMA_M = portable_outcome.PLACEMENT_BROAD_SIGMA_M
 FULL_A_BODY_ORIENTATION_COARSE_STD_RAD = 1.0
 FULL_A_SUPPORT_FORCE_N = 10.0
-FULL_A_DEFAULT_ROOT_POS = (0.0, 0.0, 1.0684)
-FULL_A_DEFAULT_ROOT_QUAT_WXYZ = (1.0, 0.0, 0.0, 0.0)
-FULL_A_POLICY_BOOTSTRAP_KIND = "a3_default_stand_zero_head_v1"
+FULL_A_POLICY_BOOTSTRAP_KIND = "a3_take061_dynamic_ready_head_v1"
 FULL_A_FACT_INTEGRITY_R03_NONFINITE = 1 << 0
 FULL_A_FACT_INTEGRITY_R06_SOURCE_INVALID = 1 << 1
 FULL_A_FACT_INTEGRITY_R07_SEQUENCE = 1 << 2
@@ -92,6 +92,15 @@ FULLMDP_TRACKED_BODY_NAMES = (
     "right_hip_roll_Link",
     "right_knee_Link",
     "right_ankle_roll_Link",
+    "torso_Link",
+    "left_shoulder_roll_Link",
+    "left_elbow_Link",
+    "left_wrist_yaw_Link",
+    "right_shoulder_roll_Link",
+    "right_elbow_Link",
+    "right_wrist_yaw_Link",
+)
+FULLMDP_UPPER_TRACKED_BODY_NAMES = (
     "torso_Link",
     "left_shoulder_roll_Link",
     "left_elbow_Link",
@@ -160,11 +169,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             count_contacts=True,
             capacity_probe=capacity_probe,
         )
-        if self.full_a_mode:
-            # Fresh A/C is born at the materialized default stand.  The
-            # take061 artifact remains an input/provenance carrier, not a
-            # physical-birth or policy-prior authority for this task.
-            self.q_ready = self.action_offset.clone()
         import mujoco
 
         if not self._robot_table_ok:
@@ -192,11 +196,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._fullmdp_anchor_body_id = int(body_ids[self._fullmdp_anchor_index])
         self._fullmdp_pelvis_body_id = int(body_ids[0])
         self._fullmdp_pelvis_root_id = int(roots[0])
-        wrist_index = FULLMDP_TRACKED_BODY_NAMES.index(
-            reward_contract.HELD_RACKET_WRIST_BODY_NAME
+        upper_non_wrist_names = (
+            reward_contract.upper_except_held_wrist_body_names(
+                FULLMDP_UPPER_TRACKED_BODY_NAMES
+            )
         )
-        self._fullmdp_non_wrist_body_indices = self._torch.tensor(
-            [index for index in range(len(body_ids)) if index != wrist_index],
+        self._fullmdp_upper_non_wrist_body_indices = self._torch.tensor(
+            [FULLMDP_TRACKED_BODY_NAMES.index(name) for name in upper_non_wrist_names],
             dtype=self._torch.long,
             device=self.device,
         )
@@ -288,6 +294,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 dtype=self.qpos_init.dtype,
                 device=self.device,
             )
+            self._bind_full_a_dynamic_ready_policy_prior(
+                ready_pose_payload=ready_pose_payload,
+                ready_pose_path=ready_pose_path,
+            )
             self._initialize_full_a_geometry(mujoco)
             self._initialize_full_a_state()
             self.sim.forward()
@@ -308,38 +318,85 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         identity = super().action_contract_identity
         identity.update(
             {
-                "full_a_reset_joint_source": "runtime_plant.default_joint_pos_rad",
-                "full_a_reset_root_source": "AGIBOT_A3_CFG.init_state.pos/rot",
+                "full_a_reset_joint_source": "dynamic_ready.physical_ready.joint_pos_rad",
+                "full_a_reset_root_source": "dynamic_ready.physical_ready.root_pose",
                 "full_a_policy_bootstrap": FULL_A_POLICY_BOOTSTRAP_KIND,
             }
         )
         return identity
 
+    def _bind_full_a_dynamic_ready_policy_prior(
+        self, *, ready_pose_payload, ready_pose_path
+    ) -> None:
+        """Close physical birth, hold q_des and Take061 teacher identity."""
+
+        if ready_pose_payload is None:
+            source = Path(ready_pose_path) if ready_pose_path is not None else Path(
+                self.pose["source"]
+            )
+            payload = source.read_bytes()
+        else:
+            payload = ready_pose_payload
+        try:
+            document = json.loads(payload.decode("utf-8"))
+            normalized = document["hold_candidate"]["normalized_actor_action"]
+            hold_qdes = document["hold_candidate"]["hold_qdes_joint_pos_rad"]
+            stable_motion = document["sources"]["stable_motion"]
+        except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Full-A dynamic-ready artifact core fields differ") from exc
+        row = self._full_a_catalog.fresh_action
+        if (
+            document.get("action_id") != row.action_id
+            or stable_motion.get("sha256") != row.motion_sha256
+            or stable_motion.get("frame_index") != 0
+            or not isinstance(normalized, list)
+            or len(normalized) != self.num_actions
+            or not isinstance(hold_qdes, list)
+            or len(hold_qdes) != self.num_actions
+            or any(
+                type(value) not in (int, float) or not math.isfinite(float(value))
+                for value in (*normalized, *hold_qdes)
+            )
+        ):
+            raise RuntimeError(
+                "Full-A physical ready, actor prior and teacher are not one Take061 source"
+            )
+        action = self._torch.tensor(
+            normalized, dtype=self.action_offset.dtype, device=self.device
+        )
+        expected_qdes = self._torch.tensor(
+            hold_qdes, dtype=self.action_offset.dtype, device=self.device
+        )
+        decoded_qdes = self.action_offset + self.act_scale * action
+        if not self._torch.allclose(
+            decoded_qdes, expected_qdes, rtol=0.0, atol=2.0e-7
+        ):
+            raise RuntimeError(
+                "Full-A dynamic-ready actor prior does not decode to hold q_des"
+            )
+        self._full_a_policy_bootstrap_action = action
+        self._full_a_policy_bootstrap_qdes = expected_qdes
+        # The first guarded action is compared with the command that actually
+        # sustains the physical birth pose, not the unrelated default stand.
+        # Birth, actor prior and guard history therefore share one artifact.
+        self._qdes_previous_executable.copy_(
+            expected_qdes.unsqueeze(0).expand_as(
+                self._qdes_previous_executable
+            )
+        )
+
     def _reset_idx(self, ids):
-        """Use the fresh Full-A default stand, never the legacy take061 pose."""
+        """Reset at physical ready and seed the guard from its hold command."""
 
         super()._reset_idx(ids)
-        if not getattr(self, "full_a_mode", False) or ids.numel() == 0:
-            return
-        data = self.sim.data
-        count = int(ids.numel())
-        root = self.root_qadr
-        data.qpos[ids, root : root + 3] = (
-            self._torch.tensor(
-                FULL_A_DEFAULT_ROOT_POS,
-                dtype=self.qpos_init.dtype,
-                device=self.device,
-            ).expand(count, 3)
-            + self.env.scene.env_origins[ids]
-        )
-        data.qpos[ids, root + 3 : root + 7] = self._torch.tensor(
-            FULL_A_DEFAULT_ROOT_QUAT_WXYZ,
-            dtype=self.qpos_init.dtype,
-            device=self.device,
-        ).expand(count, 4)
-        data.qpos[
-            ids[:, None], self.q_adr_act[None, :]
-        ] = self.action_offset[None, :].expand(count, -1)
+        if (
+            getattr(self, "full_a_mode", False)
+            and ids.numel() > 0
+            and hasattr(self, "_full_a_policy_bootstrap_qdes")
+        ):
+            self._qdes_previous_executable[ids] = (
+                self._full_a_policy_bootstrap_qdes
+            )
 
     def _initialize_full_a_geometry(self, mujoco) -> None:
         """Bind R06/R07 numeric geometry to the compiled MuJoCo scene."""
@@ -641,7 +698,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_motion_phase_code = torch.full(
             (n,), RECOVER_HIDDEN_PHASE_INDEX, dtype=torch.long, device=self.device
         )
-        self._full_a_teacher_joint_pos = self.action_offset.unsqueeze(0).expand(
+        self._full_a_teacher_joint_pos = self.q_ready.unsqueeze(0).expand(
             n, -1
         ).clone()
         self._full_a_teacher_joint_vel = torch.zeros_like(
@@ -1744,7 +1801,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             torch.where(
                 measured_joint[:, None],
                 measured_joint_pos,
-                self.action_offset.unsqueeze(0).expand_as(
+                self.q_ready.unsqueeze(0).expand_as(
                     self._full_a_teacher_joint_pos
                 ),
             )
@@ -2583,7 +2640,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 tracked_body_kinematics
             )
         anchor = self._fullmdp_anchor_index
-        non_wrist = self._fullmdp_non_wrist_body_indices
+        non_wrist = self._fullmdp_upper_non_wrist_body_indices
         body_orientation_error = self._quat_error_sq(
             torch,
             self._aligned_teacher_body_quat[:, non_wrist],
@@ -2810,7 +2867,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_pre_swing_wait_s[ids] = 0.0
             self._full_a_teacher_frame[ids] = 0
             self._full_a_motion_phase_code[ids] = RECOVER_HIDDEN_PHASE_INDEX
-            self._full_a_teacher_joint_pos[ids] = self.action_offset
+            self._full_a_teacher_joint_pos[ids] = self.q_ready
             self._full_a_teacher_joint_vel[ids] = 0.0
             if hasattr(self, "_ready_teacher_body_pos"):
                 self._teacher_body_pos[ids] = self._ready_teacher_body_pos[ids]

@@ -1,8 +1,9 @@
-"""Dependency-light FullMDP catalog rows shared by Isaac and MuJoCo.
+"""Dependency-light FullMDP active action rows shared by Isaac and MuJoCo.
 
-The 73-row bank is cold source data.  The fresh FullMDP cadence currently
-selects action slot zero only; loading the complete bank must not be confused
-with a multi-action runtime selector.
+The fresh curriculum currently selects one action only.  Keep that executable
+N=1 view explicit instead of loading 72 cold rows that no runtime selector can
+consume.  This also keeps the physical-ready, policy prior and teacher motion
+on the same content-addressed Take061 source.
 """
 
 from __future__ import annotations
@@ -64,16 +65,16 @@ except ImportError:
 ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND = (
     "action_ball_full_mdp_code_owned_diagnostic_catalog_v1"
 )
-ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT = 73
+ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT = 1
 ACTION_BALL_FULL_MDP_FRESH_ACTION_SLOT = 0
 PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH = (
-    "configs/action_ball_chingmu73_measured_a3p0807_f10_20260819.json"
+    "configs/action_ball_full_mdp_n1_take061_measured_v4_20260828.json"
 )
 PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256 = (
-    "7176fa6448094eaa5dba9640c3e7c74fcd947f36208c434813820a5161dd24a4"
+    "6ac539eee83b4446e0738cc7e9763a311d31984b187d1e6870fd953f8a114c9d"
 )
 PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
-    "f530165013baa570e0bf6bbbebcd7eef0c5c54db6ff7d51afccdc24e170f8cd5"
+    "5e2ccd735921647f827b0ec974dd8b8175c097edb8a37b2afdfe5ff86f8b66fb"
 )
 FRESH_POLICY_STEP_S = 0.02
 # Give every fresh row one complete, observable balance prefix before task
@@ -82,12 +83,12 @@ FRESH_POLICY_STEP_S = 0.02
 FRESH_FIRST_REVEAL_TICK = 295
 FRESH_RECOVERY_END_OFFSET_TICKS = 77
 FRESH_HIDDEN_GAP_TICKS = 2
-FRESH_REFERENCE_DUE_COUNT = 4
-FRESH_REFERENCE_DUE_TICKS = (295, 588, 881, 1174)
+FRESH_REFERENCE_DUE_COUNT = 6
+FRESH_REFERENCE_DUE_TICKS = (295, 480, 665, 850, 1035, 1220)
 FRESH_EPISODE_HORIZON_TICKS = 1500
 # Raw actor-clock sentinel shared by both backends.  A negative value is
 # outside the domain of every real countdown and makes schedule exhaustion
-# distinguishable from the fourth shot's still-valid settlement boundary.
+# distinguishable from the sixth shot's still-valid settlement boundary.
 FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S = -1.0
 
 
@@ -173,7 +174,7 @@ class PortableFreshCadence:
 def derive_portable_fresh_cadence(
     table: PortableActionCenterTable,
 ) -> PortableFreshCadence:
-    """Derive the 30 s cadence from the sealed all-action timing bank."""
+    """Derive the 30 s cadence from the sealed active-action timing row."""
 
     if type(table) is not PortableActionCenterTable or not table.actions:
         raise ValueError("portable fresh cadence requires the exact action bank")
@@ -200,12 +201,12 @@ def derive_portable_fresh_cadence(
         for ordinal in range(FRESH_REFERENCE_DUE_COUNT)
     )
     if (
-        maximum_close != 214
-        or cadence != 293
+        maximum_close != 106
+        or cadence != 185
         or due_ticks != FRESH_REFERENCE_DUE_TICKS
         # Every advertised opportunity must fit its complete construction
-        # window.  Tick 1467 is the fourth row's retirement boundary, not a
-        # fifth reveal: only 33 episode ticks remain after it.
+        # window. Tick 1405 is the sixth row's retirement boundary, not a
+        # seventh reveal: only 95 episode ticks remain after it.
         or due_ticks[-1] + cadence >= FRESH_EPISODE_HORIZON_TICKS
     ):
         raise ValueError("portable fresh cadence differs from the frozen schedule")
@@ -251,7 +252,7 @@ def _load_catalog_source():
         or action_order != tuple(action.action_id for action in actions)
     ):
         raise ValueError(
-            "code-owned full-MDP diagnostic catalog is not the exact 73-row order"
+            "code-owned full-MDP diagnostic catalog is not the exact active N=1 order"
         )
     motion_files = []
     motion_sha256 = []
@@ -279,7 +280,7 @@ def _load_catalog_source():
 
 def load_action_ball_full_mdp_diagnostic_catalog_table(
 ) -> ActionBallFullMdpDiagnosticCatalogTable:
-    """Re-read the code-pinned manifest and all 73 motion files."""
+    """Re-read the code-pinned active N=1 manifest and motion file."""
 
     loaded, motion_files, motion_sha256 = _load_catalog_source()
     actions = loaded.manifest.actions

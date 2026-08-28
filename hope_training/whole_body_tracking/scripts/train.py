@@ -24,6 +24,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import sys
 import time
 import zipfile
@@ -11876,10 +11877,10 @@ def resolve_motion_sources(cfg, *, cwd: pathlib.Path | None = None) -> tuple[lis
 
 
 def _resolve_motion_sources_for_training(cfg, env_cfg, task):
-    """Keep the fresh code-owned catalog out of the legacy source resolver.
+    """Keep the fresh code-owned active N=1 view out of the legacy resolver.
 
     The exact A/C EnvCfg constructors have already loaded and byte-checked the
-    ordered 73-action catalog.  Re-resolving a caller path here would replace
+    ordered active-action catalog. Re-resolving a caller path here would replace
     that construction result and make the source of truth ambiguous.  Every
     legacy task retains the historical local/registry resolution unchanged.
     """
@@ -11913,7 +11914,7 @@ def _resolve_motion_sources_for_training(cfg, env_cfg, task):
         raise _OverrideError(
             "[train.py] exact fresh full-MDP forbids caller/task motion or "
             "registry overrides; its sole source is the code-owned ordered "
-            f"73-action catalog: configured={tuple(configured)!r} "
+            f"active N=1 catalog: configured={tuple(configured)!r} "
             f"argv={tuple(argv_overrides)!r}"
         )
 
@@ -11936,6 +11937,11 @@ def _resolve_motion_sources_for_training(cfg, env_cfg, task):
         raise RuntimeError(
             "[train.py] fresh full-MDP code-owned Motion catalog API is absent"
         )
+    expected_count = getattr(
+        commands,
+        "ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT",
+        None,
+    )
     try:
         table = require_bindings(motion_cfg, racket_cfg)
     except ValueError as exc:
@@ -11944,25 +11950,27 @@ def _resolve_motion_sources_for_training(cfg, env_cfg, task):
         ) from exc
     if (
         type(table) is not table_type
-        or len(table.action_order) != 73
-        or len(table.motion_files) != 73
-        or len(table.motion_sha256) != 73
-        or len(set(table.action_order)) != 73
-        or len(set(table.motion_files)) != 73
-        or len(set(table.motion_sha256)) != 73
+        or type(expected_count) is not int
+        or expected_count != 1
+        or len(table.action_order) != expected_count
+        or len(table.motion_files) != expected_count
+        or len(table.motion_sha256) != expected_count
+        or len(set(table.action_order)) != expected_count
+        or len(set(table.motion_files)) != expected_count
+        or len(set(table.motion_sha256)) != expected_count
         or tuple(getattr(motion_cfg, "motion_file", ()) or ())
         != table.motion_files
     ):
         raise RuntimeError(
             "[train.py] fresh full-MDP code-owned Motion catalog is not the "
-            "exact installed ordered 73-action table"
+            "exact installed active N=1 table"
         )
     status = {
         "family": family,
         "kind": getattr(
             commands, "ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND", None
         ),
-        "action_count": 73,
+        "action_count": expected_count,
         "manifest_file_sha256": table.manifest_file_sha256,
         "manifest_canonical_sha256": table.manifest_canonical_sha256,
         "first_action": table.action_order[0],
@@ -15120,7 +15128,7 @@ _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_CFG_KEY = (
     "action_ball_full_mdp_policy_bootstrap"
 )
 _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_KIND = (
-    "a3_default_stand_zero_head_v1"
+    "a3_take061_dynamic_ready_head_v1"
 )
 _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM = 31
 _ACTION_BALL_FULL_MDP_DIAGNOSTIC_JOINT_SAFETY_MODE = (
@@ -15223,7 +15231,7 @@ _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER = (
 
 
 def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
-    """Validate the code-owned default-stand bootstrap without self-hashing it."""
+    """Validate the code-owned dynamic-ready bootstrap without self-proof."""
 
     recipe = (
         _action_ball_full_mdp_ppo_recipe_module()
@@ -15256,7 +15264,8 @@ def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
         "joint_names",
         "semantics",
         "use_default_offset",
-        "zero_action_target",
+        "bootstrap_action_target",
+        "dynamic_ready_binding_sha256",
     }:
         raise RuntimeError(
             "fresh full-MDP policy bootstrap decoder contract differs"
@@ -15267,8 +15276,12 @@ def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
         or decoder["semantics"]
         != "q_des=materialized_default_joint_pos+action_scale*action"
         or decoder["use_default_offset"] is not True
-        or decoder["zero_action_target"]
-        != "robot.data.default_joint_pos[:,action_joint_ids]"
+        or decoder["bootstrap_action_target"]
+        != "dynamic_ready.hold_qdes_joint_pos_rad"
+        or type(decoder["dynamic_ready_binding_sha256"]) is not str
+        or re.fullmatch(
+            r"[0-9a-f]{64}", decoder["dynamic_ready_binding_sha256"]
+        ) is None
         or not isinstance(joint_names, list)
         or len(joint_names) != _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM
         or len(set(joint_names)) != len(joint_names)
@@ -15294,7 +15307,11 @@ def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
         initialization["output_layer_weight"] != "zeros"
         or not isinstance(bias, list)
         or len(bias) != _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM
-        or any(type(item) not in (int, float) or float(item) != 0.0 for item in bias)
+        or any(
+            type(item) not in (int, float) or not math.isfinite(float(item))
+            for item in bias
+        )
+        or not any(float(item) != 0.0 for item in bias)
         or initialization["init_noise_std"]
         != recipe.init_noise_std
         or initialization["required_realized_init_noise_std"]
@@ -15302,7 +15319,7 @@ def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
         or initialization["noise_std_type"] != recipe.noise_std_type
     ):
         raise RuntimeError(
-            "fresh full-MDP policy bootstrap must be zero-head exact "
+            "fresh full-MDP policy bootstrap must be dynamic-ready-head exact "
             f"{recipe.noise_std_type}_std={recipe.init_noise_std!r} from "
             f"{recipe.kind}"
         )
@@ -15312,7 +15329,7 @@ def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
 def _action_ball_full_mdp_policy_bootstrap_contract(
     env, agent_cfg, bootstrap_config: dict
 ) -> dict:
-    """Bind zero normalized action to the live materialized reset birth."""
+    """Bind the actor mean to the live certified dynamic-ready hold q_des."""
 
     import torch
 
@@ -15324,11 +15341,12 @@ def _action_ball_full_mdp_policy_bootstrap_contract(
         )
     try:
         action = env.action_manager.get_term("joint_pos")
+        motion = env.command_manager.get_term("motion")
         robot = env.scene["robot"]
     except (AttributeError, KeyError) as exc:
         raise RuntimeError(
-            "fresh full-MDP policy bootstrap requires the live joint_pos action "
-            "term and robot articulation"
+            "fresh full-MDP policy bootstrap requires live joint_pos, Motion, "
+            "and robot owners"
         ) from exc
     data = robot.data
     joint_names = list(
@@ -15357,12 +15375,12 @@ def _action_ball_full_mdp_policy_bootstrap_contract(
             ) from exc
     if joint_ids != list(range(_ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM)):
         raise RuntimeError(
-            "fresh full-MDP zero head requires identity action/articulation order"
+            "fresh full-MDP ready head requires identity action/articulation order"
         )
     action_cfg = getattr(action, "cfg", None)
     if getattr(action_cfg, "use_default_offset", None) is not True:
         raise RuntimeError(
-            "fresh full-MDP zero head requires use_default_offset=True"
+            "fresh full-MDP ready head requires use_default_offset=True"
         )
     default_joint_pos = getattr(data, "default_joint_pos", None)
     offset = getattr(action, "_offset", None)
@@ -15401,12 +15419,38 @@ def _action_ball_full_mdp_policy_bootstrap_contract(
             "fresh full-MDP action-term offset differs from the materialized "
             "default joint reset birth"
         )
-    zero_action = torch.zeros_like(offset)
-    decoded_zero = offset + scale * zero_action
-    if not torch.equal(decoded_zero, selected_default):
+    normalized_rows = getattr(
+        motion, "_action_ball_dynamic_ready_normalized_actor_action", None
+    )
+    hold_qdes_rows = getattr(
+        motion, "_action_ball_dynamic_ready_hold_qdes_joint_pos_rad", None
+    )
+    ready_binding_sha256 = getattr(
+        motion, "_action_ball_dynamic_ready_binding_sha256", None
+    )
+    if (
+        not torch.is_tensor(normalized_rows)
+        or tuple(normalized_rows.shape) != (1, _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM)
+        or not torch.is_tensor(hold_qdes_rows)
+        or tuple(hold_qdes_rows.shape) != (1, _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM)
+        or type(ready_binding_sha256) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", ready_binding_sha256) is None
+        or normalized_rows.device != offset.device
+        or normalized_rows.dtype != offset.dtype
+        or hold_qdes_rows.device != offset.device
+        or hold_qdes_rows.dtype != offset.dtype
+        or not bool(torch.all(torch.isfinite(normalized_rows)).item())
+        or not bool(torch.all(torch.isfinite(hold_qdes_rows)).item())
+    ):
         raise RuntimeError(
-            "fresh full-MDP zero action does not decode to the materialized "
-            "default joint reset birth"
+            "fresh full-MDP requires one live finite dynamic-ready action/q_des row"
+        )
+    bootstrap_action = normalized_rows[0]
+    decoded_ready = offset + scale * bootstrap_action.unsqueeze(0)
+    expected_ready = hold_qdes_rows.expand_as(decoded_ready)
+    if not torch.allclose(decoded_ready, expected_ready, rtol=0.0, atol=2.0e-7):
+        raise RuntimeError(
+            "fresh full-MDP dynamic-ready action does not decode to certified hold q_des"
         )
     agent = agent_cfg.to_dict()
     policy_cfg = agent.get("policy") if isinstance(agent, dict) else None
@@ -15431,16 +15475,15 @@ def _action_ball_full_mdp_policy_bootstrap_contract(
                 "q_des=materialized_default_joint_pos+action_scale*action"
             ),
             "use_default_offset": True,
-            "zero_action_target": (
-                "robot.data.default_joint_pos[:,action_joint_ids]"
-            ),
+            "bootstrap_action_target": "dynamic_ready.hold_qdes_joint_pos_rad",
+            "dynamic_ready_binding_sha256": ready_binding_sha256,
         },
         "initialization": {
             "output_layer_weight": "zeros",
             "output_layer_bias": [
-                0.0
-            ]
-            * _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM,
+                float(value)
+                for value in bootstrap_action.detach().cpu().tolist()
+            ],
             "init_noise_std": resolved["init_noise_std"],
             "noise_std_type": resolved["noise_std_type"],
             "required_realized_init_noise_std": resolved["init_noise_std"],
@@ -15501,7 +15544,11 @@ def _inspect_action_ball_full_mdp_policy_bootstrap_runtime(
     ):
         raise RuntimeError("fresh full-MDP runtime policy std is not finite positive")
     if require_initial_values:
-        expected_bias = torch.zeros_like(output.bias)
+        expected_bias = torch.tensor(
+            contract["initialization"]["output_layer_bias"],
+            dtype=output.bias.dtype,
+            device=output.bias.device,
+        )
         expected_std = torch.full_like(
             actual_std,
             contract["initialization"]["required_realized_init_noise_std"],
@@ -15514,7 +15561,7 @@ def _inspect_action_ball_full_mdp_policy_bootstrap_runtime(
             )
         ):
             raise RuntimeError(
-                "fresh full-MDP runtime policy differs from zero-head "
+                "fresh full-MDP runtime policy differs from dynamic-ready-head "
                 "typed-recipe bootstrap"
             )
     summary = torch.stack(
@@ -15538,7 +15585,7 @@ def _inspect_action_ball_full_mdp_policy_bootstrap_runtime(
 def _apply_action_ball_full_mdp_fresh_policy_bootstrap(
     runner, policy_bootstrap: dict, *, checkpoint_path
 ) -> bool:
-    """Apply the default-stand prior once; a resume is an exact no-op here."""
+    """Apply the dynamic-ready hold prior once; resume remains an exact no-op."""
 
     import torch
 
@@ -15568,7 +15615,13 @@ def _apply_action_ball_full_mdp_fresh_policy_bootstrap(
         )
     with torch.no_grad():
         output.weight.zero_()
-        output.bias.zero_()
+        output.bias.copy_(
+            torch.tensor(
+                contract["initialization"]["output_layer_bias"],
+                dtype=output.bias.dtype,
+                device=output.bias.device,
+            )
+        )
     facts = _inspect_action_ball_full_mdp_policy_bootstrap_runtime(
         runner, contract, require_initial_values=True
     )

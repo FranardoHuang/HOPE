@@ -136,6 +136,7 @@ def _plant_env(n, width, actuator_from_runtime=None):
     ).clone()
     env._qdes_previous_executable_valid = torch.ones(n, dtype=torch.bool)
     env._qdes_guard_terminal = torch.zeros(n, dtype=torch.bool)
+    env._qdes_reward_operand_valid = torch.zeros(n, dtype=torch.bool)
     env._actual_hard_edge_latch = torch.zeros(n, dtype=torch.bool)
     env._qdes_guard_intervention = torch.zeros(n, dtype=torch.bool)
     env.kp = torch.ones(width)
@@ -393,9 +394,9 @@ def test_action_contract_identity_is_one_read_only_copy():
         ),
         "action_offset_source": "runtime_plant.default_joint_pos_rad",
         "action_offset_sha256": train.ACTION_OFFSET_FLOAT32_SHA256,
-        "full_a_reset_joint_source": "runtime_plant.default_joint_pos_rad",
-        "full_a_reset_root_source": "AGIBOT_A3_CFG.init_state.pos/rot",
-        "full_a_policy_bootstrap": "a3_default_stand_zero_head_v1",
+        "full_a_reset_joint_source": "dynamic_ready.physical_ready.joint_pos_rad",
+        "full_a_reset_root_source": "dynamic_ready.physical_ready.root_pose",
+        "full_a_policy_bootstrap": "a3_take061_dynamic_ready_head_v1",
         "raw_action_clip": None,
         "executable_qdes_guard": "action_ball_shared_soft_hard_state_guard_v1",
         "transfer_authority": False,
@@ -441,7 +442,7 @@ def test_raw_zero_uses_action_offset_while_reset_stays_physical_ready():
     assert not torch.equal(requested[0], env.q_ready)
 
 
-def test_full_a_reset_uses_default_joint_and_root_birth_not_take061():
+def test_full_a_reset_keeps_physical_ready_and_dynamic_hold_guard_history():
     env = wait_env.FullMdpInitialWaitVecEnv.__new__(
         wait_env.FullMdpInitialWaitVecEnv
     )
@@ -456,7 +457,9 @@ def test_full_a_reset_uses_default_joint_and_root_birth_not_take061():
     env.qpos_init[3] = 1.0
     env.qvel_init = torch.zeros(40)
     env.q_ready = torch.full((31,), 3.0)
+    env.qpos_init[env.q_adr_act] = env.q_ready
     env.action_offset = torch.linspace(-0.4, 0.4, 31)
+    env._full_a_policy_bootstrap_qdes = torch.linspace(-0.2, 0.2, 31)
     env.env = SimpleNamespace(
         scene=SimpleNamespace(env_origins=torch.zeros((2, 3)))
     )
@@ -477,6 +480,7 @@ def test_full_a_reset_uses_default_joint_and_root_birth_not_take061():
     env._qdes_previous_executable = torch.ones((2, 31))
     env._qdes_previous_executable_valid = torch.zeros(2, dtype=torch.bool)
     env._qdes_guard_terminal = torch.ones(2, dtype=torch.bool)
+    env._qdes_reward_operand_valid = torch.ones(2, dtype=torch.bool)
     env._actual_hard_edge_latch = torch.ones(2, dtype=torch.bool)
     env._qdes_guard_intervention = torch.ones(2, dtype=torch.bool)
     env._cur_ret = torch.ones(2)
@@ -485,21 +489,13 @@ def test_full_a_reset_uses_default_joint_and_root_birth_not_take061():
 
     env._reset_idx(torch.tensor([0]))
 
+    torch.testing.assert_close(env.sim.data.qpos[0], env.qpos_init)
     torch.testing.assert_close(
-        env.sim.data.qpos[0, :3],
-        torch.tensor(wait_env.FULL_A_DEFAULT_ROOT_POS),
+        env.sim.data.qpos[0, env.q_adr_act], env.q_ready
     )
-    torch.testing.assert_close(
-        env.sim.data.qpos[0, 3:7],
-        torch.tensor(wait_env.FULL_A_DEFAULT_ROOT_QUAT_WXYZ),
-    )
-    torch.testing.assert_close(
-        env.sim.data.qpos[0, env.q_adr_act], env.action_offset
-    )
-    assert not torch.equal(env.sim.data.qpos[0, env.q_adr_act], env.q_ready)
     assert not env.actions[0].any() and not env.last_actions[0].any()
     torch.testing.assert_close(
-        env._qdes_previous_executable[0], env.action_offset
+        env._qdes_previous_executable[0], env._full_a_policy_bootstrap_qdes
     )
     assert env._qdes_previous_executable_valid[0]
     assert not env._qdes_guard_terminal[0]
