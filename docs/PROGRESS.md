@@ -70,9 +70,15 @@
   但唯一reset Event写asset default而非dynamic-ready；这是生产physical-birth实现错误，不是Pod安装损坏或
   学习步数不足。
 - 首版候选曾在wrapper前再调一次reset；exact Kit正确拒绝无terminal事实的第二次reset，失败root保留且不复用。
-  该重复owner已删除，最终候选只改唯一reset Event：它从Motion validated dynamic-ready binding读取physical
-  root/q/dq并作为唯一sim writer写入。teacher frame0和decoder default仍独立，不增加task-success Gate；修后
-  exact Pod同带尚待完成，不能提前启动V9长跑。
+  该重复owner已删除，最终候选`179148e3`只改唯一reset Event。修后exact Pod双端同commit记录已经自然完成：
+  初始31-D joint q/dq逐位相同，root position最大差`4.1e-7 m`，拍心position最大差`0.467 mm`，48 tick的
+  done/time-out也逐格相同；修前physical-birth分叉因此闭合。teacher frame0和decoder default仍独立，
+  没有增加task-success Gate。
+- 修后记录同时暴露首版tape自身的诊断偏差：它围绕raw action `0`加`±.02`，而Take061 dynamic-ready actor
+  mean最大绝对值为`16.3001`、31维平均绝对值约`1.6631`；第一步实际是在把physical-ready猛拉向asset default，
+  `512/512`环境每8 tick统一终止/重置。它可裁决birth，却不能代表fresh policy或teacher mimic动力学。
+  当前tape已升为围绕同一tracked Take061 actor mean的`±.02`扰动，并要求两个backend的live actor mean与该
+  center逐位一致；修后centered同带尚待exact Pod闭合，长跑仍保持HOLD。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 

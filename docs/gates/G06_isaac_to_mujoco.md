@@ -2134,6 +2134,18 @@ do not close the causal Isaac-to-MuJoCo gap. Full forensic scope and limitations
 [`EXP-MUJOCO-PELVIS-FRAME-PARITY`](../experiments/2026-07/EXP-MUJOCO-PELVIS-FRAME-PARITY.md);
 G06 remains `Partial`.
 
+### 2026-08-28 FullMDP physical-birth first-divergence correction
+
+clean `981327de` fixed tape先证明两端在首个action前已经不同：Isaac写asset default而MuJoCo写Take061
+dynamic-ready，initial joint/root/racket-position最大差为`1.5199 rad/.1778 m/.5376 m`。该Isaac reset Event
+实现已在`179148e3`修复；修后双端同commit initial q/dq exact，root position最大差`4.1e-7 m`、拍心position
+最大差`.467 mm`，48 tick done/time-out无mismatch。这关闭的是出生实现错误，不是physics parity。
+
+首版tape又被证明围绕错误的raw-zero问问题：Take061 live fresh actor mean最大绝对值`16.3001`，所以v1实际把
+两端拉向asset-default q_des，并每8 tick全量终止/reset。当前tape改为同一tracked live actor mean中心的
+`±.02`扰动；centered exact Pod compare尚未完成。不得用birth修复、同步Done或v1 post-step数值宣布
+cross-engine parity、训练成功、transfer或部署；G06保持`Partial`。
+
 ### 2026-07-14 evaluator parity red-team closure (source gate only)
 
 Independent review found that the first implicit-effort guard could miss saturation-equivalence

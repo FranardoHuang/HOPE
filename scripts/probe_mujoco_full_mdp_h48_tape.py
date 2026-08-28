@@ -329,6 +329,12 @@ def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) ->
         full_a_mode=True,
     )
     runner._verify_full_a_runtime_postimport(runtime)
+    live_center = getattr(env, "_full_a_policy_bootstrap_action", None)
+    if live_center is None:
+        raise ProbeError("MuJoCo fixed-action live actor mean is unavailable")
+    cross_engine_tape.require_live_action_center(
+        live_center.detach().cpu().numpy(), config
+    )
     origins = env.env.scene.env_origins
 
     def snapshot():
@@ -407,13 +413,14 @@ def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) ->
         arrays=arrays,
         joint_names=list(env._action_joint_names),
         runtime_identity={
-            "kind": "mujoco_full_mdp_fixed_action_runtime_v1",
+            "kind": "mujoco_full_mdp_fixed_action_runtime_v2",
             "runtime_stack": runtime,
             "plant_xml": str(plant_xml),
             "plant_xml_sha256": hashlib.sha256(
                 _stable_bytes(plant_xml, "MuJoCo plant XML")
             ).hexdigest(),
             "action_tape_sha256": tape_sha,
+            "action_center_kind": config["action_tape"]["center"]["kind"],
         },
     )
     return {**summary, "record_root": str(record_root)}

@@ -1109,4 +1109,12 @@ dynamic-ready physical birth。此前catalog、teacher bridge和actor-head修复
 现有wrapper已经是genesis reset owner。失败root保留、不复用，该重复调用已删除。最终修复不添加下游Gate：
 reset Event仍是唯一sim writer，但只读取Motion已验证的`dynamic_ready.physical_ready`窄projection并写root/q/dq。
 teacher frame0继续只是mimic authority，`default_joint_pos`继续只是affine action decoder offset，二者都不得
-冒充physical birth。修后必须用新的clean commit重跑Pod双端同带；初态未闭合前V9长跑保持HOLD。
+冒充physical birth。修后clean `179148e3`的Isaac/Mu记录已自然完成：initial 31-D q/dq逐位相同，root
+position最大差`4.1e-7 m`、拍心position最大差`0.467 mm`，done/time-out `0` mismatch；所以初态实现错误已闭合。
+
+但这次反例也审出了诊断本身的错问法：v1 tape围绕raw action `0`取`±.02`，而生产fresh actor mean是
+Take061 dynamic-ready normalized action，最大绝对值`16.3001`、平均绝对值`1.6631`。因此v1第一步把两端都从
+physical-ready拉向asset-default q_des，`512/512`行在tick`7/15/23/31/39/47`同步终止并reset；它能证明birth
+修复，不能代表fresh policy/teacher mimic的backend动力学。v2不加readiness Gate，只把同一个tracked
+Take061 actor mean作为tape center、叠加`±.02`确定性扰动，并要求两个backend的live bootstrap action与center
+逐位一致。centered双端exact记录闭合前V9长跑继续HOLD。

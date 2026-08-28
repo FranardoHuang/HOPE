@@ -50,6 +50,18 @@ Isaac约82 tick全base tilt且无launch，Mu约140 tick、table/tilt混合且有
 31-D action tape逐tick对齐后，才能判断Jiayi本机、Pod、Isaac与Mu哪个callpoint先偏。所有证据继续
 `diagnostic_unauthorized=true`。
 
+该对齐已先找到并修复一个确定实现错误，而不是把它升级成“Pod整体坏”：clean `981327de`中Isaac出生写
+asset default、Mu写Take061 dynamic-ready，首action前joint/root/racket-position最大差达
+`1.5199 rad/.1778 m/.5376 m`。RSL wrapper本来就是唯一genesis reset owner；正确修复是让唯一Isaac reset
+Event消费Motion physical-ready窄projection，不是再加第二次reset或新Gate。clean `179148e3`修后initial
+q/dq逐位相同，root/racket-position最大差降为`4.1e-7 m/.467 mm`，done/time-out逐格一致。
+
+同时v1 fixed tape被审出问错对象：它围绕raw action `0`，而fresh actor真正以Take061 normalized hold action
+为mean（最大绝对值`16.3001`）。所以v1 post-step是在测试“physical-ready后猛拉回asset default”，并造成
+每8 tick全量终止/reset；它只授权birth结论。当前v2 tape改为同一tracked live actor mean中心的`±.02`
+扰动，并要求两个backend的live mean逐位匹配；centered compare未闭合前不发V9长期namespace，也不把
+同步Done写成physics parity。
+
 结构裁决不新增安全Gate：把catalog变成一个typed原子安装对象、把bootstrap归给唯一owner、把backend留作
 薄adapter；保留plant/full-key/optimizer/durable事实边界。warm-start、replay、双LR、sigma、Build4数值、
 新observation与DR均延后，直到当前同源课程产生可归因的未来窗。

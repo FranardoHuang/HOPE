@@ -6818,6 +6818,8 @@ Isaac仍是asset default pose，Mu是Take061 dynamic-ready physical birth；初�
 max absolute差分别为`1.5199 rad/.1778 m/.5376 m`，且tick7开始terminal分叉。exact Kit确认RSL wrapper已
 消费canonical genesis reset；根因是唯一reset Event仍写asset default，而不是Motion validated
 physical-ready projection。首版多加一次`train.py` reset被第二次reset协议正确拒绝，已删除；最终候选只改
-唯一Event writer。teacher frame0与decoder default不变，也没有新增成功/安全Gate。exact Pod修后同带、有限
-学习与长期fresh均尚未完成，所以这只是一项根因修复候选，G05继续`Partial`且
-`diagnostic_unauthorized=true`。
+唯一Event writer。teacher frame0与decoder default不变，也没有新增成功/安全Gate。修后clean
+`179148e3`双端初始q/dq逐位相同，root/racket position最大差降为`4.1e-7 m/.467 mm`，48 tick done/time-out
+也逐格一致，故physical-birth实现错误已闭合。但v1 raw-zero tape实际命令asset-default而非fresh
+dynamic-ready actor mean，导致每8 tick全量terminal/reset；当前已改成围绕live Take061 mean的确定性tape，
+其exact Pod记录、有限学习与长期fresh尚未完成。G05继续`Partial`且`diagnostic_unauthorized=true`。

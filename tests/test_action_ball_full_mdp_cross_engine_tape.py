@@ -34,8 +34,17 @@ def test_tracked_cross_engine_tape_is_recomputable():
     payload, tape_sha = M.generate_action_bytes(config)
     assert digest == M.CONFIG_SHA256
     assert len(payload) == 512 * 48 * 31 * 4
-    assert tape_sha == "dff37981204156b442815d274aa59201c485749fa0364218a6d7afd13418961d"
-    assert payload[:20].hex() == "e19591bc14c3d23b5d529e3cacae253c6edb4d3c"
+    assert tape_sha == "beb542097a709565b8b2ab73a4a326c3812232bb8d3b4538db2f8250f3ee46df"
+    assert payload[:20].hex() == "2270683e069a0f3c5d529e3cd3c581bef3502d3f"
+    tape, _config, _config_sha, _tape_sha = M.action_tape_numpy()
+    center = np.asarray(
+        config["action_tape"]["center"]["normalized_actor_action"],
+        dtype=np.float32,
+    )
+    assert np.max(np.abs(tape[0] - center)) <= 0.02
+    np.testing.assert_array_equal(M.require_live_action_center(center, config), center)
+    with pytest.raises(M.CrossEngineTapeError, match="actor mean"):
+        M.require_live_action_center(center + 1.0e-3, config)
 
 
 def test_comparison_separates_initial_from_post_step_difference(tmp_path):
@@ -80,8 +89,10 @@ def test_probe_wiring_precedes_the_policy_runner():
     assert train.index(hook) < train.index("runner_type = (")
     assert "_run_action_ball_full_mdp_isaac_fixed_action_probe" in train
     assert "FULLMDP_ISAAC_FIXED_ACTION_PROBE_STARTED" in train
+    assert "module.require_live_action_center(" in train
     mujoco = (
         ROOT / "scripts/probe_mujoco_full_mdp_h48_tape.py"
     ).read_text(encoding="utf-8")
     assert "cross-engine-probe" in mujoco
     assert "runner._verify_full_a_runtime_postimport(runtime)" in mujoco
+    assert "cross_engine_tape.require_live_action_center(" in mujoco

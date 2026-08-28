@@ -16290,7 +16290,19 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
         raise RuntimeError("Isaac fixed-action probe runtime shape differs")
     robot = runtime_env.scene["robot"]
     racket = runtime_env.command_manager.get_term("racket_target")
+    motion = runtime_env.command_manager.get_term("motion")
     origins = runtime_env.scene.env_origins
+    live_center = getattr(
+        motion, "_action_ball_dynamic_ready_normalized_actor_action", None
+    )
+    if (
+        not torch.is_tensor(live_center)
+        or tuple(live_center.shape) != (1, config["action_width"])
+    ):
+        raise RuntimeError("Isaac fixed-action live actor mean surface differs")
+    module.require_live_action_center(
+        live_center[0].detach().cpu().numpy(), config
+    )
 
     def snapshot():
         data = robot.data
@@ -16358,9 +16370,10 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
         arrays=arrays,
         joint_names=list(robot.data.joint_names),
         runtime_identity={
-            "kind": "isaac_full_mdp_fixed_action_runtime_v1",
+            "kind": "isaac_full_mdp_fixed_action_runtime_v2",
             "device": str(env.device),
             "action_tape_sha256": tape_sha,
+            "action_center_kind": config["action_tape"]["center"]["kind"],
         },
     )
     return summary

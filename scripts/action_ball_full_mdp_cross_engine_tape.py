@@ -22,8 +22,8 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs/fixtures/action_ball_full_mdp_cross_engine_tape_v1.json"
-CONFIG_SHA256 = "e8bee5eeb558f628ed1f31c5561eadb7d43a68dbb8a40315ec325a1aa3665718"
+CONFIG = ROOT / "configs/fixtures/action_ball_full_mdp_cross_engine_tape_v2.json"
+CONFIG_SHA256 = "415cb41a3388c8ec74024e0d8bae330334660e5d9d47f61bc90f12b40173155e"
 ARRAYS_NAME = "portable_state.npz"
 SUMMARY_NAME = "summary.json"
 MASK64 = (1 << 64) - 1
@@ -92,14 +92,14 @@ def load_config() -> tuple[dict, str]:
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise CrossEngineTapeError("cross-engine tape config is not JSON") from exc
     if (
-        config.get("schema_version") != 1
-        or config.get("probe_id") != "action_ball_full_mdp_cross_engine_tape_v1"
+        config.get("schema_version") != 2
+        or config.get("probe_id") != "action_ball_full_mdp_cross_engine_tape_v2"
         or config.get("num_envs") != 512
         or config.get("num_ticks") != 48
         or config.get("action_width") != 31
         or config.get("environment_seed") != 0
         or config.get("action_tape", {}).get("generator")
-        != "splitmix64_u24_uniform_v1"
+        != "splitmix64_u24_uniform_about_take061_ready_v1"
         or config.get("scientific_scope")
         != {
             "diagnostic_unauthorized": True,
@@ -120,15 +120,39 @@ def load_config() -> tuple[dict, str]:
     }:
         raise CrossEngineTapeError("cross-engine initial-state contract differs")
     tape = config["action_tape"]
+    center = tape.get("center")
+    center_values = (
+        center.get("normalized_actor_action") if isinstance(center, dict) else None
+    )
     if (
         type(tape.get("seed")) is not int
         or not 0 <= tape["seed"] <= MASK64
         or any(
             type(tape.get(name)) not in (int, float)
             or not math.isfinite(float(tape[name]))
-            for name in ("low", "high")
+            for name in ("delta_low", "delta_high")
         )
-        or not -1.0 <= float(tape["low"]) < float(tape["high"]) <= 1.0
+        or not -1.0
+        <= float(tape["delta_low"])
+        < float(tape["delta_high"])
+        <= 1.0
+        or not isinstance(center, dict)
+        or set(center) != {
+            "kind",
+            "dynamic_ready_artifact_sha256",
+            "normalized_actor_action",
+        }
+        or center.get("kind")
+        != "take061_dynamic_ready_normalized_actor_action_v1"
+        or center.get("dynamic_ready_artifact_sha256")
+        != "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
+        or not isinstance(center_values, list)
+        or len(center_values) != config["action_width"]
+        or any(
+            type(value) not in (int, float) or not math.isfinite(float(value))
+            for value in center_values
+        )
+        or not any(float(value) != 0.0 for value in center_values)
     ):
         raise CrossEngineTapeError("cross-engine action tape parameters differ")
     return config, digest
@@ -137,18 +161,24 @@ def load_config() -> tuple[dict, str]:
 def generate_action_bytes(config: dict) -> tuple[bytes, str]:
     tape = config["action_tape"]
     state = tape["seed"]
-    low = float(tape["low"])
-    span = float(tape["high"]) - low
+    low = float(tape["delta_low"])
+    span = float(tape["delta_high"]) - low
+    center = tuple(float(value) for value in tape["center"]["normalized_actor_action"])
     count = config["num_ticks"] * config["num_envs"] * config["action_width"]
     payload = bytearray()
-    for _ in range(count):
+    for flat_index in range(count):
         state = (state + 0x9E3779B97F4A7C15) & MASK64
         value = state
         value = ((value ^ (value >> 30)) * 0xBF58476D1CE4E5B9) & MASK64
         value = ((value ^ (value >> 27)) * 0x94D049BB133111EB) & MASK64
         value ^= value >> 31
         unit = (value >> 40) / float(1 << 24)
-        payload.extend(struct.pack("<f", low + span * unit))
+        payload.extend(
+            struct.pack(
+                "<f",
+                center[flat_index % config["action_width"]] + low + span * unit,
+            )
+        )
     header = json.dumps(
         {
             "dtype": "<f4",
@@ -173,6 +203,23 @@ def action_tape_numpy():
         config["num_ticks"], config["num_envs"], config["action_width"]
     )
     return array.copy(), config, config_sha, tape_sha
+
+
+def require_live_action_center(live_action, config: dict):
+    """Require the backend's actual fresh actor mean to equal the tape center."""
+
+    import numpy as np
+
+    expected = np.asarray(
+        config["action_tape"]["center"]["normalized_actor_action"],
+        dtype="<f4",
+    )
+    actual = np.asarray(live_action, dtype="<f4")
+    if actual.shape != expected.shape or not np.array_equal(actual, expected):
+        raise CrossEngineTapeError(
+            "backend live dynamic-ready actor mean differs from tape center"
+        )
+    return expected.copy()
 
 
 def source_identity() -> dict:
@@ -312,8 +359,8 @@ def write_probe_record(
         os.close(descriptor)
     payload = _stable_bytes(root / ARRAYS_NAME, "portable probe arrays")
     summary = {
-        "schema_version": 1,
-        "record_type": "action_ball_full_mdp_cross_engine_tape_probe_v1",
+        "schema_version": 2,
+        "record_type": "action_ball_full_mdp_cross_engine_tape_probe_v2",
         "diagnostic_unauthorized": True,
         "training_authorized": False,
         "checkpoint_authority": False,
@@ -348,9 +395,9 @@ def _load_record(root: Path):
     config, config_sha = load_config()
     _payload, tape_sha = generate_action_bytes(config)
     if (
-        summary.get("schema_version") != 1
+        summary.get("schema_version") != 2
         or summary.get("record_type")
-        != "action_ball_full_mdp_cross_engine_tape_probe_v1"
+        != "action_ball_full_mdp_cross_engine_tape_probe_v2"
         or summary.get("backend") not in ("isaac", "mujoco")
         or summary.get("config_sha256") != config_sha
         or summary.get("action_tape_sha256") != tape_sha
@@ -415,8 +462,8 @@ def compare_records(isaac_root: Path, mujoco_root: Path, output: Path) -> dict:
         tick, name, index = sorted(exact_first, key=lambda row: (row[0], row[1]))[0]
         first = {"phase": "initial" if tick < 0 else "post_step", "tick": tick, "field": name, "index": index}
     record = {
-        "schema_version": 1,
-        "record_type": "action_ball_full_mdp_cross_engine_tape_comparison_v1",
+        "schema_version": 2,
+        "record_type": "action_ball_full_mdp_cross_engine_tape_comparison_v2",
         "diagnostic_unauthorized": True,
         "promotion_authority": False,
         "physics_parity_authority": False,

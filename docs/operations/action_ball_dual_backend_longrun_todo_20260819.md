@@ -226,8 +226,11 @@ slice和Mu native pose adapter两处实现错误；最终
       首差却在`initial_joint_pos[0,12]`；Isaac写asset default，Mu写dynamic-ready，初始joint/root/racket位置
       max absolute差=`1.5199 rad/.1778 m/.5376 m`，tick7起terminal也分叉。exact Kit确认RSL wrapper已消费
       canonical genesis reset，唯一根因是reset Event仍写asset default。当前Event已改为消费Motion窄
-      physical-ready projection；曾尝试的第二个`train.py` reset被runtime正确拒绝并已删除。只有修后exact Pod
-      双端record和compare闭合，才勾选本项或启动V9长跑。
+      physical-ready projection；曾尝试的第二个`train.py` reset被runtime正确拒绝并已删除。修后
+      `179148e3`双端同commit record已闭合birth：initial q/dq exact、root max=`4.1e-7 m`、racket position
+      max=`0.467 mm`，done/time-out逐格相同。但首版raw-zero tape距live Take061 actor mean最大`16.32`，
+      实际测的是default-qdes阶跃且每8 tick全量reset，不能裁决fresh policy动力学。tape已改为同一tracked
+      Take061 live actor mean中心的`±.02`扰动；只有centered修后双端record/compare闭合才勾选或发V9长跑。
 
 replacement已完成exact Pod target tests、双rate与fresh启动；fixed-tape的`cq_n_iters=12`结论沿用同一
 未变physics合同。hard-edge、paddle误差单调性、active-strata wall和短学习未来窗仍未闭合，现役namespace
