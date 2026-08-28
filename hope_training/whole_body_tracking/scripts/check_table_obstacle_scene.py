@@ -6089,7 +6089,11 @@ def nominal_hold_probe(
         runtime_execution_facts,
     )
 
-    live_plant = runtime_execution_facts(unwrapped, None)
+    live_plant = runtime_execution_facts(
+        unwrapped,
+        None,
+        allow_configclass_observation_cfg=True,
+    )
     mismatch = []
     for key, expected in inputs.expected_plant.items():
         actual = live_plant.get(key)

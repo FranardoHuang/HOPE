@@ -418,9 +418,20 @@ def test_runtime_contract_carries_exact_full_mdp_critic_layout():
 
 def test_runtime_contract_rejects_pre_8320_observation_cfg_shape():
     env = _env()
-    env.observation_manager.cfg = SimpleNamespace(policy=_PolicyCfg())
+    configclass_cfg = SimpleNamespace(policy=_PolicyCfg())
+    env.observation_manager.cfg = configclass_cfg
     with pytest.raises(RuntimeError, match="exact dict with a policy group"):
         TC.runtime_execution_facts(env, _ActorContract())
+
+    # The nominal-hold diagnostic may consume the exact cfg object owned by
+    # the instantiated environment, but not an arbitrary lookalike wrapper.
+    env.cfg.observations = configclass_cfg
+    facts = TC.runtime_execution_facts(
+        env,
+        _ActorContract(),
+        allow_configclass_observation_cfg=True,
+    )
+    assert facts["observation_history_lengths"] == [1, 2]
 
 
 def test_runtime_projection_fact_is_true_only_and_runtime_verified():

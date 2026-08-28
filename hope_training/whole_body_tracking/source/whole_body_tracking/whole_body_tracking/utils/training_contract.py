@@ -2504,13 +2504,28 @@ def _policy_layout(env) -> tuple[list[str], list[int], int]:
     return _observation_group_layout(env, "policy")
 
 
-def _observation_history_lengths(env, names: list[str]) -> list[int]:
+def _observation_history_lengths(
+    env,
+    names: list[str],
+    *,
+    allow_configclass_cfg: bool = False,
+) -> list[int]:
     manager_cfg = env.observation_manager.cfg
-    if type(manager_cfg) is not dict or "policy" not in manager_cfg:
+    if type(manager_cfg) is dict and "policy" in manager_cfg:
+        group_cfg = manager_cfg["policy"]
+    elif (
+        allow_configclass_cfg
+        and manager_cfg is getattr(env.cfg, "observations", None)
+        and getattr(manager_cfg, "policy", None) is not None
+    ):
+        # The legacy nominal-hold scene still uses IsaacLab's configclass form.
+        # Require object identity with the instantiated env cfg so a lookalike
+        # wrapper cannot mint runtime facts.
+        group_cfg = manager_cfg.policy
+    else:
         raise RuntimeError(
             "IsaacLab 8320 observation-manager cfg must be an exact dict with a policy group"
         )
-    group_cfg = manager_cfg["policy"]
     if group_cfg.history_length is not None:
         return [int(group_cfg.history_length)] * len(names)
     cfg_by_name = group_cfg.to_dict()
@@ -2523,7 +2538,11 @@ def _observation_history_lengths(env, names: list[str]) -> list[int]:
 
 
 def runtime_execution_facts(
-    env, actor_contract, *, allow_legacy_actor_leg_ref_mask_ambiguity: bool = False
+    env,
+    actor_contract,
+    *,
+    allow_legacy_actor_leg_ref_mask_ambiguity: bool = False,
+    allow_configclass_observation_cfg: bool = False,
 ) -> dict:
     """Extract schema-3 execution facts from the instantiated, startup-initialized environment."""
     robot = env.scene["robot"]
@@ -2621,7 +2640,11 @@ def runtime_execution_facts(
         )
 
     obs_names, obs_dims, obs_total = _policy_layout(env)
-    history = _observation_history_lengths(env, obs_names)
+    history = _observation_history_lengths(
+        env,
+        obs_names,
+        allow_configclass_cfg=allow_configclass_observation_cfg,
+    )
     if actor_contract is not None:
         expected_layout = [(term.name, int(term.dim)) for term in actor_contract.terms]
         if list(zip(obs_names, obs_dims)) != expected_layout or obs_total != int(
