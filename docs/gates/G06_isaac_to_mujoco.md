@@ -2143,8 +2143,11 @@ dynamic-ready，initial joint/root/racket-position最大差为`1.5199 rad/.1778 
 
 首版tape又被证明围绕错误的raw-zero问问题：Take061 live fresh actor mean最大绝对值`16.3001`，所以v1实际把
 两端拉向asset-default q_des，并每8 tick全量终止/reset。当前tape改为同一tracked live actor mean中心的
-`±.02`扰动；centered exact Pod compare尚未完成。不得用birth修复、同步Done或v1 post-step数值宣布
-cross-engine parity、训练成功、transfer或部署；G06保持`Partial`。
+`±.02`扰动。clean `3343fe90` centered exact compare中两端48 tick均无Done，但Isaac相对初态joint/root/
+racket最大漂移`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`；跨端joint max差从tick0
+`.0059 rad`增至tick47 `.3480 rad`。下一record只加入实际executable `joint_qdes`来先裁决decoder，q_des
+相同才继续比较PD effort/gain/substep/plant。不得用birth修复、同步Done或该分叉包络宣布cross-engine parity、
+训练成功、transfer或部署；G06保持`Partial`。
 
 ### 2026-07-14 evaluator parity red-team closure (source gate only)
 

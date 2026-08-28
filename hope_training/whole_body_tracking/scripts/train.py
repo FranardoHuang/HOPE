@@ -16289,6 +16289,7 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
     ):
         raise RuntimeError("Isaac fixed-action probe runtime shape differs")
     robot = runtime_env.scene["robot"]
+    action_term = runtime_env.action_manager.get_term("joint_pos")
     racket = runtime_env.command_manager.get_term("racket_target")
     motion = runtime_env.command_manager.get_term("motion")
     origins = runtime_env.scene.env_origins
@@ -16303,6 +16304,9 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
     module.require_live_action_center(
         live_center[0].detach().cpu().numpy(), config
     )
+    action_joint_names = getattr(action_term, "_joint_names", None)
+    if list(action_joint_names or ()) != list(robot.data.joint_names):
+        raise RuntimeError("Isaac fixed-action q_des joint order differs")
 
     def snapshot():
         data = robot.data
@@ -16341,7 +16345,7 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
         }
 
     initial = snapshot()
-    rows = {name: [] for name in module.TICK_FLOAT_FIELDS}
+    rows = {name: [] for name in module.TICK_RECORDED_FLOAT_FIELDS}
     done_rows, timeout_rows = [], []
     tape = torch.from_numpy(tape_np).to(device=env.device)
     for tick in range(config["num_ticks"]):
@@ -16349,6 +16353,15 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
         state = snapshot()
         for name, value in state.items():
             rows[name].append(value)
+        qdes = getattr(action_term, "processed_actions", None)
+        if (
+            not torch.is_tensor(qdes)
+            or tuple(qdes.shape)
+            != (config["num_envs"], config["action_width"])
+            or not bool(torch.isfinite(qdes).all())
+        ):
+            raise RuntimeError("Isaac fixed-action joint q_des surface differs")
+        rows["joint_qdes"].append(qdes.detach().cpu().numpy().copy())
         time_out = extras.get("time_outs")
         if (
             not torch.is_tensor(done)
@@ -16370,7 +16383,7 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
         arrays=arrays,
         joint_names=list(robot.data.joint_names),
         runtime_identity={
-            "kind": "isaac_full_mdp_fixed_action_runtime_v2",
+            "kind": "isaac_full_mdp_fixed_action_runtime_v3",
             "device": str(env.device),
             "action_tape_sha256": tape_sha,
             "action_center_kind": config["action_tape"]["center"]["kind"],

@@ -1117,4 +1117,8 @@ Take061 dynamic-ready normalized action，最大绝对值`16.3001`、平均绝�
 physical-ready拉向asset-default q_des，`512/512`行在tick`7/15/23/31/39/47`同步终止并reset；它能证明birth
 修复，不能代表fresh policy/teacher mimic的backend动力学。v2不加readiness Gate，只把同一个tracked
 Take061 actor mean作为tape center、叠加`±.02`确定性扰动，并要求两个backend的live bootstrap action与center
-逐位一致。centered双端exact记录闭合前V9长跑继续HOLD。
+逐位一致。clean `3343fe90` centered record中两端48 tick均无terminal，initial q/dq仍exact；但Isaac相对
+初态的joint/root/racket最大漂移为`.349 rad/.092 m/.170 m`，Mu只有`.012 rad/.008 m/.010 m`，跨端joint
+最大差从tick0 `.0059 rad`扩大到tick47 `.3480 rad`。这不是课程阶段结论，而是decoder/plant二选一的真实
+首差范围。下一record只增加实际executed `joint_qdes`：若不同先修动作解码/桥接；若相同再查PD effort、gain、
+substep与plant。调用点证据闭合前V9长跑继续HOLD。

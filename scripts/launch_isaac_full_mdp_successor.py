@@ -800,9 +800,9 @@ def _verify_fixed_action_probe(
     except (OSError, json.JSONDecodeError) as exc:
         raise LaunchError("fixed-action summary is not JSON") from exc
     if (
-        summary.get("schema_version") != 2
+        summary.get("schema_version") != 3
         or summary.get("record_type")
-        != "action_ball_full_mdp_cross_engine_tape_probe_v2"
+        != "action_ball_full_mdp_cross_engine_tape_probe_v3"
         or summary.get("backend") != "isaac"
         or summary.get("diagnostic_unauthorized") is not True
         or summary.get("training_authorized") is not False

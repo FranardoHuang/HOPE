@@ -24,6 +24,7 @@ def _arrays(*, initial_delta=0.0, tick_delta=0.0):
         result[name] = np.zeros(shape, dtype=dtype)
     result["initial_root_pos"][0, 0] = initial_delta
     result["root_pos"][3, 0, 0] = tick_delta
+    result["joint_qdes"][:] = tape
     result["initial_root_quat"][:, 0] = 1.0
     result["root_quat"][:, :, 0] = 1.0
     return result
@@ -75,6 +76,7 @@ def test_comparison_separates_initial_from_post_step_difference(tmp_path):
     }
     assert result["numeric_difference_envelope"]["initial_root_pos"]["max_abs"] == 0.25
     assert result["numeric_difference_envelope"]["root_pos"]["max_abs"] == 0.5
+    assert result["numeric_difference_envelope"]["joint_qdes"]["max_abs"] == 0.0
     assert result["physics_parity_authority"] is False
     with pytest.raises(FileExistsError):
         M.compare_records(isaac, mujoco, output)
@@ -90,9 +92,13 @@ def test_probe_wiring_precedes_the_policy_runner():
     assert "_run_action_ball_full_mdp_isaac_fixed_action_probe" in train
     assert "FULLMDP_ISAAC_FIXED_ACTION_PROBE_STARTED" in train
     assert "module.require_live_action_center(" in train
+    assert 'action_term = runtime_env.action_manager.get_term("joint_pos")' in train
+    assert 'rows["joint_qdes"].append' in train
     mujoco = (
         ROOT / "scripts/probe_mujoco_full_mdp_h48_tape.py"
     ).read_text(encoding="utf-8")
     assert "cross-engine-probe" in mujoco
     assert "runner._verify_full_a_runtime_postimport(runtime)" in mujoco
     assert "cross_engine_tape.require_live_action_center(" in mujoco
+    assert 'qdes = getattr(env, "_qdes_reward_processed", None)' in mujoco
+    assert 'rows["joint_qdes"].append' in mujoco

@@ -59,8 +59,12 @@ q/dq逐位相同，root/racket-position最大差降为`4.1e-7 m/.467 mm`，done/
 同时v1 fixed tape被审出问错对象：它围绕raw action `0`，而fresh actor真正以Take061 normalized hold action
 为mean（最大绝对值`16.3001`）。所以v1 post-step是在测试“physical-ready后猛拉回asset default”，并造成
 每8 tick全量终止/reset；它只授权birth结论。当前v2 tape改为同一tracked live actor mean中心的`±.02`
-扰动，并要求两个backend的live mean逐位匹配；centered compare未闭合前不发V9长期namespace，也不把
-同步Done写成physics parity。
+扰动，并要求两个backend的live mean逐位匹配。clean `3343fe90` centered compare中两端48 tick均无Done，
+但Isaac相对初态的joint/root/racket最大漂移为`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`；
+跨端joint max差从tick0 `.0059 rad`增至tick47 `.3480 rad`。所以分叉真实存在，却还不能归因给Pod安装或
+engine：当前记录升版只加入实际送入关节控制器的31-D executable `joint_qdes`。若q_des已分叉，修decoder/
+bridge；若逐位相同，再比较applied effort、gain与substep/plant。该调用点闭合前不发V9长期namespace，也
+不把同步Done写成physics parity。
 
 结构裁决不新增安全Gate：把catalog变成一个typed原子安装对象、把bootstrap归给唯一owner、把backend留作
 薄adapter；保留plant/full-key/optimizer/durable事实边界。warm-start、replay、双LR、sigma、Build4数值、

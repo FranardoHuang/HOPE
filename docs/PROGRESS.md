@@ -77,8 +77,11 @@
 - 修后记录同时暴露首版tape自身的诊断偏差：它围绕raw action `0`加`±.02`，而Take061 dynamic-ready actor
   mean最大绝对值为`16.3001`、31维平均绝对值约`1.6631`；第一步实际是在把physical-ready猛拉向asset default，
   `512/512`环境每8 tick统一终止/重置。它可裁决birth，却不能代表fresh policy或teacher mimic动力学。
-  当前tape已升为围绕同一tracked Take061 actor mean的`±.02`扰动，并要求两个backend的live actor mean与该
-  center逐位一致；修后centered同带尚待exact Pod闭合，长跑仍保持HOLD。
+  centered record已在clean `3343fe90`完成：两端初态与terminal继续对齐且48 tick均无Done，但Isaac相对
+  初态的joint/root/racket最大漂移为`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`；两端
+  joint差从tick0的`.0059 rad`增长到tick47的`.3480 rad`。这证明真实fresh邻域存在动力学分叉，但尚不能
+  区分action decoder与plant。诊断记录现只增加post-step 31-D executable `joint_qdes`，下一exact Pod同带先
+  裁决decoder；q_des同则再查PD effort/gain/substep，不同则修桥接。长跑继续HOLD，不新增physics/safety Gate。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 

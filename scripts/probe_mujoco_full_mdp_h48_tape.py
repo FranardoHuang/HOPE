@@ -382,7 +382,7 @@ def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) ->
         }
 
     initial_state = snapshot()
-    rows = {name: [] for name in cross_engine_tape.TICK_FLOAT_FIELDS}
+    rows = {name: [] for name in cross_engine_tape.TICK_RECORDED_FLOAT_FIELDS}
     done_rows, timeout_rows = [], []
     tape = torch.from_numpy(tape_np).to(env.device)
     for tick in range(config["num_ticks"]):
@@ -390,6 +390,15 @@ def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) ->
         state = snapshot()
         for name, value in state.items():
             rows[name].append(value)
+        qdes = getattr(env, "_qdes_reward_processed", None)
+        if (
+            not torch.is_tensor(qdes)
+            or tuple(qdes.shape)
+            != (config["num_envs"], config["action_width"])
+            or not bool(torch.isfinite(qdes).all())
+        ):
+            raise ProbeError("MuJoCo fixed-action joint q_des surface differs")
+        rows["joint_qdes"].append(qdes.detach().cpu().numpy().copy())
         timeout = extras.get("time_outs")
         if (
             tuple(done.shape) != (config["num_envs"],)
@@ -413,7 +422,7 @@ def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) ->
         arrays=arrays,
         joint_names=list(env._action_joint_names),
         runtime_identity={
-            "kind": "mujoco_full_mdp_fixed_action_runtime_v2",
+            "kind": "mujoco_full_mdp_fixed_action_runtime_v3",
             "runtime_stack": runtime,
             "plant_xml": str(plant_xml),
             "plant_xml_sha256": hashlib.sha256(

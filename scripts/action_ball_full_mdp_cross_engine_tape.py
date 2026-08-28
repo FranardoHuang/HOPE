@@ -50,6 +50,8 @@ TICK_FLOAT_FIELDS = (
     "racket_normal",
     "racket_long_axis",
 )
+TICK_CONTROL_FLOAT_FIELDS = ("joint_qdes",)
+TICK_RECORDED_FLOAT_FIELDS = (*TICK_FLOAT_FIELDS, *TICK_CONTROL_FLOAT_FIELDS)
 DISCRETE_FIELDS = ("done", "time_out")
 
 
@@ -301,6 +303,7 @@ def _required_shapes(config: dict) -> dict[str, tuple[int, ...]]:
     for name, width in widths.items():
         shapes[name] = (h, n, width)
         shapes["initial_" + name] = (n, width)
+    shapes["joint_qdes"] = (h, n, a)
     shapes.update({name: (h, n) for name in DISCRETE_FIELDS})
     return shapes
 
@@ -328,7 +331,7 @@ def write_probe_record(
         owned["actions"], tape
     ):
         raise CrossEngineTapeError("portable probe action tape differs")
-    for name in (*INITIAL_FLOAT_FIELDS, *TICK_FLOAT_FIELDS):
+    for name in (*INITIAL_FLOAT_FIELDS, *TICK_RECORDED_FLOAT_FIELDS):
         if not np.issubdtype(owned[name].dtype, np.floating) or not np.isfinite(
             owned[name]
         ).all():
@@ -359,8 +362,8 @@ def write_probe_record(
         os.close(descriptor)
     payload = _stable_bytes(root / ARRAYS_NAME, "portable probe arrays")
     summary = {
-        "schema_version": 2,
-        "record_type": "action_ball_full_mdp_cross_engine_tape_probe_v2",
+        "schema_version": 3,
+        "record_type": "action_ball_full_mdp_cross_engine_tape_probe_v3",
         "diagnostic_unauthorized": True,
         "training_authorized": False,
         "checkpoint_authority": False,
@@ -395,9 +398,9 @@ def _load_record(root: Path):
     config, config_sha = load_config()
     _payload, tape_sha = generate_action_bytes(config)
     if (
-        summary.get("schema_version") != 2
+        summary.get("schema_version") != 3
         or summary.get("record_type")
-        != "action_ball_full_mdp_cross_engine_tape_probe_v2"
+        != "action_ball_full_mdp_cross_engine_tape_probe_v3"
         or summary.get("backend") not in ("isaac", "mujoco")
         or summary.get("config_sha256") != config_sha
         or summary.get("action_tape_sha256") != tape_sha
@@ -434,7 +437,7 @@ def compare_records(isaac_root: Path, mujoco_root: Path, output: Path) -> dict:
         raise CrossEngineTapeError("comparison inputs do not share joint order/tape")
     numeric = {}
     exact_first = []
-    for name in (*INITIAL_FLOAT_FIELDS, *TICK_FLOAT_FIELDS):
+    for name in (*INITIAL_FLOAT_FIELDS, *TICK_RECORDED_FLOAT_FIELDS):
         a = left[name].astype(np.float64)
         b = right[name].astype(np.float64)
         delta = np.abs(a - b)
@@ -462,8 +465,8 @@ def compare_records(isaac_root: Path, mujoco_root: Path, output: Path) -> dict:
         tick, name, index = sorted(exact_first, key=lambda row: (row[0], row[1]))[0]
         first = {"phase": "initial" if tick < 0 else "post_step", "tick": tick, "field": name, "index": index}
     record = {
-        "schema_version": 2,
-        "record_type": "action_ball_full_mdp_cross_engine_tape_comparison_v2",
+        "schema_version": 3,
+        "record_type": "action_ball_full_mdp_cross_engine_tape_comparison_v3",
         "diagnostic_unauthorized": True,
         "promotion_authority": False,
         "physics_parity_authority": False,

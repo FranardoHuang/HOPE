@@ -6822,4 +6822,7 @@ physical-ready projection。首版多加一次`train.py` reset被第二次reset�
 `179148e3`双端初始q/dq逐位相同，root/racket position最大差降为`4.1e-7 m/.467 mm`，48 tick done/time-out
 也逐格一致，故physical-birth实现错误已闭合。但v1 raw-zero tape实际命令asset-default而非fresh
 dynamic-ready actor mean，导致每8 tick全量terminal/reset；当前已改成围绕live Take061 mean的确定性tape，
-其exact Pod记录、有限学习与长期fresh尚未完成。G05继续`Partial`且`diagnostic_unauthorized=true`。
+clean `3343fe90` centered record两端48 tick均无Done，却显示Isaac相对初态joint/root/racket最大漂移
+`.349 rad/.092 m/.170 m`，Mu仅`.012 rad/.008 m/.010 m`。下一版record只增加真实executable
+`joint_qdes`以区分decoder与PD/plant，不新增安全Gate；该callpoint、有限学习与长期fresh尚未完成。
+G05继续`Partial`且`diagnostic_unauthorized=true`。
