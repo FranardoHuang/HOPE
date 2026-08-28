@@ -90,6 +90,14 @@ _A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256 = (
     "365ba37edd5e5e1d4fac22f2cbb3ec871ead7bb49aeadb50161ef523a9ae6747"
 )
 _A3_COLLISION_PROXY_RUNTIME_USD_TOTAL_FILE_BYTES = 60519988
+_A3_DERIVED_RUNTIME_MODEL_USD_SHA256 = (
+    "a3cd382943ff9f70beecf88c729a6cc1c052a3c0a0cbffe91003ec319ab78140"
+)
+_A3_DERIVED_RUNTIME_MODEL_USD_BYTES = 2018444
+_A3_DERIVED_RUNTIME_RECEIPT_SHA256 = (
+    "7df70ea9d8f791a441f409b0cf62e6e2988b390dff4ba09a57fb6957fcfe937b"
+)
+_A3_DERIVED_RUNTIME_RECEIPT_BYTES = 3943
 _A3_COLLISION_PROXY_RUNTIME_USD_FILES = (
     (
         ".asset_hash",
@@ -454,6 +462,92 @@ def _verify_live_bundle_is_a_cache_of_this_plant(bundle_root: Path) -> str:
     return stored
 
 
+def _verified_derived_runtime_source_bundle(package_root: Path) -> Path:
+    """Verify the 0807 collider overlay and return its exact source bundle.
+
+    The articulation deliberately loads the derived top-level USD because that
+    layer installs the named racket colliders.  Plant mass, joints and link
+    frames still come from the enclosed six-file IsaacLab conversion.  Binding
+    only either layer was the bug: this verifies both as one package.
+    """
+
+    receipt_path = package_root / "DERIVATION_RECEIPT.json"
+    model_path = package_root / "model.usd"
+    try:
+        receipt_payload = receipt_path.read_bytes()
+        model_payload = model_path.read_bytes()
+        receipt = json.loads(receipt_payload)
+    except (OSError, ValueError, TypeError) as exc:
+        raise RuntimeError(
+            "robot_hit_table derived 0807 USD package has no valid receipt"
+        ) from exc
+    if (
+        len(receipt_payload) != _A3_DERIVED_RUNTIME_RECEIPT_BYTES
+        or hashlib.sha256(receipt_payload).hexdigest()
+        != _A3_DERIVED_RUNTIME_RECEIPT_SHA256
+        or len(model_payload) != _A3_DERIVED_RUNTIME_MODEL_USD_BYTES
+        or hashlib.sha256(model_payload).hexdigest()
+        != _A3_DERIVED_RUNTIME_MODEL_USD_SHA256
+        or receipt.get("schema") != "action_ball_a3p0807_split_rubber_usd_v2"
+        or receipt.get("diagnostic_unauthorized") is not True
+        or receipt.get("model_usd")
+        != {
+            "bytes": _A3_DERIVED_RUNTIME_MODEL_USD_BYTES,
+            "sha256": _A3_DERIVED_RUNTIME_MODEL_USD_SHA256,
+        }
+        or receipt.get("source_urdf", {}).get("sha256")
+        != _A3_COLLISION_PROXY_SOURCE_URDF_SHA256
+    ):
+        raise RuntimeError(
+            "robot_hit_table derived 0807 USD model or receipt differs from pin"
+        )
+    pinned_source = {
+        relative: {"sha256": sha256, "bytes": size}
+        for relative, sha256, size in _A3_COLLISION_PROXY_RUNTIME_USD_FILES
+    }
+    if receipt.get("source_bundle") != pinned_source:
+        raise RuntimeError(
+            "robot_hit_table derived 0807 USD receipt names a different source bundle"
+        )
+    declared: dict[str, dict[str, object]] = {
+        "model.usd": receipt["model_usd"],
+        "DERIVATION_RECEIPT.json": {
+            "sha256": _A3_DERIVED_RUNTIME_RECEIPT_SHA256,
+            "bytes": _A3_DERIVED_RUNTIME_RECEIPT_BYTES,
+        },
+        "source/urdf/model.urdf": receipt["source_urdf"],
+        **{
+            f"source_bundle/{relative}": row
+            for relative, row in pinned_source.items()
+        },
+        **{
+            f"source/meshes/{name}.stl": row
+            for name, row in receipt.get("source_meshes", {}).items()
+        },
+    }
+    observed = {
+        path.relative_to(package_root).as_posix()
+        for path in package_root.rglob("*")
+        if path.is_file()
+    }
+    if observed != set(declared):
+        raise RuntimeError(
+            "robot_hit_table derived 0807 USD package file set drifted"
+        )
+    for relative, row in declared.items():
+        path = package_root / relative
+        payload = path.read_bytes()
+        if (
+            path.is_symlink()
+            or len(payload) != int(row["bytes"])
+            or hashlib.sha256(payload).hexdigest() != row["sha256"]
+        ):
+            raise RuntimeError(
+                f"robot_hit_table derived 0807 USD package file drifted: {relative}"
+            )
+    return package_root / "source_bundle"
+
+
 @lru_cache(maxsize=8)
 def _verify_loaded_runtime_usd_bundle(
     model_usd_path: str,
@@ -514,9 +608,7 @@ def _verify_loaded_runtime_usd_bundle(
         if path.is_file():
             observed_paths.add(path.relative_to(bundle_root).as_posix())
     if observed_paths != expected_paths:
-        raise RuntimeError(
-            "robot_hit_table live USD bundle differs from the exact six-file pin"
-        )
+        bundle_root = _verified_derived_runtime_source_bundle(bundle_root)
     entries = []
     for relative, expected_sha256, expected_size in (
         _A3_COLLISION_PROXY_RUNTIME_USD_FILES

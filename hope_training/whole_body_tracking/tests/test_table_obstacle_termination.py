@@ -1232,6 +1232,110 @@ def test_live_runtime_usd_validator_binds_exact_tree_once(
     term_mod._verify_loaded_runtime_usd_bundle.cache_clear()
 
 
+def test_live_runtime_usd_validator_binds_derived_overlay_and_source(
+    term_mod, tmp_path, monkeypatch
+):
+    root = tmp_path / "derived"
+    source_payloads = {
+        ".asset_hash": b"asset",
+        "config.yaml": b"config",
+        "configuration/model_base.usd": b"base",
+        "configuration/model_physics.usd": b"physics",
+        "configuration/model_sensor.usd": b"sensor",
+        "model.usd": b"source-root",
+    }
+    expected = []
+    for relative, payload in source_payloads.items():
+        path = root / "source_bundle" / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        expected.append(
+            (relative, hashlib.sha256(payload).hexdigest(), len(payload))
+        )
+    expected = tuple(sorted(expected))
+    entries = [
+        {"path": path, "sha256": sha256, "size": size}
+        for path, sha256, size in expected
+    ]
+    tree_sha256 = hashlib.sha256(
+        json.dumps(
+            entries,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+    ).hexdigest()
+    model_payload = b"derived-model"
+    urdf_payload = b"plant-urdf"
+    mesh_payload = b"racket-mesh"
+    (root / "model.usd").write_bytes(model_payload)
+    (root / "source/urdf").mkdir(parents=True)
+    (root / "source/urdf/model.urdf").write_bytes(urdf_payload)
+    (root / "source/meshes").mkdir(parents=True)
+    (root / "source/meshes/racket.stl").write_bytes(mesh_payload)
+    receipt = {
+        "schema": "action_ball_a3p0807_split_rubber_usd_v2",
+        "diagnostic_unauthorized": True,
+        "model_usd": {
+            "bytes": len(model_payload),
+            "sha256": hashlib.sha256(model_payload).hexdigest(),
+        },
+        "source_urdf": {
+            "bytes": len(urdf_payload),
+            "sha256": hashlib.sha256(urdf_payload).hexdigest(),
+        },
+        "source_bundle": {
+            relative: {"sha256": sha256, "bytes": size}
+            for relative, sha256, size in expected
+        },
+        "source_meshes": {
+            "racket": {
+                "bytes": len(mesh_payload),
+                "sha256": hashlib.sha256(mesh_payload).hexdigest(),
+            }
+        },
+    }
+    receipt_payload = json.dumps(receipt, sort_keys=True).encode()
+    (root / "DERIVATION_RECEIPT.json").write_bytes(receipt_payload)
+    monkeypatch.setattr(
+        term_mod, "_A3_COLLISION_PROXY_RUNTIME_USD_FILES", expected
+    )
+    monkeypatch.setattr(
+        term_mod, "_A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256", tree_sha256
+    )
+    monkeypatch.setattr(
+        term_mod,
+        "_A3_DERIVED_RUNTIME_MODEL_USD_SHA256",
+        hashlib.sha256(model_payload).hexdigest(),
+    )
+    monkeypatch.setattr(
+        term_mod, "_A3_DERIVED_RUNTIME_MODEL_USD_BYTES", len(model_payload)
+    )
+    monkeypatch.setattr(
+        term_mod,
+        "_A3_DERIVED_RUNTIME_RECEIPT_SHA256",
+        hashlib.sha256(receipt_payload).hexdigest(),
+    )
+    monkeypatch.setattr(
+        term_mod, "_A3_DERIVED_RUNTIME_RECEIPT_BYTES", len(receipt_payload)
+    )
+    monkeypatch.setattr(
+        term_mod,
+        "_A3_COLLISION_PROXY_SOURCE_URDF_SHA256",
+        hashlib.sha256(urdf_payload).hexdigest(),
+    )
+    monkeypatch.setattr(
+        term_mod,
+        "_verify_live_bundle_is_a_cache_of_this_plant",
+        lambda bundle_root: "stubbed",
+    )
+    term_mod._verify_loaded_runtime_usd_bundle.cache_clear()
+    assert term_mod._verify_loaded_runtime_usd_bundle(
+        str((root / "model.usd").resolve())
+    ) == tree_sha256
+    term_mod._verify_loaded_runtime_usd_bundle.cache_clear()
+
+
 def test_live_articulation_usd_path_rejects_split_identity(
     term_mod, tmp_path, monkeypatch
 ):
