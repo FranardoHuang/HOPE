@@ -130,6 +130,8 @@ class _R05:
         self._diagnostic_epoch_owner = epoch
         self._diagnostic_motion_owner = motion
         self._internal_question_compose = self._compose
+        self._num_envs = 4
+        self._prepared_records = {}
 
     def _compose(self, _context):
         return None
@@ -138,7 +140,7 @@ class _R05:
         return None
 
     def _prepare_many_impl(self, *args, **kwargs):
-        return args, kwargs
+        return getattr(self, "_prepared_token", (args, kwargs))
 
     def _preview_impl(self, *args, **kwargs):
         return args, kwargs
@@ -378,6 +380,39 @@ def test_profiler_preserves_exact_r05_and_motion_method_identity(monkeypatch):
     assert profiler._segments["d05_total"]["calls"] == 1
     assert "_prepare_many_impl" in r05.__dict__
     assert "_internal_question_compose" in r05.__dict__
+
+    class _Attempts:
+        ndim = 1
+        shape = (4,)
+
+        @staticmethod
+        def bincount(*, minlength):
+            assert minlength == 4
+
+            class _Histogram:
+                @staticmethod
+                def detach():
+                    return _Histogram()
+
+                @staticmethod
+                def cpu():
+                    return _Histogram()
+
+                @staticmethod
+                def tolist():
+                    return [0, 2, 1, 1]
+
+            return _Histogram()
+
+    token = object()
+    r05._prepared_token = token
+    r05._prepared_records[token] = types.SimpleNamespace(
+        rounds_attempted=_Attempts()
+    )
+    assert r05._prepare_many_impl() is token
+    assert profiler._segments["d05_round_1_attempted_rows"]["env_count"] == 4
+    assert profiler._segments["d05_round_2_attempted_rows"]["env_count"] == 2
+    assert profiler._segments["d05_round_3_attempted_rows"]["env_count"] == 1
 
     profiler.close()
     assert "advance_action_ball_full_mdp_rows" not in r05.__dict__

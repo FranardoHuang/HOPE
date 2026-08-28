@@ -1027,6 +1027,22 @@ opt-in runtime host-clock；内部prepare/question/preview/build/settle保持可
 Motion publish的class/bound identity不变”测试。Motion publish不再单独替换方法，其wall包含在D05 total
 残差中。
 
+successor exact source=`39569c492ccc94f76f83be1ff9c7451f4a2c6bc3`随后在Pod1 GPU2自然完成12/12轮，
+无signal/stop且lock随child退出。namespace=
+`fullmdp-a-h48-v9-isaac-profile12-d05-39569c49-20260828T1450Z`，receipt/log SHA-256=
+`aa4892c3e39053479c17374bdba16b5842f3f8c2e7322152b376fa51c886b970`/
+`f807955a3f35f247675ba463e66a7dab1033af8af212fc905889d5cdff51cb23`。D05 total/prepare/question
+compose中位=`1.999/1.830/1.724 s`，12轮累计=`22.394/20.065/18.444 s`；question compose占D05
+累计约`82.4%`。preview/build/epoch settle累计仅`.001/.092/.719 s`，不值得先动。下一候选是保留三轮
+RNG和candidate identity、只对上一轮尚未出现success/fault的行继续solver/exact/Physical计算；但当前
+round journal仍保存三轮reason/fault，且prepare会核全部round chronology，故在证明selected identity、
+reason/counter/safety与可消费journal parity前不实现，也不直接降低100-step RK4或`cq_n_iters`。
+
+为量化算法上限，successor仅在显式profile模式下、prepare已经完成之后对`rounds_attempted`做一次device→host
+histogram，并把`>=1/2/3`行数写进profile segment的`env_count`；它不进入生产ACK、D05 journal或任何Gate，
+含该同步的wall一律不作速度证据。若第二/三轮消费者很少，下一步仍须处理现有journal保存全三轮reason/fault、
+prepare核全round chronology这一语义事实；不能把未求解行伪装成已求解的producer结果。
+
 同源码MuJoCo 61-update窗也已自然完成，p50/p90=`6.644/6.854 s/H48`，scheduled/reveal=
 `10,861/10,860`、launch=`6,658`、missed launch=0、R03 present/physically-valid=`5,107/5,107`，
 selected contact=`0/6,658`、landing=0。episode mean first10→last10=`135.78→139.98`；paddle position/

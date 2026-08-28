@@ -210,9 +210,12 @@ slice和Mu native pose adapter两处实现错误；最终
      learned-success Gate。
   9. [x] 收完tick48的Isaac/MuJoCo同源61-update有限窗；两端都证明自然task exposure与finite/identity，
      但mimic误差未降且行为明显分叉，因此不直接启动fresh长期namespace。
-  10. [ ] 用自然退出的`--diagnostic-profile-probe --profile-updates N`（有限host-wall归因；见
+  10. [x] 用自然退出的`--diagnostic-profile-probe --profile-updates N`（有限host-wall归因；见
       [`diagnostic_unauthorized`](../DEFINITIONS.md#diagnostic-unauthorized)）定位Isaac满due路径约5秒增量；
-      profiler span含嵌套且不做CUDA sync，不作为正式速度证据。
+      profiler span含嵌套且不做CUDA sync，不作为正式速度证据。exact source=`39569c49`的12轮自然完成；
+      `D05 total/question compose`中位=`1.999/1.724 s`，累计=`22.394/18.444 s`，question compose占
+      D05累计约`82.4%`。preview/build/epoch-settle累计仅`.001/.092/.719 s`，下一算法刀只审计固定三轮
+      question bank，不再优化这些小段或增加Gate。
   11. [ ] 从同一physical-ready、joint order、q/dq与固定31-D action tape逐tick比较Isaac/Mu的base、racket、
       terminal与first divergence；先裁决实现/plant差异，再决定V9长期双fresh，不增加task-success安全Gate。
 

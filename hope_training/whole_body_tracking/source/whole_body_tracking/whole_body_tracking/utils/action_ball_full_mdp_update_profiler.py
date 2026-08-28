@@ -57,6 +57,9 @@ _SEGMENT_NAMES = (
     "d05_preview",
     "d05_build_transaction",
     "d05_epoch_settle",
+    "d05_round_1_attempted_rows",
+    "d05_round_2_attempted_rows",
+    "d05_round_3_attempted_rows",
     "event_apply",
     "observation_compute",
     "recorder_callbacks",
@@ -144,6 +147,7 @@ class FullMdpUpdateProfiler:
         mark_end: str | None = None,
         gap_from_mark: str | None = None,
         gap_segment_name: str | None = None,
+        result_env_counts: Callable[[object], Mapping[str, int]] | None = None,
     ) -> None:
         if segment_name not in self._segments:
             raise RuntimeError("FullMDP profiler segment name differs")
@@ -185,6 +189,22 @@ class FullMdpUpdateProfiler:
             try:
                 result = original(*args, **kwargs)
                 succeeded = True
+                if result_env_counts is not None:
+                    counts = result_env_counts(result)
+                    if type(counts) is not dict:
+                        raise RuntimeError(
+                            "FullMDP profiler result counters differ"
+                        )
+                    for count_name, count in counts.items():
+                        if (
+                            count_name not in self._segments
+                            or type(count) is not int
+                            or count < 0
+                        ):
+                            raise RuntimeError(
+                                "FullMDP profiler result counter differs"
+                            )
+                        self._record(count_name, 0, count)
                 return result
             finally:
                 finished_ns = self._clock_ns()
@@ -342,6 +362,32 @@ class FullMdpUpdateProfiler:
                 None,
             ),
         )
+
+        def d05_round_attempt_counts(token: object) -> dict[str, int]:
+            records = getattr(r05, "_prepared_records", None)
+            record = records.get(token) if isinstance(records, dict) else None
+            attempts = getattr(record, "rounds_attempted", None)
+            if (
+                attempts is None
+                or getattr(attempts, "ndim", None) != 1
+                or getattr(attempts, "shape", (None,))[0] != getattr(
+                    r05, "_num_envs", None
+                )
+            ):
+                raise RuntimeError("FullMDP profiler D05 attempts differ")
+            histogram = attempts.bincount(minlength=4).detach().cpu().tolist()
+            if (
+                type(histogram) is not list
+                or len(histogram) < 4
+                or any(type(value) is not int or value < 0 for value in histogram)
+            ):
+                raise RuntimeError("FullMDP profiler D05 histogram differs")
+            return {
+                f"d05_round_{round_index}_attempted_rows": sum(
+                    histogram[round_index:]
+                )
+                for round_index in range(1, 4)
+            }
         recorder_methods = (
             "record_pre_step",
             "record_post_physics_decimation_step",
@@ -359,6 +405,8 @@ class FullMdpUpdateProfiler:
                         gap_from_mark="command_compute_end",
                         gap_segment_name="after_command_to_observation_gap",
                     )
+                elif owner is r05 and method == "_prepare_many_impl":
+                    kwargs["result_env_counts"] = d05_round_attempt_counts
                 self._wrap_method(
                     owner,
                     method,

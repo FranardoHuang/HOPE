@@ -26,6 +26,14 @@
   median为collection/learning=`8.042/.334 s`，其中reward=`1.519 s`、sim step=`1.076 s`、command后D05到
   observation gap=`2.050 s`；后者与due rows相关系数约`.885`，下一层只细分D05 prepare/question/settle，
   不再扩安全Gate或把profile-on值冒充正式速度。
+- 修正诊断binding后的exact source=`39569c49`已在GPU2自然完成12/12轮，receipt/log SHA-256分别为
+  `aa4892c…b970`/`f807955a…b23`。D05 total/question compose中位=`1.999/1.724 s`，12轮累计
+  `22.394/18.444 s`，后者占D05约`82.4%`；preview/build/epoch settle累计仅`.001/.092/.719 s`。
+  主墙已从抽象“D05复杂”收敛为三轮全量question compose；下一步先证明逐轮未决行compaction的
+  RNG/selected identity/reason/counter/safety语义，不削100-step RK4或solver迭代冒充等价提速。
+- 同一opt-in profiler增加三项纯诊断`rounds_attempted>=1/2/3`行计数；它只在prepare返回后做一次
+  device→host histogram，同步开销不进入正式wall证据、不进入runtime Gate/ACK/schema。目的只回答后两轮
+  数值构造有多少真实消费者，再决定incremental redraw是否值得，避免凭`3×`静态调用数下结论。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 

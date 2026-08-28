@@ -19,6 +19,11 @@ optimizer与durable ACK事实。wall与due row数相关系数约`.771`，满512-
 `5.50 s`；已新增自然退出的有限profile入口以定位具体callpoint，不把profiler结果算正式速度。MuJoCo同源
 有限窗已完成但Isaac/Mu行为明显分叉，mimic/hit/landing及parity未闭合，故保持`Partial`。
 
+exact source=`39569c49`的D05细分诊断已自然完成12/12轮：D05 total/question compose累计=
+`22.394/18.444 s`，约`82.4%`落在三轮全量question compose；preview/build/epoch settle累计只有
+`.001/.092/.719 s`。该结果只授权热点归因，不是profiler-off速度PASS。下一刀必须先守住固定RNG、
+selected identity、reason/counter/safety和可消费journal语义；不能用缩RK4、降solver迭代或删Gate绕过。
+
 ## 2026-08-27 FullMDP V8 Isaac replacement（仍`Partial`）
 
 V7 fresh候选采用[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)、
