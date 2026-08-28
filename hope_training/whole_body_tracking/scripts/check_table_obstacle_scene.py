@@ -85,6 +85,7 @@ MEASURED_BIRTH_HOLDABLE_FULL_SEED_SEMANTICS = (
     "teacher_yaw_aligned_seed_plus_contact_free_hold_projection_plus_exact_"
     "teacher_reference"
 )
+CONTACT_FREE_PROJECTION_MINIMUM_TORQUE_SLACK_NM = 1.0e-2
 MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS = (
     "exact_measured_teacher_frame0_root_joint_physical_birth"
 )
@@ -2432,6 +2433,8 @@ def _nominal_teacher_physical_contract(
             or projection.get("root_changed") is not False
             or projection.get("leg_joints_changed") is not False
             or projection.get("final_exact_ground_lp_feasible") is not True
+            or projection.get("minimum_contact_free_torque_slack_nm")
+            != CONTACT_FREE_PROJECTION_MINIMUM_TORQUE_SLACK_NM
             or float(
                 projection.get("support_foot_pose_max_abs_delta", math.inf)
             )

@@ -1345,6 +1345,9 @@ def test_nominal_hold_accepts_audited_contact_free_seed_projection(tmp_path):
         "root_changed": False,
         "leg_joints_changed": False,
         "final_exact_ground_lp_feasible": True,
+        "minimum_contact_free_torque_slack_nm": (
+            P.CONTACT_FREE_PROJECTION_MINIMUM_TORQUE_SLACK_NM
+        ),
         "support_foot_pose_max_abs_delta": 0.0,
         "changed_joint_indices": [nonleg_index],
         "changed_joint_names": [A3_JOINT_NAMES[nonleg_index]],

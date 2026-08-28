@@ -107,6 +107,7 @@ MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS = (
 MEASURED_PROJECTED_FRAME0_RACKET_SITE = "right_racket"
 FULL_SEED_QDES_FRESH_STATIC_LP = "fresh_static_lp"
 FULL_SEED_QDES_SEED_TRANSPORT = "seed_transport"
+CONTACT_FREE_PROJECTION_MINIMUM_TORQUE_SLACK_NM = 1.0e-2
 WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N = 0.1
 WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_FOOT_N = 1.0
 WHOLE_BODY_REQUIRED_COLLISION_CLEARANCE_M = 2.0e-3
@@ -4690,7 +4691,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                     required - low
                     if binding_side == "lower"
                     else high - required
-                )
+                ) - CONTACT_FREE_PROJECTION_MINIMUM_TORQUE_SLACK_NM
 
             projected, boundary = nearest_feasible_scalar_boundary(
                 current=float(ready_q[joint_index]),
@@ -4795,6 +4796,9 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                         "l2_joint_delta_rad": float(np.linalg.norm(delta)),
                         "iterations": projection_history,
                         "final_exact_ground_lp_feasible": True,
+                        "minimum_contact_free_torque_slack_nm": (
+                            CONTACT_FREE_PROJECTION_MINIMUM_TORQUE_SLACK_NM
+                        ),
                     },
                 }
             )
