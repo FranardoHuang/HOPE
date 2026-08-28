@@ -322,8 +322,8 @@ class _OldReferenceLeanActionEpochRewardGraph(R.LeanActionEpochRewardGraph):
     """The pre-cache R03 implementation retained only as a parity oracle."""
 
     def _r03(self, ordinal: int, scale: float) -> torch.Tensor:
-        valid, source_step, fact, faults = self._owner_rows("r03_strike_fact")
-        record = self._record()
+        snapshot = self._snapshot()
+        valid, source_step, fact, faults = snapshot.r03
         if fact.shape != (self.num_envs, E.OWNER_FACT_F32_WIDTH):
             raise R.LeanRewardCycleError("R03 epoch fact width differs")
         target_position = fact[:, 0:3]
@@ -364,8 +364,8 @@ class _OldReferenceLeanActionEpochRewardGraph(R.LeanActionEpochRewardGraph):
         admitted = (
             present
             & torch.bitwise_and(valid, R.R03_PHYSICALLY_VALID).ne(0)
-            & record.reward_cycle_fault.eq(0)
-            & source_step.eq(record.reward_cycle_age)
+            & snapshot.reward_cycle_fault.eq(0)
+            & source_step.eq(snapshot.reward_cycle_age)
         )
         self._milestone.add_reward(
             ordinal,
@@ -477,15 +477,10 @@ def test_packed_r03_cache_matches_old_reference_for_all_fact_classes(case):
 
 def test_packed_r03_owner_decode_and_shared_errors_run_once(monkeypatch):
     graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
-    counts = {"owner_rows": 0, "gather": 0, "vector_norm": 0, "acos": 0}
-    owner_rows = graph._owner_rows
+    counts = {"gather": 0, "vector_norm": 0, "acos": 0}
     gather = R.torch.gather
     vector_norm = R.torch.linalg.vector_norm
     acos = R.torch.acos
-
-    def counted_owner_rows(owner_kind):
-        counts["owner_rows"] += 1
-        return owner_rows(owner_kind)
 
     def counted_gather(*args, **kwargs):
         counts["gather"] += 1
@@ -499,7 +494,6 @@ def test_packed_r03_owner_decode_and_shared_errors_run_once(monkeypatch):
         counts["acos"] += 1
         return acos(*args, **kwargs)
 
-    monkeypatch.setattr(graph, "_owner_rows", counted_owner_rows)
     monkeypatch.setattr(R.torch, "gather", counted_gather)
     monkeypatch.setattr(R.torch.linalg, "vector_norm", counted_vector_norm)
     monkeypatch.setattr(R.torch, "acos", counted_acos)
@@ -507,7 +501,7 @@ def test_packed_r03_owner_decode_and_shared_errors_run_once(monkeypatch):
     values = _pay_r03(graph)
 
     assert all(torch.isfinite(value).all() for value in values)
-    assert counts == {"owner_rows": 1, "gather": 4, "vector_norm": 3, "acos": 1}
+    assert counts == {"gather": 17, "vector_norm": 3, "acos": 1}
     assert graph._r03_cycle_cache is None
 
 
@@ -518,6 +512,8 @@ def test_r03_cache_lifecycle_closes_and_reopens_with_a_new_cycle():
 
     value = graph.pay(0, scale=_R03_TEST_SCALES[0])
     actual.add_(value)
+    first_snapshot = graph._cycle_snapshot
+    assert first_snapshot is not None
     first_cache = graph._r03_cycle_cache
     assert first_cache is not None
     for ordinal in range(1, len(R.R03_NAMES)):
@@ -527,6 +523,7 @@ def test_r03_cache_lifecycle_closes_and_reopens_with_a_new_cycle():
     for ordinal in range(10, R.LIFECYCLE_PAYMENT_COUNT):
         value = graph.pay(ordinal)
         actual.add_(value)
+    assert graph._cycle_snapshot is None
     for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT, R.MANAGER_TERM_COUNT):
         dense_value = torch.ones(graph.num_envs, device=TEST_DEVICE)
         value = graph.record_common_dense(
@@ -541,6 +538,16 @@ def test_r03_cache_lifecycle_closes_and_reopens_with_a_new_cycle():
 
     graph.pay(0, scale=_R03_TEST_SCALES[0])
 
+    second_snapshot = graph._cycle_snapshot
+    assert second_snapshot is not None and second_snapshot is not first_snapshot
+    assert torch.equal(
+        second_snapshot.reward_cycle_age,
+        first_snapshot.reward_cycle_age + 1,
+    )
+    assert (
+        second_snapshot.reward_cycle_age.data_ptr()
+        != first_snapshot.reward_cycle_age.data_ptr()
+    )
     assert graph._r03_cycle_cache is not None
     assert graph._r03_cycle_cache is not first_cache
 
@@ -586,9 +593,20 @@ def test_r03_cache_hot_path_has_no_tensor_host_observation_api():
     assert '.to(device="cpu"' not in source
 
 
-def test_exact_reward28_cycle_completes_once():
-    graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
+def test_exact_reward28_cycle_completes_once(monkeypatch):
+    owner = _epoch()
+    before_commit = owner.commit_head
+    before_version = owner._publication.current.version
+
+    def reject_full_record_clone(_record):
+        raise AssertionError("sealed Lean Reward cloned the full epoch record")
+
+    monkeypatch.setattr(E.ActionEpochRecord, "clone", reject_full_record_clone)
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
     values = _pay_all(graph)
+    after = owner._publication.current
+    assert owner.commit_head == before_commit + 15
+    assert after.version == before_version + 15
     assert len(values) == R.MANAGER_TERM_COUNT == 28
     assert graph.completed_cycle_count == 1
     assert graph.actual_closed_cycle_count == 1
@@ -727,8 +745,7 @@ def test_reward_payment_before_local_settlement_faults_without_mutation():
 def test_r06_ordinals_share_the_ordinal_zero_frozen_before_image():
     owner = _epoch()
     graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
-    for ordinal in range(12):
-        graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
+    graph.pay(0, scale=1.0)
 
     record = owner.current()
     slot = E.OWNER_ORDER.index("r06_landing_outcome")
@@ -743,6 +760,8 @@ def test_r06_ordinals_share_the_ordinal_zero_frozen_before_image():
         values=live_facts,
     )
 
+    for ordinal in range(1, 12):
+        graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
     assert torch.equal(graph.pay(12), torch.ones(2, device=TEST_DEVICE))
     current = owner.current().fact_f32[:, :, slot]
     assert torch.equal(
@@ -754,15 +773,14 @@ def test_r06_ordinals_share_the_ordinal_zero_frozen_before_image():
 def test_r06_frozen_source_decodes_once_and_clears_after_second_row(monkeypatch):
     graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
     calls = 0
-    owner_rows = graph._owner_rows
+    decode = graph._decode_r06_cycle
 
-    def counted(owner_kind):
+    def counted():
         nonlocal calls
-        if owner_kind == "r06_landing_outcome":
-            calls += 1
-        return owner_rows(owner_kind)
+        calls += 1
+        return decode()
 
-    monkeypatch.setattr(graph, "_owner_rows", counted)
+    monkeypatch.setattr(graph, "_decode_r06_cycle", counted)
     for ordinal in range(11):
         graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
     first = graph.pay(11)

@@ -302,7 +302,7 @@ class LeanActionEpochRewardGraph:
         self.num_envs = epoch_owner.num_envs
         self.shot_slot_capacity = epoch_owner.shot_slot_capacity
         self.device = epoch_owner.device
-        self._cycle_epoch: epoch_v1.ActionEpochRecord | None = None
+        self._cycle_snapshot: epoch_v1._LeanRewardCycleSnapshot | None = None
         self._r03_cycle_cache: _PackedR03RewardCycle | None = None
         self._r06_cycle_cache: _FrozenR06RewardCycle | None = None
         self._paddle_reward_cycle_cache: tuple[torch.Tensor, ...] | None = None
@@ -351,7 +351,7 @@ class LeanActionEpochRewardGraph:
 
     @property
     def cycle_open(self) -> bool:
-        return self._cycle_epoch is not None or self._dense_cycle_open
+        return self._cycle_snapshot is not None or self._dense_cycle_open
 
     @property
     def completed_cycle_count(self) -> int:
@@ -381,34 +381,10 @@ class LeanActionEpochRewardGraph:
         self._paddle_playback_cycle_mask = None
         self._paddle_error_cycle_matrix = None
 
-    def _record(self) -> epoch_v1.ActionEpochRecord:
-        if self._cycle_epoch is None:
+    def _snapshot(self) -> epoch_v1._LeanRewardCycleSnapshot:
+        if self._cycle_snapshot is None:
             raise LeanRewardCycleError("Reward fact requested outside a cycle")
-        return self._cycle_epoch
-
-    def _selected(self, value: torch.Tensor) -> torch.Tensor:
-        record = self._record()
-        index = record.current_task_slot
-        suffix = (1,) * (value.ndim - 2)
-        gather_index = index.reshape(self.num_envs, 1, *suffix).expand(
-            self.num_envs, 1, *value.shape[2:]
-        )
-        return torch.gather(value, 1, gather_index).squeeze(1)
-
-    def _owner_rows(self, owner_kind: str) -> tuple[torch.Tensor, ...]:
-        record = self._record()
-        try:
-            slot = epoch_v1.OWNER_ORDER.index(owner_kind)
-        except ValueError as exc:
-            raise LeanRewardConstructionHold(
-                "epoch owner order lacks " + owner_kind
-            ) from exc
-        return (
-            self._selected(record.fact_valid_bits[:, :, slot]),
-            self._selected(record.fact_source_step[:, :, slot]),
-            self._selected(record.fact_f32[:, :, slot]),
-            self._selected(record.owner_fault_bits[:, :, slot]),
-        )
+        return self._cycle_snapshot
 
     def _invalidate_r03_cycle_cache(self) -> None:
         self._r03_cycle_cache = None
@@ -420,8 +396,8 @@ class LeanActionEpochRewardGraph:
         cached = self._r03_cycle_cache
         if cached is not None:
             return cached
-        valid, source_step, fact, faults = self._owner_rows("r03_strike_fact")
-        record = self._record()
+        snapshot = self._snapshot()
+        valid, source_step, fact, faults = snapshot.r03
         if fact.shape != (self.num_envs, epoch_v1.OWNER_FACT_F32_WIDTH):
             raise LeanRewardCycleError("R03 epoch fact width differs")
         target_position = fact[:, 0:3]
@@ -457,8 +433,8 @@ class LeanActionEpochRewardGraph:
             present
             & torch.bitwise_and(valid, R03_PHYSICALLY_VALID).ne(0)
             # The fact image is sticky; only its source Reward tick is payable.
-            & record.reward_cycle_fault.eq(0)
-            & source_step.eq(record.reward_cycle_age)
+            & snapshot.reward_cycle_fault.eq(0)
+            & source_step.eq(snapshot.reward_cycle_age)
         )
         cached = _PackedR03RewardCycle(
             clean_errors=clean_errors,
@@ -488,13 +464,13 @@ class LeanActionEpochRewardGraph:
         )
 
     def _physical(self) -> torch.Tensor:
-        valid, source_step, _fact, faults = self._owner_rows("physical_ball")
-        record = self._record()
+        snapshot = self._snapshot()
+        valid, source_step, faults = snapshot.physical
         present = (
             torch.bitwise_and(valid, PHYSICAL_PRESENT).ne(0)
             & faults.eq(0)
-            & record.reward_cycle_fault.eq(0)
-            & source_step.eq(record.reward_cycle_age)
+            & snapshot.reward_cycle_fault.eq(0)
+            & source_step.eq(snapshot.reward_cycle_age)
         )
         contact = torch.bitwise_and(valid, PHYSICAL_SELECTED_CONTACT).ne(0)
         raw = (present & contact).to(torch.float32)
@@ -541,27 +517,21 @@ class LeanActionEpochRewardGraph:
         )
 
     def _decode_r06_cycle(self) -> _FrozenR06RewardCycle:
-        valid, _source_step, fact, faults = self._owner_rows(
-            "r06_landing_outcome"
-        )
-        record = self._record()
-        phase = self._selected(record.phase)
-        settlement_step = self._selected(record.settlement_step)
-        payment_step = self._selected(record.payment_step)
+        snapshot = self._snapshot()
+        valid, fact, faults = snapshot.r06
         return _FrozenR06RewardCycle(
             valid=valid,
             fact=fact,
             faults=faults,
-            phase=phase,
-            settlement_step=settlement_step,
-            payment_step=payment_step,
+            phase=snapshot.phase,
+            settlement_step=snapshot.settlement_step,
+            payment_step=snapshot.payment_step,
         )
 
     def _r07(self) -> torch.Tensor:
-        valid, source_step, fact, faults = self._owner_rows("r07_recovery")
-        record = self._record()
-        phase = self._selected(record.phase)
-        reward_cycle_age = record.reward_cycle_age
+        snapshot = self._snapshot()
+        valid, source_step, fact, faults = snapshot.r07
+        reward_cycle_age = snapshot.reward_cycle_age
         reward = fact[:, 0]
         reward_eligible = fact[:, 2].eq(1.0)
         facts_valid = fact[:, 3].eq(1.0)
@@ -579,7 +549,7 @@ class LeanActionEpochRewardGraph:
             & facts_valid
             & ~infrastructure_fault
             & faults.eq(0)
-            & record.reward_cycle_fault.eq(0)
+            & snapshot.reward_cycle_fault.eq(0)
             # R07 is dense across recovery ticks, but each tick still requires
             # the producer's immediately preceding post-physics publication.
             & reward_cycle_age.gt(0)
@@ -587,7 +557,7 @@ class LeanActionEpochRewardGraph:
             # RETIRED deliberately retains its last immutable fact image.
             # Current phase is therefore the non-redundant boundary that
             # prevents replaying the final recovery payment.
-            & phase.eq(epoch_v1.PHASE_OUTCOME_SETTLED)
+            & snapshot.phase.eq(epoch_v1.PHASE_OUTCOME_SETTLED)
         )
         self._milestone.add_reward(
             13, raw_score, reward, eligible, finite,
@@ -701,17 +671,17 @@ class LeanActionEpochRewardGraph:
                 self._invalidate_r03_cycle_cache()
                 self._invalidate_r06_cycle_cache()
                 self._clear_paddle_playback_cycle_cache()
-                if self._cycle_epoch is not None or self._dense_cycle_open:
+                if self._cycle_snapshot is not None or self._dense_cycle_open:
                     raise LeanRewardCycleError("Reward cycle was already open")
                 if self._actual_closed_cycle_count != self._completed_cycle_count:
                     raise LeanRewardCycleError(
                         "prior Reward cycle lacks its actual-buffer close"
                     )
-                # The returned record includes the exact newly opened cycle
-                # and one frozen post-physics fact image for every ordinal.
-                self._cycle_epoch = self.epoch_owner.open_reward_cycle()
+                self._cycle_snapshot = (
+                    self.epoch_owner._open_lean_reward_cycle_snapshot()
+                )
                 self._dense_cycle_open = True
-            elif self._cycle_epoch is None:
+            elif self._cycle_snapshot is None:
                 raise LeanRewardCycleError("Reward term ran before ordinal zero")
 
             if ordinal < 10:
@@ -748,7 +718,7 @@ class LeanActionEpochRewardGraph:
         self._next_ordinal += 1
         if self._next_ordinal == LIFECYCLE_PAYMENT_COUNT:
             self._next_ordinal = 0
-            self._cycle_epoch = None
+            self._cycle_snapshot = None
             self._invalidate_r03_cycle_cache()
             self._invalidate_r06_cycle_cache()
         return value
@@ -774,7 +744,7 @@ class LeanActionEpochRewardGraph:
                 type(ordinal) is not int
                 or ordinal != self._next_dense_ordinal
                 or not self._dense_cycle_open
-                or self._cycle_epoch is not None
+                or self._cycle_snapshot is not None
                 or self._next_ordinal != 0
             ):
                 raise LeanRewardCycleError(
@@ -897,7 +867,7 @@ class LeanActionEpochRewardGraph:
             )
         try:
             if (
-                self._cycle_epoch is not None
+                self._cycle_snapshot is not None
                 or self._next_ordinal != 0
                 or self._dense_cycle_open
                 or self._next_dense_ordinal != LIFECYCLE_PAYMENT_COUNT
@@ -923,7 +893,7 @@ class LeanActionEpochRewardGraph:
             self._invalidate_r06_cycle_cache()
             raise LeanRewardCycleError("poisoned Reward graph cannot checkpoint")
         if (
-            self._cycle_epoch is not None
+            self._cycle_snapshot is not None
             or self._next_ordinal != 0
             or self._dense_cycle_open
             or self._next_dense_ordinal != LIFECYCLE_PAYMENT_COUNT

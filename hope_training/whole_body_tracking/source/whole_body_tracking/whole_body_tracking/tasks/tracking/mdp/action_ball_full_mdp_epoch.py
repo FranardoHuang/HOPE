@@ -68,6 +68,10 @@ OWNER_ORDER = (
     "r07_recovery",
 )
 OWNER_COUNT = len(OWNER_ORDER)
+_LEAN_REWARD_PHYSICAL_SLOT = OWNER_ORDER.index("physical_ball")
+_LEAN_REWARD_R06_SLOT = OWNER_ORDER.index("r06_landing_outcome")
+_LEAN_REWARD_R03_SLOT = OWNER_ORDER.index("r03_strike_fact")
+_LEAN_REWARD_R07_SLOT = OWNER_ORDER.index("r07_recovery")
 REVEAL_WRITE_OWNER_ORDER = ("motion", "racket", "r05_runtime")
 LAUNCH_WRITE_OWNER_ORDER = ("physical_ball",)
 
@@ -539,6 +543,21 @@ class ActionEpochRecord:
             | self.phase.eq(PHASE_RETIRED)
         ) & started & committed
         return RecoveryReferenceLifecycleMasks(upcoming.clone(), completed.clone())
+
+
+@dataclass(frozen=True)
+class _LeanRewardCycleSnapshot:
+    """Selected, copied before-image consumed by lifecycle Reward rows only."""
+
+    reward_cycle_age: torch.Tensor
+    reward_cycle_fault: torch.Tensor
+    phase: torch.Tensor
+    settlement_step: torch.Tensor
+    payment_step: torch.Tensor
+    r03: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+    physical: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    r06: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    r07: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
 
 @dataclass(frozen=True)
@@ -3169,58 +3188,108 @@ class ActionEpochOwner:
     # ------------------------------------------------------------------
     # Reward-cycle completion and actual control-step payment
 
+    def _open_reward_cycle_record_locked(self) -> ActionEpochRecord:
+        self._healthy()
+        record = self._publication.current
+        if (
+            record is None
+            or self._reward_open
+            or self._active_d05 is not None
+            or self._selected_reset.active
+        ):
+            raise ActionEpochError("reward cycle cannot open at this boundary")
+        overflow = self._reward_cycle_age.eq(_I64_MAX)
+        safe_age = torch.where(
+            overflow, self._reward_cycle_age, self._reward_cycle_age + 1
+        )
+        fault = torch.where(
+            overflow,
+            torch.bitwise_or(
+                self._reward_cycle_fault,
+                torch.full_like(
+                    self._reward_cycle_fault, _FAULT_REWARD_CYCLE_OVERFLOW
+                ),
+            ),
+            self._reward_cycle_fault,
+        )
+        due = torch.ones(
+            (self.num_envs, REWARD_CONSUMER_COUNT),
+            dtype=torch.bool,
+            device=self.device,
+        )
+        paid = torch.zeros_like(due)
+        opened = torch.ones(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        record = self._append(
+            record,
+            transition="REWARD_CYCLE_OPEN",
+            names=("reward_cycle_age", "reward_cycle_fault"),
+            values=(safe_age, fault),
+            changes={
+                "reward_cycle_age": safe_age,
+                "reward_cycle_fault": fault,
+                "reward_cycle_open": opened,
+                "reward_due": due,
+                "reward_paid": paid,
+            },
+        )
+        self._reward_cycle_age = safe_age
+        self._reward_cycle_fault = fault
+        self._reward_open = True
+        self._reward_ordinal = 0
+        return record
+
     def open_reward_cycle(self) -> ActionEpochRecord:
         with self._operation("open reward cycle"):
-            self._healthy()
-            record = self._publication.current
-            if (
-                record is None
-                or self._reward_open
-                or self._active_d05 is not None
-                or self._selected_reset.active
-            ):
-                raise ActionEpochError("reward cycle cannot open at this boundary")
-            overflow = self._reward_cycle_age.eq(_I64_MAX)
-            safe_age = torch.where(
-                overflow, self._reward_cycle_age, self._reward_cycle_age + 1
-            )
-            fault = torch.where(
-                overflow,
-                torch.bitwise_or(
-                    self._reward_cycle_fault,
-                    torch.full_like(
-                        self._reward_cycle_fault, _FAULT_REWARD_CYCLE_OVERFLOW
-                    ),
+            return self._open_reward_cycle_record_locked().clone()
+
+    def _open_lean_reward_cycle_snapshot(self) -> _LeanRewardCycleSnapshot:
+        """Open once and copy only selected fields used by sealed Lean Reward."""
+
+        with self._operation("open lean reward cycle"):
+            record = self._open_reward_cycle_record_locked()
+            index = record.current_task_slot
+
+            def selected(value: torch.Tensor) -> torch.Tensor:
+                suffix = (1,) * (value.ndim - 2)
+                gather_index = index.reshape(
+                    self.num_envs, 1, *suffix
+                ).expand(self.num_envs, 1, *value.shape[2:])
+                return torch.gather(value, 1, gather_index).squeeze(1)
+
+            def owner_field(value: torch.Tensor, owner_slot: int) -> torch.Tensor:
+                return selected(value[:, :, owner_slot])
+
+            return _LeanRewardCycleSnapshot(
+                reward_cycle_age=record.reward_cycle_age.clone(),
+                reward_cycle_fault=record.reward_cycle_fault.clone(),
+                phase=selected(record.phase),
+                settlement_step=selected(record.settlement_step),
+                payment_step=selected(record.payment_step),
+                r03=(
+                    owner_field(record.fact_valid_bits, _LEAN_REWARD_R03_SLOT),
+                    owner_field(record.fact_source_step, _LEAN_REWARD_R03_SLOT),
+                    owner_field(record.fact_f32, _LEAN_REWARD_R03_SLOT),
+                    owner_field(record.owner_fault_bits, _LEAN_REWARD_R03_SLOT),
                 ),
-                self._reward_cycle_fault,
+                physical=(
+                    owner_field(record.fact_valid_bits, _LEAN_REWARD_PHYSICAL_SLOT),
+                    owner_field(record.fact_source_step, _LEAN_REWARD_PHYSICAL_SLOT),
+                    owner_field(record.owner_fault_bits, _LEAN_REWARD_PHYSICAL_SLOT),
+                ),
+                r06=(
+                    owner_field(record.fact_valid_bits, _LEAN_REWARD_R06_SLOT),
+                    owner_field(record.fact_f32, _LEAN_REWARD_R06_SLOT),
+                    owner_field(record.owner_fault_bits, _LEAN_REWARD_R06_SLOT),
+                ),
+                r07=(
+                    owner_field(record.fact_valid_bits, _LEAN_REWARD_R07_SLOT),
+                    owner_field(record.fact_source_step, _LEAN_REWARD_R07_SLOT),
+                    owner_field(record.fact_f32, _LEAN_REWARD_R07_SLOT),
+                    owner_field(record.owner_fault_bits, _LEAN_REWARD_R07_SLOT),
+                ),
             )
-            due = torch.ones(
-                (self.num_envs, REWARD_CONSUMER_COUNT),
-                dtype=torch.bool,
-                device=self.device,
-            )
-            paid = torch.zeros_like(due)
-            opened = torch.ones(
-                self.num_envs, dtype=torch.bool, device=self.device
-            )
-            record = self._append(
-                record,
-                transition="REWARD_CYCLE_OPEN",
-                names=("reward_cycle_age", "reward_cycle_fault"),
-                values=(safe_age, fault),
-                changes={
-                    "reward_cycle_age": safe_age,
-                    "reward_cycle_fault": fault,
-                    "reward_cycle_open": opened,
-                    "reward_due": due,
-                    "reward_paid": paid,
-                },
-            )
-            self._reward_cycle_age = safe_age
-            self._reward_cycle_fault = fault
-            self._reward_open = True
-            self._reward_ordinal = 0
-            return record.clone()
 
     def pay_reward(self, ordinal: int) -> None:
         if type(ordinal) is not int:

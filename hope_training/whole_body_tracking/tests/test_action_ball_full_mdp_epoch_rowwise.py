@@ -4068,17 +4068,111 @@ def test_reward_order_overflow_and_checkpoint_are_bounded():
     assert not hasattr(checkpoint, "commit_log")
 
 
+def test_public_open_reward_cycle_still_returns_an_isolated_full_record():
+    epoch = E.ActionEpochOwner(num_envs=2, device="cpu")
+    epoch.activate_reset_genesis(
+        selected_mask=torch.ones(2, dtype=torch.bool),
+        reset_generation=torch.zeros(2, dtype=torch.int64),
+    )
+
+    returned = epoch.open_reward_cycle()
+    publication = epoch._publication.current
+    assert type(returned) is E.ActionEpochRecord
+    assert publication is not None
+    expected_age = publication.reward_cycle_age.clone()
+    expected_fact = publication.fact_f32.clone()
+    returned.reward_cycle_age.add_(100)
+    returned.fact_f32.add_(100.0)
+    assert torch.equal(publication.reward_cycle_age, expected_age)
+    assert torch.equal(publication.fact_f32, expected_fact)
+
+
+def test_lean_reward_snapshot_uses_one_selected_slot_for_every_field():
+    epoch = E.ActionEpochOwner(
+        num_envs=2, device="cpu", shot_slot_capacity=2
+    )
+    epoch.activate_reset_genesis(
+        selected_mask=torch.ones(2, dtype=torch.bool),
+        reset_generation=torch.zeros(2, dtype=torch.int64),
+    )
+    publication = epoch._publication
+    record = publication.current
+    assert record is not None
+    selected_slot = torch.tensor([1, 0], dtype=torch.int64)
+    owner_shape = (2, 2, E.OWNER_COUNT)
+    fact_shape = (*owner_shape, E.OWNER_FACT_F32_WIDTH)
+    epoch._publication = E._Publication(
+        replace(
+            record,
+            current_task_slot=selected_slot,
+            phase=torch.arange(4, dtype=torch.int64).reshape(2, 2),
+            settlement_step=torch.arange(10, 14, dtype=torch.int64).reshape(2, 2),
+            payment_step=torch.arange(20, 24, dtype=torch.int64).reshape(2, 2),
+            fact_valid_bits=torch.arange(
+                2 * 2 * E.OWNER_COUNT, dtype=torch.int64
+            ).reshape(owner_shape),
+            fact_source_step=torch.arange(
+                100, 100 + 2 * 2 * E.OWNER_COUNT, dtype=torch.int64
+            ).reshape(owner_shape),
+            fact_f32=torch.arange(
+                2 * 2 * E.OWNER_COUNT * E.OWNER_FACT_F32_WIDTH,
+                dtype=torch.float32,
+            ).reshape(fact_shape),
+            owner_fault_bits=torch.arange(
+                200, 200 + 2 * 2 * E.OWNER_COUNT, dtype=torch.int64
+            ).reshape(owner_shape),
+        ),
+        publication.pending_log,
+    )
+
+    snapshot = epoch._open_lean_reward_cycle_snapshot()
+    opened = epoch._publication.current
+    assert opened is not None
+
+    def selected(value, owner_slot=None):
+        if owner_slot is not None:
+            value = value[:, :, owner_slot]
+        suffix = (1,) * (value.ndim - 2)
+        index = selected_slot.reshape(2, 1, *suffix).expand(
+            2, 1, *value.shape[2:]
+        )
+        return torch.gather(value, 1, index).squeeze(1)
+
+    assert torch.equal(snapshot.reward_cycle_age, opened.reward_cycle_age)
+    assert torch.equal(snapshot.reward_cycle_fault, opened.reward_cycle_fault)
+    assert torch.equal(snapshot.phase, selected(opened.phase))
+    assert torch.equal(snapshot.settlement_step, selected(opened.settlement_step))
+    assert torch.equal(snapshot.payment_step, selected(opened.payment_step))
+    def full_owner(slot):
+        return (
+            selected(opened.fact_valid_bits, slot),
+            selected(opened.fact_source_step, slot),
+            selected(opened.fact_f32, slot),
+            selected(opened.owner_fault_bits, slot),
+        )
+
+    r03 = full_owner(E.OWNER_ORDER.index("r03_strike_fact"))
+    physical = full_owner(E.OWNER_ORDER.index("physical_ball"))
+    r06 = full_owner(E.OWNER_ORDER.index("r06_landing_outcome"))
+    r07 = full_owner(E.OWNER_ORDER.index("r07_recovery"))
+    assert all(torch.equal(left, right) for left, right in zip(snapshot.r03, r03))
+    assert all(
+        torch.equal(left, right)
+        for left, right in zip(snapshot.physical, (physical[0], physical[1], physical[3]))
+    )
+    assert all(
+        torch.equal(left, right)
+        for left, right in zip(snapshot.r06, (r06[0], r06[2], r06[3]))
+    )
+    assert all(torch.equal(left, right) for left, right in zip(snapshot.r07, r07))
+
+
 def test_reward_payment_mutates_publication_without_return_clone(monkeypatch):
     epoch = E.ActionEpochOwner(num_envs=2, device="cpu")
     epoch.activate_reset_genesis(
         selected_mask=torch.ones(2, dtype=torch.bool),
         reset_generation=torch.zeros(2, dtype=torch.int64),
     )
-    epoch.open_reward_cycle()
-    before = epoch._publication.current
-    assert before is not None
-    commit_head = epoch.commit_head
-
     clone_calls = 0
     original_clone = E.ActionEpochRecord.clone
 
@@ -4088,6 +4182,36 @@ def test_reward_payment_mutates_publication_without_return_clone(monkeypatch):
         return original_clone(record)
 
     monkeypatch.setattr(E.ActionEpochRecord, "clone", counted_clone)
+    snapshot = epoch._open_lean_reward_cycle_snapshot()
+    before = epoch._publication.current
+    assert before is not None
+    commit_head = epoch.commit_head
+    assert tuple(field.name for field in fields(snapshot)) == (
+        "reward_cycle_age",
+        "reward_cycle_fault",
+        "phase",
+        "settlement_step",
+        "payment_step",
+        "r03",
+        "physical",
+        "r06",
+        "r07",
+    )
+    assert clone_calls == 0
+
+    publication_before = (
+        before.reward_cycle_age.clone(),
+        before.phase.clone(),
+        before.fact_f32.clone(),
+    )
+    snapshot.reward_cycle_age.add_(100)
+    snapshot.phase.add_(100)
+    snapshot.r03[2].add_(100.0)
+    snapshot.r06[1].add_(100.0)
+    snapshot.r07[2].add_(100.0)
+    assert torch.equal(before.reward_cycle_age, publication_before[0])
+    assert torch.equal(before.phase, publication_before[1])
+    assert torch.equal(before.fact_f32, publication_before[2])
 
     assert epoch.pay_reward(0) is None
     paid = epoch._publication.current
