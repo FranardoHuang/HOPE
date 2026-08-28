@@ -2,6 +2,20 @@
 
 ## 2026-08-28 — FullMDP V9同源初态与tick48重叠课程（branch diagnostic）
 
+- clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`已在Pod1发射两条fresh长期
+  replacement：MuJoCo namespace=`fullmdp-a-h48-v9-mujoco-genesisfix-eb57233b-20260828T093350Z`
+  （GPU2），Isaac namespace=`fullmdp-a-h48-v9-isaac-genesisfix-eb57233b-20260828T094243Z`（GPU0）。
+  `observed_at=2026-08-28T09:48:33Z`时Mu ACK0..83=`2,064,384` transitions，Isaac ACK0..18=
+  `466,944` transitions；两端reward nonfinite、conservation fault与attributed/fact fault均为0，进程、
+  exact GPU UUID与lifetime lock仍存活。
+- replacement各自取得连续durable ACK后，旧V8按exact PID/PGID/cwd/source/namespace停止。Mu进程组在TERM
+  后1秒退出；Isaac launcher响应TERM，但已再次核验身份的旧Kit child在30秒后仍未退出，因此只对旧PID
+  `708503`发SIGKILL。两份V8 run root/checkpoint均保留，未伪造completion，也未触碰新V9 child。
+- V9当前仍是早期课程：Mu首10→近10 episode mean=`137.31→141.96 tick`，近10 launch/R03/contact=
+  `1,210/855/0`，wall mean=`6.57 s/H48`；Isaac为`67.34→73.55 tick`，近10虽有`3,414`次D05 due，
+  但physical launch/R03/contact均为0，wall mean=`16.76 s/H48`。Mu hit是早期`0/launch` diagnostic negative；
+  Isaac尚未活到physical launch，hit/landing仍`未测`。这些前缀不授权mimic成功、physics parity、promotion
+  或安全结论；Isaac active wall仍需结构/算法提速。
 - D05细分profile首个Pod namespace在首个environment step、PPO update前fail-closed：profiler把
   `advance_action_ball_full_mdp_rows`替换成instance wrapper，破坏LeanRuntime既有exact bound-method
   身份检查。失败root只读且不复用；修复不放宽检查，而是在LeanRuntime已认证的调用点用既有opt-in

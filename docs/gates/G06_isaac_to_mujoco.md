@@ -4,12 +4,20 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 
 ## 2026-08-28 V9同源课程双端复核（仍`Partial`）
 
+clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`的双fresh长期replacement已在Pod1运行。
+`observed_at=2026-08-28T09:48:33Z`时Mu ACK0..83=`2,064,384` transitions，近10 episode mean/wall=
+`141.96 tick/6.57 s`、launch/R03/contact=`1,210/855/0`；Isaac ACK0..18=`466,944` transitions，
+近10 episode mean/wall=`73.55 tick/16.76 s`、physical launch/R03/contact=`0/0/0`。两端finite与durable
+边界clean，但阶段分母不同，不能把学习曲线当physics parity；旧V8已精确停止并只读保留。
+
 V9已在Isaac真实Kit证明tick48自然打开Take061 task/playback；旧V8混源和tick295外推不再是跨引擎合同。
 MuJoCo同一source有限窗已自然完成：p50/p90=`6.644/6.854 s/H48`，reveal=`10,860`、launch=`6,658`、
 R03 valid=`5,107`、selected contact=`0/6,658`。Isaac对应窗却约82 tick全base tilt且launch=0，Mu约140 tick
 并为table/tilt混合；这是真实behavior divergence，不是physics parity，也尚不能归因“Pod physics错”。
-下一步必须同physical-ready、joint order、q/dq和固定31-D action tape逐tick寻找first divergence。G06保持
-`Partial`、`diagnostic_unauthorized=true`；
+同physical-ready、joint order、q/dq和固定31-D action tape的first-divergence已完成：genesis修后initial
+q/dq exact，live centered tape的executable qdes在tick0--34最大只差`5.96e-8 rad`，而q在首个20 ms已
+分叉；shared decoder/order已排除，差异属于backend plant/controller response。G06保持`Partial`、
+`diagnostic_unauthorized=true`；
 task success不是parity/safety Gate，独立plant identity、fixed tape、finite与durable边界继续保留。
 
 ## 2026-08-27 FullMDP V8双后端replacement（仍`Partial`）

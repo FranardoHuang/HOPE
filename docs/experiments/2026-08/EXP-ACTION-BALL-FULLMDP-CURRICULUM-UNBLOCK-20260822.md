@@ -5,7 +5,7 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`V8 dual-fresh read-only / V9 same-source overlap validating / no authorized formal run`
+> 状态：`V8 stopped read-only / V9 dual-fresh running / no authorized formal run`
 > 证据边界：`diagnostic_unauthorized=true`；本记录不授权 resume、promotion、export、部署或真机。
 
 > **阅读边界（2026-08-28）：**§1--§10保留课程故障发现、旧运行和被替换实现史；当前结论只认§11。
@@ -1077,8 +1077,8 @@ fail-closed；按`setup_local_sync`固定三文件SHA恢复后r2成功，故这�
 140 tick、table/tilt混合且launch非零。该分叉既不能直接归咎“Pod安装坏了”，也不能以“原生后端不同”豁免；
 下一固定实验必须从同一physical-ready、同一joint order、同一q/dq与同一固定31-D action tape逐policy tick
 比较q、dq、base、racket和terminal first divergence。当前只能说balance→mimic交接实现闭合；mimic、hit、
-landing与physics parity均未闭合。V8继续只读，V9长期replacement暂不发；所有结果继续
-`diagnostic_unauthorized=true`。
+landing与physics parity均未闭合。该有限窗当时不单独授权长期replacement；随后fixed-action根因闭合与
+双fresh发射事实见§11.2，V8现已停止并只读保留。所有结果继续`diagnostic_unauthorized=true`。
 
 `observed_at=2026-08-28T07:12Z`的旧V8只读长跑已进一步坐实negative，而不是启动balance-only：
 Mu ACK0..20563累计`505,380,864` transitions，scheduled/launch/R03/contact=
@@ -1127,3 +1127,20 @@ Take061 actor mean作为tape center、叠加`±.02`确定性扰动，并要求�
 PASS只表示尚未触发terminal，不是“保持在ready”。它足以证明tick48前没有硬终止，却不能充当balance/mimic
 readiness Gate。V9允许两端分别从该prefix学习balance并在tick48自然公开mimic；因此physics parity不再
 冒充长训启动门，同时继续禁止用该差异声称Pod安装损坏或transfer成立。
+
+### 11.2 V9双fresh长期启动与首个未来前缀
+
+clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`已发射MuJoCo/Isaac双fresh长期
+replacement；namespace分别为`fullmdp-a-h48-v9-mujoco-genesisfix-eb57233b-20260828T093350Z`与
+`fullmdp-a-h48-v9-isaac-genesisfix-eb57233b-20260828T094243Z`。两端先取得连续durable ACK，随后旧V8才按
+exact身份停止；旧root/checkpoint保留、未伪造completion。
+
+`observed_at=2026-08-28T09:48:33Z`的首个未来前缀中，Mu ACK0..83=`2,064,384` transitions，首10→近10
+episode mean=`137.31→141.96 tick`，近10 launch/R03/contact=`1,210/855/0`；Isaac ACK0..18=
+`466,944` transitions，episode mean=`67.34→73.55 tick`，近10 D05 due=`3,414`，但physical
+launch/R03/contact=`0/0/0`。两端reward finite、conservation与fact/attribution fault均为0。Mu近10
+wall mean=`6.57 s/H48`，Isaac=`16.76 s/H48`，后者仍不满足可迭代速度方向。
+
+阶段解释保持预注册顺序而不设硬Stage：Mu已有早期hit分母但`0/launch`，Isaac还主要在balance，因未活到
+physical launch而hit/landing为`未测`；两端mimic真实误差方向尚混合，均不能称基本成功。该前缀不能被用来
+事后发明阈值，也不授权physics parity、promotion、部署或真机安全。

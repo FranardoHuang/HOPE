@@ -4,6 +4,14 @@ Status: Partial (the base training-loop mechanics are proven; the current-fresh 
 
 ## 2026-08-28 FullMDP V9 tick48真实Isaac（仍`Partial`）
 
+clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`的fresh长期Isaac已在GPU0运行：
+namespace=`fullmdp-a-h48-v9-isaac-genesisfix-eb57233b-20260828T094243Z`。
+`observed_at=2026-08-28T09:48:33Z`时ACK0..18=`466,944` transitions，首10→近10 episode mean=
+`67.34→73.55 tick`，
+近10 D05 due=`3,414`但physical launch/R03/contact=`0/0/0`，wall mean=`16.76 s/H48`；reward nonfinite、
+conservation与attributed fault均为0。它证明fresh训练与durable边界在工作，但当前仍以balance为主，hit/
+landing为`未测`，也没有达到迭代速度目标。旧V8已在replacement ACK后精确停止并保留root；本Gate不晋级。
+
 V8两端合计已有`1,089,548`次launch而selected contact仍为0；同源/override审计已将它从“继续等”翻转为
 训练实现negative。V9 source链`651c305e→cbf0aae3→e3cbe9fc`修复N1 action identity、Take061唯一
 bootstrap owner和tick48首次曝光，active-schedule聚焦测试=`53 passed`。tick295 predecessor rate probe
@@ -30,10 +38,12 @@ selected identity、reason/counter/safety和可消费journal语义；不能用�
 `3,584/3,584/3,581/3`、terminal overlap=`0`、launch=`0`。这只把热点密度从推算升级为直接测量；
 仍不得把profile-on结果写成rate PASS或学习证据。
 
-跨引擎分叉现已进入可执行诊断而不是口头猜因：同一tracked `512×H48×31` raw action tape会在policy
+跨引擎分叉现已进入可执行诊断而不是口头猜因：同一tracked `512×H48×31` raw action tape在policy
 runner前驱动真实Isaac FullMDP，并由Mu真实FullMDP记录同一portable root/q/dq/racket/terminal surface；
-compare只报告initial/post-step首差与差值包络。host结构/反例测试=`41 passed`，exact Pod结果尚未产生，
-因此仍不能把Jiayi本机差异或“动作看起来不对”升级成Pod/physics故障。
+compare只报告initial/post-step首差与差值包络。修正唯一genesis reset owner后，两端initial q/dq exact；
+centered live-action v3又证明tick0--34 executable qdes最大只差`5.96e-8 rad`，但q在首个20 ms已分叉，
+故joint order/action decoder已排除，剩余是backend plant/controller response。没有同源码、asset、clock与
+fixed tape的Jiayi本机收据，不能把本机差异或“动作看起来不对”升级成Pod安装故障。
 
 ## 2026-08-27 FullMDP V8 Isaac replacement（仍`Partial`）
 

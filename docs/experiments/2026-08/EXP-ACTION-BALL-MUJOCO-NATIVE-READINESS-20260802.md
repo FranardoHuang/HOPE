@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`V8-dual-fresh-read-only / V9-same-source-overlap-validating / no-authorized-formal-run`
+- 状态：`V8-stopped-read-only / V9-dual-fresh-running / no-authorized-formal-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -67,6 +67,17 @@ Isaac waist-roll逼近hard-inner才让guard改写q_des，这是plant分叉的后
 旧Isaac nominal-hold PASS本身也记录60 tick末`waist_roll=-.3205 rad, dq=-1.19 rad/s`；因此它只能称
 60-tick nonterminal prefix，不能称静态hold/readiness。剩余差异属于backend plant/controller response；
 它不阻止两端分别学习balance，但不授权physics parity，也不支持“Pod安装坏了”。
+
+同一clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`随后在Pod1发射双fresh长期
+replacement。Mu namespace=`fullmdp-a-h48-v9-mujoco-genesisfix-eb57233b-20260828T093350Z`，Isaac
+namespace=`fullmdp-a-h48-v9-isaac-genesisfix-eb57233b-20260828T094243Z`；两端各自产生连续durable ACK后，
+V8才按exact PID/PGID/cwd/source/namespace停止，旧root/checkpoint保持只读、无伪造completion。
+`observed_at=2026-08-28T09:48:33Z`时Mu ACK0..83=`2,064,384` transitions，首10→近10 episode mean=
+`137.31→141.96 tick`，近10 launch/R03/contact=`1,210/855/0`，wall mean=`6.57 s/H48`；Isaac
+ACK0..18=`466,944` transitions，episode mean=`67.34→73.55 tick`，近10 D05 due=`3,414`但physical
+launch/R03/contact仍为0，wall mean=`16.76 s/H48`。两端reward nonfinite、conservation与fact/attribution
+fault全0。Mu hit已有早期`0/launch`分母但尚不足以裁决新学习配方；Isaac仍在balance且hit/landing为`未测`。
+当前前缀既不支持mimic成功，也不支持Pod损坏、physics parity或formal promotion。
 
 结构裁决不新增安全Gate：把catalog变成一个typed原子安装对象、把bootstrap归给唯一owner、把backend留作
 薄adapter；保留plant/full-key/optimizer/durable事实边界。warm-start、replay、双LR、sigma、Build4数值、
@@ -160,7 +171,7 @@ profiling仍须覆盖PPO-boundary完整业务重放。只保留学习、分层�
 | cadence | 采用tick`48/233/418/603/788/973`六次真实due与耗尽`-1` sentinel | 一轮H48先学balance，随后在60-tick实测ready窗内打开mimic；完整185-tick task/recovery cadence不变 |
 | Build4 | 采用早期连续曝光、direct-paddle objective/correction-information原则；延后warm-start/replay/双LR/sigma与具体权重 | mandatory actor warm-start排除fresh-from-zero比较；tick48来自本系统H48/60-tick证据，不复制混杂数值 |
 | performance | active-task Isaac p50/p90=`10.470/13.863 s/H48`；due count与wall相关系数约`.77`，先profile task construction/ACK热路 | tick295空业务`6.635/7.153`不能代表现役速度；保留跨writer事实与WAL/ACK，不保留无用完整record往返 |
-| authority | V8只读negative；V9双端有限窗仍`diagnostic_unauthorized`，G04/G05/G06 `Partial` | mimic趋势混合、launch/contact/landing、Mu同源窗、physics parity与transfer均未闭合 |
+| authority | V8已停止并只读冻结为negative；V9双端fresh长期仍`diagnostic_unauthorized`，G04/G05/G06 `Partial` | mimic趋势、hit/landing、physics parity与transfer均未闭合；启动ACK不是阶段成功 |
 
 ## HISTORICAL / FROZEN — 2026-08-23 current correction
 

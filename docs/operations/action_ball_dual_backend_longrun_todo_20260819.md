@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`V8-dual-fresh-running-read-only / V9-replacement-validating / branch-scoped / diagnostic_unauthorized`
+> 状态：`V8-stopped-read-only / V9-dual-fresh-running / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-28
@@ -25,7 +25,9 @@ exact身份停止，root继续只读且不得resume。V8 clean source=
 再次得到两端合计`1,089,548`次launch、selected contact仍为0；同时源码/运行输入审计确认V8把Take058
 teacher、Take061 ready、旧动态ready artifact和被YAML覆盖的split-ready混在一起，不能再用step数裁决
 这条污染谱系。当前[`V9`](../DEFINITIONS.md#fullmdp-v9-candidate)只修同源ready→teacher、原子catalog绑定、
-upper-only mimic与课程交接；V8进程在replacement双端闭合前保持只读运行，尚未停止。所有运行仍为
+upper-only mimic与课程交接。clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`的MuJoCo/Isaac
+fresh长期replacement已分别在GPU2/GPU0取得连续durable ACK；随后V8按exact身份停止，旧root/checkpoint只读
+保留且未伪造completion。所有运行仍为
 [`diagnostic_unauthorized`](../DEFINITIONS.md#diagnostic-unauthorized)，不得由
 短验、单轮wall或文档状态推出promotion、physics parity、export、部署或真机授权。
 
@@ -129,6 +131,15 @@ ignored EPA48/RSL3未恢复在首ACK前失败，按固定SHA恢复后r2成功；
 零launch与Mu table+tilt/大量launch的分叉必须做同初态固定action first-divergence parity，不能直接归因Pod
 安装，也不能被“原生physics不同”豁免。
 
+`observed_at=2026-08-28T09:48:33Z`的长期replacement快照：Mu namespace=
+`fullmdp-a-h48-v9-mujoco-genesisfix-eb57233b-20260828T093350Z`，ACK0..83=`2,064,384` transitions；
+Isaac namespace=`fullmdp-a-h48-v9-isaac-genesisfix-eb57233b-20260828T094243Z`，ACK0..18=`466,944`
+transitions。Mu首10→近10 episode mean=`137.31→141.96 tick`，近10 launch/R03/contact=
+`1,210/855/0`，wall mean=`6.57 s/H48`；Isaac为`67.34→73.55 tick`，近10 D05 due=`3,414`但
+physical launch/R03/contact=`0/0/0`，wall mean=`16.76 s/H48`。两端finite/conservation/fact边界均clean。
+Mu的零contact已有早期launch分母但仍远小于预注册学习窗；Isaac尚处balance且下游为`未测`。不得按该前缀
+补写“基本成功”阈值或把Isaac慢速包装成安全Gate。
+
 V6的历史闭合仍如下；它不再是待继续到25k的学习候选。上一候选`72b87100`在真实Pod揭示Isaac schema
 slice和Mu native pose adapter两处实现错误；最终
 `caddecb7`已完成exact Pod CPU与两端`2048×H48×61` rate。Mu p50/p90=`5.468/5.526 s`达到约6秒
@@ -221,7 +232,7 @@ slice和Mu native pose adapter两处实现错误；最终
       row-round中约`63.8%`没有消费者；采用未决行incremental compose候选，拒绝直接降成一轮。修正后的
       exact source=`34cd7af8`已在fresh 12-update namespace自然完成，直接active-row计数仍精确为
       `3,584/290/22`，不是由inactive row倒推；该profile-on诊断只授权密度事实，不授权速度或学习。
-  11. [ ] 从同一physical-ready、joint order、q/dq与固定31-D action tape逐tick比较Isaac/Mu的base、racket、
+  11. [x] 从同一physical-ready、joint order、q/dq与固定31-D action tape逐tick比较Isaac/Mu的base、racket、
       terminal与first divergence。首轮exact Pod已完成：source clean `981327de`、joint order/action tape相同，
       首差却在`initial_joint_pos[0,12]`；Isaac写asset default，Mu写dynamic-ready，初始joint/root/racket位置
       max absolute差=`1.5199 rad/.1778 m/.5376 m`，tick7起terminal也分叉。exact Kit确认RSL wrapper已消费
@@ -237,9 +248,10 @@ slice和Mu native pose adapter两处实现错误；最终
       backend plant/controller response，不再把physics parity错设成长训Gate。旧nominal-hold PASS也降级为
       60-tick nonterminal prefix；其末端已是`waist_roll=-.3205 rad, dq=-1.19 rad/s`，不得写成稳定ready。
 
-replacement已完成exact Pod target tests、双rate与fresh启动；fixed-tape的`cq_n_iters=12`结论沿用同一
-未变physics合同。hard-edge、paddle误差单调性、active-strata wall和短学习未来窗仍未闭合，现役namespace
-保持只读且不resume/不hot-patch；不得把启动ACK或rate probe升级成阶段成功。
+replacement已完成exact Pod target tests、双rate、fixed-action first-divergence与V9双fresh长期启动；
+fixed-tape的`cq_n_iters=12`结论沿用同一未变physics合同。hard-edge、paddle误差单调性、active-strata wall
+和短学习未来窗仍未闭合，现役namespace保持只读source且不resume/不hot-patch；不得把启动ACK或rate probe
+升级成阶段成功。
 
 `ACK 0..101`启动快照已冻结：两端各`10,027,008` transitions且仍持有exact GPU/CPU affinity/flock；
 Mu first10→recent10 episode length=`104.337→159.622`并已有scheduled/public/overlap=
