@@ -31,9 +31,16 @@
   `22.394/18.444 s`，后者占D05约`82.4%`；preview/build/epoch settle累计仅`.001/.092/.719 s`。
   主墙已从抽象“D05复杂”收敛为三轮全量question compose；下一步先证明逐轮未决行compaction的
   RNG/selected identity/reason/counter/safety语义，不削100-step RK4或solver迭代冒充等价提速。
-- 同一opt-in profiler增加三项纯诊断`rounds_attempted>=1/2/3`行计数；它只在prepare返回后做一次
+- 同一opt-in profiler增加三项纯诊断、只计`rng_advance_mask`真实construction行的
+  `rounds_attempted>=1/2/3`计数；它只在prepare返回后做一次
   device→host histogram，同步开销不进入正式wall证据、不进入runtime Gate/ACK/schema。目的只回答后两轮
   数值构造有多少真实消费者，再决定incremental redraw是否值得，避免凭`3×`静态调用数下结论。
+- exact source=`ad29312a`的12轮round-density诊断自然完成。初版计数包含每个transaction的inactive full-N
+  行；因74次调用、zero terminal overlap与总due=`3,584`，可逐位扣除`34,304`个inactive行，得到真实
+  round1/2/3 attempted=`3,584/290/22`：`91.9%`第一轮结束、`99.4%`第二轮结束。当前固定计算
+  `10,752` env-round，实际消费`3,896`，incremental unresolved-row compose的数值row-round上限可减
+  `63.8%`。不能直接把round数降到1，否则约`8.1%`当前可在后轮解出的题会丢失。profiler已修为直接按
+  `rng_advance_mask`计数，下一复核不再依赖扣除法。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 

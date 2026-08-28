@@ -23,6 +23,8 @@ exact source=`39569c49`的D05细分诊断已自然完成12/12轮：D05 total/que
 `22.394/18.444 s`，约`82.4%`落在三轮全量question compose；preview/build/epoch settle累计只有
 `.001/.092/.719 s`。该结果只授权热点归因，不是profiler-off速度PASS。下一刀必须先守住固定RNG、
 selected identity、reason/counter/safety和可消费journal语义；不能用缩RK4、降solver迭代或删Gate绕过。
+同一未来窗真实construction attempted round1/2/3=`3,584/290/22`；因此incremental unresolved-row是
+有实测上限的候选，直接删后两轮则会改变约8.1%的题目准入并被拒绝。
 
 ## 2026-08-27 FullMDP V8 Isaac replacement（仍`Partial`）
 

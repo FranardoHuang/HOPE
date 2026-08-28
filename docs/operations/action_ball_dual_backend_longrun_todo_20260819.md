@@ -216,6 +216,8 @@ slice和Mu native pose adapter两处实现错误；最终
       `D05 total/question compose`中位=`1.999/1.724 s`，累计=`22.394/18.444 s`，question compose占
       D05累计约`82.4%`。preview/build/epoch-settle累计仅`.001/.092/.719 s`，下一算法刀只审计固定三轮
       question bank，不再优化这些小段或增加Gate。
+      round-density进一步得到真实construction attempted round1/2/3=`3,584/290/22`，固定三轮数值
+      row-round中约`63.8%`没有消费者；采用未决行incremental compose候选，拒绝直接降成一轮。
   11. [ ] 从同一physical-ready、joint order、q/dq与固定31-D action tape逐tick比较Isaac/Mu的base、racket、
       terminal与first divergence；先裁决实现/plant差异，再决定V9长期双fresh，不增加task-success安全Gate。
 

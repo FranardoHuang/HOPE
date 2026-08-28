@@ -367,15 +367,23 @@ class FullMdpUpdateProfiler:
             records = getattr(r05, "_prepared_records", None)
             record = records.get(token) if isinstance(records, dict) else None
             attempts = getattr(record, "rounds_attempted", None)
+            active = getattr(record, "rng_advance_mask", None)
             if (
                 attempts is None
                 or getattr(attempts, "ndim", None) != 1
                 or getattr(attempts, "shape", (None,))[0] != getattr(
                     r05, "_num_envs", None
                 )
+                or active is None
+                or getattr(active, "ndim", None) != 1
+                or getattr(active, "shape", None) != getattr(
+                    attempts, "shape", None
+                )
             ):
                 raise RuntimeError("FullMDP profiler D05 attempts differ")
-            histogram = attempts.bincount(minlength=4).detach().cpu().tolist()
+            histogram = (
+                attempts[active].bincount(minlength=4).detach().cpu().tolist()
+            )
             if (
                 type(histogram) is not list
                 or len(histogram) < 4

@@ -385,6 +385,10 @@ def test_profiler_preserves_exact_r05_and_motion_method_identity(monkeypatch):
         ndim = 1
         shape = (4,)
 
+        def __getitem__(self, active):
+            assert active is active_mask
+            return self
+
         @staticmethod
         def bincount(*, minlength):
             assert minlength == 4
@@ -405,9 +409,10 @@ def test_profiler_preserves_exact_r05_and_motion_method_identity(monkeypatch):
             return _Histogram()
 
     token = object()
+    active_mask = types.SimpleNamespace(ndim=1, shape=(4,))
     r05._prepared_token = token
     r05._prepared_records[token] = types.SimpleNamespace(
-        rounds_attempted=_Attempts()
+        rounds_attempted=_Attempts(), rng_advance_mask=active_mask
     )
     assert r05._prepare_many_impl() is token
     assert profiler._segments["d05_round_1_attempted_rows"]["env_count"] == 4

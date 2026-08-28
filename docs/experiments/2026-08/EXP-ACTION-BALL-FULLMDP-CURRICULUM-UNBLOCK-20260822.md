@@ -1038,10 +1038,22 @@ RNG和candidate identity、只对上一轮尚未出现success/fault的行继续s
 round journal仍保存三轮reason/fault，且prepare会核全部round chronology，故在证明selected identity、
 reason/counter/safety与可消费journal parity前不实现，也不直接降低100-step RK4或`cq_n_iters`。
 
-为量化算法上限，successor仅在显式profile模式下、prepare已经完成之后对`rounds_attempted`做一次device→host
-histogram，并把`>=1/2/3`行数写进profile segment的`env_count`；它不进入生产ACK、D05 journal或任何Gate，
+为量化算法上限，successor仅在显式profile模式下、prepare已经完成之后对`rng_advance_mask`真实construction
+行的`rounds_attempted`做一次device→host histogram，并把`>=1/2/3`行数写进profile segment的`env_count`；
+它不进入生产ACK、D05 journal或任何Gate，
 含该同步的wall一律不作速度证据。若第二/三轮消费者很少，下一步仍须处理现有journal保存全三轮reason/fault、
 prepare核全round chronology这一语义事实；不能把未求解行伪装成已求解的producer结果。
+
+exact source=`ad29312ae31ce017c37a04780398e819990bf3b5`的round-density件随后自然完成12/12轮，
+receipt/log SHA-256=`950a3d07…f6e9`/`26019698…c70`。初版profile计数包含每次full-N transaction的
+inactive行；本窗74次compose、due=`3,584`、terminal overlap=`0`，所以从三档raw
+`37,888/34,594/34,326`逐档扣除`74×512-3,584=34,304`，真实construction attempted=
+`3,584/290/22`。即91.9%在第一轮结束、99.4%在第二轮结束；固定dense三轮计算`10,752` env-round，
+实际消费`3,896`，未决行incremental compose最多可少约`63.8%`数值row-round。该结果采用incremental
+unresolved-row作为下一算法候选，明确拒绝把三轮直接降成一轮（会丢约8.1%现有后轮题）。实现前必须让
+D05把previous-cell作为同owner ephemeral context交给composer，并让未尝试suffix在journal/chronology中
+有诚实语义；selected identity、最终reason、RNG/draw/generation counters、producer fault和safety结果须与
+dense fixed-tape逐位相同。profile计数器已修为直接过滤`rng_advance_mask`，后续不再靠扣除法。
 
 同源码MuJoCo 61-update窗也已自然完成，p50/p90=`6.644/6.854 s/H48`，scheduled/reveal=
 `10,861/10,860`、launch=`6,658`、missed launch=0、R03 present/physically-valid=`5,107/5,107`，
