@@ -1471,6 +1471,8 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             self._action_ball_full_mdp_reset_genesis_install = _ABSENT
         if hasattr(self, "_action_ball_full_mdp_lean_reward_graph"):
             self._action_ball_full_mdp_lean_reward_graph = _ABSENT
+        if hasattr(self, "_action_ball_full_mdp_reward_hot_path"):
+            self._action_ball_full_mdp_reward_hot_path = _ABSENT
         if hasattr(self, "_action_ball_full_mdp_lean_observation_source"):
             self._action_ball_full_mdp_lean_observation_source = _ABSENT
         for manager_name in (
@@ -1642,6 +1644,15 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             lean_observations = importlib.import_module(
                 "action_ball_full_mdp_lean_observation_cfg"
             )
+        try:
+            lean_rewards = importlib.import_module(
+                "whole_body_tracking.tasks.tracking.mdp."
+                "action_ball_full_mdp_lean_rewards"
+            )
+        except ImportError:  # pragma: no cover - focused direct imports.
+            lean_rewards = importlib.import_module(
+                "action_ball_full_mdp_lean_rewards"
+            )
         source_type = lean_observations.LeanActionEpochObservationSource
         source_observe = getattr(observation_source, "observe", None)
         if (
@@ -1695,6 +1706,9 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
         components.reward_graph.configure_milestone_configured_income(
             reward_manager_cfg, self.step_dt
         )
+        reward_hot_path = lean_rewards.seal_env_reward_hot_path(
+            self, components.reward_graph
+        )
         if (
             hasattr(self, "_action_ball_full_mdp_components")
             or hasattr(self, "_action_ball_full_mdp_reset_genesis_install")
@@ -1714,6 +1728,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             "_action_ball_full_mdp_lean_reward_graph",
             "_action_ball_full_mdp_lean_observation_source",
             "_action_ball_full_mdp_live_physx_shutdown",
+            "_action_ball_full_mdp_reward_hot_path",
         )
         try:
             self.cfg.rewards = reward_manager_cfg
@@ -1729,6 +1744,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                     published_names[2]: components.reward_graph,
                     published_names[3]: observation_source,
                     published_names[4]: live_physx_shutdown,
+                    published_names[5]: reward_hot_path,
                 }
             )
         except BaseException as install_error:
@@ -1848,9 +1864,9 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
         """Pay one manager ordinal through the atomically installed graph.
 
         RewardManager configuration may contain only code-owned scalars.  The
-        live graph therefore remains private to this environment and is joined
-        to a term call only after the same lifecycle and component-identity
-        checks used by the private observation resolver.
+        live graph therefore remains private to this environment.  Construction
+        seals its exact dispatcher and evaluators once; runtime keeps only the
+        lifecycle, ordinal, and dynamic tensor-ABI checks that can still change.
         """
 
         if type(ordinal) is not int:
@@ -1865,34 +1881,12 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             raise FullMdpPostPhysicsProtocolError(
                 "lean Reward term ran outside its installed graph lifecycle"
             )
-        try:
-            lean_rewards = importlib.import_module(
-                "whole_body_tracking.tasks.tracking.mdp."
-                "action_ball_full_mdp_lean_rewards"
-            )
-        except ImportError:  # pragma: no cover - focused direct imports.
-            lean_rewards = importlib.import_module(
-                "action_ball_full_mdp_lean_rewards"
-            )
-        components = getattr(self, "_action_ball_full_mdp_components", _ABSENT)
-        graph = getattr(
-            self, "_action_ball_full_mdp_lean_reward_graph", _ABSENT
+        binding = getattr(
+            self, "_action_ball_full_mdp_reward_hot_path", _ABSENT
         )
-        graph_type = lean_rewards.LeanActionEpochRewardGraph
-        pay = getattr(graph, "pay", None)
-        if (
-            type(components) is not FullMdpLeanRuntimeComponents
-            or type(graph) is not graph_type
-            or graph is not components.reward_graph
-            or graph.epoch_owner is not components.epoch_owner
-            or not callable(pay)
-            or getattr(pay, "__self__", None) is not graph
-            or getattr(pay, "__func__", None) is not graph_type.pay
-        ):
-            raise FullMdpPostPhysicsProtocolError(
-                "lean Reward graph/epoch/component identity differs"
-            )
-        if ordinal < lean_rewards.LIFECYCLE_PAYMENT_COUNT:
+        graph = binding.graph
+        graph_type = binding.graph_type
+        if ordinal < binding.lifecycle_payment_count:
             if (
                 value is not None
                 or paddle_playback_active is not None
@@ -1907,9 +1901,9 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 "common dense Reward term requires one tensor and no scale"
             )
         paddle_row = (
-            lean_rewards.PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+            binding.paddle_first_ordinal
             <= ordinal
-            < lean_rewards.REGULARIZATION_FIRST_ORDINAL
+            < binding.regularization_first_ordinal
         )
         if (
             paddle_playback_active is not None

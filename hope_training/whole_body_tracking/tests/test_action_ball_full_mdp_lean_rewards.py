@@ -27,7 +27,9 @@ from test_action_ball_full_mdp_epoch_rowwise import (
 R = importlib.import_module(
     "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_lean_rewards"
 )
-TEST_DEVICE = os.environ.get("ACTION_BALL_LEAN_REWARD_TEST_DEVICE", "cpu")
+TEST_DEVICE = torch.device(
+    os.environ.get("ACTION_BALL_LEAN_REWARD_TEST_DEVICE", "cpu")
+)
 
 
 def _tensor(data, *, dtype=None):
@@ -226,6 +228,38 @@ class _ExactEnvRewardDispatcherRepresentation:
 
     def __init__(self, graph):
         self._test_reward_graph = graph
+        # The production seal resolves real IsaacLab evaluator modules once.
+        # This focused CPU file deliberately stays dependency-light, so supply
+        # inert callable surfaces only when the test's own monkeypatch did not
+        # already provide the relevant module.
+        current_import = R.importlib.import_module
+        common_fallback = types.SimpleNamespace(
+            **{
+                spec.evaluator_name: (lambda *_args, **_kwargs: None)
+                for spec in R.COMMON_DENSE_SPECS
+            }
+        )
+        paddle_fallback = types.SimpleNamespace(
+            _cmd=lambda *_args, **_kwargs: None,
+            motion_racket_tracking_errors_now=lambda *_args, **_kwargs: None,
+        )
+
+        def focused_import(name):
+            try:
+                return current_import(name)
+            except ModuleNotFoundError:
+                if name.endswith(".rewards"):
+                    return common_fallback
+                if name.endswith(".hope_rewards"):
+                    return paddle_fallback
+                raise
+
+        R.importlib.import_module = focused_import
+        try:
+            binding = R.seal_env_reward_hot_path(self, graph)
+        finally:
+            R.importlib.import_module = current_import
+        self.__dict__[R.ENV_REWARD_HOT_PATH_ATTR] = binding
 
     def _action_ball_full_mdp_lean_reward_term(
         self,
@@ -514,9 +548,10 @@ def test_r03_cache_hot_path_has_no_tensor_host_observation_api():
     assert '.to(device="cpu"' not in source
 
 
-def test_exact_fourteen_lifecycle_plus_six_dense_complete_once():
+def test_exact_reward28_cycle_completes_once():
     graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
     values = _pay_all(graph)
+    assert len(values) == R.MANAGER_TERM_COUNT == 28
     assert graph.completed_cycle_count == 1
     assert graph.actual_closed_cycle_count == 1
     assert graph.cycle_open is False
@@ -676,6 +711,54 @@ def test_r06_ordinals_share_the_ordinal_zero_frozen_before_image():
         current[:, :, 1] * current[:, :, 2],
         torch.full((2, 1), 12.0, device=TEST_DEVICE),
     )
+
+
+def test_r06_frozen_source_decodes_once_and_clears_after_second_row(monkeypatch):
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
+    calls = 0
+    owner_rows = graph._owner_rows
+
+    def counted(owner_kind):
+        nonlocal calls
+        if owner_kind == "r06_landing_outcome":
+            calls += 1
+        return owner_rows(owner_kind)
+
+    monkeypatch.setattr(graph, "_owner_rows", counted)
+    for ordinal in range(11):
+        graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
+    first = graph.pay(11)
+    cache = graph._r06_cycle_cache
+    second = graph.pay(12)
+
+    assert calls == 1
+    assert cache is not None
+    assert graph._r06_cycle_cache is None
+    assert torch.equal(first, _tensor((1.0, 0.0)))
+    assert torch.equal(second, torch.ones(2, device=TEST_DEVICE))
+
+
+def test_r06_pack_preserves_per_column_nonfinite_suppression_and_counts():
+    owner = _epoch()
+    publication = owner._publication
+    record = publication.current
+    slot = E.OWNER_ORDER.index("r06_landing_outcome")
+    facts = record.fact_f32.clone()
+    facts[0, 0, slot, 0] = float("nan")
+    facts[1, 0, slot, 1] = float("inf")
+    owner._publication = E._Publication(
+        replace(record, fact_f32=facts), publication.pending_log
+    )
+
+    values = _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
+    rows = owner.milestone.i64[: R.MANAGER_TERM_COUNT * 4].reshape(
+        R.MANAGER_TERM_COUNT, 4
+    )
+
+    assert torch.equal(values[11], torch.zeros(2, device=TEST_DEVICE))
+    assert torch.equal(values[12], _tensor((1.0, 0.0)))
+    assert rows[11].tolist() == [2, 2, 1, 0]
+    assert rows[12].tolist() == [2, 2, 1, 1]
 
 
 def test_reward_cycle_overflow_fault_suppresses_all_fresh_reward_families():
@@ -1164,60 +1247,47 @@ def test_common_dense_reuses_motion_evaluator_and_changes_with_reference_error(
     assert calls == [None, None, body_names, body_names, body_names, body_names]
 
 
-@pytest.mark.parametrize("telemetry_available", (True, False))
+@pytest.mark.parametrize(
+    "telemetry_mode", ("valid", "absent", "malformed", "noncontiguous_errors")
+)
 def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
-    monkeypatch, telemetry_available
+    monkeypatch, telemetry_mode
 ):
-    calls = []
+    target_calls = 0
     telemetry_calls = 0
-
-    def make_evaluator(evaluator_name):
-        def evaluator(
-            env, *, command_name, std, coarse_std, scale_in_strike_window
-        ):
-            calls.append(
-                (
-                    evaluator_name,
-                    command_name,
-                    std,
-                    coarse_std,
-                    scale_in_strike_window,
-                )
-            )
-            return torch.full(
-                (env._test_reward_graph.num_envs,),
-                0.25 + 0.1 * len(calls),
-                dtype=torch.float32,
-                device=TEST_DEVICE,
-            )
-
-        return evaluator
 
     class Motion:
         def action_ball_full_mdp_playback_active_mask(self):
             nonlocal telemetry_calls
             telemetry_calls += 1
-            if not telemetry_available:
+            if telemetry_mode == "absent":
                 raise RuntimeError("optional diagnostic telemetry unavailable")
+            if telemetry_mode == "malformed":
+                return torch.ones((2, 1), dtype=torch.bool, device=TEST_DEVICE)
             return torch.tensor(
                 [True, False], dtype=torch.bool, device=TEST_DEVICE
             )
 
     motion = Motion()
     command = types.SimpleNamespace(_motion=lambda: motion)
+    exact_errors = torch.tensor(
+        [[0.017, 0.731, 0.123, 0.456], [0.31, 2.7, 0.41, 0.93]],
+        dtype=torch.float32,
+        device=TEST_DEVICE,
+    )
+
+    def tracking_errors_now(_cmd):
+        nonlocal target_calls
+        target_calls += 1
+        if telemetry_mode == "noncontiguous_errors":
+            return exact_errors.t().contiguous().t()
+        return exact_errors
+
     evaluator_module = types.SimpleNamespace(
         _cmd=lambda _env, name: command
         if name == "racket_target"
         else (_ for _ in ()).throw(KeyError(name)),
-        **{
-            spec.evaluator_name: make_evaluator(spec.evaluator_name)
-            for spec in R.PADDLE_MOTION_PRIOR_SPECS
-        }
-    )
-    evaluator_module.motion_racket_tracking_errors_now = lambda _cmd: torch.tensor(
-        [[0.10, 0.20, 0.30, 0.40], [0.50, 0.60, 0.70, 0.80]],
-        dtype=torch.float32,
-        device=TEST_DEVICE,
+        motion_racket_tracking_errors_now=tracking_errors_now,
     )
     real_import = R.importlib.import_module
     monkeypatch.setattr(
@@ -1251,6 +1321,7 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
                 scale_in_strike_window=spec.scale_in_strike_window,
             )
         )
+    assert graph._paddle_reward_cycle_cache is None
     for ordinal in range(R.REGULARIZATION_FIRST_ORDINAL, R.MANAGER_TERM_COUNT):
         graph.record_common_dense(
             ordinal, torch.zeros(2, dtype=torch.float32, device=TEST_DEVICE)
@@ -1258,17 +1329,23 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
     assert graph.completed_cycle_count == 1
     assert graph.poisoned is False
     assert all(torch.isfinite(value).all() for value in values)
+    expected_values = torch.stack(
+        tuple(
+            R.paddle_prior.coarse_precision_kernel(
+                exact_errors[:, column],
+                precision_std=spec.std,
+                coarse_std=spec.coarse_std,
+            )
+            for column, spec in enumerate(R.PADDLE_MOTION_PRIOR_SPECS)
+        ),
+        dim=1,
+    )
+    assert torch.equal(
+        torch.stack(values, dim=1).view(torch.int32),
+        expected_values.view(torch.int32),
+    )
     assert telemetry_calls == 1
-    assert calls == [
-        (
-            spec.evaluator_name,
-            spec.command_name,
-            spec.std,
-            spec.coarse_std,
-            spec.scale_in_strike_window,
-        )
-        for spec in R.PADDLE_MOTION_PRIOR_SPECS
-    ]
+    assert target_calls == 1
     owner_telemetry = graph.epoch_owner.milestone
     # Batched milestone reductions are committed only when RewardManager's
     # exact actual reward closes the cycle.  Use the already accumulated
@@ -1283,6 +1360,7 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
         )
     ).as_json(R.MANAGER_NAMES)
     playback_rows = payload["paddle_motion_prior_playback"]["terms"]
+    telemetry_available = telemetry_mode == "valid"
     expected_unavailable = [0] * 4 if telemetry_available else [2] * 4
     expected_playback = [1] * 4 if telemetry_available else [0] * 4
     assert [
@@ -1295,7 +1373,7 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
     for row, value in zip(playback_rows, values):
         expected_sum = float(value[0]) if telemetry_available else 0.0
         assert row["kernel_sum"] == pytest.approx(expected_sum)
-    expected_error = [0.10, 0.20, 0.30, 0.40]
+    expected_error = exact_errors[0].tolist()
     for row, error in zip(playback_rows, expected_error):
         assert row["error_sum"] == pytest.approx(
             error if telemetry_available else 0.0
@@ -1322,6 +1400,32 @@ def test_shared_reward_contract_keeps_only_supplied_upper_scope_without_held_wri
         contract.upper_except_held_wrist_body_names(
             ("torso", contract.HELD_RACKET_WRIST_BODY_NAME, "torso")
         )
+
+
+def test_regularization_wrapper_uses_sealed_unbound_dispatcher(monkeypatch):
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
+    env = _ExactEnvRewardDispatcherRepresentation(graph)
+    env.num_envs = graph.num_envs
+    env.action_manager = types.SimpleNamespace(
+        action=torch.zeros((graph.num_envs, 31), device=TEST_DEVICE),
+        prev_action=torch.zeros((graph.num_envs, 31), device=TEST_DEVICE),
+    )
+    monkeypatch.setattr(R, "_regularization_action_term", lambda _env: object())
+    monkeypatch.setattr(
+        R, "_regularization_robot_data", lambda _env, _action: object()
+    )
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT):
+        graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT, R.REGULARIZATION_FIRST_ORDINAL):
+        value = torch.ones(graph.num_envs, device=TEST_DEVICE)
+        graph.record_common_dense(
+            ordinal, value, **_paddle_telemetry_kwargs(ordinal, value)
+        )
+
+    actual = R.regularization_reward(
+        env, ordinal=R.REGULARIZATION_FIRST_ORDINAL
+    )
+    assert torch.equal(actual, torch.zeros(graph.num_envs, device=TEST_DEVICE))
 
 
 def test_dense_rows_ignore_lifecycle_paid_bits_and_exist_when_lifecycle_is_zero():
@@ -1373,59 +1477,26 @@ def test_dense_duplicate_fails_before_actual_close():
     assert graph.poisoned is True
 
 
-def test_reward_function_rejects_instance_shadow_dispatcher():
+def test_sealed_reward_dispatcher_ignores_later_instance_shadow():
     env = _ExactEnvRewardDispatcherRepresentation(
         R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
     )
     env.__dict__[R.ENV_REWARD_DISPATCHER_NAME] = lambda **_kwargs: None
-    with pytest.raises(R.LeanRewardConstructionHold, match="class-owned"):
-        R.racket_position(env, scale=1.0)
+    value = R.racket_position(env, scale=1.0)
+    assert torch.equal(value, torch.ones(2, device=TEST_DEVICE))
 
 
-def test_reward_function_rejects_inherited_foreign_dispatcher():
-    class ForeignBase:
-        def _action_ball_full_mdp_lean_reward_term(
-            self, *, ordinal: int, scale: float | None = None
-        ):
-            del ordinal, scale
-            return None
-
-    class EnvWithForeignInheritedDispatcher(ForeignBase):
+@pytest.mark.parametrize("descriptor", (None, staticmethod(lambda **_kwargs: None)))
+def test_reward_hot_path_seal_requires_own_plain_dispatcher(descriptor):
+    class InvalidEnv:
         pass
 
+    if descriptor is not None:
+        InvalidEnv._action_ball_full_mdp_lean_reward_term = descriptor
     with pytest.raises(R.LeanRewardConstructionHold, match="class-owned"):
-        R.racket_position(EnvWithForeignInheritedDispatcher(), scale=1.0)
-
-
-def test_reward_function_rejects_foreign_bound_dispatcher():
-    def foreign_dispatcher(_self, *, ordinal: int, scale: float | None = None):
-        del ordinal, scale
-        return None
-
-    class EnvReturningForeignBoundDispatcher:
-        def _action_ball_full_mdp_lean_reward_term(
-            self, *, ordinal: int, scale: float | None = None
-        ):
-            del ordinal, scale
-            return None
-
-        def __getattribute__(self, name):
-            if name == R.ENV_REWARD_DISPATCHER_NAME:
-                return types.MethodType(foreign_dispatcher, self)
-            return object.__getattribute__(self, name)
-
-    with pytest.raises(R.LeanRewardConstructionHold, match="binding differs"):
-        R.racket_position(EnvReturningForeignBoundDispatcher(), scale=1.0)
-
-
-def test_reward_function_rejects_non_function_class_descriptor():
-    class EnvWithForeignDescriptor:
-        _action_ball_full_mdp_lean_reward_term = staticmethod(
-            lambda **_kwargs: None
+        R.seal_env_reward_hot_path(
+            InvalidEnv(), R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
         )
-
-    with pytest.raises(R.LeanRewardConstructionHold, match="class-owned"):
-        R.racket_position(EnvWithForeignDescriptor(), scale=1.0)
 
 
 def test_diagnostic_bundle_has_no_caller_numeric_seam(monkeypatch):

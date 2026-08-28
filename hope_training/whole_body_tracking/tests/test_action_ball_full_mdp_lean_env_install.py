@@ -77,6 +77,20 @@ _REWARD_MODULE.LIFECYCLE_PAYMENT_COUNT = 14
 _REWARD_MODULE.LeanActionEpochRewardGraph = _RewardGraph
 
 
+def _seal_env_reward_hot_path(env, graph):
+    return types.SimpleNamespace(
+        graph=graph,
+        graph_type=_RewardGraph,
+        dispatcher=type(env)._action_ball_full_mdp_lean_reward_term,
+        lifecycle_payment_count=14,
+        paddle_first_ordinal=20,
+        regularization_first_ordinal=24,
+    )
+
+
+_REWARD_MODULE.seal_env_reward_hot_path = _seal_env_reward_hot_path
+
+
 @pytest.fixture(autouse=True)
 def _install_lean_env_lazy_import_stubs(monkeypatch):
     """Scope synthetic lazy imports to this module's individual tests."""
@@ -353,6 +367,7 @@ def test_lean_graph_installs_genesis_and_same_top_together():
     assert genesis.authority is authority
     assert genesis.receipt is receipt
     assert env._action_ball_full_mdp_lean_reward_graph is components.reward_graph
+    assert env._action_ball_full_mdp_reward_hot_path.graph is components.reward_graph
     source = env._action_ball_full_mdp_lean_observation_source
     assert source._env is env
     assert source._runtime_owner is components.lean_runtime_owner
@@ -396,7 +411,7 @@ def test_lean_reward_term_rejects_non_exact_ordinal_before_graph_pay():
     assert components.reward_graph.calls == []
 
 
-def test_lean_reward_term_rejects_foreign_private_graph_identity():
+def test_lean_reward_term_uses_construction_bound_graph_after_publication_drift():
     env, lease = _env()
     components = _components(env)
     rewards, observations, terminations = _manager_cfgs()
@@ -415,15 +430,12 @@ def test_lean_reward_term_rejects_foreign_private_graph_identity():
     foreign = _RewardGraph(components.epoch_owner)
     env._action_ball_full_mdp_lean_reward_graph = foreign
 
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError,
-        match="graph/epoch/component identity differs",
-    ):
-        env._action_ball_full_mdp_lean_reward_term(
-            ordinal=0, scale=0.2
-        )
+    value = env._action_ball_full_mdp_lean_reward_term(
+        ordinal=0, scale=0.2
+    )
+    assert torch.equal(value, torch.tensor([0.0]))
     assert foreign.calls == []
-    assert components.reward_graph.calls == []
+    assert components.reward_graph.calls == [(0, 0.2)]
 
 
 def test_lean_graph_foreign_lease_has_no_partial_install():
@@ -506,14 +518,7 @@ def test_lean_graph_setter_failure_restores_all_three_cfgs_and_publications(
     assert not hasattr(env, "_action_ball_full_mdp_lean_reward_graph")
     assert not hasattr(env, "_action_ball_full_mdp_lean_observation_source")
     assert not hasattr(env, "_action_ball_full_mdp_live_physx_shutdown")
-    env._action_ball_full_mdp_manager_construction_state = "sealed"
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError,
-        match="graph/epoch/component identity differs",
-    ):
-        env._action_ball_full_mdp_lean_reward_term(
-            ordinal=0, scale=0.2
-        )
+    assert not hasattr(env, "_action_ball_full_mdp_reward_hot_path")
 
 
 @pytest.mark.parametrize("prior_state", ("complete", "cold_discarded"))

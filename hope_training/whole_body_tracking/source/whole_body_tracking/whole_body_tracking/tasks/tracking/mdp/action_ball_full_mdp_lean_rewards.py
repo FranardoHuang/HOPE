@@ -44,12 +44,18 @@ try:
 except ImportError:
     import action_ball_full_mdp_regularization as regularization
 
+try:
+    from . import action_ball_full_mdp_paddle_prior as paddle_prior
+except ImportError:
+    import action_ball_full_mdp_paddle_prior as paddle_prior
+
 
 DIAGNOSTIC_UNAUTHORIZED = True
 RUNTIME_INTEGRATED = False
 LAUNCH_AUTHORIZED = False
 
 GRAPH_ATTR = "action_ball_full_mdp_lean_reward_graph"
+ENV_REWARD_HOT_PATH_ATTR = "_action_ball_full_mdp_reward_hot_path"
 ORDERED_CONSUMERS = epoch_v1.REWARD_CONSUMER_ORDER
 LIFECYCLE_PAYMENT_COUNT = reward_contract.LIFECYCLE_PAYMENT_COUNT
 
@@ -80,6 +86,21 @@ PADDLE_MOTION_PRIOR_FIRST_ORDINAL = (
 REGULARIZATION_FIRST_ORDINAL = (
     PADDLE_MOTION_PRIOR_FIRST_ORDINAL + len(PADDLE_MOTION_PRIOR_SPECS)
 )
+if (
+    tuple(spec.manager_name for spec in PADDLE_MOTION_PRIOR_SPECS)
+    != (
+        "motion_racket_position",
+        "motion_racket_velocity",
+        "motion_racket_normal",
+        "motion_racket_long_axis",
+    )
+    or len({spec.command_name for spec in PADDLE_MOTION_PRIOR_SPECS}) != 1
+    or any(
+        float(spec.scale_in_strike_window) != 1.0
+        for spec in PADDLE_MOTION_PRIOR_SPECS
+    )
+):
+    raise RuntimeError("paddle pack requires the full-strength ordered contract")
 
 R03_PRESENT = 1 << 0
 R03_PHYSICALLY_VALID = 1 << 1
@@ -150,6 +171,33 @@ class _PackedR03RewardCycle:
 
 
 @dataclass(frozen=True)
+class _FrozenR06RewardCycle:
+    """One frozen selected-slot source shared by both R06 consumers."""
+
+    valid: torch.Tensor
+    fact: torch.Tensor
+    faults: torch.Tensor
+    phase: torch.Tensor
+    settlement_step: torch.Tensor
+    payment_step: torch.Tensor
+
+
+@dataclass(frozen=True)
+class _SealedEnvRewardHotPath:
+    """Construction-bound dispatcher and evaluator identities for one env."""
+
+    graph: "LeanActionEpochRewardGraph"
+    graph_type: type
+    dispatcher: object
+    common_evaluators: tuple[object, ...]
+    paddle_command_lookup: object
+    paddle_tracking_errors: object
+    lifecycle_payment_count: int
+    paddle_first_ordinal: int
+    regularization_first_ordinal: int
+
+
+@dataclass(frozen=True)
 class DirectR06RewardFacts:
     """Compatibility decode of the immutable R06 epoch fact slice."""
 
@@ -217,9 +265,10 @@ class LeanActionEpochRewardGraph:
         self.device = epoch_owner.device
         self._cycle_epoch: epoch_v1.ActionEpochRecord | None = None
         self._r03_cycle_cache: _PackedR03RewardCycle | None = None
+        self._r06_cycle_cache: _FrozenR06RewardCycle | None = None
+        self._paddle_reward_cycle_cache: tuple[torch.Tensor, ...] | None = None
         self._paddle_playback_cycle_mask: torch.Tensor | None = None
         self._paddle_error_cycle_matrix: torch.Tensor | None = None
-        self._paddle_playback_cycle_resolved = False
         self._next_ordinal = 0
         self._next_dense_ordinal = LIFECYCLE_PAYMENT_COUNT
         self._dense_cycle_open = False
@@ -279,6 +328,7 @@ class LeanActionEpochRewardGraph:
 
     def _poison(self, reason: object) -> None:
         self._invalidate_r03_cycle_cache()
+        self._invalidate_r06_cycle_cache()
         self._clear_paddle_playback_cycle_cache()
         clean = reason.strip() if type(reason) is str else ""
         if not clean:
@@ -288,9 +338,9 @@ class LeanActionEpochRewardGraph:
         self._poisoned = True
 
     def _clear_paddle_playback_cycle_cache(self) -> None:
+        self._paddle_reward_cycle_cache = None
         self._paddle_playback_cycle_mask = None
         self._paddle_error_cycle_matrix = None
-        self._paddle_playback_cycle_resolved = False
 
     def _record(self) -> epoch_v1.ActionEpochRecord:
         if self._cycle_epoch is None:
@@ -323,6 +373,9 @@ class LeanActionEpochRewardGraph:
 
     def _invalidate_r03_cycle_cache(self) -> None:
         self._r03_cycle_cache = None
+
+    def _invalidate_r06_cycle_cache(self) -> None:
+        self._r06_cycle_cache = None
 
     def _decode_r03_cycle(self) -> _PackedR03RewardCycle:
         cached = self._r03_cycle_cache
@@ -414,6 +467,41 @@ class LeanActionEpochRewardGraph:
         return raw
 
     def _r06(self, ordinal: int) -> torch.Tensor:
+        cached = self._r06_cycle_cache
+        if cached is None:
+            cached = self._decode_r06_cycle()
+            self._r06_cycle_cache = cached
+        primitive = cached.fact[:, 0] if ordinal == 11 else cached.fact[:, 1]
+        payment = (
+            primitive if ordinal == 11 else primitive * cached.fact[:, 2]
+        )
+        finite = torch.isfinite(primitive) & torch.isfinite(payment)
+        eligible = (
+            torch.bitwise_and(cached.valid, R06_PRESENT).ne(0)
+            & torch.bitwise_and(cached.valid, R06_POLICY_ELIGIBLE).ne(0)
+            & torch.bitwise_and(cached.valid, R06_SOURCE_VALID).ne(0)
+            & cached.faults.eq(0)
+            # Both R06 ordinals share the ordinal-zero frozen before-image.
+            # The payment is recorded only after the complete Reward cycle.
+            & cached.phase.eq(epoch_v1.PHASE_OUTCOME_SETTLED)
+            & cached.settlement_step.ge(0)
+            & cached.payment_step.eq(-1)
+        )
+        self._milestone.add_reward(
+            ordinal,
+            primitive,
+            payment,
+            eligible,
+            finite,
+            self._milestone_configured_income_scale[ordinal],
+        )
+        return torch.where(
+            eligible & finite,
+            torch.where(finite, payment, torch.zeros_like(payment)),
+            torch.zeros_like(payment),
+        )
+
+    def _decode_r06_cycle(self) -> _FrozenR06RewardCycle:
         valid, _source_step, fact, faults = self._owner_rows(
             "r06_landing_outcome"
         )
@@ -421,28 +509,13 @@ class LeanActionEpochRewardGraph:
         phase = self._selected(record.phase)
         settlement_step = self._selected(record.settlement_step)
         payment_step = self._selected(record.payment_step)
-        primitive = fact[:, 0] if ordinal == 11 else fact[:, 1]
-        payment = primitive if ordinal == 11 else primitive * fact[:, 2]
-        finite = torch.isfinite(primitive) & torch.isfinite(payment)
-        eligible = (
-            torch.bitwise_and(valid, R06_PRESENT).ne(0)
-            & torch.bitwise_and(valid, R06_POLICY_ELIGIBLE).ne(0)
-            & torch.bitwise_and(valid, R06_SOURCE_VALID).ne(0)
-            & faults.eq(0)
-            # Both R06 ordinals share the ordinal-zero frozen before-image.
-            # The payment is recorded only after the complete Reward cycle.
-            & phase.eq(epoch_v1.PHASE_OUTCOME_SETTLED)
-            & settlement_step.ge(0)
-            & payment_step.eq(-1)
-        )
-        self._milestone.add_reward(
-            ordinal, primitive, payment, eligible, finite,
-            self._milestone_configured_income_scale[ordinal],
-        )
-        return torch.where(
-            eligible & finite,
-            torch.where(finite, payment, torch.zeros_like(payment)),
-            torch.zeros_like(payment),
+        return _FrozenR06RewardCycle(
+            valid=valid,
+            fact=fact,
+            faults=faults,
+            phase=phase,
+            settlement_step=settlement_step,
+            payment_step=payment_step,
         )
 
     def _r07(self) -> torch.Tensor:
@@ -487,23 +560,107 @@ class LeanActionEpochRewardGraph:
             torch.zeros_like(reward),
         )
 
+    def paddle_motion_prior_cycle_value(
+        self,
+        env: object,
+        *,
+        ordinal: int,
+        command_lookup: object,
+        tracking_errors: object,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+        """Return one column from the same-cycle four-channel paddle pack."""
+
+        carry_txn._require_leaf_mutable(self)
+        first = PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+        if (
+            type(ordinal) is not int
+            or not first <= ordinal < REGULARIZATION_FIRST_ORDINAL
+            or not self._dense_cycle_open
+            or ordinal != self._next_dense_ordinal
+        ):
+            raise LeanRewardCycleError("paddle pack requested outside its dense row")
+        cached = self._paddle_reward_cycle_cache
+        playback_active = None
+        telemetry_errors = None
+        if cached is None:
+            if ordinal != first:
+                raise LeanRewardCycleError("paddle pack first row was skipped")
+            cmd = command_lookup(
+                env, PADDLE_MOTION_PRIOR_SPECS[0].command_name
+            )
+            errors = tracking_errors(cmd)
+            # Keep the adopted four scalar kernel expressions bitwise exact on
+            # CUDA while sharing the materially larger teacher/error decode.
+            value = tuple(
+                paddle_prior.coarse_precision_kernel(
+                    errors[:, column],
+                    precision_std=spec.std,
+                    coarse_std=spec.coarse_std,
+                )
+                for column, spec in enumerate(PADDLE_MOTION_PRIOR_SPECS)
+            )
+            try:
+                motion = cmd._motion()
+                accessor = getattr(
+                    motion, "action_ball_full_mdp_playback_active_mask", None
+                )
+                if not callable(accessor):
+                    raise RuntimeError(
+                        "Motion lacks its public FullMDP playback-active accessor"
+                    )
+                candidate = accessor()
+                if (
+                    type(candidate) is not torch.Tensor
+                    or tuple(candidate.shape) != (self.num_envs,)
+                    or candidate.device != self.device
+                    or candidate.dtype is not torch.bool
+                    or not candidate.is_contiguous()
+                ):
+                    raise RuntimeError("Motion playback telemetry ABI differs")
+                if (
+                    type(errors) is not torch.Tensor
+                    or tuple(errors.shape)
+                    != (self.num_envs, len(PADDLE_MOTION_PRIOR_SPECS))
+                    or errors.device != self.device
+                    or errors.dtype is not torch.float32
+                    or not errors.is_contiguous()
+                ):
+                    raise RuntimeError("Motion paddle-error telemetry ABI differs")
+                playback_active, telemetry_errors = candidate, errors
+            except Exception:
+                # This denominator is diagnostic only.  Reward remains the
+                # exact measured-paddle pack even when telemetry is absent.
+                playback_active = None
+                telemetry_errors = None
+            cached = value
+            self._paddle_reward_cycle_cache = cached
+        column = ordinal - first
+        return (
+            cached[column],
+            playback_active,
+            telemetry_errors,
+        )
+
     def pay(self, ordinal: int, *, scale: float | None = None) -> torch.Tensor:
         carry_txn._require_leaf_mutable(self)
         """Decode and pay the next manager ordinal exactly once."""
 
         if self._poisoned:
             self._invalidate_r03_cycle_cache()
+            self._invalidate_r06_cycle_cache()
             raise LeanRewardCycleError(
                 "lean Reward graph is poisoned: " + str(self._poison_reason)
             )
         if type(ordinal) is not int or ordinal != self._next_ordinal:
             self._invalidate_r03_cycle_cache()
+            self._invalidate_r06_cycle_cache()
             raise LeanRewardCycleError(
                 f"Reward consumer order differs: expected {self._next_ordinal}, got {ordinal!r}"
             )
         try:
             if ordinal == 0:
                 self._invalidate_r03_cycle_cache()
+                self._invalidate_r06_cycle_cache()
                 self._clear_paddle_playback_cycle_cache()
                 if self._cycle_epoch is not None or self._dense_cycle_open:
                     raise LeanRewardCycleError("Reward cycle was already open")
@@ -541,6 +698,8 @@ class LeanActionEpochRewardGraph:
             self.epoch_owner.pay_reward(ordinal)
             if ordinal == len(R03_NAMES) - 1:
                 self._invalidate_r03_cycle_cache()
+            if ordinal == 12:
+                self._invalidate_r06_cycle_cache()
         except BaseException as exc:
             self._poison(
                 "ordinal " + str(ordinal) + " failed: " + type(exc).__name__
@@ -552,6 +711,7 @@ class LeanActionEpochRewardGraph:
             self._next_ordinal = 0
             self._cycle_epoch = None
             self._invalidate_r03_cycle_cache()
+            self._invalidate_r06_cycle_cache()
         return value
 
     def record_common_dense(
@@ -595,10 +755,6 @@ class LeanActionEpochRewardGraph:
                 < REGULARIZATION_FIRST_ORDINAL
             ):
                 if ordinal == PADDLE_MOTION_PRIOR_FIRST_ORDINAL:
-                    if self._paddle_playback_cycle_resolved:
-                        raise LeanRewardCycleError(
-                            "paddle playback telemetry resolved twice"
-                        )
                     if paddle_playback_active is not None and (
                         type(paddle_playback_active) is not torch.Tensor
                         or tuple(paddle_playback_active.shape)
@@ -631,17 +787,12 @@ class LeanActionEpochRewardGraph:
                         )
                     self._paddle_playback_cycle_mask = paddle_playback_active
                     self._paddle_error_cycle_matrix = paddle_error_components
-                    self._paddle_playback_cycle_resolved = True
                 elif (
                     paddle_playback_active is not None
                     or paddle_error_components is not None
                 ):
                     raise LeanRewardCycleError(
                         "paddle telemetry must be resolved once"
-                    )
-                if not self._paddle_playback_cycle_resolved:
-                    raise LeanRewardCycleError(
-                        "paddle playback telemetry cycle was not resolved"
                     )
             elif (
                 paddle_playback_active is not None
@@ -679,6 +830,8 @@ class LeanActionEpochRewardGraph:
                             :, ordinal - PADDLE_MOTION_PRIOR_FIRST_ORDINAL
                         ],
                     )
+                if ordinal + 1 == REGULARIZATION_FIRST_ORDINAL:
+                    self._clear_paddle_playback_cycle_cache()
         except BaseException as exc:
             self._poison(
                 "common dense ordinal " + str(ordinal) + " failed: "
@@ -698,6 +851,7 @@ class LeanActionEpochRewardGraph:
         """Close one completed cycle with RewardManager's exact output tensor."""
 
         self._invalidate_r03_cycle_cache()
+        self._invalidate_r06_cycle_cache()
         if self._poisoned:
             raise LeanRewardCycleError(
                 "lean Reward graph is poisoned: " + str(self._poison_reason)
@@ -727,6 +881,7 @@ class LeanActionEpochRewardGraph:
     def _require_checkpoint_boundary(self, *, dormant: bool) -> None:
         if self._poisoned:
             self._invalidate_r03_cycle_cache()
+            self._invalidate_r06_cycle_cache()
             raise LeanRewardCycleError("poisoned Reward graph cannot checkpoint")
         if (
             self._cycle_epoch is not None
@@ -734,11 +889,14 @@ class LeanActionEpochRewardGraph:
             or self._dense_cycle_open
             or self._next_dense_ordinal != LIFECYCLE_PAYMENT_COUNT
             or self._completed_cycle_count != self._actual_closed_cycle_count
+            or self._r03_cycle_cache is not None
+            or self._r06_cycle_cache is not None
+            or self._paddle_reward_cycle_cache is not None
             or self._paddle_playback_cycle_mask is not None
             or self._paddle_error_cycle_matrix is not None
-            or self._paddle_playback_cycle_resolved
         ):
             self._invalidate_r03_cycle_cache()
+            self._invalidate_r06_cycle_cache()
             raise LeanRewardCycleError("Reward checkpoint boundary is not closed")
         if dormant and self._completed_cycle_count != 0:
             raise LeanRewardCycleError("Reward restore target is not dormant")
@@ -811,40 +969,68 @@ class LeanActionEpochRewardGraph:
 ENV_REWARD_DISPATCHER_NAME = "_action_ball_full_mdp_lean_reward_term"
 
 
-def _env_reward_dispatcher(env: object):
-    """Resolve the env class's own bound Reward dispatcher, without graph access."""
+def seal_env_reward_hot_path(
+    env: object, graph: LeanActionEpochRewardGraph
+) -> _SealedEnvRewardHotPath:
+    """Resolve immutable Reward callables once at the construction boundary."""
 
+    if type(graph) is not LeanActionEpochRewardGraph:
+        raise LeanRewardConstructionHold("sealed Reward graph type differs")
     env_type = type(env)
     descriptor = vars(env_type).get(ENV_REWARD_DISPATCHER_NAME)
     instance_state = getattr(env, "__dict__", None)
     if (
         type(instance_state) is not dict
         or ENV_REWARD_DISPATCHER_NAME in instance_state
+        or ENV_REWARD_HOT_PATH_ATTR in instance_state
         or type(descriptor) is not types.FunctionType
     ):
         raise LeanRewardConstructionHold(
-            "env has no exact class-owned lean Reward dispatcher"
+            "env has no unique class-owned lean Reward dispatcher"
         )
-    bound = descriptor.__get__(env, env_type)
-    live = getattr(env, ENV_REWARD_DISPATCHER_NAME, None)
-    if (
-        not callable(bound)
-        or getattr(bound, "__self__", None) is not env
-        or getattr(bound, "__func__", None) is not descriptor
-        or not callable(live)
-        or getattr(live, "__self__", None) is not env
-        or getattr(live, "__func__", None) is not descriptor
-    ):
-        raise LeanRewardConstructionHold(
-            "env lean Reward dispatcher binding differs from its class descriptor"
-        )
-    return bound
+    evaluator_module = importlib.import_module(
+        "whole_body_tracking.tasks.tracking.mdp.rewards"
+    )
+    common_evaluators = tuple(
+        getattr(evaluator_module, spec.evaluator_name)
+        for spec in COMMON_DENSE_SPECS
+    )
+    paddle_evaluator_module = importlib.import_module(
+        "whole_body_tracking.tasks.tracking.mdp.hope_rewards"
+    )
+    paddle_command_lookup = getattr(paddle_evaluator_module, "_cmd")
+    paddle_tracking_errors = getattr(
+        paddle_evaluator_module, "motion_racket_tracking_errors_now"
+    )
+    if not callable(paddle_command_lookup) or not callable(paddle_tracking_errors):
+        raise LeanRewardConstructionHold("paddle evaluator callables differ")
+    return _SealedEnvRewardHotPath(
+        graph=graph,
+        graph_type=LeanActionEpochRewardGraph,
+        dispatcher=descriptor,
+        common_evaluators=common_evaluators,
+        paddle_command_lookup=paddle_command_lookup,
+        paddle_tracking_errors=paddle_tracking_errors,
+        lifecycle_payment_count=LIFECYCLE_PAYMENT_COUNT,
+        paddle_first_ordinal=PADDLE_MOTION_PRIOR_FIRST_ORDINAL,
+        regularization_first_ordinal=REGULARIZATION_FIRST_ORDINAL,
+    )
+
+
+def _env_reward_hot_path(env: object) -> _SealedEnvRewardHotPath:
+    return env.__dict__[ENV_REWARD_HOT_PATH_ATTR]
+
+
+def _env_reward_dispatcher(env: object):
+    """Return the construction-bound exact unbound env dispatcher."""
+
+    return _env_reward_hot_path(env).dispatcher
 
 
 def _dispatch_reward_term(
     env: object, *, ordinal: int, scale: float | None
 ) -> torch.Tensor:
-    return _env_reward_dispatcher(env)(ordinal=ordinal, scale=scale)
+    return _env_reward_dispatcher(env)(env, ordinal=ordinal, scale=scale)
 
 
 def common_dense_reward(
@@ -886,22 +1072,17 @@ def common_dense_reward(
             raise LeanRewardConstructionHold("common dense held-wrist scope differs")
     else:
         raise LeanRewardConstructionHold("common dense body scope is unknown")
-    try:
-        evaluator_module = importlib.import_module(
-            "whole_body_tracking.tasks.tracking.mdp.rewards"
-        )
-        evaluator = getattr(evaluator_module, spec.evaluator_name)
-    except Exception as exc:
-        raise LeanRewardConstructionHold(
-            "common dense Motion evaluator is unavailable: " + spec.manager_name
-        ) from exc
+    binding = _env_reward_hot_path(env)
+    evaluator = binding.common_evaluators[
+        ordinal - LIFECYCLE_PAYMENT_COUNT
+    ]
     evaluator_kwargs = {"command_name": command_name, "std": spec.std}
     if spec.coarse_std is not None:
         evaluator_kwargs["coarse_std"] = spec.coarse_std
     if body_names is not None:
         evaluator_kwargs["body_names"] = body_names
     value = evaluator(env, **evaluator_kwargs)
-    return _env_reward_dispatcher(env)(ordinal=ordinal, value=value)
+    return binding.dispatcher(env, ordinal=ordinal, value=value)
 
 
 def paddle_motion_prior_reward(
@@ -939,64 +1120,17 @@ def paddle_motion_prior_reward(
         raise LeanRewardConstructionHold(
             "paddle motion-prior term parameters differ"
         )
-    try:
-        evaluator_module = importlib.import_module(
-            "whole_body_tracking.tasks.tracking.mdp.hope_rewards"
+    binding = _env_reward_hot_path(env)
+    value, playback_active, paddle_error_components = (
+        binding.graph.paddle_motion_prior_cycle_value(
+            env,
+            ordinal=ordinal,
+            command_lookup=binding.paddle_command_lookup,
+            tracking_errors=binding.paddle_tracking_errors,
         )
-        evaluator = getattr(evaluator_module, spec.evaluator_name)
-    except Exception as exc:
-        raise LeanRewardConstructionHold(
-            "paddle motion-prior evaluator is unavailable: "
-            + spec.manager_name
-        ) from exc
-    value = evaluator(
-        env,
-        command_name=command_name,
-        std=spec.std,
-        coarse_std=spec.coarse_std,
-        scale_in_strike_window=float(spec.scale_in_strike_window),
     )
-    playback_active = None
-    paddle_error_components = None
-    if ordinal == PADDLE_MOTION_PRIOR_FIRST_ORDINAL:
-        try:
-            cmd = evaluator_module._cmd(env, command_name)
-            motion = cmd._motion()
-            playback_accessor = getattr(
-                motion, "action_ball_full_mdp_playback_active_mask", None
-            )
-            if not callable(playback_accessor):
-                raise RuntimeError(
-                    "Motion lacks its public FullMDP playback-active accessor"
-                )
-            candidate = playback_accessor()
-            if (
-                type(candidate) is not torch.Tensor
-                or tuple(candidate.shape) != tuple(value.shape)
-                or candidate.device != value.device
-                or candidate.dtype is not torch.bool
-                or not candidate.is_contiguous()
-            ):
-                raise RuntimeError("Motion playback telemetry ABI differs")
-            playback_active = candidate
-            errors = evaluator_module.motion_racket_tracking_errors_now(cmd)
-            if (
-                type(errors) is not torch.Tensor
-                or tuple(errors.shape)
-                != (value.shape[0], len(PADDLE_MOTION_PRIOR_SPECS))
-                or errors.device != value.device
-                or errors.dtype is not torch.float32
-                or not errors.is_contiguous()
-            ):
-                raise RuntimeError("Motion paddle-error telemetry ABI differs")
-            paddle_error_components = errors
-        except Exception:
-            # This denominator is diagnostic only.  Missing or malformed
-            # telemetry is recorded explicitly by the graph and can never
-            # poison a valid reward cycle or become a safety/admission gate.
-            playback_active = None
-            paddle_error_components = None
-    return _env_reward_dispatcher(env)(
+    return binding.dispatcher(
+        env,
         ordinal=ordinal,
         value=value,
         paddle_playback_active=playback_active,
@@ -1098,7 +1232,7 @@ def regularization_reward(env: object, *, ordinal: int) -> torch.Tensor:
         raise LeanRewardConstructionHold(
             "regularization evaluator tensor ABI differs: " + spec.manager_name
         )
-    return _env_reward_dispatcher(env)(ordinal=ordinal, value=value)
+    return _env_reward_dispatcher(env)(env, ordinal=ordinal, value=value)
 
 
 def racket_position(

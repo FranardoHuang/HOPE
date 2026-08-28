@@ -68,6 +68,40 @@ def test_vectorized_mu_kernel_is_the_same_four_channel_kernel_as_isaac():
     torch.testing.assert_close(vectorized, scalar_columns, rtol=0.0, atol=0.0)
 
 
+def test_vectorized_kernel_preserves_scalar_nonfinite_results_exactly():
+    errors = torch.tensor(
+        [
+            [float("nan"), 0.50, float("inf"), math.radians(10.0)],
+            [0.075, float("-inf"), math.radians(15.0), float("nan")],
+        ],
+        dtype=torch.float64,
+    )
+    precision = torch.tensor(
+        [spec.std for spec in C.PADDLE_MOTION_PRIOR_SPECS], dtype=torch.float64
+    )
+    coarse = torch.tensor(
+        [spec.coarse_std for spec in C.PADDLE_MOTION_PRIOR_SPECS],
+        dtype=torch.float64,
+    )
+    vectorized = P.kernels(
+        errors, precision_stds=precision, coarse_stds=coarse
+    )
+    scalar_columns = torch.stack(
+        [
+            P.coarse_precision_kernel(
+                errors[:, index],
+                precision_std=spec.std,
+                coarse_std=spec.coarse_std,
+            )
+            for index, spec in enumerate(C.PADDLE_MOTION_PRIOR_SPECS)
+        ],
+        dim=1,
+    )
+    torch.testing.assert_close(
+        vectorized, scalar_columns, rtol=0.0, atol=0.0, equal_nan=True
+    )
+
+
 def test_tracking_errors_are_physical_units_and_preserve_nonfinite_evidence():
     actual_position = torch.tensor(
         [[3.0, 4.0, 0.0], [float("nan"), 0.0, 0.0]], dtype=torch.float32
