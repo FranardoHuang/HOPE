@@ -22,6 +22,8 @@
 - D05 attempted-prefix实现已通过mixed round1/2/3、全拒绝、numeric/structural fault与previous-cell两态；
   incremental/dense完整projection和downstream prepared record逐tensor bitwise一致。隔离相关host suites
   全绿；最多3个`nonzero`同步的GPU净收益仍待Pod profiler-off验证，未把理论numeric-row减少写成速度PASS。
+- 新profile首试在step0前因诊断器shadow slotted Physical leaf而fail-closed；production未执行。已删除3个非法
+  leaf wrapper、保留D05总段与其他合法分段，失败root只读且不计速度/学习证据。
 - V9 Mu长期证据口径自查纠正：先前`7,139/517,214`是generic `racket_contact_rows`，不是课程合同的
   selected contact。首次selected在update473，最佳rate 50窗仅`36/6,926=.520%`；当前累计=
   `188/538,008 launch=.0349%`，landing=`0/188 selected contact`，raw contact中`96.15%`是edge；

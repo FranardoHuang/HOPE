@@ -83,6 +83,11 @@ cell两态，完整projection及下游prepared record逐tensor bitwise相等。�
 `297 passed, 11 skipped`；GPU净墙钟仍未测。
 结构合同显式只允许这一处最多3次逐轮`nonzero`，不允许compaction扩散到cadence/transaction。
 
+Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝试给带`__slots__`、无instance
+`__dict__`的`PhysicalQuestionNumericCore`安装3个leaf wrapper。production/profile-off不受影响；修复是删除
+非法wrapper并继续由既有`d05_question_compose`总段归因，而不是放宽对象身份或改class。失败namespace只读，
+不计速度或学习证据。
+
 采用/延后/拒绝如下：
 
 - **采用：**真实A3P0807 root绑定；immutable teacher与robust physical birth分离；artifact作为hold/actor

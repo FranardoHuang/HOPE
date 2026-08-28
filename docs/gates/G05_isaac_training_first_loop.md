@@ -21,6 +21,8 @@ G05仍`Partial`。该窗证明当前Isaac iteration速度不可接受，不证�
 已解决row的后续数值构造，保持三轮、18+1 RNG、reason/counter/safety、100-step RK4与最终cell不变。
 该切片现已在host以dense reference关闭完整projection与prepared-record逐tensor parity；GPU profiler-off
 净墙钟仍未测，所以G05不把算法工作量上限当速度PASS。
+首个Pod profile在step0前因profiler非法shadow slotted Physical leaf而fail-closed；删除该诊断wrapper后
+重新验证，不改变production路径，也不把失败namespace纳入Gate证据。
 
 active V9最新只读负窗（`observed_at=2026-08-28T17:49Z`）中，Isaac累计selected contact仍为
 `0/144,824 launch`，recent50 episode mean=`141.58 tick`，mimic除position近似持平外均恶化；Mu同窗又

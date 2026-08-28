@@ -110,7 +110,8 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
 5. [ ] D05真实未决row逐轮压缩已实现并通过dense-reference projection与downstream prepared-record逐tensor
    bitwise parity；3轮/18+1 RNG、candidate IDs、reason/counter/safety、100-step RK4与最终cell均保持。当前
    实测round1/2/3消费者=`3,584/290/22`；Pod profiler-off净墙钟尚待测，最多3个`nonzero`同步若抵消收益就
-   撤回，不能用减少的numeric rows代签加速。
+   撤回，不能用减少的numeric rows代签加速。首个profile尝试在step0前因诊断器试图shadow slotted Physical
+   leaf而fail-closed；已删除这3个非法leaf wrapper，保留D05总段与可合法绑定分段，失败root只读。
 6. [ ] 两端replacement均finite且无灾难性启动分布后，冻结最终clean commit和fresh namespace，再按exact
    PID/startticks/PGID/cwd/source/namespace停止V9并发射双长期run。后续只按预注册未来窗判断自然课程交接。
 7. [ ] replacement连续ACK后做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的

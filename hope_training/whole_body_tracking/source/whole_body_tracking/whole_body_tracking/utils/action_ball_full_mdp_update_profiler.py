@@ -57,9 +57,6 @@ _SEGMENT_NAMES = (
     "d05_total",
     "d05_prepare",
     "d05_question_compose",
-    "d05_rk4_horizon_discovery",
-    "d05_physical_horizon_projection",
-    "d05_rk4_exact_finalize",
     "d05_preview",
     "d05_build_transaction",
     "d05_epoch_settle",
@@ -332,7 +329,6 @@ class FullMdpUpdateProfiler:
                 raise RuntimeError("FullMDP profiler Physical/R06 identities differ")
             question_compose = getattr(r05, "_internal_question_compose", None)
             question_bundle = getattr(question_compose, "__self__", None)
-            question_core = getattr(question_bundle, "_physical_owner", None)
             compose_function = getattr(question_compose, "__func__", None)
             if (
                 r05 is None
@@ -348,15 +344,6 @@ class FullMdpUpdateProfiler:
                 or compose_function
                 is not vars(type(question_bundle)).get(
                     "compose_r05_candidate_bank_inside_prepare"
-                )
-                or question_core is None
-                or any(
-                    not _is_exact_bound_method(question_core, method)
-                    for method in (
-                        "issue_horizon_for_test",
-                        "project_horizon_for_test",
-                        "finalize_exact_ticks_for_test",
-                    )
                 )
             ):
                 raise RuntimeError("FullMDP profiler D05 identities differ")
@@ -423,24 +410,6 @@ class FullMdpUpdateProfiler:
             ),
             (r05, "_prepare_many_impl", "d05_prepare", None),
             (r05, "_internal_question_compose", "d05_question_compose", None),
-            (
-                question_core,
-                "issue_horizon_for_test",
-                "d05_rk4_horizon_discovery",
-                None,
-            ),
-            (
-                question_core,
-                "project_horizon_for_test",
-                "d05_physical_horizon_projection",
-                None,
-            ),
-            (
-                question_core,
-                "finalize_exact_ticks_for_test",
-                "d05_rk4_exact_finalize",
-                None,
-            ),
             (r05, "_preview_impl", "d05_preview", None),
             (r05, "_build_row_transaction", "d05_build_transaction", None),
             (

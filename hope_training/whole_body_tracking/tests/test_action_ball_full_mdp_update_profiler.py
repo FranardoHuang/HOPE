@@ -155,6 +155,8 @@ class _Motion:
 
 
 class _PhysicalQuestionCore:
+    __slots__ = ()
+
     def issue_horizon_for_test(self, batch):
         return batch
 
@@ -356,10 +358,6 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     runtime._physical_ball.publish_action_epoch_post_physics()
     runtime._r06_landing_outcome.close_action_ball_full_mdp_epoch_reward_rows()
     runtime.epoch_owner._milestone_after_business_write("owner", "method")
-    core = runtime._r05_runtime._question_bundle._physical_owner
-    receipt = core.issue_horizon_for_test("batch")
-    core.project_horizon_for_test(receipt)
-    core.finalize_exact_ticks_for_test(receipt, ticks=1)
     start, end = runtime.epoch_owner.prepare_drain()
     runtime.epoch_owner.materialize_drain(start=start, end=end)
     runtime.epoch_owner.acknowledge_drain(start=start, end=end)
@@ -409,9 +407,6 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
         "physical_active_flight_capture",
         "r06_reward_close_impl",
         "epoch_milestone_write",
-        "d05_rk4_horizon_discovery",
-        "d05_physical_horizon_projection",
-        "d05_rk4_exact_finalize",
         "ppo_drain_prepare",
         "ppo_drain_materialize_d2h_decode",
         "ppo_drain_ack",
@@ -437,7 +432,6 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     )
     assert "_milestone_after_business_write" not in runtime.epoch_owner.__dict__
     assert "materialize_drain" not in runtime.epoch_owner.__dict__
-    assert "issue_horizon_for_test" not in core.__dict__
     assert "_full_mdp_profile_runtime_call" not in (
         env._full_mdp_runtime_owner.__dict__
     )
