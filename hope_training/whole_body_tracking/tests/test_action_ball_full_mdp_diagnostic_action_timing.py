@@ -156,7 +156,7 @@ def _reference_cadence(
         episode_tick=torch.full_like(lane, 2),
         reveal_tick=torch.full_like(lane, 2),
         deadline_tick=torch.full_like(lane, 4),
-        next_reveal_tick=torch.full_like(lane, 48),
+        next_reveal_tick=torch.full_like(lane, 295),
         swing_generation=lane + 1,
         ready_at_reveal=torch.ones(num_envs, dtype=torch.bool, device=device),
         action_slot=action_slot,
