@@ -433,50 +433,16 @@ def _ceil_eps_ticks(duration_s: float, *, policy_step_s: float) -> int:
 
 
 def diagnostic_catalog_max_task_close_ticks() -> int:
-    """Return the pinned v4 worst-case reveal-to-task-close duration.
+    """Project the sole portable cadence owner's active-action maximum."""
 
-    This cold helper accepts no path, policy step, action slot, or caller
-    timing.  The worst case uses each action's catalog arrival centre and
-    minimum admitted teacher rate.  It is therefore a code-owned lower bound
-    for the recurring diagnostic cadence, not a runtime task verdict.
-    """
-
-    rows = tuple(_load_pinned_catalog().manifest.actions)
-    if not rows:
+    try:
+        table = _portable_catalog.load_portable_action_center_table()
+        cadence = _portable_catalog.derive_portable_fresh_cadence(table)
+    except Exception as exc:
         raise DiagnosticActionTimingError(
-            "pinned diagnostic action catalog is empty"
-        )
-    _strict_time_to_contact_ticks(
-        rows, policy_step_s=DIAGNOSTIC_POLICY_STEP_S
-    )
-    close_ticks = []
-    for slot, action in enumerate(rows):
-        suffix_s = (
-            action.reference_t_cycle_s - action.reference_t_hit_s
-        ) / action.teacher_rate_min
-        duration_s = action.ball_profile.time_to_contact_center_s + suffix_s
-        if (
-            not math.isfinite(suffix_s)
-            or suffix_s <= 0.0
-            or not math.isfinite(duration_s)
-            or duration_s <= 0.0
-        ):
-            raise DiagnosticActionTimingError(
-                "pinned diagnostic task-close timing is invalid at slot "
-                f"{slot}"
-            )
-        close_ticks.append(
-            _ceil_eps_ticks(
-                float(duration_s),
-                policy_step_s=DIAGNOSTIC_POLICY_STEP_S,
-            )
-        )
-    maximum = max(close_ticks)
-    if maximum != 214:
-        raise DiagnosticActionTimingError(
-            "pinned diagnostic catalog task-close maximum differs"
-        )
-    return maximum
+            "portable active-action cadence is absent or changed"
+        ) from exc
+    return cadence.maximum_task_close_ticks
 
 
 def construct_action_ball_full_mdp_diagnostic_action_timing_static_table(

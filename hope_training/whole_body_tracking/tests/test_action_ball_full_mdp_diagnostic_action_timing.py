@@ -342,7 +342,7 @@ def test_static_timing_catalog_and_production_hold_remain_explicit():
         profile_mod.construct_action_ball_full_mdp_diagnostic_action_timing_static_table
     )
     assert tuple(signature.parameters) == ("racket_owner",)
-    assert profile_mod.diagnostic_catalog_max_task_close_ticks() == 214
+    assert profile_mod.diagnostic_catalog_max_task_close_ticks() == 106
     with pytest.raises(
         profile_mod.DiagnosticActionTimingProductionHold,
         match="formally admitted",

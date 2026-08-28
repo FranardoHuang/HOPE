@@ -131,7 +131,7 @@ def test_code_owned_diagnostic_profile_binds_exact_n2_motion_parent() -> None:
         "frozen_at_step": 0,
         "sequence_origin_step": 0,
         "first_reveal_step": 295,
-        "cadence_steps": 293,
+        "cadence_steps": 185,
         "deadline_offset_steps": 2,
         "upcoming_action_slot": 0,
         "upcoming_action_uid": command._action_ball_action_uids[0],
@@ -462,7 +462,7 @@ def test_diagnostic_parent_accepts_every_positive_n_and_production_stays_hold(
     assert tuple(command.clip_id.shape) == (num_envs,)
     with pytest.raises(
         cadence.MotionCadenceProductionSourceHold,
-        match="lacks owner-issued C01 four-shot and C02",
+        match="lacks owner-issued C01 six-shot and C02",
     ):
         cadence.construct_production_motion_parent_schedule_authority()
 

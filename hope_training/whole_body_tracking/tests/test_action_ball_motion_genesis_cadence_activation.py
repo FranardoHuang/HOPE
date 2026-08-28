@@ -117,12 +117,12 @@ def test_catalog_broker_identity_drift_rejects_before_schedule_bind() -> None:
     ):
         parent.bind_exact_parent_schedule(command, receipt)
     assert command._action_ball_continuous_schedule_projection is None
-    assert parent._schedule.cadence_steps == 293
+    assert parent._schedule.cadence_steps == 185
     assert (
         parent._schedule.cadence_steps
-        == timing.diagnostic_catalog_max_task_close_ticks()
-        + cadence._c02.RECOVERY_END_OFFSET_TICKS
-        + 2
+        == cadence._portable_catalog.derive_portable_fresh_cadence(
+            cadence._portable_catalog.load_portable_action_center_table()
+        ).cadence_ticks
     )
 
 
@@ -343,7 +343,7 @@ def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -
         command._advance_action_ball_continuous_motion_cadence()
 
     assert command._action_ball_continuous_current_deadline_step.tolist() == [297, 297]
-    assert command._action_ball_continuous_next_reveal_step.tolist() == [588, 588]
+    assert command._action_ball_continuous_next_reveal_step.tolist() == [480, 480]
     command._action_ball_continuous_motion_active.fill_(True)
     command._action_ball_continuous_current_policy_opportunity.fill_(True)
     command._action_ball_continuous_canonical_task_valid.fill_(True)
@@ -386,7 +386,7 @@ def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -
     )
 
 
-def test_fresh_1500_tick_trace_has_exactly_four_due_opportunities() -> None:
+def test_fresh_1500_tick_trace_has_exactly_six_due_opportunities() -> None:
     command, _cadence_owner, device_owner, epoch_owner = (
         _fresh_command_and_owners(torch.device("cpu"))
     )
@@ -403,7 +403,7 @@ def test_fresh_1500_tick_trace_has_exactly_four_due_opportunities() -> None:
             assert torch.all(command._action_ball_continuous_reveal_due)
             reveal_ticks.append(common_step)
         token = command.issue_current_r05_cadence_if_due()
-        if common_step in (1174, 1467):
+        if common_step in (1220, 1405):
             observation_token = (
                 command.action_ball_continuous_motion_observation_projection()
             )
@@ -417,21 +417,21 @@ def test_fresh_1500_tick_trace_has_exactly_four_due_opportunities() -> None:
             )
         if token is not None:
             issued_task_ticks.append(common_step)
-        if common_step == 1467:
+        if common_step == 1405:
             assert not torch.any(command._action_ball_continuous_reveal_due)
             assert token is None
             assert command._action_ball_continuous_scheduled_ordinal.tolist() == [
-                3,
-                3,
+                5,
+                5,
             ]
 
-    assert reveal_ticks == [295, 588, 881, 1174]
+    assert reveal_ticks == [295, 480, 665, 850, 1035, 1220]
     assert issued_task_ticks == reveal_ticks
-    assert command._action_ball_continuous_scheduled_ordinal.tolist() == [3, 3]
-    assert command._action_ball_swing_generation.tolist() == [3, 3]
+    assert command._action_ball_continuous_scheduled_ordinal.tolist() == [5, 5]
+    assert command._action_ball_swing_generation.tolist() == [5, 5]
     assert exhausted_observation_clocks == {
-        1174: [-1.0, -1.0],
-        1467: [-1.0, -1.0],
+        1220: [-1.0, -1.0],
+        1405: [-1.0, -1.0],
     }
     assert command._action_ball_continuous_next_reveal_step.tolist() == [
         1500,

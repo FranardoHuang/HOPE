@@ -1445,7 +1445,10 @@ def test_diagnostic_bundle_has_no_caller_numeric_seam(monkeypatch):
         if name == "isaaclab.managers":
             return types.SimpleNamespace(RewardTermCfg=RewardTermCfg)
         if name == "whole_body_tracking.robots.agibot_a3":
-            return types.SimpleNamespace(A3_TRACKED_BODIES=tracked)
+            return types.SimpleNamespace(
+                A3_TRACKED_BODIES=tracked,
+                A3_UPPER_TRACKED=tracked[1:],
+            )
         raise AssertionError("unexpected diagnostic bundle import: " + name)
 
     monkeypatch.setattr(R.importlib, "import_module", import_focused_dependency)

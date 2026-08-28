@@ -166,6 +166,7 @@ class PortableFreshCadence:
     """
 
     first_reveal_tick: int
+    maximum_task_close_ticks: int
     cadence_ticks: int
     reference_due_ticks: tuple[int, ...]
     episode_horizon_ticks: int
@@ -212,6 +213,7 @@ def derive_portable_fresh_cadence(
         raise ValueError("portable fresh cadence differs from the frozen schedule")
     return PortableFreshCadence(
         first_reveal_tick=FRESH_FIRST_REVEAL_TICK,
+        maximum_task_close_ticks=maximum_close,
         cadence_ticks=cadence,
         reference_due_ticks=due_ticks,
         episode_horizon_ticks=FRESH_EPISODE_HORIZON_TICKS,

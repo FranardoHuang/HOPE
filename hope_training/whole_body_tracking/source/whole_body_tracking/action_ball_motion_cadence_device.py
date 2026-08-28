@@ -71,25 +71,30 @@ _DIAGNOSTIC_SEQUENCE_ORIGIN_STEP = 0
 _DIAGNOSTIC_FIRST_REVEAL_STEP = _portable_catalog.FRESH_FIRST_REVEAL_TICK
 _DIAGNOSTIC_UPCOMING_ACTION_SLOT = 0
 _DIAGNOSTIC_DEADLINE_OFFSET_STEPS = 2
-# The slowest code-pinned action must finish its complete question-owned
-# Motion suffix before C02's final recovery-eligible tick, followed by one
-# complete hidden tick.  The timing helper re-derives the catalog maximum from
-# the pinned manifest and fixed policy step; no caller numeric or copied magic
-# value can shorten the schedule.
+# The active action must finish its complete question-owned Motion suffix
+# before C02's final recovery-eligible tick, followed by one complete hidden
+# tick. The portable cadence is the one cold schedule owner shared by both
+# backends; Motion must not reconstruct a second timing formula.
 
 
 def _diagnostic_cadence_steps() -> int:
-    """Derive the recurring cadence from the pinned timing owner once."""
+    """Consume the one portable recurring cadence without re-deriving it."""
 
     try:
-        import action_ball_full_mdp_diagnostic_action_timing as timing
-    except ImportError:  # Installed package import.
-        from . import action_ball_full_mdp_diagnostic_action_timing as timing
-    return (
-        timing.diagnostic_catalog_max_task_close_ticks()
-        + _c02.RECOVERY_END_OFFSET_TICKS
-        + 2
-    )
+        table = _portable_catalog.load_portable_action_center_table()
+        cadence = _portable_catalog.derive_portable_fresh_cadence(table)
+    except Exception as exc:
+        raise MotionCadenceAuthorityError(
+            "portable active-action cadence is absent or changed"
+        ) from exc
+    if (
+        _c02.RECOVERY_END_OFFSET_TICKS
+        != _portable_catalog.FRESH_RECOVERY_END_OFFSET_TICKS
+    ):
+        raise MotionCadenceAuthorityError(
+            "portable cadence and C02 recovery horizon differ"
+        )
+    return cadence.cadence_ticks
 _DIAGNOSTIC_SCHEDULED_SHOT_COUNT = (
     _portable_catalog.FRESH_REFERENCE_DUE_COUNT
 )
@@ -674,7 +679,7 @@ def construct_production_motion_parent_schedule_authority() -> NoReturn:
     """Keep production blocked until real C01 and C02 instances exist."""
 
     raise MotionCadenceProductionSourceHold(
-        "production Motion cadence lacks owner-issued C01 four-shot and C02 "
+        "production Motion cadence lacks owner-issued C01 six-shot and C02 "
         "recovery-sequence authority instances; source pins and a profile "
         "self-hash are diagnostic integrity only"
     )
