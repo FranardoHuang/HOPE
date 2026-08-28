@@ -1021,9 +1021,58 @@ cache=`3.164 MiB`、该段peak增量=`7.321 MiB`。Pod逐文件隔离矩阵=`201
 test-module alias/import-order污染。固定`30×4` discovery随后融合为一个Triton launch；actual `4,608`行、
 边界/非有限/重复identity probe及production record都逐bit相等，reference/fused/production=
 `49.591/.401/.416 ms`，约`124×` leaf speedup，fused peak增量=`3.551 MiB`，最终Pod隔离矩阵=
-`203 passed,5 skipped`。保持H48、三轮、solver迭代、RNG、candidate identity、reason/fault/counter/safety和
-CPU reference；下一步直接做完整D05 profile和profiler-off rate，不新增成功/安全Gate，也不用leaf倍数代签
-iteration倍数。
+`203 passed,5 skipped`。跨文件失败的首个polluter是runtime-factory测试在collection阶段保留整套替代
+namespace；改为teardown可恢复的单case subject绑定后，六文件同进程Pod组合门仍为
+`203 passed,5 skipped`，production identity/authority Gate没有放宽。
+
+exact source `3029e96d`的bounded profile自然完成12/12轮：D05 question compose累计=
+`21.596 s/353 calls=61.18 ms/call`，prepare/epoch settle/D05 total=`29.161/3.296/35.662 s`；profile-on
+collection/iteration中位=`10.665/11.185 s`，不作速度证据。随后同GPU profiler-off 61轮自然完成，
+warmup10、measure50、tail1的p50/p90=`17.175/21.913 s/H48`；相对R8 p50 `21.455 s`约改善`20%`，仍远离
+约6秒方向目标。全窗due/accepted/playback/launch/selected contact=
+`14,221/14,210/13,555/461/0`，episode mean=`105.58 tick`；first10→recent10的position/velocity error下降，
+face上升、long-axis仅小降，不能叫mimic成功或hit失败的长期裁决。保持H48、三轮、RNG与Gate且不启动
+replacement；下一实验只对`cq_n_iters=4/8/12`做固定题目wall、residual、admission/reason、selected identity
+和projection消融，明确把降低solver迭代当学习风险取舍，而非安全等价改动。
+
+固定输入消融现已闭合并否决降迭代。exact FullMDP-A sampler/profile、三轮×三support、共`4,608`行上，12轮
+admit `1,463`候选、`480/512`行存在最终可选解。4/8/10/11轮相对12轮分别改变
+`376/65/20/10`行solver admission、`827/118/41/20`行reason、`116/24/6/2`个最终selected identity；
+selected admission变化为`30/2/1/0`。所以11轮虽然没改变该固定卷的最终可解行数，仍改变两个具体答案，不能
+称为等价；4/8轮更直接改变题目难度分布。保持`cq_n_iters=12`。
+
+<a id="single-a512-cuda-graph"></a>
+
+单次12轮profile显示self CUDA约`5 ms`，但host wall由`mul=637`、`add=314`、`where=279`、`fill=258`等
+数百个小op主导；rollout、`bmm`和`linalg_lu_solve`本身不是墙。`torch.compile`即使把外层landing函数设为
+opaque，仍会追入手写Triton rollout并因缺失编译期runtime symbol失败，因此不作为生产候选。采用的最窄实现
+只CUDA Graph capture fixed-try LM数值叶；clip/prototype/yaw/speed预算选择在图外，producer输入校验与七类
+fault、authoritative contact/landing/net/face replay、reason/admission、NaN censor和原始ledger也全在图外。
+cache只允许同进程、同device、首次生产stream、float32、同数值合同的一个`4,608`行workspace，覆盖
+`A<=512`并删除多bucket冷capture；不同stream/config/device与更大batch直接走原eager，跨fork现存entry
+fail-loud。没有per-call parity gate、receipt或新owner。
+
+Pod RTX5090 production-shaped诊断中，`A=1/2/4/8/16/32/64/512`的全部公开输出与ledger对eager逐bit；独立改变contact、incoming
+velocity/spin、aim、reference normal、base quaternion、prototype direction/speed也逐bit；七类producer fault
+mutation逐bit，且caller-owned旧输出不被下一次graph replay覆盖。非默认stream回退eager同样逐bit；
+10,000次连续replay前后allocated/reserved均不增长；graph-first与跨fork拒绝也已覆盖。完整公开solver中位在
+`A=8`为`28.821→6.706 ms`、`A=512`为`29.204→6.698 ms`；单图allocated/reserved增量=`8.92/32 MiB`。
+最终源码为`ef6730149d3b45b063e02a57f889c9e36887abe1`；Pod clean detached checkout
+`/workspace/franco/mktemp/fullmdp-r11-ef673014.exact`上的canonical分进程门=`203 passed,5 skipped`，
+solver/semantic surface门=`109 passed,1 skipped`。随后GPU1的12轮有界profile自然完成，receipt
+`b7a1c874…cef4d7`：D05 question=`7.668 s/353=21.72 ms/call`，较`3029e96d`的
+`21.596 s/353=61.18 ms/call`降低约`64.5%`；prepare/settle/D05 total=`14.831/3.154/21.065 s`，
+reward/sim=`16.144/14.866 s`。profile含首个`A=512`冷capture，且inclusive host span不做CUDA sync，
+只作热点归因。
+
+同checkout、同GPU、profiler-off的61轮rate probe也已自然完成，receipt/log SHA-256=
+`a2d94280…e6ba`/`5cda86e0…69a4d`；warmup10、measure50、tail1的p50/p90=
+`15.135/19.779 s/H48`，相对`3029e96d`的`17.175/21.913`净改善约`11.9%/9.7%`，仍远离约6秒方向目标。
+计时50轮due/admitted/playback/physical-launch/selected-rubber-contact=
+`11,462/11,454/11,201/461/0`，episode mean=`107.41 tick`；短性能探针不能裁决课程长期学习。
+因此该执行优化采用，但不单独授权replacement。下一结构刀按profile先收敛Reward28同一cycle内的重复
+target/gather/kernel与same-writer identity回声，再评估D05 one-shot candidate transport；保持28个ordinal、
+付款chronology、H48、solver12轮、物理步和观测合同，不新增owner、receipt或“成功即安全”Gate。
 
 2026-08-29的active V9只读窗已经不是“阶段未开”：Mu updates `5143..5192`的
 due/reveal/launch/selected contact=`6,198/6,185/6,072/0`、episode mean=`202.53 tick`、wall median=

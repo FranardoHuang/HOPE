@@ -9,6 +9,13 @@
 
 本文件是现行术语真源。新人和 agent 不需要去历史归档猜缩写。
 
+<a id="action-ball-solver-cuda-graph"></a>
+**`HOPE_ACTION_BALL_SOLVER_CUDA_GRAPH` / ActionBall solver固定形状重放开关**：值只允许`0|1`，默认`1`。
+它只对CUDA float32、FullMDP每个active env固定九候选且`active_count<=512`的fixed-try LM数值叶使用一个
+有界`4,608`行CUDA Graph；输入校验、producer fault、authoritative replay、reason/admission、NaN censor
+与ledger仍走原eager。不同stream/config/device、大batch自动保留eager，跨fork拒绝；`0`是诊断/回退开关，
+不是另一套训练setting、学习消融或安全授权。
+
 <a id="hope_action_ball_full_mdp_profile_updates"></a>
 **`HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES` / FullMDP前N轮分段归因开关**：值必须是canonical整数
 `1..50`；缺失或`0`时完全不安装。启用后只记录指定数量PPO update的inclusive host wall，不新增CUDA

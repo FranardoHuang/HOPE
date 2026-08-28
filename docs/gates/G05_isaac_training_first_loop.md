@@ -32,8 +32,17 @@ final batch全字段逐bit相等，reference/cache总耗时=`101.263/50.534 ms`�
 retained cache=`3.164 MiB`、该段peak增量=`7.321 MiB`。第二步已把固定`30×4` discovery融合为一个Triton
 launch；actual `4,608`行、边界probe与production record均逐bit相等，reference/fused/production=
 `49.591/.401/.416 ms`，约`124×` leaf speedup，fused peak增量=`3.551 MiB`。Pod隔离测试=
-`203 passed,5 skipped`。两步都不改变H48、三轮、solver迭代、physics或Gate；G05仍不晋级，最终仍由
-完整D05 profile、fixed tape和profiler-off rate共同验收。
+`203 passed,5 skipped`。跨文件失败另被证明是测试collection时替换canonical namespace造成的双代模块；
+测试改为单case临时绑定后，六文件同进程Pod组合门同为`203 passed,5 skipped`，production身份Gate未放宽。
+两步都不改变H48、三轮、solver迭代、physics或Gate。
+
+固定输入消融已否决降低solver12轮；`ef673014`只用单个`A=512` CUDA Graph capture数值叶。逐bit、显存、
+反例、profile和rate证据见
+[课程实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#single-a512-cuda-graph)。
+fresh profile已把D05 question从`61.18`降到`21.72 ms/call`，但同GPU profiler-off
+p50/p90仅从`17.175/21.913`降到`15.135/19.779 s/H48`。执行优化成立、约6秒方向目标未达；G05继续
+`Partial`，不单独授权replacement。下一候选是Reward28 cycle-local pack，必须保持28项、付款chronology、
+milestone/Epoch账本与fault语义逐bit/逐字段一致，不增加同写者Gate。
 
 active V9最新只读负窗（2026-08-29）中，Isaac updates `1543..1592`的
 due/accept/playback/launch/selected contact=`8,441/8,437/8,420/7,477/0`，recent50 episode mean=

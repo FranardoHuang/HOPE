@@ -28,9 +28,15 @@
   `3.164 MiB`，该段peak增量=`7.321 MiB`。随后同一Torch reference的固定`30×4` discovery已融合为一个
   Triton launch；actual `4,608`行、边界/非有限/重复identity probe与production record均逐bit相等，
   reference/fused/production=`49.591/.401/.416 ms`，约`124×` leaf speedup，fused peak增量=`3.551 MiB`。
-  Pod隔离矩阵=`203 passed,5 skipped`；跨文件合跑曾出现的失败已定位为test-module alias/import-order污染，
-  不冒充production失败。H48、三轮、solver迭代、RNG、identity、reason/fault/counter/safety与CPU reference
-  保持；下一裁决只认完整D05 profile和profiler-off H48，不用leaf speedup代签iteration。
+  Pod隔离矩阵=`203 passed,5 skipped`；跨文件合跑曾出现的失败已定位为测试在collection阶段替换整套
+  canonical namespace。测试改为case内临时绑定subject后，六文件同进程Pod组合门=`203 passed,5 skipped`；
+  production identity/authority检查未放宽。H48、三轮、solver迭代、RNG、identity、reason/fault/counter/
+  safety与CPU reference保持。
+- 固定输入已否决降低solver12轮；`ef673014`只用单个`A=512` CUDA Graph capture数值叶，并保持公开结果、
+  RNG/reason/fault/counter/safety逐bit。fresh profile的D05 question=`61.18→21.72 ms/call`，同GPU
+  profiler-off p50/p90=`17.175/21.913→15.135/19.779 s/H48`，仍未达约6秒，也不单独授权replacement。
+  下一刀收敛Reward28 cycle-local重复计算和same-writer热路回声；详细证据见
+  [课程实验](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#single-a512-cuda-graph)。
 - 新profile首试在step0前因诊断器shadow slotted Physical leaf而fail-closed；production未执行。已删除3个非法
   leaf wrapper、保留D05总段与其他合法分段，失败root只读且不计速度/学习证据。
 - V9 Mu长期证据口径自查纠正：先前`7,139/517,214`是generic `racket_contact_rows`，不是课程合同的

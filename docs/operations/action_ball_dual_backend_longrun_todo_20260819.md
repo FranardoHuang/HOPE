@@ -131,10 +131,13 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    cache候选的matched discovery仍约`50.2 ms/call`；第二步融合现已在exact Torch2.7 RTX5090闭合：actual
    `4,608`行、边界/非有限/重复identity
    probe及production record都逐bit相等，reference/fused/production=`49.591/.401/.416 ms`，约`124×`
-   leaf speedup，fused peak增量=`3.551 MiB`；Pod隔离矩阵=`203 passed,5 skipped`。下一步不再改该叶节点，
-   直接跑完整D05 profile与profiler-off H48。两步都保留
-   CPU reference、完整candidate identity、三轮RNG、reason/fault/counter/safety与逐位输出；不得增加逐轮
-   host/device控制流、缩RK4、降solver精度或新增“成功即安全”Gate。
+   leaf speedup，fused peak增量=`3.551 MiB`；Pod组合门=`203 passed,5 skipped`。固定输入已否决降低
+   solver12轮；`ef673014`只把数值叶放进单个有界`A=512` CUDA Graph，完整执行证据见
+   [课程实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#single-a512-cuda-graph)。
+   fresh profile已把D05 question从`61.18`降至`21.72 ms/call`；profiler-off p50/p90
+   从`17.175/21.913`降至`15.135/19.779 s/H48`，约6秒目标仍未达。下一步收敛Reward28同cycle重复
+   target/gather/kernel与same-writer identity回声，再按同GPU matched wall裁决；不得缩RK4/solver、增加
+   per-call parity/receipt或新增“成功即安全”Gate。
 7. [ ] 两端replacement均finite且无灾难性启动分布后，冻结最终clean commit和fresh namespace，再按exact
    PID/startticks/PGID/cwd/source/namespace停止V9并发射双长期run。后续只按预注册未来窗判断自然课程交接。
 8. [ ] replacement连续ACK后做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的
