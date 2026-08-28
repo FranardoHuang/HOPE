@@ -88,10 +88,10 @@ tilt/table=`8,064/5,868`为主。它证明mimic与physical launch入口已自然
 产生极稀疏selected hit后又遗忘，不能移签R8，也不能把update61零contact误写成不可学。
 
 2026-08-29再次冻结的active V9只读窗已经是明确negative、不是“任务还没开放”：Mu updates
-`4926..4975`的due/reveal/launch/selected contact=`7,818/7,648/5,267/0`，episode mean=`233.25 tick`，
-四项mimic误差=`.364 m/1.067 mps/1.240 rad/1.228 rad`，wall median=`6.563 s/H48`；Isaac updates
-`1481..1530`的due/accept/playback/launch/selected contact=`8,454/8,451/8,431/7,392/0`，episode mean=
-`145.80 tick`，四项误差=`.286 m/.951 mps/1.350 rad/1.097 rad`，wall median=`23.36 s/H48`。
+`5143..5192`的due/reveal/launch/selected contact=`6,198/6,185/6,072/0`，episode mean=`202.53 tick`，
+四项mimic误差=`.352 m/1.051 mps/1.304 rad/1.193 rad`，wall median=`6.475 s/H48`；Isaac updates
+`1543..1592`的due/accept/playback/launch/selected contact=`8,441/8,437/8,420/7,477/0`，episode mean=
+`146.10 tick`，四项误差=`.283 m/.948 mps/1.325 rad/1.133 rad`，wall median=`22.10 s/H48`。
 两端都已有高eligible分母而hit仍为0，不能继续解释成
 balance或mimic阶段尚未打开。V9两端继续只读只为保存反例；因为Mu plant身份错误，这些数不能裁决R8，
 但足以拒绝继续等待V9自然恢复。
@@ -125,9 +125,14 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    `virtual_ball.coarse_landing`的100-step Triton融合真实启用，`N=512`仅`.0526 ms/call`，不是当前墙。
    真正热点是Physical horizon：discovery固定`30 ticks×4`次eager reverse RK4，finalize又从同一contact state
    重算最多`30×4`次；`[512,3,3]`实测分别=`202.2/54.1 ms`，与旧dense D05 question约
-   `245 ms/call`一一吻合。第一步候选已最小化为保留CUDA discovery逐tick state、finalize直接gather；它
-   只删除第二段约`54.1 ms`，须先经exact CUDA parity/direct benchmark，不能冒充大提速。其后仍须把第一段
-   `202.2 ms`固定horizon融合成单launch，才进入同R8 source的profile-on归因与profiler-off rate。两步都保留
+   `245 ms/call`一一吻合。第一步trajectory cache/gather已在exact Kit/Torch2.7 RTX5090通过：`4,608`行
+   全部admit、final batch全字段逐bit相等，matched reference/cache总耗时=`101.263/50.534 ms`，finalize=
+   `51.471/.317 ms`，cache=`3.164 MiB`、该段peak增量=`7.321 MiB`，隔离测试=`201 passed,5 skipped`。
+   cache候选的matched discovery仍约`50.2 ms/call`；第二步融合现已在exact Torch2.7 RTX5090闭合：actual
+   `4,608`行、边界/非有限/重复identity
+   probe及production record都逐bit相等，reference/fused/production=`49.591/.401/.416 ms`，约`124×`
+   leaf speedup，fused peak增量=`3.551 MiB`；Pod隔离矩阵=`203 passed,5 skipped`。下一步不再改该叶节点，
+   直接跑完整D05 profile与profiler-off H48。两步都保留
    CPU reference、完整candidate identity、三轮RNG、reason/fault/counter/safety与逐位输出；不得增加逐轮
    host/device控制流、缩RK4、降solver精度或新增“成功即安全”Gate。
 7. [ ] 两端replacement均finite且无灾难性启动分布后，冻结最终clean commit和fresh namespace，再按exact

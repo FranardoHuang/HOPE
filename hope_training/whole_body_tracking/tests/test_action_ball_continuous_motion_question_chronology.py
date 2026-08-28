@@ -264,6 +264,54 @@ def test_physical_tick_cache_is_bitwise_reference_for_all_tick_outcomes(
     assert (dispatched.motion_tick_state_f32 is not None) == (device.type == "cuda")
 
 
+def test_physical_fast_kill_switch_does_not_touch_triton(monkeypatch) -> None:
+    monkeypatch.setenv("HOPE_PHYSICAL_QUESTION_FAST", "0")
+    monkeypatch.setattr(
+        physical,
+        "_build_fused_kernel",
+        lambda: pytest.fail("kill switch must stop before Triton discovery"),
+    )
+    params = physical.PhysicalQuestionFlightParams(
+        k_d=0.08, k_m=0.001, g=9.81, ball_radius_m=0.02
+    )
+    config = physical.PhysicalQuestionNumericConfig(
+        motion_tick_s=0.02,
+        integration_substeps_per_motion_tick=4,
+        max_final_segment_motion_ticks=30,
+        table_surface_z_m=0.76,
+    )
+    assert not physical._fast_path_admitted(
+        _physical_batch(torch.device("cpu")), params, config
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_physical_fused_discovery_is_bitwise_reference() -> None:
+    if physical._build_fused_kernel() is None:
+        pytest.skip("Triton unavailable")
+    device = torch.device("cuda", torch.cuda.current_device())
+    params = physical.PhysicalQuestionFlightParams(
+        k_d=0.08, k_m=0.001, g=9.81, ball_radius_m=0.02
+    )
+    config = physical.PhysicalQuestionNumericConfig(
+        motion_tick_s=0.02,
+        integration_substeps_per_motion_tick=4,
+        max_final_segment_motion_ticks=30,
+        table_surface_z_m=0.76,
+    )
+    probe = physical._parity_probe(device, params, config)
+    reference = physical._discover_horizon_reference(
+        probe,
+        params=params,
+        config=config,
+        _retain_motion_tick_state=True,
+    )
+    fused = physical._discover_horizon_fused(
+        probe, params=params, config=config
+    )
+    assert physical._records_bitwise_equal(reference, fused)
+
+
 def _motion(device: torch.device = torch.device("cpu")) -> tuple[object, tuple]:
     command, _ = bridge._configure_unbound_command(num_envs=2)
     if device.type == "cuda":

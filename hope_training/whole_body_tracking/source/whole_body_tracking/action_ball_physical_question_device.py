@@ -19,14 +19,19 @@ raises ``PhysicalQuestionProductionHold``.
 
 There is no scene handle in this module.  Reveal retains data; only the later
 Physical launch owner may publish the selected 13-state to the scene.
+
+CUDA discovery kill switch: ``HOPE_PHYSICAL_QUESTION_FAST=0``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import os
+import struct
 from threading import Lock
 from typing import Optional, Tuple
+import warnings
 import weakref
 
 import torch
@@ -322,14 +327,7 @@ def _rk4_step(
     return position_new, velocity_new
 
 
-@torch.no_grad()
-def _discover_horizon_reference(
-    batch: PhysicalQuestionCandidateBatch,
-    *,
-    params: PhysicalQuestionFlightParams,
-    config: PhysicalQuestionNumericConfig,
-    _retain_motion_tick_state: bool = False,
-) -> _DiscoveryRecord:
+def _prepare_discovery(batch: PhysicalQuestionCandidateBatch):
     _, shape = _require_candidate_batch(batch)
     candidate = batch.candidate_identity.clone()
     contact = batch.contact_position_env_m.clone()
@@ -354,6 +352,100 @@ def _discover_horizon_reference(
     safe_contact = torch.where(input_valid.unsqueeze(-1), contact, torch.zeros_like(contact))
     safe_incoming = torch.where(input_valid.unsqueeze(-1), incoming, torch.zeros_like(incoming))
     safe_omega = torch.where(input_valid.unsqueeze(-1), omega, torch.zeros_like(omega))
+    return (
+        shape,
+        candidate,
+        safe_contact,
+        safe_incoming,
+        safe_omega,
+        finite_input,
+        identity_valid,
+        input_valid,
+    )
+
+
+def _finish_discovery(
+    prepared,
+    max_ticks: torch.Tensor,
+    tick_states: Optional[torch.Tensor],
+) -> _DiscoveryRecord:
+    (
+        shape,
+        candidate,
+        safe_contact,
+        safe_incoming,
+        safe_omega,
+        finite_input,
+        identity_valid,
+        input_valid,
+    ) = prepared
+    producer_fault = torch.zeros(shape, dtype=torch.int64, device=candidate.device)
+    producer_fault = torch.where(
+        ~finite_input,
+        torch.bitwise_or(
+            producer_fault,
+            torch.full_like(producer_fault, PRODUCER_FAULT_NONFINITE_INPUT),
+        ),
+        producer_fault,
+    )
+    producer_fault = torch.where(
+        ~identity_valid,
+        torch.bitwise_or(
+            producer_fault,
+            torch.full_like(
+                producer_fault, PRODUCER_FAULT_INVALID_CANDIDATE_IDENTITY
+            ),
+        ),
+        producer_fault,
+    ).contiguous()
+    construction_reason = torch.full(
+        shape,
+        CONSTRUCTION_REASON_ADMITTED,
+        dtype=torch.int64,
+        device=candidate.device,
+    )
+    construction_reason = torch.where(
+        input_valid & max_ticks.eq(0),
+        torch.full_like(
+            construction_reason, CONSTRUCTION_REASON_NO_COMPLETE_FINAL_SEGMENT
+        ),
+        construction_reason,
+    )
+    construction_reason = torch.where(
+        ~input_valid,
+        torch.full_like(construction_reason, CONSTRUCTION_REASON_INVALID_PRODUCER),
+        construction_reason,
+    ).contiguous()
+    return _DiscoveryRecord(
+        candidate_identity=candidate,
+        contact_position_env_m=safe_contact.contiguous(),
+        incoming_linear_velocity_world_mps=safe_incoming.contiguous(),
+        incoming_angular_velocity_world_radps=safe_omega.contiguous(),
+        max_feasible_motion_ticks=max_ticks.contiguous(),
+        construction_reason=construction_reason,
+        producer_fault=producer_fault,
+        motion_tick_state_f32=tick_states,
+    )
+
+
+@torch.no_grad()
+def _discover_horizon_reference(
+    batch: PhysicalQuestionCandidateBatch,
+    *,
+    params: PhysicalQuestionFlightParams,
+    config: PhysicalQuestionNumericConfig,
+    _retain_motion_tick_state: bool = False,
+) -> _DiscoveryRecord:
+    (
+        shape,
+        candidate,
+        safe_contact,
+        safe_incoming,
+        safe_omega,
+        finite_input,
+        identity_valid,
+        input_valid,
+    ) = _prepare_discovery(batch)
 
     position = safe_contact
     velocity = safe_incoming
@@ -405,57 +497,347 @@ def _discover_horizon_reference(
         if motion_tick_states is not None:
             motion_tick_states.append(torch.cat((position, velocity), dim=-1))
 
-    producer_fault = torch.zeros(shape, dtype=torch.int64, device=candidate.device)
-    producer_fault = torch.where(
-        ~finite_input,
-        torch.bitwise_or(
-            producer_fault,
-            torch.full_like(producer_fault, PRODUCER_FAULT_NONFINITE_INPUT),
-        ),
-        producer_fault,
+    tick_states = (
+        torch.stack(motion_tick_states, dim=-2).contiguous()
+        if motion_tick_states is not None
+        else None
     )
-    producer_fault = torch.where(
-        ~identity_valid,
-        torch.bitwise_or(
-            producer_fault,
-            torch.full_like(
-                producer_fault, PRODUCER_FAULT_INVALID_CANDIDATE_IDENTITY
-            ),
+    return _finish_discovery(
+        (
+            shape,
+            candidate,
+            safe_contact,
+            safe_incoming,
+            safe_omega,
+            finite_input,
+            identity_valid,
+            input_valid,
         ),
-        producer_fault,
-    ).contiguous()
-    construction_reason = torch.full(
-        shape,
-        CONSTRUCTION_REASON_ADMITTED,
-        dtype=torch.int64,
-        device=candidate.device,
+        max_ticks,
+        tick_states,
     )
-    construction_reason = torch.where(
-        input_valid & max_ticks.eq(0),
-        torch.full_like(
-            construction_reason, CONSTRUCTION_REASON_NO_COMPLETE_FINAL_SEGMENT
+
+
+_FAST_ENV = "HOPE_PHYSICAL_QUESTION_FAST"
+_FUSED_BLOCK = 128
+_fused_kernel = None
+_parity_cache: dict = {}
+
+
+def _f32(value: float) -> float:
+    return struct.unpack("<f", struct.pack("<f", float(value)))[0]
+
+
+def _build_fused_kernel():
+    global _fused_kernel
+    if _fused_kernel is not None:
+        return _fused_kernel or None
+    try:
+        import triton as _triton_mod
+        import triton.language as _tl_mod
+    except Exception:
+        _fused_kernel = False
+        return None
+
+    globals()["triton"] = triton = _triton_mod
+    globals()["tl"] = tl = _tl_mod
+
+    @triton.jit
+    def _pq_accel(vx, vy, vz, wx, wy, wz, kd, km, gravity):
+        speed = tl.math.sqrt_rn((vx * vx + vz * vz) + vy * vy)
+        drag = (-kd) * speed
+        cx = tl.math.fma(wy, vz, -(wz * vy))
+        cy = tl.math.fma(wz, vx, -(wx * vz))
+        cz = tl.math.fma(wx, vy, -(wy * vx))
+        return (
+            drag * vx + km * cx,
+            drag * vy + km * cy,
+            (drag * vz + km * cz) - gravity,
+        )
+
+    globals()["_pq_accel"] = _pq_accel
+
+    @triton.jit
+    def _pq_rk4(px, py, pz, vx, vy, vz, wx, wy, wz,
+                kd, km, gravity, half_step, full_step, sixth_step):
+        a1x, a1y, a1z = _pq_accel(vx, vy, vz, wx, wy, wz, kd, km, gravity)
+        v2x, v2y, v2z = (
+            vx + half_step * a1x,
+            vy + half_step * a1y,
+            vz + half_step * a1z,
+        )
+        a2x, a2y, a2z = _pq_accel(v2x, v2y, v2z, wx, wy, wz, kd, km, gravity)
+        v3x, v3y, v3z = (
+            vx + half_step * a2x,
+            vy + half_step * a2y,
+            vz + half_step * a2z,
+        )
+        a3x, a3y, a3z = _pq_accel(v3x, v3y, v3z, wx, wy, wz, kd, km, gravity)
+        v4x, v4y, v4z = (
+            vx + full_step * a3x,
+            vy + full_step * a3y,
+            vz + full_step * a3z,
+        )
+        a4x, a4y, a4z = _pq_accel(v4x, v4y, v4z, wx, wy, wz, kd, km, gravity)
+        next_vx = vx + sixth_step * (((a1x + 2.0 * a2x) + 2.0 * a3x) + a4x)
+        next_vy = vy + sixth_step * (((a1y + 2.0 * a2y) + 2.0 * a3y) + a4y)
+        next_vz = vz + sixth_step * (((a1z + 2.0 * a2z) + 2.0 * a3z) + a4z)
+        next_px = px + sixth_step * (((vx + 2.0 * v2x) + 2.0 * v3x) + v4x)
+        next_py = py + sixth_step * (((vy + 2.0 * v2y) + 2.0 * v3y) + v4y)
+        next_pz = pz + sixth_step * (((vz + 2.0 * v2z) + 2.0 * v3z) + v4z)
+        return next_px, next_py, next_pz, next_vx, next_vy, next_vz
+
+    globals()["_pq_rk4"] = _pq_rk4
+
+    @triton.jit
+    def _pq_discover(position_ptr, velocity_ptr, omega_ptr, valid_ptr,
+                     states_ptr, max_ticks_ptr, n_rows, kd, km, gravity,
+                     half_step, full_step, sixth_step, z_min, speed_cap,
+                     finite_max, BLOCK: tl.constexpr):
+        offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+        mask = offsets < n_rows
+        base = offsets * 3
+        px = tl.load(position_ptr + base + 0, mask=mask, other=0.0)
+        py = tl.load(position_ptr + base + 1, mask=mask, other=0.0)
+        pz = tl.load(position_ptr + base + 2, mask=mask, other=0.0)
+        vx = tl.load(velocity_ptr + base + 0, mask=mask, other=0.0)
+        vy = tl.load(velocity_ptr + base + 1, mask=mask, other=0.0)
+        vz = tl.load(velocity_ptr + base + 2, mask=mask, other=0.0)
+        wx = tl.load(omega_ptr + base + 0, mask=mask, other=0.0)
+        wy = tl.load(omega_ptr + base + 1, mask=mask, other=0.0)
+        wz = tl.load(omega_ptr + base + 2, mask=mask, other=0.0)
+        alive = tl.load(valid_ptr + offsets, mask=mask, other=0) != 0
+        max_ticks = tl.zeros((BLOCK,), tl.int32)
+
+        for tick in range(30):
+            tick_px, tick_py, tick_pz = px, py, pz
+            tick_vx, tick_vy, tick_vz = vx, vy, vz
+            work_px, work_py, work_pz = px, py, pz
+            work_vx, work_vy, work_vz = vx, vy, vz
+            tick_valid = alive
+            for _ in range(4):
+                next_px, next_py, next_pz, next_vx, next_vy, next_vz = _pq_rk4(
+                    work_px, work_py, work_pz,
+                    work_vx, work_vy, work_vz,
+                    wx, wy, wz, kd, km, gravity,
+                    half_step, full_step, sixth_step,
+                )
+                finite = (
+                    (tl.abs(next_px) <= finite_max)
+                    & (tl.abs(next_py) <= finite_max)
+                    & (tl.abs(next_pz) <= finite_max)
+                    & (tl.abs(next_vx) <= finite_max)
+                    & (tl.abs(next_vy) <= finite_max)
+                    & (tl.abs(next_vz) <= finite_max)
+                )
+                speed = tl.math.sqrt_rn(
+                    (next_vx * next_vx + next_vz * next_vz) + next_vy * next_vy
+                )
+                valid = tick_valid & finite & (next_pz > z_min) & (speed < speed_cap)
+                work_px, work_py, work_pz = (
+                    tl.where(valid, next_px, work_px),
+                    tl.where(valid, next_py, work_py),
+                    tl.where(valid, next_pz, work_pz),
+                )
+                work_vx, work_vy, work_vz = (
+                    tl.where(valid, next_vx, work_vx),
+                    tl.where(valid, next_vy, work_vy),
+                    tl.where(valid, next_vz, work_vz),
+                )
+                tick_valid = valid
+
+            px, py, pz = (
+                tl.where(tick_valid, work_px, tick_px),
+                tl.where(tick_valid, work_py, tick_py),
+                tl.where(tick_valid, work_pz, tick_pz),
+            )
+            vx, vy, vz = (
+                tl.where(tick_valid, work_vx, tick_vx),
+                tl.where(tick_valid, work_vy, tick_vy),
+                tl.where(tick_valid, work_vz, tick_vz),
+            )
+            max_ticks += tick_valid.to(tl.int32)
+            alive = tick_valid
+            state_base = (offsets * 30 + tick) * 6
+            tl.store(states_ptr + state_base + 0, px, mask=mask)
+            tl.store(states_ptr + state_base + 1, py, mask=mask)
+            tl.store(states_ptr + state_base + 2, pz, mask=mask)
+            tl.store(states_ptr + state_base + 3, vx, mask=mask)
+            tl.store(states_ptr + state_base + 4, vy, mask=mask)
+            tl.store(states_ptr + state_base + 5, vz, mask=mask)
+
+        tl.store(max_ticks_ptr + offsets, max_ticks.to(tl.int64), mask=mask)
+
+    _fused_kernel = (triton, _pq_discover)
+    return _fused_kernel
+
+
+@torch.no_grad()
+def _discover_horizon_fused(
+    batch: PhysicalQuestionCandidateBatch,
+    *,
+    params: PhysicalQuestionFlightParams,
+    config: PhysicalQuestionNumericConfig,
+) -> _DiscoveryRecord:
+    prepared = _prepare_discovery(batch)
+    shape, candidate, contact, incoming, omega, _, _, input_valid = prepared
+    triton, kernel = _build_fused_kernel()
+    n_rows = candidate.numel()
+    tick_states = torch.empty((*shape, 30, 6), dtype=torch.float32, device=candidate.device)
+    max_ticks = torch.empty(shape, dtype=torch.int64, device=candidate.device)
+    step_s = -float(config.motion_tick_s) / 4.0
+    z_min = (
+        float(config.table_surface_z_m)
+        + float(params.ball_radius_m)
+        + float(config.table_clearance_margin_m)
+    )
+    kernel[(triton.cdiv(n_rows, _FUSED_BLOCK),)](
+        contact.reshape(-1, 3), incoming.reshape(-1, 3), omega.reshape(-1, 3),
+        input_valid.reshape(-1).view(torch.uint8), tick_states, max_ticks, n_rows,
+        _f32(params.k_d), _f32(params.k_m), _f32(params.g),
+        _f32(0.5 * step_s), _f32(step_s), _f32(step_s / 6.0),
+        _f32(z_min), _f32(config.reverse_speed_cap_mps),
+        _f32(torch.finfo(torch.float32).max),
+        BLOCK=_FUSED_BLOCK, num_warps=4, enable_fp_fusion=False,
+    )
+    return _finish_discovery(prepared, max_ticks, tick_states)
+
+
+def _parity_probe(
+    device: torch.device,
+    params: PhysicalQuestionFlightParams,
+    config: PhysicalQuestionNumericConfig,
+) -> PhysicalQuestionCandidateBatch:
+    z_min = (
+        float(config.table_surface_z_m)
+        + float(params.ball_radius_m)
+        + float(config.table_clearance_margin_m)
+    )
+    contact = torch.tensor(
+        [
+            [0.10, -0.10, z_min + 0.50],
+            [0.00, 0.00, z_min + 1.0e-4],
+            [-0.10, 0.10, z_min + 0.08],
+            [0.20, -0.20, z_min + 0.30],
+            [float("nan"), 0.00, z_min + 0.20],
+            [0.00, 0.00, z_min + 0.20],
+            [0.00, 0.00, z_min + 0.20],
+            [0.00, 0.00, z_min + 0.20],
+        ],
+        dtype=torch.float32,
+    ).repeat(192, 1)
+    incoming = torch.tensor(
+        [
+            [-0.8, 0.1, -0.2],
+            [0.0, 0.0, 2.0],
+            [0.1, 0.0, 1.0],
+            [float(config.reverse_speed_cap_mps) * 1.25, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [-0.5, 0.0, -0.1],
+            [-0.5, 0.0, -0.1],
+            [-0.5, 0.0, -0.1],
+        ],
+        dtype=torch.float32,
+    ).repeat(192, 1)
+    omega = torch.tensor(
+        [
+            [20.0, -10.0, 15.0],
+            [0.0, 0.0, 0.0],
+            [5.0, -3.0, 2.0],
+            [0.0, 0.0, 0.0],
+            [float("inf"), 0.0, 0.0],
+            [1.0, 2.0, 3.0],
+            [1.0, 2.0, 3.0],
+            [1.0, 2.0, 3.0],
+        ],
+        dtype=torch.float32,
+    ).repeat(192, 1)
+    candidate = torch.arange(1, 1537, dtype=torch.int64)
+    candidate[-3] = 0
+    candidate[-2:] = 9001
+    return PhysicalQuestionCandidateBatch(
+        candidate_identity=candidate.reshape(512, 3).to(device).contiguous(),
+        contact_position_env_m=contact.reshape(512, 3, 3).to(device).contiguous(),
+        incoming_linear_velocity_world_mps=(
+            incoming.reshape(512, 3, 3).to(device).contiguous()
         ),
-        construction_reason,
-    )
-    construction_reason = torch.where(
-        ~input_valid,
-        torch.full_like(construction_reason, CONSTRUCTION_REASON_INVALID_PRODUCER),
-        construction_reason,
-    ).contiguous()
-    return _DiscoveryRecord(
-        candidate_identity=candidate,
-        contact_position_env_m=safe_contact.contiguous(),
-        incoming_linear_velocity_world_mps=safe_incoming.contiguous(),
-        incoming_angular_velocity_world_radps=safe_omega.contiguous(),
-        max_feasible_motion_ticks=max_ticks.contiguous(),
-        construction_reason=construction_reason,
-        producer_fault=producer_fault,
-        motion_tick_state_f32=(
-            torch.stack(motion_tick_states, dim=-2).contiguous()
-            if motion_tick_states is not None
-            else None
+        incoming_angular_velocity_world_radps=(
+            omega.reshape(512, 3, 3).to(device).contiguous()
         ),
     )
+
+
+def _records_bitwise_equal(reference: _DiscoveryRecord, fused: _DiscoveryRecord) -> bool:
+    for name in (
+        "candidate_identity",
+        "max_feasible_motion_ticks",
+        "construction_reason",
+        "producer_fault",
+    ):
+        if not bool(torch.equal(getattr(reference, name), getattr(fused, name))):
+            return False
+    for name in (
+        "contact_position_env_m",
+        "incoming_linear_velocity_world_mps",
+        "incoming_angular_velocity_world_radps",
+        "motion_tick_state_f32",
+    ):
+        left = getattr(reference, name)
+        right = getattr(fused, name)
+        if left is None or right is None or tuple(left.shape) != tuple(right.shape):
+            return False
+        if not bool(torch.equal(left.contiguous().view(torch.int32), right.contiguous().view(torch.int32))):
+            return False
+    return True
+
+
+@torch.no_grad()
+def _fast_path_admitted(
+    batch: PhysicalQuestionCandidateBatch,
+    params: PhysicalQuestionFlightParams,
+    config: PhysicalQuestionNumericConfig,
+) -> bool:
+    mode = os.environ.get(_FAST_ENV, "1").strip().lower()
+    if mode in ("0", "off", "false", "no", "eager"):
+        return False
+    device, _ = _require_candidate_batch(batch)
+    if (
+        device.type != "cuda"
+        or config.max_final_segment_motion_ticks != 30
+        or config.integration_substeps_per_motion_tick != 4
+        or _build_fused_kernel() is None
+    ):
+        return False
+    key = (device.type, device.index, params, config)
+    admitted = _parity_cache.get(key)
+    if admitted is not None:
+        return admitted
+    try:
+        probe = _parity_probe(device, params, config)
+        reference = _discover_horizon_reference(
+            probe,
+            params=params,
+            config=config,
+            _retain_motion_tick_state=True,
+        )
+        fused = _discover_horizon_fused(probe, params=params, config=config)
+        admitted = _records_bitwise_equal(reference, fused)
+    except Exception as exc:  # pragma: no cover - CUDA/runtime safety net
+        warnings.warn(
+            f"physical question fused discovery disabled ({exc!r})",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        _parity_cache[key] = False
+        return False
+    if not admitted:
+        warnings.warn(
+            "physical question fused discovery is not bit-identical; using reference",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    _parity_cache[key] = admitted
+    return admitted
 
 
 @torch.no_grad()
@@ -466,6 +848,8 @@ def _discover_horizon(
     config: PhysicalQuestionNumericConfig,
 ) -> _DiscoveryRecord:
     device, _ = _require_candidate_batch(batch)
+    if _fast_path_admitted(batch, params, config):
+        return _discover_horizon_fused(batch, params=params, config=config)
     return _discover_horizon_reference(
         batch,
         params=params,

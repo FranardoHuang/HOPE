@@ -1015,15 +1015,20 @@ question从旧dense的`18.16 s/12 updates`回归到`98.72 s`，已完整撤回�
 `virtual_ball.coarse_landing`的100-step Triton融合真实启用，`N=512`仅`.0526 ms/call`；真正热点是
 Physical horizon对同一contact state先做`30×4=120`次eager reverse RK4 discovery，再重做最多`120`次
 finalize，`[512,3,3]`直接实测=`202.2+54.1 ms`，与旧dense D05 question约`245 ms/call`匹配。
-第一步候选只保留CUDA discovery逐tick state并让finalize gather，删除约`54.1 ms`重算；它须经exact
-CUDA parity/direct benchmark且不能冒充大提速。其后仍须把约`202.2 ms`的固定discovery融合成单launch，
-保持H48、三轮、solver迭代、RNG、candidate identity、reason/fault/counter/safety和CPU reference；
-再做profile-on归因和profiler-off rate，不新增成功/安全Gate。
+第一步trajectory cache/gather已在exact Kit/Torch2.7 RTX5090通过：`4,608`行全部admit、final batch全字段
+逐bit相等，matched reference/cache总耗时=`101.263/50.534 ms`，其中finalize=`51.471/.317 ms`；retained
+cache=`3.164 MiB`、该段peak增量=`7.321 MiB`。Pod逐文件隔离矩阵=`201 passed,5 skipped`，广合跑失败另归为
+test-module alias/import-order污染。固定`30×4` discovery随后融合为一个Triton launch；actual `4,608`行、
+边界/非有限/重复identity probe及production record都逐bit相等，reference/fused/production=
+`49.591/.401/.416 ms`，约`124×` leaf speedup，fused peak增量=`3.551 MiB`，最终Pod隔离矩阵=
+`203 passed,5 skipped`。保持H48、三轮、solver迭代、RNG、candidate identity、reason/fault/counter/safety和
+CPU reference；下一步直接做完整D05 profile和profiler-off rate，不新增成功/安全Gate，也不用leaf倍数代签
+iteration倍数。
 
-2026-08-29的active V9只读窗已经不是“阶段未开”：Mu updates `4926..4975`的
-due/reveal/launch/selected contact=`7,818/7,648/5,267/0`、wall median=`6.563 s/H48`；Isaac updates
-`1481..1530`的due/accept/playback/launch/selected contact=`8,454/8,451/8,431/7,392/0`、wall median=
-`23.36 s/H48`。两端都有高eligible分母而selected hit仍为0，应在R8精确候选通过后替换；V9 Mu使用
+2026-08-29的active V9只读窗已经不是“阶段未开”：Mu updates `5143..5192`的
+due/reveal/launch/selected contact=`6,198/6,185/6,072/0`、episode mean=`202.53 tick`、wall median=
+`6.475 s/H48`；Isaac updates `1543..1592`的due/accept/playback/launch/selected contact=
+`8,441/8,437/8,420/7,477/0`、episode mean=`146.10 tick`、wall median=`22.10 s/H48`。两端都有高eligible分母而selected hit仍为0，应在R8精确候选通过后替换；V9 Mu使用
 legacy plant，故这项negative不能移签R8。
 
 source链为`651c305e`（原子action identity）→`cbf0aae3`（tick48）→`e3cbe9fc`（保持generic future-tick

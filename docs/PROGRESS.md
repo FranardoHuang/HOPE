@@ -23,10 +23,14 @@
 - Pod exact CUDA已排除`virtual_ball`融合失效：100-step Triton path真实admit，`N=512`为
   `.0526 ms/call`。真正与D05 question墙钟吻合的是Physical horizon的重复eager RK4：`[512,3,3]`
   discovery=`202.2 ms`、从同一contact state再finalize=`54.1 ms`，合计约旧dense `245 ms/call`。
-  第一最小候选只保留CUDA discovery逐tick state并让finalize gather，删除约`54.1 ms`重复段；它不冒充
-  大提速。exact CUDA parity/direct benchmark后仍须把约`202.2 ms`的固定discovery融合成单launch。
-  H48、三轮、solver迭代、RNG、identity、reason/fault/counter/safety与CPU reference保持，性能只认
-  profiler-off实测。
+  第一最小候选已通过exact Kit/Torch2.7 RTX5090 matched benchmark：`4,608`行全部admit、final batch全字段
+  逐bit相等，reference/cache总耗时=`101.263/50.534 ms`，其中finalize=`51.471/.317 ms`；retained cache=
+  `3.164 MiB`，该段peak增量=`7.321 MiB`。随后同一Torch reference的固定`30×4` discovery已融合为一个
+  Triton launch；actual `4,608`行、边界/非有限/重复identity probe与production record均逐bit相等，
+  reference/fused/production=`49.591/.401/.416 ms`，约`124×` leaf speedup，fused peak增量=`3.551 MiB`。
+  Pod隔离矩阵=`203 passed,5 skipped`；跨文件合跑曾出现的失败已定位为test-module alias/import-order污染，
+  不冒充production失败。H48、三轮、solver迭代、RNG、identity、reason/fault/counter/safety与CPU reference
+  保持；下一裁决只认完整D05 profile和profiler-off H48，不用leaf speedup代签iteration。
 - 新profile首试在step0前因诊断器shadow slotted Physical leaf而fail-closed；production未执行。已删除3个非法
   leaf wrapper、保留D05总段与其他合法分段，失败root只读且不计速度/学习证据。
 - V9 Mu长期证据口径自查纠正：先前`7,139/517,214`是generic `racket_contact_rows`，不是课程合同的
@@ -34,10 +38,10 @@
   `188/538,008 launch=.0349%`，landing=`0/188 selected contact`，raw contact中`96.15%`是edge；
   recent50 episode mean已塌到`105.59 tick`且launch=0。旧错误plant谱系只证明极稀疏hit曾可达后遗忘，
   不能移签R8，也不能用generic contact冒充课程交接。
-- active V9的2026-08-29只读窗已经有真实任务分母：Mu updates `4926..4975`为
-  due/reveal/launch/selected contact=`7,818/7,648/5,267/0`、episode mean=`233.25 tick`、wall median=
-  `6.563 s/H48`；Isaac updates `1481..1530`为due/accept/playback/launch/selected contact=
-  `8,454/8,451/8,431/7,392/0`、episode mean=`145.80 tick`、wall median=`23.36 s/H48`。因此两端都不是
+- active V9的2026-08-29只读窗已经有真实任务分母：Mu updates `5143..5192`为
+  due/reveal/launch/selected contact=`6,198/6,185/6,072/0`、episode mean=`202.53 tick`、wall median=
+  `6.475 s/H48`；Isaac updates `1543..1592`为due/accept/playback/launch/selected contact=
+  `8,441/8,437/8,420/7,477/0`、episode mean=`146.10 tick`、wall median=`22.10 s/H48`。因此两端都不是
   “仍在balance所以hit未测”，而是selected hit的高分母负结果；错误Mu plant
   使它不能移签R8，但已足以拒绝继续等待V9自然恢复。
 

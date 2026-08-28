@@ -27,15 +27,18 @@ updates`、collection中位`8.05→16.17 s`，故已撤回并恢复单一mask-fi
 Pod exact CUDA进一步排除了错误热点：`virtual_ball.coarse_landing`的100-step Triton融合真实启用，
 `N=512`仅`.0526 ms/call`；Physical horizon仍以Python/eager方式做`120`次discovery RK4，再从同一状态
 做最多`120`次finalize RK4，`[512,3,3]`实测=`202.2+54.1 ms`，与旧dense D05 question约
-`245 ms/call`匹配。第一步只让CUDA discovery保留逐tick state、finalize直接gather，删除约`54.1 ms`重算；
-它不是性能完成，exact CUDA parity/direct benchmark后还须把约`202.2 ms`的固定discovery融合成单launch。
-两步都不改变H48、三轮、solver迭代、physics或Gate，最终必须由CPU reference与exact CUDA完整输出逐位
-相等、fixed tape和profiler-off rate共同验收。
+`245 ms/call`匹配。逐tick cache/gather第一步已通过exact Kit/Torch2.7 RTX5090验证：`4,608`行全部admit、
+final batch全字段逐bit相等，reference/cache总耗时=`101.263/50.534 ms`，finalize=`51.471/.317 ms`，
+retained cache=`3.164 MiB`、该段peak增量=`7.321 MiB`。第二步已把固定`30×4` discovery融合为一个Triton
+launch；actual `4,608`行、边界probe与production record均逐bit相等，reference/fused/production=
+`49.591/.401/.416 ms`，约`124×` leaf speedup，fused peak增量=`3.551 MiB`。Pod隔离测试=
+`203 passed,5 skipped`。两步都不改变H48、三轮、solver迭代、physics或Gate；G05仍不晋级，最终仍由
+完整D05 profile、fixed tape和profiler-off rate共同验收。
 
-active V9最新只读负窗（2026-08-29）中，Isaac updates `1481..1530`的
-due/accept/playback/launch/selected contact=`8,454/8,451/8,431/7,392/0`，recent50 episode mean=
-`145.80 tick`、wall median=`23.36 s/H48`；Mu updates `4926..4975`的due/reveal/launch/selected contact=
-`7,818/7,648/5,267/0`，episode mean=`233.25 tick`、wall median=`6.563 s/H48`。两端都已形成高eligible分母而hit仍为0，不能归为
+active V9最新只读负窗（2026-08-29）中，Isaac updates `1543..1592`的
+due/accept/playback/launch/selected contact=`8,441/8,437/8,420/7,477/0`，recent50 episode mean=
+`146.10 tick`、wall median=`22.10 s/H48`；Mu updates `5143..5192`的due/reveal/launch/selected contact=
+`6,198/6,185/6,072/0`，episode mean=`202.53 tick`、wall median=`6.475 s/H48`。两端都已形成高eligible分母而hit仍为0，不能归为
 “课程尚未打开”。V9 Mu plant身份错误，故该negative不能移签R8；replacement验证完成后应替换，而不是
 继续等旧run。
 
