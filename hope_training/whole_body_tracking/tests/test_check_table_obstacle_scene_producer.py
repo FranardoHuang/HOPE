@@ -1324,6 +1324,46 @@ def test_nominal_hold_accepts_full_seed_birth_with_exact_teacher(tmp_path):
     assert loaded.physical_joint_pos[nonleg_index] == 0.2
 
 
+def test_nominal_hold_accepts_audited_contact_free_seed_projection(tmp_path):
+    path, document, _contract = _split_nominal_hold_fixture(tmp_path)
+    projected = json.loads(json.dumps(document))
+    semantics = P.MEASURED_BIRTH_HOLDABLE_FULL_SEED_SEMANTICS
+    composition = projected["physical_birth_composition"]
+    composition["semantics"] = semantics
+    composition["teacher_nonleg_exactly_preserved"] = False
+    composition["seed_all_joints_exactly_preserved"] = False
+    composition["seed_root_and_leg_joints_exactly_preserved"] = True
+    nonleg_index = composition["nonleg_joint_indices"][0]
+    projected["physical_ready"]["joint_pos_rad"][nonleg_index] = 0.2
+    composition["physical_minus_teacher_joint_pos_rad"][nonleg_index] = 0.2
+    seed_delta = [0.0] * 31
+    seed_delta[nonleg_index] = 0.2
+    composition["physical_minus_seed_joint_pos_rad"] = seed_delta
+    composition["contact_free_hold_projection"] = {
+        "schema_version": 1,
+        "semantics": "iterated_exact_bias_contact_free_pd_travel_projection",
+        "root_changed": False,
+        "leg_joints_changed": False,
+        "final_exact_ground_lp_feasible": True,
+        "support_foot_pose_max_abs_delta": 0.0,
+        "changed_joint_indices": [nonleg_index],
+        "changed_joint_names": [A3_JOINT_NAMES[nonleg_index]],
+    }
+    projected["ready_source"]["physical_birth_semantics"] = semantics
+    projected["sources"]["physical_birth_seed"]["consumed_fields"][-1] = (
+        "physical_ready.31_joint_pos_rad"
+    )
+    projected.pop("content_sha256")
+    projected["content_sha256"] = _sha(P._canonical_json_bytes(projected))
+    path.write_bytes(P._canonical_json_bytes(projected))
+
+    loaded = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+    assert loaded.teacher_physical_separated is True
+    assert loaded.physical_joint_pos[nonleg_index] == 0.2
+
+
 def test_nominal_hold_accepts_direct_frame0_and_requires_vendor_hctrl(tmp_path):
     path, document, _contract = _direct_frame0_nominal_hold_fixture(tmp_path)
     loaded = P._load_nominal_hold_input(

@@ -81,6 +81,10 @@ MEASURED_BIRTH_SHARED_LOWER_SEMANTICS = (
 MEASURED_BIRTH_FULL_SEED_SEMANTICS = (
     "teacher_yaw_aligned_full_seed_plus_exact_teacher_reference"
 )
+MEASURED_BIRTH_HOLDABLE_FULL_SEED_SEMANTICS = (
+    "teacher_yaw_aligned_seed_plus_contact_free_hold_projection_plus_exact_"
+    "teacher_reference"
+)
 MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS = (
     "exact_measured_teacher_frame0_root_joint_physical_birth"
 )
@@ -2230,6 +2234,7 @@ def _nominal_teacher_physical_contract(
         not in (
             MEASURED_BIRTH_SHARED_LOWER_SEMANTICS,
             MEASURED_BIRTH_FULL_SEED_SEMANTICS,
+            MEASURED_BIRTH_HOLDABLE_FULL_SEED_SEMANTICS,
         )
         or composition.get("teacher_and_physical_birth_differ") is not True
         or not isinstance(ready_source, Mapping)
@@ -2377,6 +2382,7 @@ def _nominal_teacher_physical_contract(
         or len(expected_nonleg) != 19
     ):
         raise TableSmokeReceiptError("physical-birth leg/nonleg mapping drifted")
+    close = lambda a, b: math.isclose(a, b, rel_tol=0.0, abs_tol=1.0e-12)
     if composition_semantics == MEASURED_BIRTH_SHARED_LOWER_SEMANTICS:
         if (
             composition.get("teacher_nonleg_exactly_preserved") is not True
@@ -2385,7 +2391,7 @@ def _nominal_teacher_physical_contract(
             raise TableSmokeReceiptError(
                 "shared-lower physical-birth composition is invalid"
             )
-    else:
+    elif composition_semantics == MEASURED_BIRTH_FULL_SEED_SEMANTICS:
         seed_joint_indices = composition.get("seed_joint_indices")
         seed_joint_names = composition.get("seed_joint_names")
         if (
@@ -2397,7 +2403,59 @@ def _nominal_teacher_physical_contract(
             raise TableSmokeReceiptError(
                 "full-seed physical-birth composition is invalid"
             )
-    close = lambda a, b: math.isclose(a, b, rel_tol=0.0, abs_tol=1.0e-12)
+    else:
+        seed_delta = _finite_tuple(
+            composition.get("physical_minus_seed_joint_pos_rad"),
+            31,
+            "projected physical-minus-seed q",
+        )
+        projection = composition.get("contact_free_hold_projection")
+        changed_indices = (
+            projection.get("changed_joint_indices")
+            if isinstance(projection, Mapping)
+            else None
+        )
+        changed_names = (
+            projection.get("changed_joint_names")
+            if isinstance(projection, Mapping)
+            else None
+        )
+        if (
+            composition.get("teacher_nonleg_exactly_preserved") is not False
+            or composition.get("seed_all_joints_exactly_preserved") is not False
+            or composition.get("seed_root_and_leg_joints_exactly_preserved")
+            is not True
+            or not isinstance(projection, Mapping)
+            or projection.get("schema_version") != 1
+            or projection.get("semantics")
+            != "iterated_exact_bias_contact_free_pd_travel_projection"
+            or projection.get("root_changed") is not False
+            or projection.get("leg_joints_changed") is not False
+            or projection.get("final_exact_ground_lp_feasible") is not True
+            or float(
+                projection.get("support_foot_pose_max_abs_delta", math.inf)
+            )
+            > 1.0e-12
+            or not isinstance(changed_indices, list)
+            or any(
+                type(index) is not int or index not in expected_nonleg
+                for index in changed_indices
+            )
+            or changed_names
+            != [joint_names[index] for index in changed_indices]
+            or any(
+                not close(seed_delta[index], 0.0)
+                for index in expected_leg
+            )
+            or any(
+                (index in changed_indices)
+                != (not close(seed_delta[index], 0.0))
+                for index in range(31)
+            )
+        ):
+            raise TableSmokeReceiptError(
+                "contact-free projected physical-birth composition is invalid"
+            )
     if (
         any(
             not close(physical_q[index], teacher_q[index] + delta_q[index])
