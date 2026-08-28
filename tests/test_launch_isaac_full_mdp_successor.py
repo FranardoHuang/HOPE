@@ -290,6 +290,25 @@ def test_dry_run_profile_probe_is_explicit_finite_completion_mode(
     assert not rig.root.exists()
 
 
+def test_dry_run_fixed_action_probe_uses_its_own_boot_marker(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.module.main(
+        rig.argv(dry=True) + ["--diagnostic-fixed-action-probe"]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["argv"][-1] == (
+        "task.action_ball_full_mdp_fixed_action_probe_output_path="
+        f"{rig.root / 'fixed-action-probe'}"
+    )
+    assert payload["launcher_env"]["KIT_BOOT_MARKER"] == (
+        rig.module.FIXED_ACTION_PROBE_BOOT_MARKER
+    )
+    assert payload["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "1"
+    assert payload["launcher_env"]["KIT_COMPLETION_TIMEOUT_S"] == "7200"
+    assert not rig.root.exists()
+
+
 def test_profile_probe_requires_budget_and_is_rate_exclusive_before_root(
     rig, capsys: pytest.CaptureFixture[str]
 ) -> None:

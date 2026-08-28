@@ -21688,6 +21688,7 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     if action_ball_full_mdp_fixed_action_probe_output is not None:
         if _get(cfg, "checkpoint_path") is not None:
             raise RuntimeError("FullMDP fixed-action probe is fresh-only")
+        print("FULLMDP_ISAAC_FIXED_ACTION_PROBE_STARTED", flush=True)
         summary = _run_action_ball_full_mdp_isaac_fixed_action_probe(
             env,
             runtime_env,

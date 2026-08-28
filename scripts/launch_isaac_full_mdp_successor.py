@@ -61,6 +61,7 @@ LD_LIBRARY_PATH = (
     "x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e"
 )
 RATE_PROBE_COMPLETION_TIMEOUT_S = 7200
+FIXED_ACTION_PROBE_BOOT_MARKER = "FULLMDP_ISAAC_FIXED_ACTION_PROBE_STARTED"
 RATE_PROBE_WARMUP_UPDATES = 10
 RATE_PROBE_MEASURED_UPDATES = 50
 RATE_PROBE_TAIL_UPDATES = 1
@@ -605,7 +606,8 @@ def _runtime_env(
 
 
 def _launcher_env(
-    paths: dict[str, Path], *, finite_probe: bool = False
+    paths: dict[str, Path], *, finite_probe: bool = False,
+    boot_marker: str = "Learning iteration"
 ) -> dict[str, str]:
     result = {
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
@@ -614,7 +616,7 @@ def _launcher_env(
         "XDG_CONFIG_HOME": str(paths["xdg_config"]),
         "XDG_DATA_HOME": str(paths["xdg_data"]),
         "XDG_STATE_HOME": str(paths["xdg_state"]),
-        "KIT_BOOT_MARKER": "Learning iteration",
+        "KIT_BOOT_MARKER": boot_marker,
         "KIT_BOOT_TIMEOUT_S": "900",
         "KIT_BOOT_STALE_TIMEOUT_S": "180",
         "KIT_BOOT_POLL_S": "5",
@@ -1098,6 +1100,11 @@ def launch(args: argparse.Namespace) -> int:
         rsl_sha256=rsl_sha256,
         profile_updates=args.profile_updates,
     )
+    boot_marker = (
+        FIXED_ACTION_PROBE_BOOT_MARKER
+        if args.diagnostic_fixed_action_probe
+        else "Learning iteration"
+    )
     if args.dry_run:
         dry_run_payload = {
             "source_commit": commit,
@@ -1109,6 +1116,7 @@ def launch(args: argparse.Namespace) -> int:
                     or args.diagnostic_profile_probe
                     or args.diagnostic_fixed_action_probe
                 ),
+                boot_marker=boot_marker,
             ),
             "runtime_env": runtime_env,
             "run_root": str(root),
@@ -1165,6 +1173,7 @@ def launch(args: argparse.Namespace) -> int:
                         or args.diagnostic_profile_probe
                         or args.diagnostic_fixed_action_probe
                     ),
+                    boot_marker=boot_marker,
                 ),
                 stdin=subprocess.DEVNULL,
                 check=False,

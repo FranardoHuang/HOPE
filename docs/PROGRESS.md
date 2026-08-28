@@ -59,6 +59,10 @@
   区分initial与post-step首个exact差异并保留逐字段差值包络。它在Isaac policy runner前自然退出，不产生
   checkpoint，不设physics容差或安全Gate。host generator/record/tamper/wiring/launcher targeted=
   `41 passed`；因host无Torch，sim目标矩阵只认后续exact Pod结果。
+- fixed-action诊断不能沿用PPO的`Learning iteration`启动标记：它按合同在runner前自然退出，沿用旧标记会把
+  已完成的有限诊断误报成900秒boot timeout。启动器与`train.py`现共享唯一具名
+  `FULLMDP_ISAAC_FIXED_ACTION_PROBE_STARTED`标记，completion仍要求自然退出与完整no-clobber record；
+  这只修诊断可观测性，不新增物理/安全Gate。相关host targeted=`36 passed`。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 
