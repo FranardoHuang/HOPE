@@ -1094,4 +1094,19 @@ mimic。这份结果只证伪混源/覆盖的V8谱系，不能反向证伪V9的T
 runtime joint-order q/dq、实际拍面几何，以及48 tick逐步状态/terminal；比较器把initial mismatch与
 post-step divergence分开，并只给exact首差和数值包络。若q/dq在tick0前已不同，优先查asset/reset/joint
 order；若初态一致而第一动作后分叉，才进入decoder/plant/backend。host targeted=`41 passed`，exact Pod
-记录尚未生成，故当前不得提前选边。
+首轮记录已由clean source=`981327de58d5c72b3ffcf3c3ebf1bfe981ce0292`自然生成；两端joint order和tape
+SHA完全相同，首差却在`initial_joint_pos[0,12]`。初始joint max/mean absolute差=`1.5199/.2427 rad`，
+root position=`.1778/.1101 m`，racket position=`.5376/.3561 m`；Isaac root local为
+`[0,0,1.0684]`且右肩pitch/elbow为`.3/.8`，Mu root local为`[.15259,-.17777,1.0684]`且右肩pitch为
+`-1.2199`，后者精确对应Take061 physical-ready。tick7开始done mismatch，Mu总数`3,072=512×6`、Isaac为0。
+
+源码因果链已闭合：dedicated FullMDP env在base construction后才安装top owner，并明确把canonical genesis
+reset留为pending；`train.py`却没有消费它，runner仍沿用“fresh在construction已reset”的旧假设。更严重的是
+唯一reset Event明确写`Articulation.default_joint_pos/default_root_state`，所以后续reset也不会安装
+dynamic-ready physical birth。此前catalog、teacher bridge和actor-head修复只闭合老师、课程内部状态与q_des，
+并未成为Isaac plant birth；这就是用户看到“老师第0帧调过但sim起始动作仍不对”的实现根因，不是Pod安装坏。
+
+采用的修复不添加下游Gate：`train.py`在runner/固定带probe前恰好消费一次canonical genesis reset；reset
+Event仍是唯一sim writer，但只读取Motion已验证的`dynamic_ready.physical_ready`窄projection并写root/q/dq。
+teacher frame0继续只是mimic authority，`default_joint_pos`继续只是affine action decoder offset，二者都不得
+冒充physical birth。修后必须用新的clean commit重跑Pod双端同带；初态未闭合前V9长跑保持HOLD。

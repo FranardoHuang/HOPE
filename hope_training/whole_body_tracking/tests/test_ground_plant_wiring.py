@@ -617,7 +617,7 @@ def test_fresh_full_mdp_contract_uses_installed_reset_only_event_graph(monkeypat
     del cfg.events.physics_material
     expected_reset = object()
     mdp_module = types.ModuleType("whole_body_tracking.tasks.tracking.mdp")
-    mdp_module.reset_action_ball_full_mdp_robot_to_default = expected_reset
+    mdp_module.reset_action_ball_full_mdp_robot_to_physical_ready = expected_reset
     monkeypatch.setitem(
         sys.modules, "whole_body_tracking.tasks.tracking.mdp", mdp_module
     )

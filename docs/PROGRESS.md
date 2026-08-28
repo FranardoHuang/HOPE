@@ -63,6 +63,15 @@
   已完成的有限诊断误报成900秒boot timeout。启动器与`train.py`现共享唯一具名
   `FULLMDP_ISAAC_FIXED_ACTION_PROBE_STARTED`标记，completion仍要求自然退出与完整no-clobber record；
   这只修诊断可观测性，不新增物理/安全Gate。相关host targeted=`36 passed`。
+- exact Pod同带首轮已自然完成并把分叉定位到首个action之前：两端source都为clean `981327de`、joint order与
+  action tape完全相同，但Isaac初态仍是asset default，Mu是Take061 dynamic-ready physical birth。初始joint
+  max/mean absolute差=`1.5199/.2427 rad`、root=`.1778/.1101 m`、racket position=`.5376/.3561 m`；
+  tick7起Mu累计done=`3,072=512×6`而Isaac为0。源码对账确认fresh genesis reset在构造后保持pending但
+  `train.py`未消费，唯一reset event又写asset default而非dynamic-ready；这是生产reset/bootstrap实现错误，
+  不是Pod安装损坏或学习步数不足。
+- 修复候选只收束两个owner：`train.py`在runner/probe前恰好消费一次canonical genesis reset；reset Event作为
+  唯一sim writer，从Motion唯一validated dynamic-ready binding读取physical root/q/dq。teacher frame0和
+  decoder default仍保持独立，不增加task-success Gate；exact Pod回归和修后同带尚待完成，不能提前启动V9长跑。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 

@@ -222,9 +222,11 @@ slice和Mu native pose adapter两处实现错误；最终
       exact source=`34cd7af8`已在fresh 12-update namespace自然完成，直接active-row计数仍精确为
       `3,584/290/22`，不是由inactive row倒推；该profile-on诊断只授权密度事实，不授权速度或学习。
   11. [ ] 从同一physical-ready、joint order、q/dq与固定31-D action tape逐tick比较Isaac/Mu的base、racket、
-      terminal与first divergence；代码已实现同一tracked `512×H48×31` tape、portable record与无verdict
-      compare，host targeted=`41 passed`；exact Pod双端记录与首差尚待执行。先裁决实现/plant差异，再决定
-      V9长期双fresh，不增加task-success安全Gate。
+      terminal与first divergence。首轮exact Pod已完成：source clean `981327de`、joint order/action tape相同，
+      首差却在`initial_joint_pos[0,12]`；Isaac写asset default，Mu写dynamic-ready，初始joint/root/racket位置
+      max absolute差=`1.5199 rad/.1778 m/.5376 m`，tick7起terminal也分叉。源码根因为fresh genesis reset
+      未被`train.py`消费，reset Event又写asset default。当前已实现单一genesis reset owner与Motion→Event窄
+      physical-ready projection；只有修后exact Pod双端record和compare闭合，才勾选本项或启动V9长跑。
 
 replacement已完成exact Pod target tests、双rate与fresh启动；fixed-tape的`cq_n_iters=12`结论沿用同一
 未变physics合同。hard-edge、paddle误差单调性、active-strata wall和短学习未来窗仍未闭合，现役namespace

@@ -640,7 +640,10 @@ def test_fresh_a_c_alone_install_exact_deterministic_robot_reset_event():
         )
         assert public_event_terms == ("action_ball_full_mdp_robot_reset",)
         assert type(term) is EventTermCfg
-        assert term.func is reset_events.reset_action_ball_full_mdp_robot_to_default
+        assert (
+            term.func
+            is reset_events.reset_action_ball_full_mdp_robot_to_physical_ready
+        )
         assert term.mode == "reset"
         assert tuple(term.params) == ("asset_cfg",)
         asset_cfg = term.params["asset_cfg"]

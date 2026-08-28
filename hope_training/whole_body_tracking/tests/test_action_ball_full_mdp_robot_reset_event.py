@@ -153,11 +153,57 @@ class _Scene:
         return self.robot
 
 
+class _Motion:
+    def __init__(self, scene):
+        self.scene = scene
+        self.calls = []
+
+    def action_ball_full_mdp_physical_reset_state(self, env_ids):
+        self.calls.append(env_ids)
+        count = len(env_ids)
+        root_state = torch.zeros(count, 13, dtype=torch.float32)
+        root_state[:, :3] = torch.tensor(
+            [[0.25, -0.5, 1.125]], dtype=torch.float32
+        ) + self.scene.env_origins[env_ids]
+        root_state[:, 3] = 1.0
+        joint_pos = torch.stack(
+            [
+                torch.tensor(
+                    [index + 0.1, index + 0.2, index + 0.3, index + 0.4]
+                )
+                for index in env_ids.tolist()
+            ]
+        )
+        return {
+            "root_state": root_state,
+            "joint_pos": joint_pos,
+            "joint_vel": torch.zeros_like(joint_pos),
+        }
+
+
+class _CommandManager:
+    def __init__(self, motion):
+        self.motion = motion
+
+    def get_term(self, name):
+        assert name == "motion"
+        return self.motion
+
+
+def _env(robot):
+    scene = _Scene(robot)
+    motion = _Motion(scene)
+    return SimpleNamespace(
+        scene=scene,
+        command_manager=_CommandManager(motion),
+    )
+
+
 def _raw_bytes(value):
     return value.detach().contiguous().view(torch.uint8).clone()
 
 
-def test_fresh_robot_reset_writes_only_selected_materialized_defaults_without_rng(
+def test_fresh_robot_reset_writes_only_selected_dynamic_ready_birth_without_rng(
     monkeypatch,
 ):
     def forbid_rng(*_args, **_kwargs):
@@ -169,19 +215,20 @@ def test_fresh_robot_reset_writes_only_selected_materialized_defaults_without_rn
         monkeypatch.setattr(torch, name, forbid_rng)
 
     robot = _Articulation()
-    env = SimpleNamespace(scene=_Scene(robot))
+    env = _env(robot)
     selected = torch.tensor([2, 0], dtype=torch.int64)
     peer_root_before = _raw_bytes(robot.root_state[1])
     peer_joint_pos_before = _raw_bytes(robot.joint_pos[1])
     peer_joint_vel_before = _raw_bytes(robot.joint_vel[1])
 
-    E.reset_action_ball_full_mdp_robot_to_default(env, selected)
+    E.reset_action_ball_full_mdp_robot_to_physical_ready(env, selected)
 
-    expected_root = robot.data.default_root_state[selected].clone()
-    expected_root[:, :3] += env.scene.env_origins[selected]
-    expected_root[:, 7:] = 0.0
-    expected_joint_pos = robot.data.default_joint_pos[selected]
-    expected_joint_vel = torch.zeros_like(robot.data.default_joint_vel[selected])
+    expected = env.command_manager.motion.action_ball_full_mdp_physical_reset_state(
+        selected
+    )
+    expected_root = expected["root_state"]
+    expected_joint_pos = expected["joint_pos"]
+    expected_joint_vel = expected["joint_vel"]
 
     assert len(robot.root_writes) == 1
     assert len(robot.joint_writes) == 1
@@ -197,6 +244,7 @@ def test_fresh_robot_reset_writes_only_selected_materialized_defaults_without_rn
     assert torch.equal(robot.root_state[selected], expected_root)
     assert torch.equal(robot.joint_pos[selected], expected_joint_pos)
     assert torch.equal(robot.joint_vel[selected], expected_joint_vel)
+    assert env.command_manager.motion.calls[0] is selected
 
     # The unselected peer never appears in either setter call and retains its
     # exact bit pattern in all three live plant tensors.
@@ -207,10 +255,10 @@ def test_fresh_robot_reset_writes_only_selected_materialized_defaults_without_rn
 
 def test_fresh_robot_reset_rejects_implicit_all_env_selection():
     robot = _Articulation()
-    env = SimpleNamespace(scene=_Scene(robot))
+    env = _env(robot)
 
     with pytest.raises(ValueError, match="selected int64 env_ids"):
-        E.reset_action_ball_full_mdp_robot_to_default(env, None)
+        E.reset_action_ball_full_mdp_robot_to_physical_ready(env, None)
 
     assert robot.root_writes == []
     assert robot.joint_writes == []

@@ -16777,6 +16777,91 @@ class MotionCommand(CommandTerm):
             raise
         return rollback_state
 
+    def action_ball_full_mdp_physical_reset_state(
+        self, env_ids: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """Project the one validated dynamic-ready plant birth for reset.
+
+        The fresh FullMDP reset event is the sole simulator writer.  Motion
+        owns the selected action and the dynamic-ready binding, so it exposes
+        only the already-validated physical root/joint state here.  Teacher
+        frame 0, policy q_des and task success are deliberately absent.
+        """
+
+        if (
+            type(env_ids) is not torch.Tensor
+            or env_ids.ndim != 1
+            or env_ids.dtype != torch.int64
+            or env_ids.device != torch.device(self.device)
+        ):
+            raise ValueError(
+                "FullMDP physical reset requires selected int64 env_ids"
+            )
+        if (
+            not bool(
+                getattr(
+                    self,
+                    "action_ball_diagnostic_split_ready_teacher",
+                    False,
+                )
+            )
+            or getattr(
+                self,
+                "_action_ball_dynamic_ready_binding_sha256",
+                None,
+            )
+            is None
+        ):
+            raise RuntimeError(
+                "FullMDP physical reset requires the split dynamic-ready binding"
+            )
+        action_slots = self.clip_id[env_ids]
+        root_pos = (
+            self._action_ball_dynamic_ready_physical_root_pos_w_m[
+                action_slots
+            ]
+            + self._env.scene.env_origins[env_ids]
+        )
+        root_quat = (
+            self._action_ball_dynamic_ready_physical_root_quat_wxyz[
+                action_slots
+            ]
+        )
+        joint_pos = self._action_ball_dynamic_ready_physical_joint_pos_rad[
+            action_slots
+        ]
+        joint_vel = self._action_ball_dynamic_ready_physical_joint_vel_radps[
+            action_slots
+        ]
+        root_velocity = torch.zeros(
+            len(env_ids),
+            6,
+            dtype=root_pos.dtype,
+            device=root_pos.device,
+        )
+        result = {
+            "root_state": torch.cat(
+                (root_pos, root_quat, root_velocity), dim=-1
+            ),
+            "joint_pos": joint_pos,
+            "joint_vel": joint_vel,
+        }
+        if (
+            tuple(result["root_state"].shape) != (len(env_ids), 13)
+            or tuple(result["joint_pos"].shape)
+            != (len(env_ids), _A3_CANONICAL_READY_JOINT_COUNT)
+            or tuple(result["joint_vel"].shape)
+            != (len(env_ids), _A3_CANONICAL_READY_JOINT_COUNT)
+            or any(
+                not bool(torch.isfinite(value).all())
+                for value in result.values()
+            )
+        ):
+            raise RuntimeError(
+                "FullMDP dynamic-ready physical reset state differs"
+            )
+        return result
+
     def _restore_action_ball_sim_state(
         self, env_ids: torch.Tensor, rollback_state: dict
     ) -> None:

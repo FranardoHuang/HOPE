@@ -393,6 +393,52 @@ def test_split_ready_true_reset_uses_receipt_xy_and_physical_z_quat_joints():
     assert torch.count_nonzero(command.robot.joint_vel).item() == 0
 
 
+def test_full_mdp_reset_projection_is_physical_ready_not_teacher_or_default():
+    command = C.MotionCommand.__new__(C.MotionCommand)
+    command.device = "cpu"
+    command._env = types.SimpleNamespace(
+        scene=types.SimpleNamespace(
+            env_origins=torch.tensor(
+                [[10.0, 20.0, 0.0], [30.0, 40.0, 0.0]]
+            )
+        )
+    )
+    command.clip_id = torch.tensor([0, 0])
+    command.action_ball_diagnostic_split_ready_teacher = True
+    command._action_ball_dynamic_ready_binding_sha256 = _PIN_SHA
+    command._action_ball_dynamic_ready_physical_root_pos_w_m = torch.tensor(
+        [[0.2, -0.3, 1.2]]
+    )
+    command._action_ball_dynamic_ready_physical_root_quat_wxyz = torch.tensor(
+        [[0.98, 0.1, 0.0, 0.0]]
+    )
+    command._action_ball_dynamic_ready_physical_joint_pos_rad = torch.full(
+        (1, _JOINTS), 0.7
+    )
+    command._action_ball_dynamic_ready_physical_joint_vel_radps = torch.zeros(
+        1, _JOINTS
+    )
+    ids = torch.tensor([1, 0], dtype=torch.int64)
+
+    result = command.action_ball_full_mdp_physical_reset_state(ids)
+
+    assert torch.equal(
+        result["root_state"][:, :3],
+        torch.tensor([[30.2, 39.7, 1.2], [10.2, 19.7, 1.2]]),
+    )
+    assert torch.equal(
+        result["root_state"][:, 3:7],
+        torch.tensor([[0.98, 0.1, 0.0, 0.0]]).expand(2, -1),
+    )
+    assert torch.count_nonzero(result["root_state"][:, 7:]).item() == 0
+    assert torch.equal(result["joint_pos"], torch.full((2, _JOINTS), 0.7))
+    assert torch.count_nonzero(result["joint_vel"]).item() == 0
+
+    command.action_ball_diagnostic_split_ready_teacher = False
+    with pytest.raises(RuntimeError, match="split dynamic-ready binding"):
+        command.action_ball_full_mdp_physical_reset_state(ids)
+
+
 def _binding_harness():
     command = C.MotionCommand.__new__(C.MotionCommand)
     command.cfg = types.SimpleNamespace()

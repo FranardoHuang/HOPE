@@ -2931,7 +2931,7 @@ class HOPEActionBallFullMdpEventsCfg:
     """
 
     action_ball_full_mdp_robot_reset = EventTerm(
-        func=mdp.reset_action_ball_full_mdp_robot_to_default,
+        func=mdp.reset_action_ball_full_mdp_robot_to_physical_ready,
         mode="reset",
         params={"asset_cfg": SceneEntityCfg("robot")},
     )

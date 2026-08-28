@@ -14881,7 +14881,9 @@ def _fresh_full_mdp_material_randomization_absence_is_proven(
         None
         if mdp_module is None
         else getattr(
-            mdp_module, "reset_action_ball_full_mdp_robot_to_default", None
+            mdp_module,
+            "reset_action_ball_full_mdp_robot_to_physical_ready",
+            None,
         )
     )
     params = getattr(term_cfg, "params", None)
@@ -16737,6 +16739,57 @@ def _resolve_action_ball_full_mdp_runtime_binding(
         checkpoint_adapter=owner_adapter,
         cold_restore_capsule=cold_capsule,
     )
+
+
+def _consume_action_ball_full_mdp_fresh_genesis_reset(
+    env, runtime_env, runtime_binding
+) -> bool:
+    """Consume the one post-construction FullMDP genesis reset."""
+
+    if runtime_binding is None:
+        return False
+    if type(runtime_binding) is not _ActionBallFullMdpRuntimeBinding:
+        raise RuntimeError(
+            "[train.py] fresh FullMDP genesis reset binding differs"
+        )
+    if getattr(
+        runtime_env,
+        "_action_ball_full_mdp_lean_genesis_reset_pending",
+        None,
+    ) is not True:
+        raise RuntimeError(
+            "[train.py] fresh FullMDP genesis reset is not pending"
+        )
+    initial_reset = env.reset()
+    if (
+        type(initial_reset) is not tuple
+        or len(initial_reset) != 2
+        or type(initial_reset[1]) is not dict
+        or getattr(
+            runtime_env,
+            "_action_ball_full_mdp_lean_genesis_reset_pending",
+            None,
+        )
+        is not False
+    ):
+        raise RuntimeError(
+            "[train.py] fresh FullMDP genesis reset did not complete exactly once"
+        )
+    print(
+        "HOPE_ACTION_BALL_FULL_MDP_GENESIS_RESET_JSON="
+        + json.dumps(
+            {
+                "event": "hope_action_ball_full_mdp_genesis_reset",
+                "schema_version": 1,
+                "physical_birth_source": "dynamic_ready.physical_ready",
+                "teacher_frame0_is_physical_birth": False,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    return True
 
 
 def _action_ball_full_mdp_training_contract(
@@ -21269,6 +21322,11 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
             action_ball_full_mdp_pre_gym_binding,
             runtime_env,
         )
+    )
+    _consume_action_ball_full_mdp_fresh_genesis_reset(
+        env,
+        runtime_env,
+        action_ball_full_mdp_runtime_binding,
     )
     action_ball_full_mdp_installed_reward_graph = (
         _resolve_action_ball_full_mdp_installed_reward_graph(

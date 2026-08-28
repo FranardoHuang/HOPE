@@ -1181,11 +1181,11 @@ schema-3 hard contract and ONNX/export metadata so old and corrected continuatio
   decoder.  Isaac fixes `clip_actions=null`; portable MuJoCo requires `TaskCfg.action_clip=None` and
   rejects every non-`None` setting.  Policy action, current-state observation, teacher and PD vectors
   all use the tracked runtime/schema-2 joint order; the sole runtime-to-MJCF actuator permutation is
-  the final plant `ctrl` write.  For portable FullMDP, a true Gym reset writes
-  `runtime_plant.default_joint_pos_rad`, the configured default root translated by `env_origin`,
-  zero joint/root velocity, and zero current/previous action history; `take061/q_ready` is provenance
-  only and is not the physical reset pose.  Natural shot retirement is not a reset and does not change
-  `reset_generation`.  The affine decoder is
+  the final plant `ctrl` write.  Fresh Isaac and portable MuJoCo FullMDP true episode reset both write the
+  selected Take061 `dynamic_ready.physical_ready` root pose and 31-D joint pose with zero root/joint
+  velocity.  Measured teacher frame0 remains a separate mimic authority.  The articulation/runtime
+  `default_joint_pos` remains only the affine decoder offset and is not a physical episode birth.
+  Natural shot retirement is not a reset and does not change `reset_generation`.  The affine decoder is
   `q_raw = runtime_plant.default_joint_pos_rad + action_scale * action`.  FullMDP Isaac与portable
   MuJoCo随后调用同一无引擎纯tensor guard：先按上一次可执行target/default pose做finite fallback，再取
   soft envelope、hard 5%内缩和soft span额外5%内缩的交集；有限越界proposal投影后继续学习，非有限proposal

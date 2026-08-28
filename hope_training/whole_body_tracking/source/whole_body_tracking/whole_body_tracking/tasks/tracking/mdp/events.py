@@ -12,18 +12,17 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
-def reset_action_ball_full_mdp_robot_to_default(
+def reset_action_ball_full_mdp_robot_to_physical_ready(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> None:
-    """Reset selected fresh full-MDP robot rows without sampling RNG.
+    """Reset selected FullMDP rows to the validated physical-ready birth.
 
-    The articulation's materialized defaults are the plant-state source.  In
-    particular, ``default_joint_pos`` already contains any startup-only
-    calibration randomization, so this reset must not reconstruct a nominal
-    pose from config literals or a motion clip.  ``env_ids=None`` is rejected:
-    the native reset callpoint must always provide its explicit selected rows.
+    Motion owns the dynamic-ready binding and selected action.  This event is
+    the sole simulator writer and consumes only Motion's narrow physical-state
+    projection; teacher frame 0 and the articulation's neutral defaults are
+    not valid FullMDP episode births.  ``env_ids=None`` remains rejected.
     """
 
     asset: Articulation = env.scene[asset_cfg.name]
@@ -38,11 +37,37 @@ def reset_action_ball_full_mdp_robot_to_default(
             "on the articulation device"
         )
 
-    root_state = asset.data.default_root_state[env_ids].clone()
-    root_state[:, :3] += env.scene.env_origins[env_ids]
-    root_state[:, 7:] = 0.0
-    joint_pos = asset.data.default_joint_pos[env_ids].clone()
-    joint_vel = torch.zeros_like(asset.data.default_joint_vel[env_ids])
+    try:
+        motion = env.command_manager.get_term("motion")
+        projector = motion.action_ball_full_mdp_physical_reset_state
+    except (AttributeError, KeyError) as exc:
+        raise RuntimeError(
+            "fresh FullMDP reset has no physical-ready Motion owner"
+        ) from exc
+    state = projector(env_ids)
+    if type(state) is not dict or set(state) != {
+        "root_state",
+        "joint_pos",
+        "joint_vel",
+    }:
+        raise RuntimeError(
+            "fresh FullMDP physical-ready reset projection differs"
+        )
+    root_state = state["root_state"]
+    joint_pos = state["joint_pos"]
+    joint_vel = state["joint_vel"]
+    if (
+        not all(torch.is_tensor(value) for value in state.values())
+        or tuple(root_state.shape) != (len(env_ids), 13)
+        or tuple(joint_pos.shape) != tuple(joint_vel.shape)
+        or tuple(joint_pos.shape)
+        != (len(env_ids), asset.data.default_joint_pos.shape[1])
+        or any(value.device != torch.device(asset.device) for value in state.values())
+        or any(not bool(torch.isfinite(value).all()) for value in state.values())
+    ):
+        raise RuntimeError(
+            "fresh FullMDP physical-ready reset tensors differ"
+        )
 
     asset.write_root_state_to_sim(root_state, env_ids=env_ids)
     asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
