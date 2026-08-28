@@ -393,7 +393,7 @@ def test_a_c_task_yaml_compose_to_one_common_non_self_authorizing_recipe():
         assert task["racket"]["target_mode"] == "action_ball_full_mdp"
         assert task["racket"]["action_ball_diagnostic_unauthorized"] is True
         assert task["racket"]["virtual_ball"] is False
-        assert task["motion"]["action_ball_diagnostic_split_ready_teacher"] is False
+        assert task["motion"]["action_ball_diagnostic_split_ready_teacher"] is True
         assert task["motion"]["action_ball_single_stroke_timeout_enabled"] is False
 
         # A/C role is a launch cross-check, never a YAML-authored payment.
@@ -463,10 +463,11 @@ def test_env_cfg_leaves_are_exact_role_projection_with_truthful_hold():
         assert type(contact_sensor) is ContactSensorCfg
         assert contact_sensor.class_type is ContactSensor
         assert contact_sensor.prim_path == "{ENV_REGEX_NS}/Robot/.*"
-        assert cfg.commands.motion.action_ball_diagnostic_split_ready_teacher is False
+        assert cfg.commands.motion.action_ball_diagnostic_split_ready_teacher is True
         assert cfg.commands.motion.action_ball_single_stroke_timeout_enabled is False
-        assert cfg.commands.motion.canonical_ready_mode is False
+        assert cfg.commands.motion.canonical_ready_mode is True
         assert cfg.commands.motion.balanced_clip_sampling is True
+        assert cfg.commands.motion.stand_start_prob == 0.0
         assert cfg.commands.motion.hold_steps_range == (0, 0)
         assert cfg.commands.motion.stand_start_min_hold == 0
         assert cfg.commands.motion.post_swing_min_hold == 0

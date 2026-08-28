@@ -6759,9 +6759,12 @@ def _validate_action_ball_effective_reward_materialization_profile(
 
 
 def _resolve_action_ball_dynamic_ready_bootstrap_request(
-    cfg, *, action_ball_launch_requested: bool
+    cfg,
+    *,
+    action_ball_launch_requested: bool,
+    action_ball_full_mdp_requested: bool = False,
 ) -> tuple[bool, dict[str, str] | None]:
-    """Resolve the exact N=1 dynamic-ready candidate and hold-receipt pins."""
+    """Resolve the exact N=1 ready candidate for either owning task family."""
 
     raw = _get(cfg, "action_ball_dynamic_ready_bootstrap")
     requested = False if raw is None else _as_explicit_bool(
@@ -6782,9 +6785,9 @@ def _resolve_action_ball_dynamic_ready_bootstrap_request(
                 "action_ball_dynamic_ready_bootstrap=true"
             )
         return False, None
-    if not action_ball_launch_requested:
+    if not (action_ball_launch_requested or action_ball_full_mdp_requested):
         raise RuntimeError(
-            "action_ball_dynamic_ready_bootstrap is ActionBall-only"
+            "action_ball_dynamic_ready_bootstrap requires ActionBall or fresh full-MDP"
         )
     if not all(present.values()):
         missing = sorted(name for name, is_present in present.items() if not is_present)
@@ -20754,7 +20757,9 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         action_ball_dynamic_ready_bootstrap_requested,
         action_ball_dynamic_ready_pins,
     ) = _resolve_action_ball_dynamic_ready_bootstrap_request(
-        cfg, action_ball_launch_requested=action_ball_launch_requested
+        cfg,
+        action_ball_launch_requested=action_ball_launch_requested,
+        action_ball_full_mdp_requested=action_ball_full_mdp_requested,
     )
     action_ball_effective_reward_recipe_output_path = (
         _resolve_action_ball_effective_reward_materialization_request(
@@ -21162,8 +21167,11 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
 
     action_ball_policy_bootstrap = None
     if (
-        action_ball_shared_ready_bootstrap_requested
-        or action_ball_dynamic_ready_bootstrap_requested
+        (
+            action_ball_shared_ready_bootstrap_requested
+            or action_ball_dynamic_ready_bootstrap_requested
+        )
+        and action_ball_full_mdp_pre_gym_binding is None
     ):
         action_ball_policy_bootstrap = (
             _action_ball_policy_bootstrap_contract(

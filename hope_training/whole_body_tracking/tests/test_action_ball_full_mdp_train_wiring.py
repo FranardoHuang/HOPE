@@ -124,6 +124,35 @@ def test_exact_task_flag_selects_the_actual_fresh_branch(task, expected):
     assert train_mod._action_ball_full_mdp_runtime_requested(task) is expected
 
 
+def test_dynamic_ready_request_is_owned_by_action_ball_or_fresh_full_mdp():
+    cfg = {
+        "action_ball_dynamic_ready_bootstrap": True,
+        "action_ball_dynamic_ready_artifact_path": "/tmp/ready.json",
+        "action_ball_dynamic_ready_artifact_sha256": "a" * 64,
+        "action_ball_dynamic_ready_nominal_receipt_path": "/tmp/hold.json",
+        "action_ball_dynamic_ready_nominal_receipt_sha256": "b" * 64,
+    }
+    requested, pins = (
+        train_mod._resolve_action_ball_dynamic_ready_bootstrap_request(
+            cfg,
+            action_ball_launch_requested=False,
+            action_ball_full_mdp_requested=True,
+        )
+    )
+    assert requested is True
+    assert pins == {
+        key: value
+        for key, value in cfg.items()
+        if key != "action_ball_dynamic_ready_bootstrap"
+    }
+    with pytest.raises(RuntimeError, match="ActionBall or fresh full-MDP"):
+        train_mod._resolve_action_ball_dynamic_ready_bootstrap_request(
+            cfg,
+            action_ball_launch_requested=False,
+            action_ball_full_mdp_requested=False,
+        )
+
+
 @pytest.mark.parametrize(
     "value", [None, 0, 1, "true", "false", [], object()]
 )

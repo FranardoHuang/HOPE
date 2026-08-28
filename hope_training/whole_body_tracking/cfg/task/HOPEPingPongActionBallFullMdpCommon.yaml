@@ -19,12 +19,10 @@ actor_obs_contract: null
 registry_name: null
 registry_name_2: null
 
-# Fresh A/C share one plant-birth policy prior.  Zero normalized action decodes
-# through the live default-offset action term to the same materialized default
-# joint pose written by the selected-row reset; Motion frame 0 is deliberately
-# not a bootstrap authority for this continuous 73-clip task.  The dependency-
-# free typed PPO recipe owns every policy number and parameterization; YAML only
-# selects the bootstrap transformation.
+# Fresh A/C share one Take061 physical-ready, hold-q_des and teacher source.
+# The dependency-free typed PPO recipe owns every policy number and
+# parameterization; YAML only selects the already validated bootstrap
+# transformation.
 action_ball_full_mdp_policy_bootstrap:
   kind: a3_take061_dynamic_ready_head_v1
 
@@ -39,11 +37,10 @@ env:
   num_envs: 512
 
 motion:
-  # The fresh diagnostic uses all 73 measured capture clips.  The old switch
-  # is a one-clip physical-ready -> measured-frame0 bridge and is not the
-  # continuous D05/Motion epoch, so applying it here would reject N=73 by
-  # construction.  False does not authorize launch or invent reset semantics.
-  action_ball_diagnostic_split_ready_teacher: false
+  # The active curriculum is explicitly N=1. Preserve the independently
+  # reviewed stable-ready -> measured-frame0 seam; D05 still owns when the
+  # teacher becomes visible and R07 remains recovery evidence, not admission.
+  action_ball_diagnostic_split_ready_teacher: true
   action_ball_single_stroke_timeout_enabled: false
 
 racket:
