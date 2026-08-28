@@ -65,6 +65,14 @@ STABLE_UPPER_SOURCE_KIND = "stable_upper_v2"
 MEASURED_RETARGET_SOURCE_KIND = "measured_retarget_l0_diagnostic"
 MEASURED_BANK_RECEIPT_KIND = "chingmu73_measured_racket_schema_v4_repo_import"
 MEASURED_MECHANICAL_AUDIT_KIND = "measured_racket_mechanical_admission_audit_v1"
+_MJCF_XML_MODEL_NAME_BY_SHA256 = {
+    "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a": (
+        "A3T2.5_pingpong_0519"
+    ),
+    "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1": (
+        "A3P_P1_0807_OP3_pingpang"
+    ),
+}
 PHYSICAL_BIRTH_SEED_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS = (
     "support_centroid_anchored_world_z_rotation_to_teacher_root_yaw"
@@ -3576,6 +3584,11 @@ def _derive_exact_model_identity(
         import mujoco
 
         pinned_mjcf_path = _pinned_mjcf_path(mjcf_path)
+        expected_xml_model_name = _MJCF_XML_MODEL_NAME_BY_SHA256.get(mjcf_sha256)
+        if expected_xml_model_name is None:
+            raise DynamicReadyMaterializationError(
+                "measured-branch MJCF generation is not registered"
+            )
         model = mujoco.MjModel.from_xml_path(str(pinned_mjcf_path))
         compiled_sha = path_adapter.compiled_model_signature(model, mujoco)
         binding = path_adapter.bind_exact_mujoco_model(
@@ -3584,7 +3597,7 @@ def _derive_exact_model_identity(
             mjcf_path=pinned_mjcf_path,
             expected_mjcf_sha256=mjcf_sha256,
             expected_compiled_model_sha256=compiled_sha,
-            expected_xml_model_name=path_adapter.EXPECTED_MJCF_MODEL_NAME,
+            expected_xml_model_name=expected_xml_model_name,
         )
         ground_sha = torque_topp._mujoco_model_binding(model)
     except Exception as exc:
