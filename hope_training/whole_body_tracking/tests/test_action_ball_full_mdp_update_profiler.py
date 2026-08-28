@@ -105,6 +105,9 @@ class _Epoch:
     def snapshot_idle_observation_chronology(self, *args, **kwargs):
         return args, kwargs
 
+    def settle_d05_transaction(self, *args, **kwargs):
+        return args, kwargs
+
 
 class _PlantAdapter:
     def read(self):
@@ -117,6 +120,31 @@ class _Motion:
 
     def install_action_ball_continuous_r07_ready_projection(self, _projection):
         return None
+
+    def publish_action_ball_full_mdp_post_d05_observation(self):
+        return None
+
+
+class _R05:
+    def __init__(self, epoch, motion):
+        self._diagnostic_epoch_owner = epoch
+        self._diagnostic_motion_owner = motion
+        self._internal_question_compose = self._compose
+
+    def _compose(self, _context):
+        return None
+
+    def advance_action_ball_full_mdp_rows(self):
+        return None
+
+    def _prepare_many_impl(self, *args, **kwargs):
+        return args, kwargs
+
+    def _preview_impl(self, *args, **kwargs):
+        return args, kwargs
+
+    def _build_row_transaction(self, *args, **kwargs):
+        return args, kwargs
 
 
 class _R07Bundle:
@@ -142,6 +170,7 @@ class _RuntimeOwner:
         self._physical_ball = _Physical()
         self._motion = _Motion()
         self._r07_recovery = _R07Bundle(self._motion)
+        self._r05_runtime = _R05(self.epoch_owner, self._motion)
 
     @property
     def epoch_owner(self):
@@ -149,7 +178,11 @@ class _RuntimeOwner:
 
     @property
     def component_identities(self):
-        return (("r07_recovery", self._r07_recovery),)
+        return (
+            ("r05_runtime", self._r05_runtime),
+            ("motion", self._motion),
+            ("r07_recovery", self._r07_recovery),
+        )
 
 
 class _ExactEnv:
@@ -294,6 +327,8 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert settlement_gap["calls"] == 1
     assert settlement_gap["inclusive_host_wall_ms"] > 0.0
     assert payload["segments"]["event_apply"]["calls"] == 0
+    assert payload["segments"]["d05_total"]["calls"] == 0
+    assert payload["segments"]["d05_question_compose"]["calls"] == 0
     assert payload["segments"]["r07_idle_epoch_snapshot"]["calls"] == 1
     assert payload["segments"]["r07_idle_support_read"]["calls"] == 0
     assert payload["segments"]["r07_idle_state_store"]["calls"] == 1

@@ -51,6 +51,13 @@ _SEGMENT_NAMES = (
     "selected_reset_total",
     "command_compute",
     "after_command_to_observation_gap",
+    "d05_total",
+    "d05_prepare",
+    "d05_question_compose",
+    "d05_preview",
+    "d05_build_transaction",
+    "d05_epoch_settle",
+    "d05_motion_publish",
     "event_apply",
     "observation_compute",
     "recorder_callbacks",
@@ -244,6 +251,8 @@ class FullMdpUpdateProfiler:
         self._runtime_owner = runtime_owner
         try:
             components = dict(runtime_owner.component_identities)
+            r05 = components.get("r05_runtime")
+            motion = components.get("motion")
             r07 = components.get("r07_recovery")
             r07_epoch = getattr(r07, "action_epoch_owner", None)
             r07_owner = getattr(r07, "owner", None)
@@ -252,6 +261,15 @@ class FullMdpUpdateProfiler:
                 or getattr(r07_owner, "_diagnostic_n2_bundle", None) is not r07
             ):
                 raise RuntimeError("FullMDP profiler R07 identities differ")
+            if (
+                r05 is None
+                or motion is None
+                or getattr(r05, "_diagnostic_epoch_owner", None)
+                is not runtime_owner.epoch_owner
+                or getattr(r05, "_diagnostic_motion_owner", None) is not motion
+                or not callable(getattr(r05, "_internal_question_compose", None))
+            ):
+                raise RuntimeError("FullMDP profiler D05 identities differ")
         except (AttributeError, TypeError, ValueError) as exc:
             self.close()
             raise RuntimeError("FullMDP profiler component identities differ") from exc
@@ -295,6 +313,23 @@ class FullMdpUpdateProfiler:
             ),
             (unwrapped.reward_manager, "compute", "reward_compute", None),
             (unwrapped.command_manager, "compute", "command_compute", None),
+            (r05, "advance_action_ball_full_mdp_rows", "d05_total", None),
+            (r05, "_prepare_many_impl", "d05_prepare", None),
+            (r05, "_internal_question_compose", "d05_question_compose", None),
+            (r05, "_preview_impl", "d05_preview", None),
+            (r05, "_build_row_transaction", "d05_build_transaction", None),
+            (
+                runtime_owner.epoch_owner,
+                "settle_d05_transaction",
+                "d05_epoch_settle",
+                None,
+            ),
+            (
+                motion,
+                "publish_action_ball_full_mdp_post_d05_observation",
+                "d05_motion_publish",
+                None,
+            ),
             (unwrapped.event_manager, "apply", "event_apply", None),
             (
                 unwrapped.observation_manager,

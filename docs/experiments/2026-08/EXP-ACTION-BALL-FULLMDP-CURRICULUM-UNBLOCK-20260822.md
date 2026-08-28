@@ -1012,6 +1012,13 @@ active-task rate p50/p90=`10.470/13.863 s/H48`，因此空业务接近6秒不能
 mean/p50=`12.10/12.35 s`，due=`0`的9轮=`6.85/6.85 s`，满任务cohort约多`5.25 s`，但相关性不能替代
 callpoint attribution。
 
+source `eefa5f5a`的自然退出profile诊断已在Pod1完成12/12轮，receipt SHA-256=
+`a1dc0a17b8b698cfabd66f6075bd5846fec3786d67daa6868d8ce131cb9c05ed`；无signal/stop path，GPU2 lock随
+child退出。profile-on median collection/learning=`8.042/.334 s`，inclusive reward/sim/observation=
+`1.519/1.076/.529 s`，command-compute约`.941 s`；command结束到observation开始的gap中位`2.050 s`，
+与due rows相关系数`.885`，而与terminal reset为`-.550`。因此下一刀只把既有profiler细分为D05 total、
+question compose、preview、epoch settle和Motion publish；不新增runtime owner/Gate，也不把嵌套span相加。
+
 同源码MuJoCo 61-update窗也已自然完成，p50/p90=`6.644/6.854 s/H48`，scheduled/reveal=
 `10,861/10,860`、launch=`6,658`、missed launch=0、R03 present/physically-valid=`5,107/5,107`，
 selected contact=`0/6,658`、landing=0。episode mean first10→last10=`135.78→139.98`；paddle position/

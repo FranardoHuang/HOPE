@@ -18,6 +18,10 @@
   首个Mu root因clean checkout缺ignored EPA48/RSL3 bundle在首ACK前fail-closed，按固定SHA恢复后r2成功，这是
   同步缺口而非physics解释。Isaac全tilt/零launch、Mu table+tilt/大量launch的分叉要求同一初态和固定动作逐帧
   parity；最终双fresh替换暂不发，G04/G05/G06保持`Partial`和`diagnostic_unauthorized=true`。
+- source `eefa5f5a`新增自然退出的有限profile入口并在Pod1完成12/12轮、无stop path。inclusive host-wall
+  median为collection/learning=`8.042/.334 s`，其中reward=`1.519 s`、sim step=`1.076 s`、command后D05到
+  observation gap=`2.050 s`；后者与due rows相关系数约`.885`，下一层只细分D05 prepare/question/settle，
+  不再扩安全Gate或把profile-on值冒充正式速度。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 
