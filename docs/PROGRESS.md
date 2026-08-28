@@ -66,12 +66,13 @@
 - exact Pod同带首轮已自然完成并把分叉定位到首个action之前：两端source都为clean `981327de`、joint order与
   action tape完全相同，但Isaac初态仍是asset default，Mu是Take061 dynamic-ready physical birth。初始joint
   max/mean absolute差=`1.5199/.2427 rad`、root=`.1778/.1101 m`、racket position=`.5376/.3561 m`；
-  tick7起Mu累计done=`3,072=512×6`而Isaac为0。源码对账确认fresh genesis reset在构造后保持pending但
-  `train.py`未消费，唯一reset event又写asset default而非dynamic-ready；这是生产reset/bootstrap实现错误，
-  不是Pod安装损坏或学习步数不足。
-- 修复候选只收束两个owner：`train.py`在runner/probe前恰好消费一次canonical genesis reset；reset Event作为
-  唯一sim writer，从Motion唯一validated dynamic-ready binding读取physical root/q/dq。teacher frame0和
-  decoder default仍保持独立，不增加task-success Gate；exact Pod回归和修后同带尚待完成，不能提前启动V9长跑。
+  tick7起Mu累计done=`3,072=512×6`而Isaac为0。源码对账确认RSL wrapper确实消费canonical genesis reset，
+  但唯一reset Event写asset default而非dynamic-ready；这是生产physical-birth实现错误，不是Pod安装损坏或
+  学习步数不足。
+- 首版候选曾在wrapper前再调一次reset；exact Kit正确拒绝无terminal事实的第二次reset，失败root保留且不复用。
+  该重复owner已删除，最终候选只改唯一reset Event：它从Motion validated dynamic-ready binding读取physical
+  root/q/dq并作为唯一sim writer写入。teacher frame0和decoder default仍独立，不增加task-success Gate；修后
+  exact Pod同带尚待完成，不能提前启动V9长跑。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 

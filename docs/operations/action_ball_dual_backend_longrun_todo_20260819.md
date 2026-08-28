@@ -224,9 +224,10 @@ slice和Mu native pose adapter两处实现错误；最终
   11. [ ] 从同一physical-ready、joint order、q/dq与固定31-D action tape逐tick比较Isaac/Mu的base、racket、
       terminal与first divergence。首轮exact Pod已完成：source clean `981327de`、joint order/action tape相同，
       首差却在`initial_joint_pos[0,12]`；Isaac写asset default，Mu写dynamic-ready，初始joint/root/racket位置
-      max absolute差=`1.5199 rad/.1778 m/.5376 m`，tick7起terminal也分叉。源码根因为fresh genesis reset
-      未被`train.py`消费，reset Event又写asset default。当前已实现单一genesis reset owner与Motion→Event窄
-      physical-ready projection；只有修后exact Pod双端record和compare闭合，才勾选本项或启动V9长跑。
+      max absolute差=`1.5199 rad/.1778 m/.5376 m`，tick7起terminal也分叉。exact Kit确认RSL wrapper已消费
+      canonical genesis reset，唯一根因是reset Event仍写asset default。当前Event已改为消费Motion窄
+      physical-ready projection；曾尝试的第二个`train.py` reset被runtime正确拒绝并已删除。只有修后exact Pod
+      双端record和compare闭合，才勾选本项或启动V9长跑。
 
 replacement已完成exact Pod target tests、双rate与fresh启动；fixed-tape的`cq_n_iters=12`结论沿用同一
 未变physics合同。hard-edge、paddle误差单调性、active-strata wall和短学习未来窗仍未闭合，现役namespace

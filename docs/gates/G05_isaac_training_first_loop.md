@@ -6815,8 +6815,9 @@ R07 readiness和same-writer回声不升级为安全Gate。G05保持`Partial`。
 
 clean `981327de`的Isaac/Mu `512×H48×31`同带记录证明首差在首个action之前：joint order/tape相同，但
 Isaac仍是asset default pose，Mu是Take061 dynamic-ready physical birth；初始joint/root/racket-position
-max absolute差分别为`1.5199 rad/.1778 m/.5376 m`，且tick7开始terminal分叉。根因是dedicated env把
-canonical genesis reset留到构造后、`train.py`却从未消费；唯一reset Event又写asset default。候选现改为
-runner前恰好一次canonical reset，并由唯一Event writer消费Motion validated physical-ready projection。
-teacher frame0与decoder default不变，也没有新增成功/安全Gate。exact Pod修后同带、有限学习与长期fresh均
-尚未完成，所以这只是一项根因修复候选，G05继续`Partial`且`diagnostic_unauthorized=true`。
+max absolute差分别为`1.5199 rad/.1778 m/.5376 m`，且tick7开始terminal分叉。exact Kit确认RSL wrapper已
+消费canonical genesis reset；根因是唯一reset Event仍写asset default，而不是Motion validated
+physical-ready projection。首版多加一次`train.py` reset被第二次reset协议正确拒绝，已删除；最终候选只改
+唯一Event writer。teacher frame0与decoder default不变，也没有新增成功/安全Gate。exact Pod修后同带、有限
+学习与长期fresh均尚未完成，所以这只是一项根因修复候选，G05继续`Partial`且
+`diagnostic_unauthorized=true`。

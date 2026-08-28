@@ -80,10 +80,6 @@ def test_probe_wiring_precedes_the_policy_runner():
     assert train.index(hook) < train.index("runner_type = (")
     assert "_run_action_ball_full_mdp_isaac_fixed_action_probe" in train
     assert "FULLMDP_ISAAC_FIXED_ACTION_PROBE_STARTED" in train
-    genesis = "_consume_action_ball_full_mdp_fresh_genesis_reset("
-    assert train.count(genesis) == 2
-    assert train.rindex(genesis) < train.index(hook)
-    assert train.rindex(genesis) < train.index("runner_type = (")
     mujoco = (
         ROOT / "scripts/probe_mujoco_full_mdp_h48_tape.py"
     ).read_text(encoding="utf-8")

@@ -1100,13 +1100,13 @@ root position=`.1778/.1101 m`，racket position=`.5376/.3561 m`；Isaac root loc
 `[0,0,1.0684]`且右肩pitch/elbow为`.3/.8`，Mu root local为`[.15259,-.17777,1.0684]`且右肩pitch为
 `-1.2199`，后者精确对应Take061 physical-ready。tick7开始done mismatch，Mu总数`3,072=512×6`、Isaac为0。
 
-源码因果链已闭合：dedicated FullMDP env在base construction后才安装top owner，并明确把canonical genesis
-reset留为pending；`train.py`却没有消费它，runner仍沿用“fresh在construction已reset”的旧假设。更严重的是
-唯一reset Event明确写`Articulation.default_joint_pos/default_root_state`，所以后续reset也不会安装
+源码因果链已闭合：RSL wrapper构造时确实调用一次canonical reset，所以不是“完全没reset”；真正错误是唯一
+reset Event明确写`Articulation.default_joint_pos/default_root_state`，从未消费Motion已经绑定的
 dynamic-ready physical birth。此前catalog、teacher bridge和actor-head修复只闭合老师、课程内部状态与q_des，
 并未成为Isaac plant birth；这就是用户看到“老师第0帧调过但sim起始动作仍不对”的实现根因，不是Pod安装坏。
 
-采用的修复不添加下游Gate：`train.py`在runner/固定带probe前恰好消费一次canonical genesis reset；reset
-Event仍是唯一sim writer，但只读取Motion已验证的`dynamic_ready.physical_ready`窄projection并写root/q/dq。
+首版候选曾在wrapper前再调用一次reset；exact Kit在第二次reset处因没有terminal事实正确fail-closed，证明
+现有wrapper已经是genesis reset owner。失败root保留、不复用，该重复调用已删除。最终修复不添加下游Gate：
+reset Event仍是唯一sim writer，但只读取Motion已验证的`dynamic_ready.physical_ready`窄projection并写root/q/dq。
 teacher frame0继续只是mimic authority，`default_joint_pos`继续只是affine action decoder offset，二者都不得
 冒充physical birth。修后必须用新的clean commit重跑Pod双端同带；初态未闭合前V9长跑保持HOLD。
