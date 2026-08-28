@@ -433,6 +433,22 @@ def test_runtime_contract_rejects_pre_8320_observation_cfg_shape():
     )
     assert facts["observation_history_lengths"] == [1, 2]
 
+    class ExactConfigclassCopy:
+        def __init__(self):
+            self.policy = _PolicyCfg()
+
+        def to_dict(self):
+            return {"policy": self.policy.to_dict()}
+
+    env.observation_manager.cfg = ExactConfigclassCopy()
+    env.cfg.observations = ExactConfigclassCopy()
+    copied = TC.runtime_execution_facts(
+        env,
+        _ActorContract(),
+        allow_configclass_observation_cfg=True,
+    )
+    assert copied["observation_history_lengths"] == [1, 2]
+
 
 def test_runtime_projection_fact_is_true_only_and_runtime_verified():
     enabled = _env(finite_qdes_projection=True)

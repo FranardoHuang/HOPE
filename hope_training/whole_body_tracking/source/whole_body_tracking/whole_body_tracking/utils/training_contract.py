@@ -2511,16 +2511,24 @@ def _observation_history_lengths(
     allow_configclass_cfg: bool = False,
 ) -> list[int]:
     manager_cfg = env.observation_manager.cfg
+    configured_cfg = getattr(env.cfg, "observations", None)
+    structurally_exact_configclass = bool(
+        allow_configclass_cfg
+        and type(manager_cfg) is type(configured_cfg)
+        and callable(getattr(manager_cfg, "to_dict", None))
+        and callable(getattr(configured_cfg, "to_dict", None))
+        and manager_cfg.to_dict() == configured_cfg.to_dict()
+    )
     if type(manager_cfg) is dict and "policy" in manager_cfg:
         group_cfg = manager_cfg["policy"]
     elif (
         allow_configclass_cfg
-        and manager_cfg is getattr(env.cfg, "observations", None)
+        and (manager_cfg is configured_cfg or structurally_exact_configclass)
         and getattr(manager_cfg, "policy", None) is not None
     ):
         # The legacy nominal-hold scene still uses IsaacLab's configclass form.
-        # Require object identity with the instantiated env cfg so a lookalike
-        # wrapper cannot mint runtime facts.
+        # Require identity or an exact same-class structural copy of the
+        # instantiated env cfg so a lookalike wrapper cannot mint runtime facts.
         group_cfg = manager_cfg.policy
     else:
         raise RuntimeError(
