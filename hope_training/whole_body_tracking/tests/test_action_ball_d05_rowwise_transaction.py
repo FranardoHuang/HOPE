@@ -592,7 +592,7 @@ def test_current_row_cadence_publishes_canonical_full_n_row_identity():
         scheduled_ordinal=torch.tensor([11, 21], dtype=torch.int64),
         reveal_tick=torch.tensor([8, 8], dtype=torch.int64),
         deadline_tick=torch.tensor([12, 12], dtype=torch.int64),
-        next_reveal_tick=torch.tensor([295, 295], dtype=torch.int64),
+        next_reveal_tick=torch.tensor([48, 48], dtype=torch.int64),
         reset_generation=torch.tensor([3, 4], dtype=torch.int64),
         swing_generation=torch.tensor([1, 1], dtype=torch.int64),
         reveal_due=due_mask.clone(),

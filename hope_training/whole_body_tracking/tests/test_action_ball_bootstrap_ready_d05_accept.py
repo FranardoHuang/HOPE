@@ -27,7 +27,7 @@ def test_fresh_motion_reveals_at_catalog_tick_without_r07_publication_or_install
             "first_reveal_step"
         ]
     )
-    assert first_reveal_step == catalog.FRESH_FIRST_REVEAL_TICK == 295
+    assert first_reveal_step == catalog.FRESH_FIRST_REVEAL_TICK == 48
     # This test isolates the curriculum seam rather than replaying the full
     # balance prefix.  Motion still owns both the due tick and its transition.
     motion._action_ball_continuous_episode_step.fill_(first_reveal_step - 1)

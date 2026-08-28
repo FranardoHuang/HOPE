@@ -21,11 +21,11 @@ import action_ball_full_mdp_portable_catalog as catalog  # noqa: E402
 def test_portable_fresh_cadence_freezes_due_ticks_not_verdicts():
     table = catalog.load_portable_action_center_table()
     cadence = catalog.derive_portable_fresh_cadence(table)
-    assert cadence.first_reveal_tick == 295
+    assert cadence.first_reveal_tick == 48
     assert cadence.cadence_ticks == 185
-    assert cadence.reference_due_ticks == (295, 480, 665, 850, 1035, 1220)
+    assert cadence.reference_due_ticks == (48, 233, 418, 603, 788, 973)
     assert len(cadence.reference_due_ticks) == catalog.FRESH_REFERENCE_DUE_COUNT
-    assert cadence.reference_due_ticks[-1] + cadence.cadence_ticks == 1405
+    assert cadence.reference_due_ticks[-1] + cadence.cadence_ticks == 1158
     assert (
         cadence.reference_due_ticks[-1] + cadence.cadence_ticks
         < cadence.episode_horizon_ticks

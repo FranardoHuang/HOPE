@@ -338,12 +338,12 @@ def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -
     )
     command.bind_action_ball_continuous_motion_device_r05_reveal(device_owner)
     command.bind_action_ball_full_mdp_motion_epoch_owner(epoch_owner)
-    for common_step in range(296):
+    for common_step in range(49):
         command._env.common_step_counter = common_step
         command._advance_action_ball_continuous_motion_cadence()
 
-    assert command._action_ball_continuous_current_deadline_step.tolist() == [297, 297]
-    assert command._action_ball_continuous_next_reveal_step.tolist() == [480, 480]
+    assert command._action_ball_continuous_current_deadline_step.tolist() == [50, 50]
+    assert command._action_ball_continuous_next_reveal_step.tolist() == [233, 233]
     command._action_ball_continuous_motion_active.fill_(True)
     command._action_ball_continuous_current_policy_opportunity.fill_(True)
     command._action_ball_continuous_canonical_task_valid.fill_(True)
@@ -352,7 +352,7 @@ def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -
     command._action_ball_continuous_canonical_action_uid.copy_(
         torch.as_tensor(command._action_ball_action_uids)[command.clip_id]
     )
-    command._action_ball_continuous_canonical_task_close_tick.fill_(299)
+    command._action_ball_continuous_canonical_task_close_tick.fill_(52)
     command._action_ball_task_timing_active.fill_(True)
     command._action_ball_pre_swing_wait_s.fill_(100.0)
     command._action_ball_scaled_t_cycle_s.fill_(1.0)
@@ -361,7 +361,7 @@ def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -
         C.ACTION_BALL_CONTINUOUS_CANONICAL_PREPARE_VISIBLE
     )
 
-    for common_step in (296, 297):
+    for common_step in (49, 50):
         command._env.common_step_counter = common_step
         command._advance_action_ball_continuous_motion_cadence()
     assert torch.all(command._action_ball_continuous_deadline_due)
@@ -372,10 +372,10 @@ def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -
         command._action_ball_continuous_canonical_playback_started
     )
 
-    command._env.common_step_counter = 298
+    command._env.common_step_counter = 51
     command._advance_action_ball_continuous_motion_cadence()
     assert torch.all(command._action_ball_continuous_motion_active)
-    command._env.common_step_counter = 299
+    command._env.common_step_counter = 52
     command._advance_action_ball_continuous_motion_cadence()
     assert not torch.any(command._action_ball_continuous_motion_active)
     assert not torch.any(command._action_ball_continuous_canonical_task_valid)
@@ -403,7 +403,7 @@ def test_fresh_1500_tick_trace_has_exactly_six_due_opportunities() -> None:
             assert torch.all(command._action_ball_continuous_reveal_due)
             reveal_ticks.append(common_step)
         token = command.issue_current_r05_cadence_if_due()
-        if common_step in (1220, 1405):
+        if common_step in (973, 1158):
             observation_token = (
                 command.action_ball_continuous_motion_observation_projection()
             )
@@ -417,7 +417,7 @@ def test_fresh_1500_tick_trace_has_exactly_six_due_opportunities() -> None:
             )
         if token is not None:
             issued_task_ticks.append(common_step)
-        if common_step == 1405:
+        if common_step == 1158:
             assert not torch.any(command._action_ball_continuous_reveal_due)
             assert token is None
             assert command._action_ball_continuous_scheduled_ordinal.tolist() == [
@@ -425,13 +425,13 @@ def test_fresh_1500_tick_trace_has_exactly_six_due_opportunities() -> None:
                 5,
             ]
 
-    assert reveal_ticks == [295, 480, 665, 850, 1035, 1220]
+    assert reveal_ticks == [48, 233, 418, 603, 788, 973]
     assert issued_task_ticks == reveal_ticks
     assert command._action_ball_continuous_scheduled_ordinal.tolist() == [5, 5]
     assert command._action_ball_swing_generation.tolist() == [5, 5]
     assert exhausted_observation_clocks == {
-        1220: [-1.0, -1.0],
-        1405: [-1.0, -1.0],
+        973: [-1.0, -1.0],
+        1158: [-1.0, -1.0],
     }
     assert command._action_ball_continuous_next_reveal_step.tolist() == [
         1500,

@@ -77,14 +77,15 @@ PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
     "5e2ccd735921647f827b0ec974dd8b8175c097edb8a37b2afdfe5ff86f8b66fb"
 )
 FRESH_POLICY_STEP_S = 0.02
-# Give every fresh row one complete, observable balance prefix before task
-# exposure.  Surviving to this tick is the curriculum condition; post-shot
-# R07 recovery quality is deliberately not an admission gate.
-FRESH_FIRST_REVEAL_TICK = 295
+# Give every fresh row one complete H48 balance rollout before task exposure.
+# The exact dynamic-ready receipt observes 60 stable policy steps; revealing
+# at 48 stays inside that measured prefix instead of extrapolating it to the
+# old 295-tick wait.  Post-shot R07 recovery remains evidence, not admission.
+FRESH_FIRST_REVEAL_TICK = 48
 FRESH_RECOVERY_END_OFFSET_TICKS = 77
 FRESH_HIDDEN_GAP_TICKS = 2
 FRESH_REFERENCE_DUE_COUNT = 6
-FRESH_REFERENCE_DUE_TICKS = (295, 480, 665, 850, 1035, 1220)
+FRESH_REFERENCE_DUE_TICKS = (48, 233, 418, 603, 788, 973)
 FRESH_EPISODE_HORIZON_TICKS = 1500
 # Raw actor-clock sentinel shared by both backends.  A negative value is
 # outside the domain of every real countdown and makes schedule exhaustion
@@ -206,8 +207,8 @@ def derive_portable_fresh_cadence(
         or cadence != 185
         or due_ticks != FRESH_REFERENCE_DUE_TICKS
         # Every advertised opportunity must fit its complete construction
-        # window. Tick 1405 is the sixth row's retirement boundary, not a
-        # seventh reveal: only 95 episode ticks remain after it.
+        # window.  The six-shot budget is explicit even though the shorter
+        # initial balance prefix leaves unused horizon after shot six.
         or due_ticks[-1] + cadence >= FRESH_EPISODE_HORIZON_TICKS
     ):
         raise ValueError("portable fresh cadence differs from the frozen schedule")

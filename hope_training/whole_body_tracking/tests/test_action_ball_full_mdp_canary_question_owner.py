@@ -168,7 +168,7 @@ def _direct_projection(
         episode_tick=torch.full((k,), 2, dtype=torch.int64),
         reveal_tick=torch.full((k,), 2, dtype=torch.int64),
         deadline_tick=torch.full((k,), 4, dtype=torch.int64),
-        next_reveal_tick=torch.full((k,), 295, dtype=torch.int64),
+        next_reveal_tick=torch.full((k,), 48, dtype=torch.int64),
         action_slot=(
             torch.zeros(k, dtype=torch.int64)
             if action_slot is None

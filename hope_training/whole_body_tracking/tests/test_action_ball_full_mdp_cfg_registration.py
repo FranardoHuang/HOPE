@@ -587,7 +587,7 @@ def test_fresh_a_c_episode_horizon_carries_six_shots_through_retirement():
     # Mechanical timing is calculated here from the independently reviewed
     # control schedule.  It is not copied from a source-code receipt or an AST
     # fingerprint: a changed cfg must still satisfy these physical ticks.
-    first_reveal_tick = 295
+    first_reveal_tick = 48
     max_task_close_ticks = 106
     recovery_ticks = 77
     deadline_offset_ticks = 2
@@ -601,8 +601,8 @@ def test_fresh_a_c_episode_horizon_carries_six_shots_through_retirement():
     sixth_shot_retirement_tick = accept_reveal_ticks[-1] + cadence_ticks
 
     assert cadence_ticks == 185
-    assert accept_reveal_ticks == (295, 480, 665, 850, 1035, 1220)
-    assert sixth_shot_retirement_tick == 1405
+    assert accept_reveal_ticks == (48, 233, 418, 603, 788, 973)
+    assert sixth_shot_retirement_tick == 1158
 
     for cfg in _fresh_cfgs(H):
         step_dt_s = float(cfg.sim.dt) * int(cfg.decimation)

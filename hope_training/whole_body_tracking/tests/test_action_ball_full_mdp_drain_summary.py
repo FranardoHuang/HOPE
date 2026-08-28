@@ -414,11 +414,11 @@ def test_due_tick_terminal_is_counted_beside_surviving_public_due(reason_bits):
             len(entries),
             selected=(True, False),
             generations=(1, 0),
-            facts=((10, 295, reason_bits), (-1, -1, 0)),
+            facts=((10, 48, reason_bits), (-1, -1, 0)),
         )
     )
     milestone_i64, milestone_f64 = _milestone_with_episode_closures(
-        ((True, False), (295, 0), (reason_bits, 0)),
+        ((True, False), (48, 0), (reason_bits, 0)),
     )
     decoded = _decode(
         entries, milestone=(milestone_i64, milestone_f64)

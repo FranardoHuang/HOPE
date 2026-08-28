@@ -741,19 +741,19 @@ def test_pure_horizon_transition_remains_rsl_timeout_and_reason_owner():
         ("robot_hit_table", 16, True, False),
     ),
 )
-def test_due_transition_294_to_295_journals_exact_terminal_tick(
+def test_due_transition_47_to_48_journals_exact_terminal_tick(
     reason_name,
     expected_reason_bits,
     expected_terminated,
     expected_timeout,
 ):
     # Row 1 terminates on the exact transition that advances its episode clock
-    # from 294 to the first public cadence tick.  The top env must freeze 295 in
+    # from 47 to the first public cadence tick.  The top env must freeze 48 in
     # ResetTelemetry before native reset clears the row; row 0 is an async peer.
     env, owner, *_ = _env(
         reset_mask=(False, True),
         decimation=1,
-        episode_lengths=(41, 294),
+        episode_lengths=(41, 47),
         termination_reason_masks={
             reason_name: torch.tensor([False, True]),
         },
@@ -766,7 +766,7 @@ def test_due_transition_294_to_295_journals_exact_terminal_tick(
     assert torch.equal(
         owner.reset_facts[0],
         torch.tensor(
-            [[-1, -1, 0], [1, 295, expected_reason_bits]],
+            [[-1, -1, 0], [1, 48, expected_reason_bits]],
             dtype=torch.int64,
         ),
     )

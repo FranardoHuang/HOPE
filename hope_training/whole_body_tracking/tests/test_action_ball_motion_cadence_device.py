@@ -130,7 +130,7 @@ def test_code_owned_diagnostic_profile_binds_exact_n2_motion_parent() -> None:
     assert dict(schedule) == {
         "frozen_at_step": 0,
         "sequence_origin_step": 0,
-        "first_reveal_step": 295,
+        "first_reveal_step": 48,
         "cadence_steps": 185,
         "deadline_offset_steps": 2,
         "upcoming_action_slot": 0,
