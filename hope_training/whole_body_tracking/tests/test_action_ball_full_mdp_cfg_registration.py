@@ -776,6 +776,7 @@ def test_fresh_cfg_installs_exact_code_owned_active_n1_motion_catalog():
         assert motion.action_ball_diagnostic_split_ready_teacher is True
         assert motion.action_ball_single_stroke_timeout_enabled is False
         assert motion.canonical_ready_mode is True
+        assert racket.clip_names_per_clip == table.action_order
         assert racket.action_ball_diagnostic_unauthorized is True
         assert (
             cfg.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence
@@ -829,6 +830,15 @@ def test_fresh_catalog_cfg_rejects_caller_override_and_order_or_sign_swap():
         H._attach_action_ball_full_mdp_diagnostic_motion_catalog(cfg)
 
     cfg.commands.motion.motion_file = ("/wrong/take061.npz",)
+    with pytest.raises(ValueError, match="active N=1 diagnostic catalog"):
+        C.require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
+            cfg.commands.motion,
+            cfg.commands.racket_target,
+            table=table,
+        )
+
+    cfg = H.HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg()
+    cfg.commands.racket_target.clip_names_per_clip = ()
     with pytest.raises(ValueError, match="active N=1 diagnostic catalog"):
         C.require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
             cfg.commands.motion,

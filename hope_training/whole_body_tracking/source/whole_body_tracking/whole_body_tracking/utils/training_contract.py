@@ -6128,7 +6128,17 @@ def load_action_ball_dynamic_ready_runtime_binding(
         or not isinstance(motion_paths, (list, tuple))
         or len(motion_paths) != 1
     ):
-        raise ValueError("dynamic-ready bootstrap currently requires exact N=1")
+        action_count = (
+            len(action_order) if isinstance(action_order, (list, tuple)) else None
+        )
+        motion_count = (
+            len(motion_paths) if isinstance(motion_paths, (list, tuple)) else None
+        )
+        raise ValueError(
+            "dynamic-ready bootstrap currently requires exact N=1 "
+            f"action identity and motion; got action_count={action_count!r} "
+            f"motion_count={motion_count!r}"
+        )
     artifact_file, artifact_file_sha, artifact = (
         _pinned_action_ball_json_file(
             artifact_path,

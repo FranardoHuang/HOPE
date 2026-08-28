@@ -3217,6 +3217,7 @@ def _attach_action_ball_full_mdp_diagnostic_motion_catalog(env_cfg):
     table = _commands.load_action_ball_full_mdp_diagnostic_catalog_table()
     motion.motion_file = table.motion_files
     motion.clip_family_per_clip = table.clip_family_per_clip
+    racket.clip_names_per_clip = table.action_order
     racket.strike_phase_per_clip = table.strike_phase_per_clip
     racket.mount_normal_sign_per_clip = table.mount_normal_sign_per_clip
     racket.motion_teacher_racket_source = "measured_channel"

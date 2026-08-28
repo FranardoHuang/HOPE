@@ -289,6 +289,8 @@ def require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
         != table.motion_files
         or tuple(getattr(motion_cfg, "clip_family_per_clip", ()) or ())
         != table.clip_family_per_clip
+        or tuple(getattr(racket_cfg, "clip_names_per_clip", ()) or ())
+        != table.action_order
         or tuple(getattr(racket_cfg, "strike_phase_per_clip", ()) or ())
         != table.strike_phase_per_clip
         or tuple(
