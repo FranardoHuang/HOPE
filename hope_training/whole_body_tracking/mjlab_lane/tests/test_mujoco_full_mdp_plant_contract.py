@@ -30,8 +30,8 @@ def test_base_mjb_and_augmented_runtime_are_separate_path_free_layers():
     assert expected["source_plant"]["model_scope"] == (
         "pre_registered_vendor_base"
     )
-    assert expected["source_plant"]["source_member_count"] == 75
-    assert expected["source_plant"]["compiled_mjb_size_bytes"] == 72254136
+    assert expected["source_plant"]["source_member_count"] == 93
+    assert expected["source_plant"]["compiled_mjb_size_bytes"] == 113759317
     assert expected["runtime_attach"]["model_scope"] == (
         "mjlab_augmented_court_ball_runtime"
     )
@@ -226,7 +226,9 @@ def test_manifest_hardlink_matches_canonical_policy_but_symlink_and_drift_fail(
     source = module.expected_manifest_path()
     hardlink = tmp_path / source.name
     os.link(source, hardlink)
-    assert module.load_pinned_manifest(hardlink)["root_filename"] == "a3_pingpong.xml"
+    assert module.load_pinned_manifest(hardlink)["root_filename"] == (
+        "a3p_pingpong_0807.xml"
+    )
 
     symlink = tmp_path / "manifest-link.json"
     symlink.symlink_to(source)

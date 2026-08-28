@@ -17,13 +17,16 @@ import stat
 import tempfile
 
 
-EXPECTED_MANIFEST_RELATIVE = Path("configs/a3_mujoco_identity_v2_20260803.json")
+EXPECTED_MANIFEST_RELATIVE = Path(
+    "configs/a3p_p1_0807_mujoco_identity_v1_20260828.json"
+)
+EXPECTED_ROOT_FILENAME = "a3p_pingpong_0807.xml"
 EXPECTED_GEOMETRY_RELATIVE = Path(
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/table_tennis/geometry.py"
 )
 TRUSTED_EXPECTED_MANIFEST_SHA256 = (
-    "b8fc5deaaff8d213c2d077a0e7892b30d7f5a6c77c3d06dc029e3a2616d54d91"
+    "9bc32cff7fe125284dd93a811d773bcf88e35f98582851aa3cd60b5d6f4c3c6a"
 )
 TRUSTED_GEOMETRY_SOURCE_SHA256 = (
     "df71f12a21fedb4b8caed182906288f573b2f05c731441a5f529996baaf056b2"
@@ -167,7 +170,7 @@ def load_pinned_manifest(path: Path | None = None) -> dict:
         type(manifest) is not dict
         or type(expected) is not dict
         or manifest.get("identity_type") != "exact_mujoco_identity_v1"
-        or manifest.get("root_filename") != "a3_pingpong.xml"
+        or manifest.get("root_filename") != EXPECTED_ROOT_FILENAME
         or any(not _digest(expected.get(key)) for key in digest_keys)
         or any(
             type(expected.get(key)) is not int or expected[key] <= 0

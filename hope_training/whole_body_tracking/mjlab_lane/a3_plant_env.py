@@ -160,24 +160,23 @@ VENDOR_KD = {
 
 _REPO_XML = (
     "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
-    "a3_pingpong/a3_pingpong.xml"
+    "a3p_pingpong_0807/a3p_pingpong_0807.xml"
 )
 
 
 def default_xml() -> Path:
-    """Locate a3_pingpong.xml: env var, pod asset dir, then repo checkout."""
+    """Locate the A3P-P1 0807 MJCF: explicit binding, then repo checkout."""
     env = os.environ.get("A3_PINGPONG_XML")
     if env:
         return Path(env)
-    pod = Path("/workspace/mjlab_lane/assets/a3_pingpong/a3_pingpong.xml")
-    if pod.is_file():
-        return pod
     here = Path(__file__).resolve()
     for parent in here.parents:
         cand = parent / _REPO_XML
         if cand.is_file():
             return cand
-    raise FileNotFoundError("a3_pingpong.xml not found; set A3_PINGPONG_XML")
+    raise FileNotFoundError(
+        "a3p_pingpong_0807.xml not found; set A3_PINGPONG_XML"
+    )
 
 
 # ---------------------------------------------------------------------------

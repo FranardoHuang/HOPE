@@ -96,14 +96,16 @@ EXPECTED_ISAAC_ACTION_LATCH_SEMANTIC_AST_SHA256 = (
 CANONICAL_MJCF = (
     REPO_ROOT
     / "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
-    "a3_pingpong/a3_pingpong.xml"
+    "a3p_pingpong_0807/a3p_pingpong_0807.xml"
 )
 EXPECTED_CANONICAL_MJCF_SHA256 = (
-    "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a"
+    "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1"
 )
-MUJOCO_IDENTITY_MANIFEST = REPO_ROOT / "configs/a3_mujoco_identity_v2_20260803.json"
+MUJOCO_IDENTITY_MANIFEST = (
+    REPO_ROOT / "configs/a3p_p1_0807_mujoco_identity_v1_20260828.json"
+)
 EXPECTED_MUJOCO_IDENTITY_MANIFEST_SHA256 = (
-    "b8fc5deaaff8d213c2d077a0e7892b30d7f5a6c77c3d06dc029e3a2616d54d91"
+    "9bc32cff7fe125284dd93a811d773bcf88e35f98582851aa3cd60b5d6f4c3c6a"
 )
 CANONICAL_MUJOCO_IDENTITY_PY = (
     REPO_ROOT / "hope_training/whole_body_tracking/scripts/canonical_mujoco_identity.py"
@@ -112,7 +114,7 @@ EXPECTED_CANONICAL_MUJOCO_IDENTITY_PY_SHA256 = (
     "e43609988a371a76e5daab7545c608338ba159100c52cb50dc61b12a872fe2e1"
 )
 EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256 = (
-    "472219ae346d9217b7d1af860d462a18d6ed8507c5cbb9c0f1ddcd6f964dfd7a"
+    "03e2590916f781e581c4a0ff6dbe305ab3a2471685b816cc32a015400816deba"
 )
 COLLISION_PROXY_ARTIFACT = (
     REPO_ROOT

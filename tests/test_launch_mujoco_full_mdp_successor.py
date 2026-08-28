@@ -23,7 +23,7 @@ READY_POSE = PROJECT / (
 )
 PLANT_XML = PROJECT / (
     "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
-    "a3_pingpong/a3_pingpong.xml"
+    "a3p_pingpong_0807/a3p_pingpong_0807.xml"
 )
 RUNNER = Path("hope_training/whole_body_tracking/mjlab_lane/"
               "mujoco_gpu_ac_full_mdp_wait_rsl3.py")
@@ -33,7 +33,9 @@ PPO_RECIPE = Path(
 )
 PLANT_CONTRACT = Path("hope_training/whole_body_tracking/mjlab_lane/"
                       "mujoco_full_mdp_plant_contract.py")
-PLANT_MANIFEST = Path("configs/a3_mujoco_identity_v2_20260803.json")
+PLANT_MANIFEST = Path(
+    "configs/a3p_p1_0807_mujoco_identity_v1_20260828.json"
+)
 UUID = "GPU-exact-0002"
 NAMESPACE = "mujoco-full-a-h48-test-0001"
 
@@ -176,7 +178,7 @@ fi
     lock.write_text("", encoding="utf-8")
     ready_pose = base / "ready-pose.json"
     shutil.copy2(READY_POSE, ready_pose)
-    plant_xml = base / "a3_pingpong.xml"
+    plant_xml = base / "a3p_pingpong_0807.xml"
     shutil.copy2(PLANT_XML, plant_xml)
     record, started, release = (
         run_root / name for name in ("record.json", "started", "release")
@@ -321,7 +323,7 @@ print(json.dumps(module.expected_plant_model_identity(), sort_keys=True))
     assert completed.returncode == 0, completed.stderr
     identity = json.loads(completed.stdout)
     assert identity["source_plant"]["portable_identity_sha256"] == (
-        "472219ae346d9217b7d1af860d462a18d6ed8507c5cbb9c0f1ddcd6f964dfd7a"
+        "03e2590916f781e581c4a0ff6dbe305ab3a2471685b816cc32a015400816deba"
     )
 
 
