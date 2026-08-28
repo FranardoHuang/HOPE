@@ -54,6 +54,11 @@
   paddle position/velocity/face/long-axis真实误差仍约`.473/.974/.949/.435`与
   `.416/.811/1.180/.750`，没有形成接触尺度mimic。V8保持只读，不能冒充V9修复后
   的学习结果。
+- 新增双后端fixed-action first-divergence诊断：唯一tracked `512×H48×31` SplitMix tape，两端从真实
+  FullMDP构造边界记录reset后与逐tick的root、31-D q/dq、拍面位置/速度/法向/长轴和terminal；compare
+  区分initial与post-step首个exact差异并保留逐字段差值包络。它在Isaac policy runner前自然退出，不产生
+  checkpoint，不设physics容差或安全Gate。host generator/record/tamper/wiring/launcher targeted=
+  `41 passed`；因host无Torch，sim目标矩阵只认后续exact Pod结果。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 

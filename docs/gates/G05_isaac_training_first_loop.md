@@ -30,6 +30,11 @@ selected identity、reason/counter/safety和可消费journal语义；不能用�
 `3,584/3,584/3,581/3`、terminal overlap=`0`、launch=`0`。这只把热点密度从推算升级为直接测量；
 仍不得把profile-on结果写成rate PASS或学习证据。
 
+跨引擎分叉现已进入可执行诊断而不是口头猜因：同一tracked `512×H48×31` raw action tape会在policy
+runner前驱动真实Isaac FullMDP，并由Mu真实FullMDP记录同一portable root/q/dq/racket/terminal surface；
+compare只报告initial/post-step首差与差值包络。host结构/反例测试=`41 passed`，exact Pod结果尚未产生，
+因此仍不能把Jiayi本机差异或“动作看起来不对”升级成Pod/physics故障。
+
 ## 2026-08-27 FullMDP V8 Isaac replacement（仍`Partial`）
 
 V7 fresh候选采用[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)、

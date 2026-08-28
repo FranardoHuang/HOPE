@@ -15104,6 +15104,9 @@ _ACTION_BALL_STRIKE_FACT_SUCCESSOR_RECEIPT_ATTR = (
 _ACTION_BALL_FULL_MDP_RUNTIME_FLAG = "action_ball_full_mdp_runtime"
 _ACTION_BALL_FULL_MDP_RATE_PROBE_FLAG = "action_ball_full_mdp_rate_probe"
 _ACTION_BALL_FULL_MDP_PROFILE_PROBE_FLAG = "action_ball_full_mdp_profile_probe"
+_ACTION_BALL_FULL_MDP_FIXED_ACTION_PROBE_OUTPUT_FLAG = (
+    "action_ball_full_mdp_fixed_action_probe_output_path"
+)
 _ACTION_BALL_FULL_MDP_RATE_PROBE_UPDATES = 61
 _ACTION_BALL_FULL_MDP_RATE_PROBE_WARMUP_UPDATES = 10
 _ACTION_BALL_FULL_MDP_RATE_PROBE_MEASURED_UPDATES = 50
@@ -16207,6 +16210,160 @@ def _action_ball_full_mdp_profile_probe_updates(task) -> int:
     return updates
 
 
+def _action_ball_full_mdp_fixed_action_probe_output(task):
+    """Resolve one finite, no-PPO Isaac/Mu state-divergence diagnostic."""
+
+    if not _contains_key(
+        task, _ACTION_BALL_FULL_MDP_FIXED_ACTION_PROBE_OUTPUT_FLAG
+    ):
+        return None
+    raw = _get(task, _ACTION_BALL_FULL_MDP_FIXED_ACTION_PROBE_OUTPUT_FLAG)
+    if raw is None:
+        return None
+    if type(raw) is not str or not raw:
+        raise _OverrideError(
+            "task.action_ball_full_mdp_fixed_action_probe_output_path must "
+            "be one explicit absolute path"
+        )
+    output = pathlib.Path(raw)
+    if (
+        not output.is_absolute()
+        or output.name in ("", ".", "..")
+        or os.path.lexists(output)
+    ):
+        raise _OverrideError(
+            "FullMDP fixed-action probe output must be one absent absolute path"
+        )
+    try:
+        parent = output.parent.resolve(strict=True)
+    except OSError as exc:
+        raise _OverrideError(
+            "FullMDP fixed-action probe output parent does not exist"
+        ) from exc
+    if parent != output.parent:
+        raise _OverrideError(
+            "FullMDP fixed-action probe output parent is not canonical"
+        )
+    if not _action_ball_full_mdp_runtime_requested(task):
+        raise _OverrideError(
+            "FullMDP fixed-action probe requires the fresh full-MDP runtime"
+        )
+    if _get(task, _ACTION_BALL_FULL_MDP_RATE_PROBE_FLAG, False) is True or _get(
+        task, _ACTION_BALL_FULL_MDP_PROFILE_PROBE_FLAG, False
+    ) is True:
+        raise _OverrideError(
+            "FullMDP fixed-action, rate and profile probes are mutually exclusive"
+        )
+    return output
+
+
+def _load_action_ball_full_mdp_cross_engine_tape_module():
+    path = pathlib.Path(__file__).resolve().parents[3] / (
+        "scripts/action_ball_full_mdp_cross_engine_tape.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "_action_ball_full_mdp_cross_engine_tape_runtime", path
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load FullMDP cross-engine tape module")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_action_ball_full_mdp_isaac_fixed_action_probe(
+    env, runtime_env, output_path
+):
+    """Step the real wrapped Isaac environment with the tracked 512xH48 tape."""
+
+    import numpy as np
+    import torch
+
+    module = _load_action_ball_full_mdp_cross_engine_tape_module()
+    tape_np, config, _config_sha, tape_sha = module.action_tape_numpy()
+    if (
+        int(runtime_env.num_envs) != config["num_envs"]
+        or int(env.num_actions) != config["action_width"]
+    ):
+        raise RuntimeError("Isaac fixed-action probe runtime shape differs")
+    robot = runtime_env.scene["robot"]
+    racket = runtime_env.command_manager.get_term("racket_target")
+    origins = runtime_env.scene.env_origins
+
+    def snapshot():
+        data = robot.data
+        fields = {
+            "root_pos": data.root_pos_w - origins,
+            "root_quat": data.root_quat_w,
+            "root_lin_vel": data.root_lin_vel_w,
+            "joint_pos": data.joint_pos,
+            "joint_vel": data.joint_vel,
+            "racket_pos": racket.racket_pos_w - origins,
+            "racket_lin_vel": racket.racket_lin_vel_w,
+            "racket_normal": racket.racket_normal_raw_w,
+            "racket_long_axis": racket.racket_long_axis_w,
+        }
+        expected = {
+            "root_pos": 3,
+            "root_quat": 4,
+            "root_lin_vel": 3,
+            "joint_pos": config["action_width"],
+            "joint_vel": config["action_width"],
+            "racket_pos": 3,
+            "racket_lin_vel": 3,
+            "racket_normal": 3,
+            "racket_long_axis": 3,
+        }
+        if any(
+            not torch.is_tensor(value)
+            or tuple(value.shape) != (config["num_envs"], expected[name])
+            or not bool(torch.isfinite(value).all())
+            for name, value in fields.items()
+        ):
+            raise RuntimeError("Isaac fixed-action portable state surface differs")
+        return {
+            name: value.detach().cpu().numpy().copy()
+            for name, value in fields.items()
+        }
+
+    initial = snapshot()
+    rows = {name: [] for name in module.TICK_FLOAT_FIELDS}
+    done_rows, timeout_rows = [], []
+    tape = torch.from_numpy(tape_np).to(device=env.device)
+    for tick in range(config["num_ticks"]):
+        _observations, _reward, done, extras = env.step(tape[tick])
+        state = snapshot()
+        for name, value in state.items():
+            rows[name].append(value)
+        time_out = extras.get("time_outs")
+        if (
+            not torch.is_tensor(done)
+            or tuple(done.shape) != (config["num_envs"],)
+            or not torch.is_tensor(time_out)
+            or tuple(time_out.shape) != (config["num_envs"],)
+        ):
+            raise RuntimeError("Isaac fixed-action terminal surface differs")
+        done_rows.append(done.detach().cpu().numpy().copy())
+        timeout_rows.append(time_out.detach().cpu().numpy().copy())
+    arrays = {"actions": tape_np}
+    arrays.update({"initial_" + name: value for name, value in initial.items()})
+    arrays.update({name: np.stack(value) for name, value in rows.items()})
+    arrays["done"] = np.stack(done_rows)
+    arrays["time_out"] = np.stack(timeout_rows)
+    summary = module.write_probe_record(
+        pathlib.Path(output_path),
+        backend="isaac",
+        arrays=arrays,
+        joint_names=list(robot.data.joint_names),
+        runtime_identity={
+            "kind": "isaac_full_mdp_fixed_action_runtime_v1",
+            "device": str(env.device),
+            "action_tape_sha256": tape_sha,
+        },
+    )
+    return summary
+
+
 def _resolve_action_ball_full_mdp_policy_bootstrap_config(
     task, *, requested: bool
 ) -> dict | None:
@@ -16302,6 +16459,7 @@ def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
     task = _get(cfg, "task")
     _action_ball_full_mdp_rate_probe_requested(task)
     _action_ball_full_mdp_profile_probe_updates(task)
+    _action_ball_full_mdp_fixed_action_probe_output(task)
     requested = _get(task, "action_ball_full_mdp_runtime")
     if requested is None or requested is False:
         return
@@ -20354,6 +20512,9 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     action_ball_full_mdp_profile_probe_updates = (
         _action_ball_full_mdp_profile_probe_updates(cfg.task)
     )
+    action_ball_full_mdp_fixed_action_probe_output = (
+        _action_ball_full_mdp_fixed_action_probe_output(cfg.task)
+    )
     raw_num_envs = (
         cfg.num_envs
         if cfg.num_envs is not None
@@ -21523,6 +21684,27 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         validate_action_ball_c211_wrapped_env(env)
     else:
         validate_action_ball_211_wrapped_env(env)
+
+    if action_ball_full_mdp_fixed_action_probe_output is not None:
+        if _get(cfg, "checkpoint_path") is not None:
+            raise RuntimeError("FullMDP fixed-action probe is fresh-only")
+        summary = _run_action_ball_full_mdp_isaac_fixed_action_probe(
+            env,
+            runtime_env,
+            action_ball_full_mdp_fixed_action_probe_output,
+        )
+        environment_close_owner.close()
+        print(
+            "FULLMDP_ISAAC_FIXED_ACTION_PROBE_JSON="
+            + json.dumps(
+                summary,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return
 
     # Only hand the runner registry refs for wandb lineage (use_artifact) when the clips actually came
     # from the registry; local runs pass None (a local motion path would crash wandb.run.use_artifact).

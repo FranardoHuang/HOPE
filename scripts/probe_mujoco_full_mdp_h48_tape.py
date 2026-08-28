@@ -41,6 +41,7 @@ OBSERVATION_CONTRACT_SOURCE = (
     "whole_body_tracking/tasks/tracking/mdp/"
     "action_ball_full_mdp_portable_observation.py"
 )
+CROSS_ENGINE_TAPE_SOURCE = ROOT / "scripts/action_ball_full_mdp_cross_engine_tape.py"
 ARRAYS_NAME = "arrays.npz"
 SUMMARY_NAME = "summary.json"
 FLOAT_FIELDS = (
@@ -136,6 +137,9 @@ REWARD_TERM_COUNT = reward_contract.REWARD_TERM_COUNT
 observation_contract = _load_source(
     OBSERVATION_CONTRACT_SOURCE, "_hope_h48_observation_contract"
 )
+cross_engine_tape = _load_source(
+    CROSS_ENGINE_TAPE_SOURCE, "_hope_full_mdp_cross_engine_tape"
+)
 OBSERVATION_KIND = observation_contract.OBSERVATION_KIND_V3
 ACTOR_WIDTH = observation_contract.ACTOR_WIDTH_V3
 CRITIC_WIDTH = observation_contract.CRITIC_WIDTH_V3
@@ -173,7 +177,10 @@ def _probe(output_root: Path, ready_pose: Path) -> dict:
     action_bytes, tape_sha = generate_action_bytes(cfg)
     root = _fresh_root(output_root)
     runner = _load_source(RUNNER, "_hope_h48_tape_runner")
-    runtime = runner._bind_full_a_runtime(str(root / "runtime_site"))
+    runtime_preimport = runner._epa48_runtime_module().verify_runtime_stack_preimport()
+    runtime = runner._bind_full_a_runtime(
+        str(root / "runtime_site"), runtime_preimport
+    )
     if str(LANE) not in sys.path:
         sys.path.insert(0, str(LANE))
     import numpy as np
@@ -197,6 +204,7 @@ def _probe(output_root: Path, ready_pose: Path) -> dict:
         device="cuda:0", seed=cfg["environment_seed"],
         ready_pose_payload=ready_payload, ready_pose_source=ready_source,
         full_a_mode=True)
+    runner._verify_full_a_runtime_postimport(runtime)
     tape = torch.frombuffer(bytearray(action_bytes), dtype=torch.float32).reshape(
         cfg["num_ticks"], cfg["num_envs"], cfg["action_width"])
     observations = env.get_observations()
@@ -273,6 +281,142 @@ def _probe(output_root: Path, ready_pose: Path) -> dict:
         "natural_h48_tick_rows": cfg["num_envs"] * cfg["num_ticks"]}
     _write_json_x(root / SUMMARY_NAME, summary)
     return summary
+
+
+def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) -> dict:
+    """Run the tracked 512xH48 tape through the real MuJoCo FullMDP env."""
+
+    root = _fresh_root(output_root)
+    runner = _load_source(RUNNER, "_hope_cross_engine_mujoco_runner")
+    runtime_preimport = runner._epa48_runtime_module().verify_runtime_stack_preimport()
+    runtime = runner._bind_full_a_runtime(
+        str(root / "runtime_site"), runtime_preimport
+    )
+    if str(LANE) not in sys.path:
+        sys.path.insert(0, str(LANE))
+    import numpy as np
+    import torch
+
+    wait = runner._wait_module()
+    prior_ready = os.environ.get("ACTIONBALL_READY_POSE")
+    os.environ["ACTIONBALL_READY_POSE"] = str(ready_pose)
+    try:
+        ready_payload, ready_source = runner._ready_pose_input()
+    finally:
+        if prior_ready is None:
+            os.environ.pop("ACTIONBALL_READY_POSE", None)
+        else:
+            os.environ["ACTIONBALL_READY_POSE"] = prior_ready
+    tape_np, config, _config_sha, tape_sha = cross_engine_tape.action_tape_numpy()
+    torch.manual_seed(config["environment_seed"])
+    initial = config["initial_state"]
+    task = wait.TaskCfg(
+        episode_length_s=30.0,
+        action_scale_mode="vendor",
+        reset_joint_noise_rad=initial["joint_position_noise_rad"],
+        reset_joint_vel_noise=initial["joint_velocity_noise_rad_s"],
+        reset_root_xy_noise_m=initial["root_xy_noise_m"],
+        reset_root_yaw_noise_rad=initial["root_yaw_noise_rad"],
+    )
+    env = wait.FullMdpInitialWaitVecEnv(
+        wait.SimCfg(nworld=config["num_envs"]),
+        task,
+        device="cuda:0",
+        xml_path=plant_xml,
+        seed=config["environment_seed"],
+        ready_pose_payload=ready_payload,
+        ready_pose_source=ready_source,
+        full_a_mode=True,
+    )
+    runner._verify_full_a_runtime_postimport(runtime)
+    origins = env.env.scene.env_origins
+
+    def snapshot():
+        data = env.sim.data
+        racket_pos, racket_velocity, racket_normal, racket_long_axis = (
+            env._full_a_racket_kinematics()
+        )
+        fields = {
+            "root_pos": data.qpos[
+                :, env.root_qadr : env.root_qadr + 3
+            ] - origins,
+            "root_quat": data.qpos[
+                :, env.root_qadr + 3 : env.root_qadr + 7
+            ],
+            "root_lin_vel": data.qvel[
+                :, env.root_vadr : env.root_vadr + 3
+            ],
+            "joint_pos": env._qpos_act(),
+            "joint_vel": env._qvel_act(),
+            "racket_pos": racket_pos,
+            "racket_lin_vel": racket_velocity,
+            "racket_normal": racket_normal,
+            "racket_long_axis": racket_long_axis,
+        }
+        expected = {
+            "root_pos": 3,
+            "root_quat": 4,
+            "root_lin_vel": 3,
+            "joint_pos": config["action_width"],
+            "joint_vel": config["action_width"],
+            "racket_pos": 3,
+            "racket_lin_vel": 3,
+            "racket_normal": 3,
+            "racket_long_axis": 3,
+        }
+        if any(
+            tuple(value.shape) != (config["num_envs"], expected[name])
+            or not bool(torch.isfinite(value).all())
+            for name, value in fields.items()
+        ):
+            raise ProbeError("MuJoCo fixed-action portable state surface differs")
+        return {
+            name: value.detach().cpu().numpy().copy()
+            for name, value in fields.items()
+        }
+
+    initial_state = snapshot()
+    rows = {name: [] for name in cross_engine_tape.TICK_FLOAT_FIELDS}
+    done_rows, timeout_rows = [], []
+    tape = torch.from_numpy(tape_np).to(env.device)
+    for tick in range(config["num_ticks"]):
+        _observations, _reward, done, extras = env.step(tape[tick])
+        state = snapshot()
+        for name, value in state.items():
+            rows[name].append(value)
+        timeout = extras.get("time_outs")
+        if (
+            tuple(done.shape) != (config["num_envs"],)
+            or timeout is None
+            or tuple(timeout.shape) != (config["num_envs"],)
+        ):
+            raise ProbeError("MuJoCo fixed-action terminal surface differs")
+        done_rows.append(done.detach().cpu().numpy().copy())
+        timeout_rows.append(timeout.detach().cpu().numpy().copy())
+    arrays = {"actions": tape_np}
+    arrays.update(
+        {"initial_" + name: value for name, value in initial_state.items()}
+    )
+    arrays.update({name: np.stack(value) for name, value in rows.items()})
+    arrays["done"] = np.stack(done_rows)
+    arrays["time_out"] = np.stack(timeout_rows)
+    record_root = root / "record"
+    summary = cross_engine_tape.write_probe_record(
+        record_root,
+        backend="mujoco",
+        arrays=arrays,
+        joint_names=list(env._action_joint_names),
+        runtime_identity={
+            "kind": "mujoco_full_mdp_fixed_action_runtime_v1",
+            "runtime_stack": runtime,
+            "plant_xml": str(plant_xml),
+            "plant_xml_sha256": hashlib.sha256(
+                _stable_bytes(plant_xml, "MuJoCo plant XML")
+            ).hexdigest(),
+            "action_tape_sha256": tape_sha,
+        },
+    )
+    return {**summary, "record_root": str(record_root)}
 
 def _load_record(root: Path):
     import numpy as np
@@ -364,11 +508,23 @@ def main(argv: list[str] | None = None) -> int:
     compare.add_argument("--baseline-root", type=Path, required=True)
     compare.add_argument("--candidate-root", type=Path, required=True)
     compare.add_argument("--output", type=Path, required=True)
+    cross = sub.add_parser(
+        "cross-engine-probe", help="run the shared 512xH48 portable-state tape"
+    )
+    cross.add_argument("--output-root", type=Path, required=True)
+    cross.add_argument("--ready-pose", type=Path, required=True)
+    cross.add_argument("--plant-xml", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        record = (_probe(args.output_root, args.ready_pose)
-                  if args.mode == "probe" else
-                  _compare(args.baseline_root, args.candidate_root, args.output))
+        record = (
+            _probe(args.output_root, args.ready_pose)
+            if args.mode == "probe"
+            else (
+                _cross_engine_probe(args.output_root, args.ready_pose, args.plant_xml)
+                if args.mode == "cross-engine-probe"
+                else _compare(args.baseline_root, args.candidate_root, args.output)
+            )
+        )
     except (ProbeError, OSError, RuntimeError, ValueError) as exc:
         print("H48_TAPE_ERROR=" + str(exc), file=sys.stderr, flush=True)
         return 2

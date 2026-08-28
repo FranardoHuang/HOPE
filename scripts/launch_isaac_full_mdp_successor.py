@@ -433,6 +433,7 @@ def _paths(root: Path) -> dict[str, Path]:
         "runtime_receipt": root / "train-runtime.receipt",
         "rate_receipt": root / "diagnostic-rate-probe.json",
         "profile_receipt": root / "diagnostic-profile-probe.json",
+        "fixed_action_probe": root / "fixed-action-probe",
         "run_log": root / "run.log",
         "launch_state": root / "kit_boot.launch",
         "training": root / "training",
@@ -490,6 +491,7 @@ def _child_argv(
     *,
     diagnostic_rate_probe: bool = False,
     diagnostic_profile_probe: bool = False,
+    diagnostic_fixed_action_probe: bool = False,
 ) -> list[str]:
     argv = [
         str(isaac_python),
@@ -532,6 +534,11 @@ def _child_argv(
         argv.append("task.action_ball_full_mdp_rate_probe=true")
     if diagnostic_profile_probe:
         argv.append("task.action_ball_full_mdp_profile_probe=true")
+    if diagnostic_fixed_action_probe:
+        argv.append(
+            "task.action_ball_full_mdp_fixed_action_probe_output_path="
+            f"{hydra_run_dir.parents[1] / 'fixed-action-probe'}"
+        )
     return argv
 
 
@@ -776,6 +783,39 @@ def _verify_completed(paths: dict[str, Path]) -> tuple[int, int]:
     return pid, pgid
 
 
+def _verify_fixed_action_probe(
+    paths: dict[str, Path], *, source_commit: str
+) -> dict[str, object]:
+    """Require one complete portable-state record from the finite Isaac child."""
+
+    root = paths["fixed_action_probe"]
+    summary_path = _canonical_regular(root / "summary.json", "fixed-action summary")
+    arrays_path = _canonical_regular(
+        root / "portable_state.npz", "fixed-action arrays"
+    )
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LaunchError("fixed-action summary is not JSON") from exc
+    if (
+        summary.get("schema_version") != 1
+        or summary.get("record_type")
+        != "action_ball_full_mdp_cross_engine_tape_probe_v1"
+        or summary.get("backend") != "isaac"
+        or summary.get("diagnostic_unauthorized") is not True
+        or summary.get("training_authorized") is not False
+        or summary.get("promotion_authority") is not False
+        or summary.get("physics_parity_authority") is not False
+        or summary.get("source")
+        != {"commit": source_commit, "dirty": False}
+        or summary.get("shape")
+        != {"num_envs": 512, "num_ticks": 48, "action_width": 31}
+        or summary.get("arrays_sha256") != _sha256(arrays_path)
+    ):
+        raise LaunchError("fixed-action probe identity differs")
+    return summary
+
+
 def _rate_probe_payload(
     *,
     run_log: Path,
@@ -1015,7 +1055,15 @@ def launch(args: argparse.Namespace) -> int:
         raise LaunchError("expected-gpu-uuid format differs")
     if not 0 <= args.profile_updates <= 50:
         raise LaunchError("profile-updates must be between 0 and 50")
-    if args.diagnostic_rate_probe and args.diagnostic_profile_probe:
+    diagnostic_count = sum(
+        bool(value)
+        for value in (
+            args.diagnostic_rate_probe,
+            args.diagnostic_profile_probe,
+            args.diagnostic_fixed_action_probe,
+        )
+    )
+    if diagnostic_count > 1:
         raise LaunchError("diagnostic probes are mutually exclusive")
     if args.diagnostic_rate_probe and args.profile_updates:
         raise LaunchError(
@@ -1024,6 +1072,10 @@ def launch(args: argparse.Namespace) -> int:
     if args.diagnostic_profile_probe and args.profile_updates == 0:
         raise LaunchError(
             "diagnostic-profile-probe requires positive profile-updates"
+        )
+    if args.diagnostic_fixed_action_probe and args.profile_updates:
+        raise LaunchError(
+            "diagnostic-fixed-action-probe and profile-updates are mutually exclusive"
         )
     cpu_affinity, cpu_ids = _cpu_affinity(args.cpu_affinity)
     if cpu_affinity is not None:
@@ -1036,6 +1088,7 @@ def launch(args: argparse.Namespace) -> int:
         paths["hydra"],
         diagnostic_rate_probe=args.diagnostic_rate_probe,
         diagnostic_profile_probe=args.diagnostic_profile_probe,
+        diagnostic_fixed_action_probe=args.diagnostic_fixed_action_probe,
     )
     runtime_env = _runtime_env(
         gpu_uuid=args.expected_gpu_uuid,
@@ -1054,6 +1107,7 @@ def launch(args: argparse.Namespace) -> int:
                 finite_probe=(
                     args.diagnostic_rate_probe
                     or args.diagnostic_profile_probe
+                    or args.diagnostic_fixed_action_probe
                 ),
             ),
             "runtime_env": runtime_env,
@@ -1109,6 +1163,7 @@ def launch(args: argparse.Namespace) -> int:
                     finite_probe=(
                         args.diagnostic_rate_probe
                         or args.diagnostic_profile_probe
+                        or args.diagnostic_fixed_action_probe
                     ),
                 ),
                 stdin=subprocess.DEVNULL,
@@ -1119,8 +1174,13 @@ def launch(args: argparse.Namespace) -> int:
             raise LaunchError("cannot start the Kit boot launcher") from exc
         if result.returncode != 0:
             raise LaunchError(f"Kit boot launcher failed rc={result.returncode}")
-        if args.diagnostic_rate_probe or args.diagnostic_profile_probe:
+        if (
+            args.diagnostic_rate_probe
+            or args.diagnostic_profile_probe
+            or args.diagnostic_fixed_action_probe
+        ):
             pid, pgid = _verify_completed(paths)
+        fixed_action_payload = None
         if args.diagnostic_rate_probe:
             rate_payload = _rate_probe_payload(
                 run_log=paths["run_log"],
@@ -1146,12 +1206,20 @@ def launch(args: argparse.Namespace) -> int:
             )
             rate_payload = None
             status = "DIAGNOSTIC_PROFILE_PROBE_COMPLETE"
+        elif args.diagnostic_fixed_action_probe:
+            fixed_action_payload = _verify_fixed_action_probe(
+                paths, source_commit=commit
+            )
+            rate_payload = None
+            profile_payload = None
+            status = "DIAGNOSTIC_FIXED_ACTION_PROBE_COMPLETE"
         else:
             pid, pgid = _verify_started(
                 paths, gpu_lock=gpu_lock, lock_file=args.lock_file
             )
             rate_payload = None
             profile_payload = None
+            fixed_action_payload = None
             status = "RUNNING"
         print(json.dumps({
             "diagnostic_unauthorized": True,
@@ -1179,6 +1247,14 @@ def launch(args: argparse.Namespace) -> int:
                     "profile_updates": args.profile_updates,
                 }
                 if profile_payload is not None
+                else {}
+            ),
+            **(
+                {
+                    "fixed_action_probe": str(paths["fixed_action_probe"]),
+                    "fixed_action_done_rows": fixed_action_payload["done_rows"],
+                }
+                if fixed_action_payload is not None
                 else {}
             ),
         }, sort_keys=True, separators=(",", ":")))
@@ -1212,6 +1288,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--profile-updates", type=int, default=0)
     parser.add_argument("--diagnostic-rate-probe", action="store_true")
     parser.add_argument("--diagnostic-profile-probe", action="store_true")
+    parser.add_argument("--diagnostic-fixed-action-probe", action="store_true")
     parser.add_argument("--cpu-affinity")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)

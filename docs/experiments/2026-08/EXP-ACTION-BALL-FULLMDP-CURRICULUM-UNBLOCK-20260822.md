@@ -1088,3 +1088,10 @@ due/accepted/launch/R03/contact=`345,310/288,403/234,365/221,036/0`。合计sele
 selected contact为零而`未测`。recent50 episode mean已经分别为`886.74/1,308.91 tick`，说明survival确实
 学习；但Mu/Isaac recent50四项paddle误差仍为`.473/.974/.949/.435`与`.416/.811/1.180/.750`，没有形成接触尺度
 mimic。这份结果只证伪混源/覆盖的V8谱系，不能反向证伪V9的Take061单一bootstrap与tick48修复。
+
+为裁决“起始动作错是否就是Pod/sim错”，本轮不增加新的成功Gate，而是实现同一tracked
+`512×H48×31` raw action tape的Isaac/Mu first-divergence诊断。两端共同记录reset后的physical root、
+runtime joint-order q/dq、实际拍面几何，以及48 tick逐步状态/terminal；比较器把initial mismatch与
+post-step divergence分开，并只给exact首差和数值包络。若q/dq在tick0前已不同，优先查asset/reset/joint
+order；若初态一致而第一动作后分叉，才进入decoder/plant/backend。host targeted=`41 passed`，exact Pod
+记录尚未生成，故当前不得提前选边。

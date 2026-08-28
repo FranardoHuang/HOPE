@@ -16,6 +16,7 @@ action_ball_full_mdp_runtime: true
 # 100,000-update learning recipe or authorizes a checkpoint lineage.
 action_ball_full_mdp_rate_probe: false
 action_ball_full_mdp_profile_probe: false
+action_ball_full_mdp_fixed_action_probe_output_path: null
 actor_obs_contract: null
 registry_name: null
 registry_name_2: null
