@@ -22,6 +22,8 @@ which is exactly what makes "the stroke's velocity direction is its identity" ex
 from __future__ import annotations
 
 import math
+import os
+from typing import Callable, Mapping
 
 import torch
 
@@ -50,6 +52,34 @@ BALL_RADIUS_M = 0.02
 # prevents a typo-shaped truthy value from silently selecting the no-host-sync
 # diagnostic path.
 _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY = object()
+
+# The fixed-try CUDA path is graph-captured after eager warm-up.  These two
+# immutable scalars must therefore already live on the target device; creating
+# them from host literals while a stream is capturing is illegal.  The cache is
+# tiny (one pair per process/device/dtype) and never stores solver state.
+_FIXED_TRY_DEVICE_CONSTANTS: dict[
+    tuple[int, str, torch.dtype],
+    tuple[torch.Tensor, torch.Tensor],
+] = {}
+_FIXED_TRY_GRAPH_ENV = "HOPE_ACTION_BALL_SOLVER_CUDA_GRAPH"
+_FIXED_TRY_GRAPH_ROWS_PER_GROUP = 9
+_FIXED_TRY_GRAPH_MAX_GROUPS = 512
+_FIXED_TRY_GRAPH_CACHE: dict[int, dict] = {}
+
+
+def _fixed_try_device_constants(
+    device: torch.device,
+    dtype: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    key = (os.getpid(), str(device), dtype)
+    cached = _FIXED_TRY_DEVICE_CONSTANTS.get(key)
+    if cached is None:
+        cached = (
+            torch.tensor(1e6, device=device, dtype=dtype),
+            torch.tensor([3.5e-3, 3.5e-3, 0.02], device=device, dtype=dtype),
+        )
+        _FIXED_TRY_DEVICE_CONSTANTS[key] = cached
+    return cached
 
 
 # ------------------------------------------------------------------ frames --- #
@@ -351,10 +381,16 @@ def solve_strike_specs_fixed_dir(
         return torch.cat([land_xy_ - target_xy, w_speed * q_[:, 2:3]], dim=-1)      # (N,3)
 
     land_xy, valid, v_r, n, net_z = fwd(q)
-    BIG = torch.tensor(1e6, device=dev, dtype=dt)
+    if diagnostic_fixed_try_lm and torch.cuda.is_current_stream_capturing():
+        BIG, hstep = _fixed_try_device_constants(dev, dt)
+    else:
+        # Keep the ordinary eager solver independent of graph-owned state.
+        BIG = torch.tensor(1e6, device=dev, dtype=dt)
+        hstep = torch.tensor(
+            [3.5e-3, 3.5e-3, 0.02], device=dev, dtype=dt
+        )
     r = residual(land_xy, q)
     cost = torch.where(valid, torch.sum(r * r, dim=-1), BIG)
-    hstep = torch.tensor([3.5e-3, 3.5e-3, 0.02], device=dev, dtype=dt)
     lam = torch.full((N,), 1e-3, device=dev, dtype=dt)
     lm_solve_info_ok = torch.ones(N, dtype=torch.bool, device=dev)
     lm_solve_finite = torch.ones(N, dtype=torch.bool, device=dev)
@@ -587,6 +623,186 @@ def solve_strike_specs_fixed_dir(
         "lm_solve_info_ok": lm_solve_info_ok,
         "lm_solve_finite": lm_solve_finite,
     }
+
+
+def _fixed_try_graph_enabled() -> bool:
+    value = os.environ.get(_FIXED_TRY_GRAPH_ENV, "1")
+    if value not in ("0", "1"):
+        raise ValueError(
+            f"{_FIXED_TRY_GRAPH_ENV} must be exactly 0 or 1, got {value!r}"
+        )
+    return value == "1"
+
+
+def _fixed_try_graph_bucket_rows(row_count: int) -> int | None:
+    if row_count <= 0 or row_count % _FIXED_TRY_GRAPH_ROWS_PER_GROUP:
+        return None
+    group_count = row_count // _FIXED_TRY_GRAPH_ROWS_PER_GROUP
+    if group_count > _FIXED_TRY_GRAPH_MAX_GROUPS:
+        return None
+    # One fixed production workspace is simpler than lazily-captured buckets.
+    # It covers the real synchronous A=512 D05 birth and every smaller replay;
+    # fixed-try rows are independent, so padded suffix rows cannot affect the
+    # caller-owned prefix.
+    return _FIXED_TRY_GRAPH_ROWS_PER_GROUP * _FIXED_TRY_GRAPH_MAX_GROUPS
+
+
+def _fixed_try_graph_signature(
+    values: Mapping[str, torch.Tensor],
+) -> tuple:
+    return tuple(
+        (name, tuple(value.shape[1:]), value.dtype, bool(value.requires_grad))
+        for name, value in values.items()
+    )
+
+
+def _fixed_try_graph_copy_rows(
+    destination: torch.Tensor,
+    source: torch.Tensor,
+) -> None:
+    row_count = int(source.shape[0])
+    destination[:row_count].copy_(source)
+    if row_count < int(destination.shape[0]):
+        suffix = destination[row_count:]
+        suffix.copy_(source[-1:].expand_as(suffix))
+
+
+def _fixed_try_graph_clone_prefix(
+    output: Mapping[str, torch.Tensor],
+    row_count: int,
+) -> dict[str, torch.Tensor]:
+    return {
+        name: value[:row_count].clone()
+        for name, value in output.items()
+    }
+
+
+def _new_fixed_try_graph_entry(
+    *,
+    row_inputs: Mapping[str, torch.Tensor],
+    bucket_rows: int,
+    contract_key: tuple,
+    solve: Callable[[Mapping[str, torch.Tensor]], dict[str, torch.Tensor]],
+) -> dict:
+    first = next(iter(row_inputs.values()))
+    device = first.device
+    static_inputs = {
+        name: torch.empty(
+            (bucket_rows, *value.shape[1:]),
+            dtype=value.dtype,
+            device=device,
+        )
+        for name, value in row_inputs.items()
+    }
+    for name, value in row_inputs.items():
+        _fixed_try_graph_copy_rows(static_inputs[name], value)
+
+    production_stream = torch.cuda.current_stream(device)
+    # Capture cannot construct these immutable device constants from literals.
+    # Create them on the production stream before the warm stream waits on it.
+    _fixed_try_device_constants(device, first.dtype)
+    warm_stream = torch.cuda.Stream(device=device)
+    warm_stream.wait_stream(production_stream)
+    with torch.cuda.stream(warm_stream):
+        for _ in range(3):
+            solve(static_inputs)
+    production_stream.wait_stream(warm_stream)
+    torch.cuda.synchronize(device)
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        output = solve(static_inputs)
+    torch.cuda.synchronize(device)
+    return {
+        "pid": os.getpid(),
+        "device": device,
+        "stream_id": int(production_stream.cuda_stream),
+        "signature": _fixed_try_graph_signature(row_inputs),
+        "contract_key": contract_key,
+        "row_inputs": static_inputs,
+        "graph": graph,
+        "output": output,
+    }
+
+
+def run_fixed_try_lm_cuda_graph(
+    *,
+    row_inputs: Mapping[str, torch.Tensor],
+    contract_key: tuple,
+    solve: Callable[[Mapping[str, torch.Tensor]], dict[str, torch.Tensor]],
+) -> dict[str, torch.Tensor] | None:
+    """Execute one sanitized fixed-try LM leaf through a bounded graph cache.
+
+    Validation, authoritative replay, reasons and ledgers remain eager.  The
+    graph path is limited to CUDA float32 ``9*A`` FullMDP batches with
+    ``A <= 512``; every other caller retains the ordinary numerical path.
+    """
+
+    pid = os.getpid()
+    if any(entry["pid"] != pid for entry in _FIXED_TRY_GRAPH_CACHE.values()):
+        raise RuntimeError("CUDA Graph solver cache cannot cross a fork boundary")
+    if not _fixed_try_graph_enabled() or not row_inputs:
+        return None
+    first = next(iter(row_inputs.values()))
+    if (
+        not isinstance(first, torch.Tensor)
+        or first.device.type != "cuda"
+        or first.dtype != torch.float32
+        or torch.is_autocast_enabled()
+        or torch.cuda.is_current_stream_capturing()
+    ):
+        return None
+    row_count = int(first.shape[0])
+    bucket_rows = _fixed_try_graph_bucket_rows(row_count)
+    if bucket_rows is None:
+        return None
+    device = first.device
+    for value in row_inputs.values():
+        if not isinstance(value, torch.Tensor) or value.device != device:
+            raise ValueError("CUDA Graph solver inputs must share one CUDA device")
+        if value.dtype != torch.float32:
+            return None
+        if value.ndim == 0 or int(value.shape[0]) != row_count:
+            raise ValueError(
+                "CUDA Graph solver inputs must share a leading row count"
+            )
+    try:
+        hash(contract_key)
+    except TypeError as exc:
+        raise TypeError(
+            "CUDA Graph solver contract_key must be hashable"
+        ) from exc
+
+    stream_id = int(torch.cuda.current_stream(device).cuda_stream)
+    signature = _fixed_try_graph_signature(row_inputs)
+    entry = _FIXED_TRY_GRAPH_CACHE.get(bucket_rows)
+    if entry is None:
+        entry = _new_fixed_try_graph_entry(
+            row_inputs=row_inputs,
+            bucket_rows=bucket_rows,
+            contract_key=contract_key,
+            solve=solve,
+        )
+        _FIXED_TRY_GRAPH_CACHE[bucket_rows] = entry
+    elif (
+        entry["pid"] != pid
+        or entry["device"] != device
+        or entry["stream_id"] != stream_id
+        or entry["signature"] != signature
+        or entry["contract_key"] != contract_key
+    ):
+        return None
+
+    # Copies, replay and result clones are queued on the entry's one stream.
+    # The next replay cannot overwrite a result before its clone completes.
+    for name, value in row_inputs.items():
+        _fixed_try_graph_copy_rows(entry["row_inputs"][name], value)
+    entry["graph"].replay()
+    return _fixed_try_graph_clone_prefix(entry["output"], row_count)
+
+
+def _clear_fixed_try_lm_cuda_graph_cache_for_tests() -> None:
+    _FIXED_TRY_GRAPH_CACHE.clear()
 
 
 def dir_deviation_deg(v_r: torch.Tensor, d_hat_w: torch.Tensor) -> torch.Tensor:

@@ -729,11 +729,154 @@ def test_landing_rewards_without_a_bank_are_refused():
 
 # ------------------------------------------------ continuous vs discrete questions --- #
 @pytest.fixture(scope="module")
-def cq():
-    _mdp("strike_spec_torch")
-    _mdp("stroke_prototypes_torch")
-    _mdp("stroke_adapt_torch")
+def cq(sa_torch):
+    # Reuse the exact stroke-adapt generation owned by ``sa_torch``.  Reloading
+    # it here would leave the graph cache fixture pointing at a dead module.
     return _mdp("continuous_questions")
+
+
+def _device_solver_snapshot(output):
+    result = {
+        name: getattr(output, name).detach().clone()
+        for name in (
+            "p_contact", "v_racket", "n_racket", "v_ball_in",
+            "w_ball_in", "aim_xy", "ok", "resid_m",
+            "attempted_v_ball_in", "producer_fault_bits",
+        )
+    }
+    for name in output.proposals.__dataclass_fields__:
+        value = getattr(output.proposals, name)
+        if type(value) is torch.Tensor:
+            result[f"proposals.{name}"] = value.detach().clone()
+    return result
+
+
+def _assert_device_solver_snapshot_bitwise(left, right):
+    assert left.keys() == right.keys()
+    for name in left:
+        lhs = left[name].contiguous().view(torch.uint8)
+        rhs = right[name].contiguous().view(torch.uint8)
+        assert torch.equal(lhs, rhs), name
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA Graph needs CUDA")
+def test_device_solver_cuda_graph_matches_eager_and_owns_its_outputs(
+    cq,
+    sa_torch,
+    protos_t,
+    prm,
+    monkeypatch,
+):
+    """Independent eager transport oracle for graph, padding and reuse.
+
+    This intentionally compares the public result and ledger rather than a
+    cache receipt or cache key produced by the optimization itself.
+    """
+
+    device = torch.device("cuda")
+    motion_id = "bh_block"
+    clip = protos_t.motion_ids.index(motion_id)
+    p, v, _t, _base, base_quat, aim = _scene(
+        protos_t, motion_id, 3.5
+    )
+    cfg = cq.ContinuousQuestionCfg(n_iters=12, fixed_direction=True)
+    graph_env = "HOPE_ACTION_BALL_SOLVER_CUDA_GRAPH"
+
+    def inputs(active_count, *, velocity_shift=0.0, bad_reference=False):
+        rows = active_count * 9
+        velocity = v.to(device).expand(rows, 3).clone()
+        velocity[:, 1].add_(velocity_shift)
+        reference = torch.tensor(
+            [[0.0, 1.0, 0.0]], dtype=torch.float32, device=device
+        ).expand(rows, 3).clone()
+        if bad_reference:
+            reference[0] = 0.0
+        return {
+            "clip_ids": torch.full(
+                (rows,), clip, dtype=torch.long, device=device
+            ),
+            "p_contact": p.to(device).expand(rows, 3).clone(),
+            "v_ball_in": velocity,
+            "w_ball_in": torch.zeros((rows, 3), device=device),
+            "aim_xy": aim.to(device).expand(rows, 2).clone(),
+            "ref_normal": reference,
+            "base_quat": base_quat.to(device).expand(rows, 4).clone(),
+        }
+
+    def solve(values, enabled):
+        monkeypatch.setenv(graph_env, "1" if enabled else "0")
+        return cq.solve_proposals_device(
+            values["clip_ids"],
+            values["p_contact"],
+            values["v_ball_in"],
+            values["w_ball_in"],
+            values["aim_xy"],
+            values["ref_normal"],
+            protos=protos_t,
+            base_quat=values["base_quat"],
+            prm=prm,
+            surface_z=0.76,
+            net_x=1.87,
+            net_top_z=0.9125,
+            cfg=cfg,
+            h=0.01,
+            n_steps=100,
+        )
+
+    sa_torch._clear_fixed_try_lm_cuda_graph_cache_for_tests()
+    try:
+        assert cq.run_fixed_try_lm_cuda_graph is (
+            sa_torch.run_fixed_try_lm_cuda_graph
+        )
+        # Small padded prefixes plus the exact bounded workspace maximum.
+        # A=1 is intentionally graph-first: eager must not pre-create any
+        # capture-only state for the optimization to work.
+        for active_count in (1, 2, 3, 5, 9, 17, 33, 47, 64, 512):
+            values = inputs(active_count)
+            graphed = _device_solver_snapshot(solve(values, True))
+            eager = _device_solver_snapshot(solve(values, False))
+            _assert_device_solver_snapshot_bitwise(graphed, eager)
+
+        first_output = solve(inputs(5), True)
+        first_snapshot = _device_solver_snapshot(first_output)
+        changed = inputs(7, velocity_shift=0.125)
+        eager_changed = _device_solver_snapshot(solve(changed, False))
+        graphed_changed = _device_solver_snapshot(solve(changed, True))
+        _assert_device_solver_snapshot_bitwise(graphed_changed, eager_changed)
+        torch.cuda.synchronize()
+        _assert_device_solver_snapshot_bitwise(
+            _device_solver_snapshot(first_output), first_snapshot
+        )
+
+        bad = inputs(5, bad_reference=True)
+        eager_bad = _device_solver_snapshot(solve(bad, False))
+        graphed_bad = _device_solver_snapshot(solve(bad, True))
+        _assert_device_solver_snapshot_bitwise(graphed_bad, eager_bad)
+        assert int(graphed_bad["producer_fault_bits"][0]) == (
+            cq.PRODUCER_FAULT_REFERENCE_NORMAL
+        )
+
+        # Cache entries are bound to the first production stream.  Another
+        # stream must retain eager semantics instead of racing static buffers.
+        other_stream = torch.cuda.Stream(device=device)
+        stream_values = inputs(5, velocity_shift=-0.125)
+        with torch.cuda.stream(other_stream):
+            eager_stream = _device_solver_snapshot(solve(stream_values, False))
+            fallback_stream = _device_solver_snapshot(solve(stream_values, True))
+        other_stream.synchronize()
+        _assert_device_solver_snapshot_bitwise(fallback_stream, eager_stream)
+
+        # A child must reject inherited graph-owned CUDA state even when it
+        # disables future graph use.  Simulate the PID mismatch without
+        # actually forking a live CUDA process.
+        graph_entry = next(iter(sa_torch._FIXED_TRY_GRAPH_CACHE.values()))
+        graph_entry["pid"] = os.getpid() + 1
+        monkeypatch.setenv(graph_env, "0")
+        with pytest.raises(RuntimeError, match="fork boundary"):
+            solve(inputs(1), False)
+        graph_entry["pid"] = os.getpid()
+    finally:
+        sa_torch._clear_fixed_try_lm_cuda_graph_cache_for_tests()
 
 
 def test_continuous_draw_is_continuous_not_a_case_list(cq, prm):

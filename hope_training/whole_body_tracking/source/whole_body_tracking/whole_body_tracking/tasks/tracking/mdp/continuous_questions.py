@@ -50,6 +50,7 @@ if __package__:
         REASONS,
         _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
         base_yaw_of,
+        run_fixed_try_lm_cuda_graph,
         solve_strike_specs_fixed_dir,
     )
     from .virtual_ball import (
@@ -66,6 +67,7 @@ else:
         REASONS,
         _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
         base_yaw_of,
+        run_fixed_try_lm_cuda_graph,
         solve_strike_specs_fixed_dir,
     )
     from virtual_ball import (
@@ -793,22 +795,74 @@ def _solve_fixed_direction_batch(
         budget_infeasible, speed_max_m, speed_min_m
     )
     face_sign_m = protos.face_sign.to(device, dtype)[clip_ids]
-    out = solve_strike_specs_fixed_dir(
-        p_contact, v_ball_in, w_ball_in, aim_xy, d_m,
-        solver_speed_min_m, speed_max_m,
-        prm, surface_z=surface_z, net_x=net_x,
-        # Map the adapter's legacy reconstructed threshold onto the scorer's explicit ball-centre
-        # plane.  Its ok/reason are ignored; the replay below is the sole acceptance authority.
-        net_height=float(net_top_z) - float(surface_z),
-        net_margin_m=0.0, ball_radius=0.0,
-        n_iters=int(cfg.n_iters), tol_m=float(cfg.tol_m),
-        h=float(h), n_steps=int(n_steps),
-        _diagnostic_fixed_try_lm_authority=(
-            _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY
-            if _diagnostic_prevalidated
-            else None
-        ),
-    )
+    leaf_inputs = {
+        "p_contact": p_contact,
+        "v_ball_in": v_ball_in,
+        "w_ball_in": w_ball_in,
+        "aim_xy": aim_xy,
+        "direction": d_m,
+        "speed_min": solver_speed_min_m,
+        "speed_max": speed_max_m,
+    }
+
+    def solve_leaf(rows):
+        return solve_strike_specs_fixed_dir(
+            rows["p_contact"],
+            rows["v_ball_in"],
+            rows["w_ball_in"],
+            rows["aim_xy"],
+            rows["direction"],
+            rows["speed_min"],
+            rows["speed_max"],
+            prm,
+            surface_z=surface_z,
+            net_x=net_x,
+            # The authoritative replay below owns acceptance.  These legacy
+            # leaf thresholds only preserve its exact numerical ABI.
+            net_height=float(net_top_z) - float(surface_z),
+            net_margin_m=0.0,
+            ball_radius=0.0,
+            n_iters=int(cfg.n_iters),
+            tol_m=float(cfg.tol_m),
+            h=float(h),
+            n_steps=int(n_steps),
+            _diagnostic_fixed_try_lm_authority=(
+                _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY
+                if _diagnostic_prevalidated
+                else None
+            ),
+        )
+
+    out = None
+    if _diagnostic_prevalidated:
+        graph_contract = (
+            "action_ball_fixed_try_lm_cuda_graph_v1",
+            int(cfg.n_iters),
+            float(cfg.tol_m),
+            float(cfg.speed_budget),
+            float(surface_z),
+            float(net_x),
+            float(net_top_z),
+            float(h),
+            int(n_steps),
+            float(prm.k_d),
+            float(prm.k_m),
+            float(prm.g),
+            float(prm.ball_radius),
+            float(prm.inertia_coeff),
+            float(prm.paddle_a_t),
+            float(prm.paddle_b_t),
+            float(prm.paddle_mu),
+            float(prm.paddle_e_g1),
+            float(prm.paddle_e_g2),
+        )
+        out = run_fixed_try_lm_cuda_graph(
+            row_inputs=leaf_inputs,
+            contract_key=graph_contract,
+            solve=solve_leaf,
+        )
+    if out is None:
+        out = solve_leaf(leaf_inputs)
     replayed, good, reasons = _fixed_direction_replay(
         out=out, p_contact=p_contact, v_ball_in=v_ball_in, w_ball_in=w_ball_in,
         aim_xy=aim_xy, ref_normal=ref_normal, speed_min=speed_min_m,

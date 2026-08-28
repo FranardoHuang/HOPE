@@ -35,6 +35,10 @@ def _bind_exact_split_asset_environment(monkeypatch):
     """
 
     monkeypatch.setenv("HOPE_AGIBOT_A3_USD_PATH", _EXACT_SPLIT_ASSET)
+    # Collection must restore any canonical package generation that another
+    # test already owns.  Bind this file's subject only for one factory test;
+    # monkeypatch then restores the prior generation at teardown.
+    monkeypatch.setitem(sys.modules, M.__name__, M)
     split_asset_name = (
         "whole_body_tracking.tasks.tracking.config.agibot_a3."
         "action_ball_full_mdp_split_asset"
@@ -89,7 +93,7 @@ TRACKING_ROOT = SOURCE_ROOT / "whole_body_tracking" / "tasks" / "tracking"
 MDP_ROOT = TRACKING_ROOT / "mdp"
 def _load_env_subject():
     return load_canonical_full_mdp_env(
-        ENV_MODULE_PATH, retain_namespace=True
+        ENV_MODULE_PATH, retain_namespace=False
     )
 
 
