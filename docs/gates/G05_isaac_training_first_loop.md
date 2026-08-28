@@ -4,7 +4,7 @@ Status: Partial (the base training-loop mechanics are proven; the current-fresh 
 
 ## 2026-08-28 FullMDP V9 tick48真实Isaac（仍`Partial`）
 
-V8两端合计已有`941,116`次launch而selected contact仍为0；同源/override审计已将它从“继续等”翻转为
+V8两端合计已有`1,089,548`次launch而selected contact仍为0；同源/override审计已将它从“继续等”翻转为
 训练实现negative。V9 source链`651c305e→cbf0aae3→e3cbe9fc`修复N1 action identity、Take061唯一
 bootstrap owner和tick48首次曝光，active-schedule聚焦测试=`53 passed`。tick295 predecessor rate probe
 p50/p90=`6.635/7.153 s/H48`，但61轮due=0，只能裁决速度。
@@ -25,6 +25,10 @@ exact source=`39569c49`的D05细分诊断已自然完成12/12轮：D05 total/que
 selected identity、reason/counter/safety和可消费journal语义；不能用缩RK4、降solver迭代或删Gate绕过。
 同一未来窗真实construction attempted round1/2/3=`3,584/290/22`；因此incremental unresolved-row是
 有实测上限的候选，直接删后两轮则会改变约8.1%的题目准入并被拒绝。
+修正后的exact source=`34cd7af8`又在fresh 12-update namespace自然完成：直接过滤active
+`rng_advance_mask`所得round1/2/3仍为`3,584/290/22`，ACK due/selected/accepted/rejected=
+`3,584/3,584/3,581/3`、terminal overlap=`0`、launch=`0`。这只把热点密度从推算升级为直接测量；
+仍不得把profile-on结果写成rate PASS或学习证据。
 
 ## 2026-08-27 FullMDP V8 Isaac replacement（仍`Partial`）
 

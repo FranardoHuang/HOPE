@@ -961,7 +961,7 @@ paddle真实误差与contact/landing分母。
 
 ### 11.1 不是“Pod装坏了”，而是可执行训练配方与已验证范围被写错
 
-V8两条进程继续保持只读；合计已观察`941,116`次physical launch而selected contact仍为0。这个结果不能
+V8两条进程继续保持只读；合计已观察`1,089,548`次physical launch而selected contact仍为0。这个结果不能
 再归因为step不足。源码、artifact与runtime input交叉审计发现：teacher动作、physical-ready、dynamic-ready
 artifact和最终YAML override并非同一动作/同一owner，Take058 teacher与Take061 ready被混入一个N1谱系；
 同时bootstrap构造出的ready→frame0 bridge会被legacy override再次覆盖。另一个独立错误是catalog attachment
@@ -1055,6 +1055,16 @@ D05把previous-cell作为同owner ephemeral context交给composer，并让未尝
 有诚实语义；selected identity、最终reason、RNG/draw/generation counters、producer fault和safety结果须与
 dense fixed-tape逐位相同。profile计数器已修为直接过滤`rng_advance_mask`，后续不再靠扣除法。
 
+修正计数后的exact source=`34cd7af8717b3463c519f306072e90f632f92344`又以fresh namespace
+`fullmdp-a-h48-v9-isaac-profile12-rounds2-34cd7af8-20260828T1545Z`在Pod1 GPU2自然完成12/12轮。
+probe/run/runtime-receipt SHA-256=`8dee501c475e1e84e0e0bbd8518e6e69eeb3ee624011f83d36c8da5465010fc1`/
+`79896bc62fda9969be02ecbfe363121e413ad79cfcc2b2312cb445920ae75a4b`/
+`5c588f65d71053a6d56b29b1652b93a27419a197758b66bbea0ffd530a52a9c4`。这次不做inactive减法，直接得到
+round1/2/3 active attempted=`3,584/290/22`，精确复现上一段结论。ACK0..11对账为
+due/selected/accepted/rejected=`3,584/3,584/3,581/3`、terminal overlap=`0`、playback=`1,642`、
+launch=`0`；所有`3,584`个terminal均为base tilt。该窗继续是`diagnostic_unauthorized=true`、profile-on、
+formal evidence=false，只授权热点密度事实，不授权速度或学习。
+
 同源码MuJoCo 61-update窗也已自然完成，p50/p90=`6.644/6.854 s/H48`，scheduled/reveal=
 `10,861/10,860`、launch=`6,658`、missed launch=0、R03 present/physically-valid=`5,107/5,107`，
 selected contact=`0/6,658`、landing=0。episode mean first10→last10=`135.78→139.98`；paddle position/
@@ -1069,3 +1079,12 @@ fail-closed；按`setup_local_sync`固定三文件SHA恢复后r2成功，故这�
 比较q、dq、base、racket和terminal first divergence。当前只能说balance→mimic交接实现闭合；mimic、hit、
 landing与physics parity均未闭合。V8继续只读，V9长期replacement暂不发；所有结果继续
 `diagnostic_unauthorized=true`。
+
+`observed_at=2026-08-28T07:12Z`的旧V8只读长跑已进一步坐实negative，而不是启动balance-only：
+Mu ACK0..20563累计`505,380,864` transitions，scheduled/launch/R03/contact=
+`1,118,460/855,183/585,784/0`；Isaac ACK0..7171累计`176,259,072` transitions，
+due/accepted/launch/R03/contact=`345,310/288,403/234,365/221,036/0`。合计selected contact=
+`0/1,089,548`，common-legal与landing仍因
+selected contact为零而`未测`。recent50 episode mean已经分别为`886.74/1,308.91 tick`，说明survival确实
+学习；但Mu/Isaac recent50四项paddle误差仍为`.473/.974/.949/.435`与`.416/.811/1.180/.750`，没有形成接触尺度
+mimic。这份结果只证伪混源/覆盖的V8谱系，不能反向证伪V9的Take061单一bootstrap与tick48修复。

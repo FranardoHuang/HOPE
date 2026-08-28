@@ -6,7 +6,7 @@
   `advance_action_ball_full_mdp_rows`替换成instance wrapper，破坏LeanRuntime既有exact bound-method
   身份检查。失败root只读且不复用；修复不放宽检查，而是在LeanRuntime已认证的调用点用既有opt-in
   host-clock callback包住原bound method，并新增R05/Motion production方法身份保持反例。
-- V8只读证据两端合计已到`941,116`次launch且selected contact仍为0；审计确认不是“再多等step”：Take058
+- V8只读证据两端合计已到`1,089,548`次launch且selected contact仍为0；审计确认不是“再多等step”：Take058
   teacher、Take061 ready与legacy bootstrap覆盖混源，catalog attachment又形成motion `N=1`/action
   identity `N=0`。修复链`651c305e→cbf0aae3→e3cbe9fc`将Take061 ready→frame0桥与动作身份原子绑定，
   first due改为tick48并保留六次185-tick完整task/recovery机会；不新增Stage或task-success安全Gate。
@@ -41,6 +41,19 @@
   `10,752` env-round，实际消费`3,896`，incremental unresolved-row compose的数值row-round上限可减
   `63.8%`。不能直接把round数降到1，否则约`8.1%`当前可在后轮解出的题会丢失。profiler已修为直接按
   `rng_advance_mask`计数，下一复核不再依赖扣除法。
+- 修正后的exact source=`34cd7af8`已在GPU2以fresh namespace自然完成12/12轮，probe/run/runtime-receipt
+  SHA-256分别为`8dee501c…10fc1`/`79896bc6…75a4b`/`5c588f65…a9c4`。直接active-row计数逐轮仍精确为
+  `3,584/290/22`，与上一轮扣除结果一致；ACK0..11的due/selected/accepted/rejected=
+  `3,584/3,584/3,581/3`、terminal overlap=`0`、launch=`0`，所有`3,584`个terminal均为base tilt。
+  该诊断`diagnostic_unauthorized=true`且profile-on，既不授权速度也不授权学习，只把incremental
+  unresolved-row的算法上限从推算升级为直接测量。
+- `observed_at=2026-08-28T07:12Z`的只读V8快照不再是启动期：Mu ACK0..20563=
+  `505,380,864` transitions，launch/R03/contact=`855,183/585,784/0`；Isaac ACK0..7171=
+  `176,259,072` transitions，launch/R03/contact=`234,365/221,036/0`。两端合计selected contact=
+  `0/1,089,548`，因此V8是有大分母的训练实现negative，不是“mimic尚未开放”。Mu/Isaac recent50
+  paddle position/velocity/face/long-axis真实误差仍约`.473/.974/.949/.435`与
+  `.416/.811/1.180/.750`，没有形成接触尺度mimic。V8保持只读，不能冒充V9修复后
+  的学习结果。
 
 ## 2026-08-27 — FullMDP V8 exact Pod双fresh运行（branch diagnostic）
 

@@ -22,7 +22,7 @@ run root与证据保持只读。V7 exact source=`1d33130ba07288918aa73d1323e1106
 两个fresh namespace运行，但最新固定前缀已把它翻转为learning negative；它已在replacement ready后按
 exact身份停止，root继续只读且不得resume。V8 clean source=
 `0ad85ae1dfae13f617dc102a15bf99dba6b9ebf6`已完成Pod目标测试、双rate与fresh双端启动。后续只读大分母
-再次得到两端合计`941,116`次launch、selected contact仍为0；同时源码/运行输入审计确认V8把Take058
+再次得到两端合计`1,089,548`次launch、selected contact仍为0；同时源码/运行输入审计确认V8把Take058
 teacher、Take061 ready、旧动态ready artifact和被YAML覆盖的split-ready混在一起，不能再用step数裁决
 这条污染谱系。当前[`V9`](../DEFINITIONS.md#fullmdp-v9-candidate)只修同源ready→teacher、原子catalog绑定、
 upper-only mimic与课程交接；V8进程在replacement双端闭合前保持只读运行，尚未停止。所有运行仍为
@@ -107,7 +107,8 @@ p50/p90/throughput=`3.796/3.999 s/6,455 transitions/s`，Isaac=
 `6.835/7.612 s/3,598 transitions/s`。V8 fresh namespace为
 `fullmdp-a-h48-v8-mujoco-fixedlr512-0ad85ae1-20260826T203329Z`与
 `fullmdp-a-h48-v8-isaac-fixedlr512-0ad85ae1-20260826T203329Z`；启动快照Mu ACK0..35、Isaac ACK0..51均
-连续durable，optimizer LR精确为`1e-4`。后续只读累计已到两端合计`941,116`次launch而selected contact
+连续durable，optimizer LR精确为`1e-4`。`observed_at=2026-08-28T07:12Z`的后续只读累计已到两端合计
+`1,089,548`次launch而selected contact
 仍为0；源码/运行输入审计又确认Take058 teacher、Take061 ready与legacy bootstrap覆盖混用，因此该谱系不再
 用更多step解释，保持只读等replacement。
 
@@ -217,7 +218,9 @@ slice和Mu native pose adapter两处实现错误；最终
       D05累计约`82.4%`。preview/build/epoch-settle累计仅`.001/.092/.719 s`，下一算法刀只审计固定三轮
       question bank，不再优化这些小段或增加Gate。
       round-density进一步得到真实construction attempted round1/2/3=`3,584/290/22`，固定三轮数值
-      row-round中约`63.8%`没有消费者；采用未决行incremental compose候选，拒绝直接降成一轮。
+      row-round中约`63.8%`没有消费者；采用未决行incremental compose候选，拒绝直接降成一轮。修正后的
+      exact source=`34cd7af8`已在fresh 12-update namespace自然完成，直接active-row计数仍精确为
+      `3,584/290/22`，不是由inactive row倒推；该profile-on诊断只授权密度事实，不授权速度或学习。
   11. [ ] 从同一physical-ready、joint order、q/dq与固定31-D action tape逐tick比较Isaac/Mu的base、racket、
       terminal与first divergence；先裁决实现/plant差异，再决定V9长期双fresh，不增加task-success安全Gate。
 
