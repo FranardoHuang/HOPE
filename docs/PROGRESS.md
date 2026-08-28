@@ -20,6 +20,13 @@
   bitwise parity，却在Pod profile2使D05 question累计`18.16→98.72 s/12 updates`、collection中位
   `8.05→16.17 s`，已撤回；恢复单一mask-first seam与三轮dense compose。下一刀只在dense kernel内部找
   复用/融合，不用numeric-row理论代签速度，也不新增success/safety Gate。
+- Pod exact CUDA已排除`virtual_ball`融合失效：100-step Triton path真实admit，`N=512`为
+  `.0526 ms/call`。真正与D05 question墙钟吻合的是Physical horizon的重复eager RK4：`[512,3,3]`
+  discovery=`202.2 ms`、从同一contact state再finalize=`54.1 ms`，合计约旧dense `245 ms/call`。
+  第一最小候选只保留CUDA discovery逐tick state并让finalize gather，删除约`54.1 ms`重复段；它不冒充
+  大提速。exact CUDA parity/direct benchmark后仍须把约`202.2 ms`的固定discovery融合成单launch。
+  H48、三轮、solver迭代、RNG、identity、reason/fault/counter/safety与CPU reference保持，性能只认
+  profiler-off实测。
 - 新profile首试在step0前因诊断器shadow slotted Physical leaf而fail-closed；production未执行。已删除3个非法
   leaf wrapper、保留D05总段与其他合法分段，失败root只读且不计速度/学习证据。
 - V9 Mu长期证据口径自查纠正：先前`7,139/517,214`是generic `racket_contact_rows`，不是课程合同的
@@ -27,10 +34,12 @@
   `188/538,008 launch=.0349%`，landing=`0/188 selected contact`，raw contact中`96.15%`是edge；
   recent50 episode mean已塌到`105.59 tick`且launch=0。旧错误plant谱系只证明极稀疏hit曾可达后遗忘，
   不能移签R8，也不能用generic contact冒充课程交接。
-- active V9最新只读窗（`observed_at=2026-08-28T17:49Z`）继续恶化：Mu recent50 episode mean=
-  `105.59 tick`且launch=0，mimic四误差全面变差；Isaac累计selected contact=`0/144,824 launch`，recent50
-  mimic除position近似持平外均变差。两端不符合balance→mimic→hit→landing交接；错误Mu plant使该negative
-  不能移签R8，但已足以拒绝继续等待V9自然恢复。
+- active V9的2026-08-29只读窗已经有真实任务分母：Mu updates `4926..4975`为
+  due/reveal/launch/selected contact=`7,818/7,648/5,267/0`、episode mean=`233.25 tick`、wall median=
+  `6.563 s/H48`；Isaac updates `1481..1530`为due/accept/playback/launch/selected contact=
+  `8,454/8,451/8,431/7,392/0`、episode mean=`145.80 tick`、wall median=`23.36 s/H48`。因此两端都不是
+  “仍在balance所以hit未测”，而是selected hit的高分母负结果；错误Mu plant
+  使它不能移签R8，但已足以拒绝继续等待V9自然恢复。
 
 ## 2026-08-28 — FullMDP V9同源初态与tick48重叠课程（branch diagnostic）
 

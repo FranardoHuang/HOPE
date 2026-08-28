@@ -957,7 +957,7 @@ mean length仍约百步、未到首个due tick295，因此launch/contact/paddle-
 `未测`，符合balance起点，不能提前写成hit negative。下一结论只看预注册未来窗中的survival-to-due、
 paddle真实误差与contact/landing分母。
 
-## 11. 2026-08-28 current：V8混源反例与V9自然重叠修复
+## 11. 2026-08-29 current：V8/V9反例、R8出生修复与自然重叠课程
 
 ### 11.1 不是“Pod装坏了”，而是可执行训练配方与已验证范围被写错
 
@@ -996,6 +996,35 @@ same-observation/different-required-action反例，Observation V3已直接给出
 table/contact几何、full-key/generation、optimizer成功与WAL/fsync/ACK；它们不替代清晰的状态机。
 
 ### 11.3 当前Pod证据与下一裁决
+
+当前裁决已从下文V9早期前缀继续推进。R8用固定13项reserve重做physical birth，并在真实PhysX完成
+`60 policy/240 physics/1.2 s`无terminal/hard-edge prefix；同一`512×H48×31` tape两端initial q/dq
+逐位一致、qdes最大差`5.96e-8 rad`，但首个20 ms后q/dq已差`.00973/.89084`，故剩余首差属于backend
+plant/controller/integrator/contact response，不是joint order、shared decoder或“Pod整体装坏”。R8
+61-update rate中Mu p50/p90=`6.962/7.018 s`、contact=`0/6,523 launch`；Isaac=
+`21.455/27.455 s`、due/playback/launch/contact=`14,221/13,555/461/0`。它证明自然课程入口已开且Isaac
+迭代速度不合格，不授权把短窗零contact外推为长期不可学。
+
+该response层已有具体源码差异：Isaac把qdes/Kp/Kd交给PhysX implicit drive在`.005 s`步内求解，Mu每个
+`.001 s`子步显式计算、clamp PD torque；Isaac无量纲PhysX joint friction与Mu常值Coulomb
+`frictionloss`又被源码明确标为未校准的逐数值移植。因此same qdes并不蕴含same torque/state response，
+也不支持用Jiayi未附runtime收据的本机sim2sim结论宣告Pod安装损坏。
+
+性能归因也已修正。逐轮未决row compaction虽保持业务输出逐位相等，却因小batch和动态launch使D05
+question从旧dense的`18.16 s/12 updates`回归到`98.72 s`，已完整撤回。Pod exact CUDA确认
+`virtual_ball.coarse_landing`的100-step Triton融合真实启用，`N=512`仅`.0526 ms/call`；真正热点是
+Physical horizon对同一contact state先做`30×4=120`次eager reverse RK4 discovery，再重做最多`120`次
+finalize，`[512,3,3]`直接实测=`202.2+54.1 ms`，与旧dense D05 question约`245 ms/call`匹配。
+第一步候选只保留CUDA discovery逐tick state并让finalize gather，删除约`54.1 ms`重算；它须经exact
+CUDA parity/direct benchmark且不能冒充大提速。其后仍须把约`202.2 ms`的固定discovery融合成单launch，
+保持H48、三轮、solver迭代、RNG、candidate identity、reason/fault/counter/safety和CPU reference；
+再做profile-on归因和profiler-off rate，不新增成功/安全Gate。
+
+2026-08-29的active V9只读窗已经不是“阶段未开”：Mu updates `4926..4975`的
+due/reveal/launch/selected contact=`7,818/7,648/5,267/0`、wall median=`6.563 s/H48`；Isaac updates
+`1481..1530`的due/accept/playback/launch/selected contact=`8,454/8,451/8,431/7,392/0`、wall median=
+`23.36 s/H48`。两端都有高eligible分母而selected hit仍为0，应在R8精确候选通过后替换；V9 Mu使用
+legacy plant，故这项negative不能移签R8。
 
 source链为`651c305e`（原子action identity）→`cbf0aae3`（tick48）→`e3cbe9fc`（保持generic future-tick
 fixture中性）。本地/Pod active-schedule聚焦矩阵为`53 passed`；更广矩阵的4个失败是旧Reward ordinal与fake

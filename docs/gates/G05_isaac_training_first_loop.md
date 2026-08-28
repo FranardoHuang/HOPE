@@ -24,10 +24,20 @@ updates`、collection中位`8.05→16.17 s`，故已撤回并恢复单一mask-fi
 首个Pod profile在step0前因profiler非法shadow slotted Physical leaf而fail-closed；删除该诊断wrapper后
 重新验证，不改变production路径，也不把失败namespace纳入Gate证据。
 
-active V9最新只读负窗（`observed_at=2026-08-28T17:49Z`）中，Isaac累计selected contact仍为
-`0/144,824 launch`，recent50 episode mean=`141.58 tick`，mimic除position近似持平外均恶化；Mu同窗又
-塌到episode mean=`105.59 tick`与launch=0。两端均未形成课程交接，且V9 Mu plant身份错误，不能把这项
-negative移签R8；replacement验证完成后应替换，而不是继续等旧run。
+Pod exact CUDA进一步排除了错误热点：`virtual_ball.coarse_landing`的100-step Triton融合真实启用，
+`N=512`仅`.0526 ms/call`；Physical horizon仍以Python/eager方式做`120`次discovery RK4，再从同一状态
+做最多`120`次finalize RK4，`[512,3,3]`实测=`202.2+54.1 ms`，与旧dense D05 question约
+`245 ms/call`匹配。第一步只让CUDA discovery保留逐tick state、finalize直接gather，删除约`54.1 ms`重算；
+它不是性能完成，exact CUDA parity/direct benchmark后还须把约`202.2 ms`的固定discovery融合成单launch。
+两步都不改变H48、三轮、solver迭代、physics或Gate，最终必须由CPU reference与exact CUDA完整输出逐位
+相等、fixed tape和profiler-off rate共同验收。
+
+active V9最新只读负窗（2026-08-29）中，Isaac updates `1481..1530`的
+due/accept/playback/launch/selected contact=`8,454/8,451/8,431/7,392/0`，recent50 episode mean=
+`145.80 tick`、wall median=`23.36 s/H48`；Mu updates `4926..4975`的due/reveal/launch/selected contact=
+`7,818/7,648/5,267/0`，episode mean=`233.25 tick`、wall median=`6.563 s/H48`。两端都已形成高eligible分母而hit仍为0，不能归为
+“课程尚未打开”。V9 Mu plant身份错误，故该negative不能移签R8；replacement验证完成后应替换，而不是
+继续等旧run。
 
 ## 2026-08-28 FullMDP V9 tick48真实Isaac（仍`Partial`）
 

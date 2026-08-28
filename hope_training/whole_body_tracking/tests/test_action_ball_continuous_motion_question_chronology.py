@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import inspect
 from pathlib import Path
@@ -133,6 +134,134 @@ def _physical_owner() -> physical.PhysicalQuestionNumericCore:
             table_surface_z_m=0.76,
         ),
     )
+
+
+@pytest.mark.parametrize("device", _DEVICES)
+def test_physical_tick_cache_is_bitwise_reference_for_all_tick_outcomes(
+    device: torch.device,
+) -> None:
+    params = physical.PhysicalQuestionFlightParams(
+        k_d=0.08, k_m=0.001, g=9.81, ball_radius_m=0.02
+    )
+    config = physical.PhysicalQuestionNumericConfig(
+        motion_tick_s=0.02,
+        integration_substeps_per_motion_tick=4,
+        max_final_segment_motion_ticks=30,
+        table_surface_z_m=0.76,
+    )
+    z_min = (
+        config.table_surface_z_m
+        + params.ball_radius_m
+        + config.table_clearance_margin_m
+    )
+    batch = physical.PhysicalQuestionCandidateBatch(
+        candidate_identity=torch.tensor(
+            [101, 102, 103, 0], dtype=torch.int64, device=device
+        ),
+        contact_position_env_m=torch.tensor(
+            [
+                [0.10, -0.10, z_min + 0.50],
+                [0.00, 0.00, z_min + 1.0e-4],
+                [-0.10, 0.10, z_min + 0.08],
+                [float("nan"), 0.00, z_min + 0.20],
+            ],
+            dtype=torch.float32,
+            device=device,
+        ),
+        incoming_linear_velocity_world_mps=torch.tensor(
+            [
+                [-0.8, 0.1, -0.2],
+                [0.0, 0.0, 2.0],
+                [0.1, 0.0, 1.0],
+                [0.0, 0.0, 0.0],
+            ],
+            dtype=torch.float32,
+            device=device,
+        ),
+        incoming_angular_velocity_world_radps=torch.tensor(
+            [
+                [20.0, -10.0, 15.0],
+                [0.0, 0.0, 0.0],
+                [5.0, -3.0, 2.0],
+                [float("inf"), 0.0, 0.0],
+            ],
+            dtype=torch.float32,
+            device=device,
+        ),
+    )
+    cached_record = physical._discover_horizon_reference(
+        batch,
+        params=params,
+        config=config,
+        _retain_motion_tick_state=True,
+    )
+    assert cached_record.motion_tick_state_f32 is not None
+    assert bool(cached_record.max_feasible_motion_ticks[0] > 0)
+    assert bool(cached_record.max_feasible_motion_ticks[1] == 0)
+    assert bool(
+        0
+        < cached_record.max_feasible_motion_ticks[2]
+        < config.max_final_segment_motion_ticks
+    )
+    assert bool(
+        cached_record.construction_reason[3]
+        == physical.CONSTRUCTION_REASON_INVALID_PRODUCER
+    )
+    reference_record = replace(cached_record, motion_tick_state_f32=None)
+    contact_tick = torch.full_like(cached_record.candidate_identity, 1000)
+    max_ticks = torch.where(
+        cached_record.max_feasible_motion_ticks > 0,
+        cached_record.max_feasible_motion_ticks,
+        torch.zeros_like(cached_record.max_feasible_motion_ticks),
+    )
+    one_tick = torch.where(max_ticks > 0, torch.ones_like(max_ticks), max_ticks)
+    middle_tick = torch.where(max_ticks > 0, (max_ticks + 1) // 2, max_ticks)
+    mismatch = cached_record.candidate_identity.clone()
+    mismatch[0] += 10000
+    request_cases = (
+        (cached_record.candidate_identity.clone(), contact_tick - one_tick),
+        (cached_record.candidate_identity.clone(), contact_tick - middle_tick),
+        (cached_record.candidate_identity.clone(), contact_tick - max_ticks),
+        (
+            cached_record.candidate_identity.clone(),
+            contact_tick - cached_record.max_feasible_motion_ticks - 1,
+        ),
+        (mismatch, contact_tick - max_ticks),
+    )
+    for request_candidate, launch_tick in request_cases:
+        reference = physical._finalize_exact_ticks(
+            reference_record,
+            candidate_identity=request_candidate,
+            contact_tick=contact_tick,
+            launch_tick=launch_tick.contiguous(),
+            params=params,
+            config=config,
+        )
+        cached = physical._finalize_exact_ticks(
+            cached_record,
+            candidate_identity=request_candidate,
+            contact_tick=contact_tick,
+            launch_tick=launch_tick.contiguous(),
+            params=params,
+            config=config,
+        )
+        for name in (
+            "candidate_identity",
+            "contact_tick",
+            "launch_tick",
+            "construction_reason",
+            "producer_fault",
+        ):
+            assert torch.equal(getattr(reference, name), getattr(cached, name))
+        for name in ("physical_state_f32", "effective_contact_horizon_s"):
+            reference_bits = getattr(reference, name).contiguous().view(torch.int32)
+            cached_bits = getattr(cached, name).contiguous().view(torch.int32)
+            assert torch.equal(reference_bits, cached_bits)
+
+    dispatched = physical._discover_horizon(
+        batch, params=params, config=config
+    )
+    assert (dispatched.motion_tick_state_f32 is not None) == (device.type == "cuda")
 
 
 def _motion(device: torch.device = torch.device("cpu")) -> tuple[object, tuple]:

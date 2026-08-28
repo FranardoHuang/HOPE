@@ -37,6 +37,13 @@ action/decoder/manifest错配已排除，剩余首差在backend plant/controller
 编译后的policy clock和solver/controller身份必须作为记录字段，而不能从配置文件名推断；该诊断定位不等于
 physics parity，也不要求两个backend逐位相同才能各自学习。
 
+源码已把这层差异进一步具体化。Isaac使用`ImplicitActuatorCfg`，将qdes、Kp/Kd交给PhysX drive在
+`.005 s`物理步内求解；Mu在每个`.001 s`子步显式计算并clamp `kp*(qdes-q)-kd*qd`。数值表相同不代表
+离散controller相同。Isaac的joint `friction`还是随传递空间力缩放的无量纲PhysX系数，Mu的
+`frictionloss`则是常值库仑关节力矩；Isaac源码明确将这份逐数值照搬标为未校准legacy choice。
+所以当前首步分叉已有具体配置/实现来源，不能归为pip/Kit安装损坏；Jiayi本机sim2sim若要对签，必须给出
+同asset、同actuator backend、同friction/contact/clock的runtime收据，而不能只比较动作或配置名称。
+
 第二个实现错误来自physical birth定义。exact teacher frame0在0807 plant静态不可执行：waist-pitch hold
 需要约`-49.155 Nm`，可执行position-control authority约`-21.704 Nm`。R7正确地把teacher与physical birth
 分开，却把fallback“robust feasible”默认实现成所有slack仅大于数值零；产物的右脚接触/support/torque
@@ -63,10 +70,12 @@ selected contact是update473；最佳selected-rate 50窗也只有`36/6,926=.520%
 episode mean已塌到`105.59 tick`且launch=0。所以旧错误plant谱系只证明极稀疏hit曾可达后被遗忘，不能
 移签R8；也不能把generic接触均值冒充当前击球能力。
 
-active V9的最新只读窗（`observed_at=2026-08-28T17:49Z`）也不符合自然课程交接：Mu recent50 episode
-mean=`105.59 tick`、launch=0且mimic四误差全面恶化；Isaac recent50 episode mean=`141.58 tick`，累计
-selected contact=`0/144,824 launch`，mimic除position近似持平外均恶化，landing仍无eligible contact分母。
-因此V9是应替换的旧谱系negative，不是继续等待对象；错误Mu plant又使它不能裁决R8/A3P0807。
+active V9的最新只读窗（2026-08-29）已有真实课程分母：Mu updates `4926..4975`的
+due/reveal/launch/selected contact=`7,818/7,648/5,267/0`，episode mean=`233.25 tick`，四项mimic误差=
+`.364 m/1.067 mps/1.240 rad/1.228 rad`；Isaac updates `1481..1530`的
+due/accept/playback/launch/selected contact=`8,454/8,451/8,431/7,392/0`，episode mean=`145.80 tick`，
+四项误差=`.286 m/.951 mps/1.350 rad/1.097 rad`。因此V9是应替换的高eligible分母negative，不是
+“课程未开”或继续等待对象；错误Mu plant又使它不能裁决R8/A3P0807。
 
 R8 Isaac 61-update profiler-off窗为p50/p90=`21.455/27.455 s/H48`，episode mean
 `97.26→107.96`；paddle position/velocity/long-axis三项改善、face变差。全窗
@@ -84,8 +93,14 @@ Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝�
 不计速度或学习证据。
 
 修正后的profile2已自然完成12/12，但只作归因：round1/2/3 attempted=`3,056/224/20`，D05 question仍占
-`98.72/187.37 s` collection，是明确回归而非收益。下一候选必须在dense kernel内部做复用/融合；先同R8
-profile定位，再用profiler-off rate裁决，拒绝逐轮host/device控制流、缩RK4或降solver精度。
+`98.72/187.37 s` collection，是明确回归而非收益。Pod exact CUDA进一步确认100-step
+`virtual_ball.coarse_landing` Triton path真实admit，`N=512`只需`.0526 ms/call`；真正未融合的是
+Physical horizon对同一contact state做`120`次discovery和最多`120`次finalize eager RK4，
+`[512,3,3]`实测=`202.2+54.1 ms`，与旧dense question约`245 ms/call`匹配。下一候选只在dense Physical
+第一步只保留CUDA discovery逐tick state并让finalize gather，删除约`54.1 ms`重算；它须先做exact CUDA
+parity/direct benchmark且不冒充大提速。其后仍须把约`202.2 ms`固定discovery融合成单launch；两步都保持
+CPU reference、完整identity/RNG/reason/fault/counter/safety逐位等价，最后用profiler-off rate裁决。
+拒绝逐轮host/device控制流、缩RK4、降solver精度或新增task-success安全Gate。
 
 采用/延后/拒绝如下：
 

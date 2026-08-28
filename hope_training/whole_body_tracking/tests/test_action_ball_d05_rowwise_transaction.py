@@ -38,6 +38,16 @@ _FAKE_R06 = ModuleType("action_ball_landing_outcome_device")
 _FAKE_R06.PreviousPaidActionEpochRows = _PreviousPaidRows
 
 
+def _previous_paid_rows_type(current_epoch):
+    """Resolve the type from the same import namespace as the epoch owner."""
+
+    if not current_epoch.__package__:
+        return _PreviousPaidRows
+    return importlib.import_module(
+        current_epoch.__package__ + ".action_ball_landing_outcome_device"
+    ).PreviousPaidActionEpochRows
+
+
 def _candidate(
     n: int, *, invalid: torch.Tensor | None = None, epoch_module=None
 ):
@@ -406,11 +416,7 @@ class _PhysicalLeaf:
 def test_real_epoch_stale_reset_censors_mutated_d05_accept_mask(monkeypatch):
     monkeypatch.setitem(sys.modules, _FAKE_R06.__name__, _FAKE_R06)
     current_epoch = d05._require_action_epoch_module()
-    paid_rows_type = _PreviousPaidRows
-    if current_epoch.__package__:
-        paid_rows_type = importlib.import_module(
-            current_epoch.__package__ + ".action_ball_landing_outcome_device"
-        ).PreviousPaidActionEpochRows
+    paid_rows_type = _previous_paid_rows_type(current_epoch)
     epoch_owner = current_epoch.ActionEpochOwner(num_envs=2, device="cpu")
     epoch_owner.activate_reset_genesis(
         selected_mask=torch.ones(2, dtype=torch.bool),
@@ -738,7 +744,7 @@ def test_k0_epoch_return_skips_question_numeric_writers_and_second_projection(
 ):
     monkeypatch.setitem(sys.modules, _FAKE_R06.__name__, _FAKE_R06)
     current_epoch = d05._require_action_epoch_module()
-    paid_rows_type = _PreviousPaidRows
+    paid_rows_type = _previous_paid_rows_type(current_epoch)
     epoch_owner = current_epoch.ActionEpochOwner(num_envs=2, device="cpu")
     epoch_owner.activate_reset_genesis(
         selected_mask=torch.ones(2, dtype=torch.bool),

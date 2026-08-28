@@ -6,8 +6,9 @@ This module implements only the numerical half of the two-stage contract:
 1. discover the largest complete Motion-tick final ballistic segment by
    reverse integrating the candidate contact state with a fixed loop bound;
 2. after an *external* Motion owner has chosen exact launch/contact ticks,
-   recompute the launch state over that exact interval and form the 13-field
-   Physical state (position, identity quaternion, linear velocity, spin).
+   select the retained CUDA prefix state (or use the non-CUDA reference
+   recomputation) and form the 13-field Physical state (position, identity
+   quaternion, linear velocity, spin).
 
 The test owner below keeps candidate inputs and discovered horizons behind an
 opaque one-shot receipt.  Consequently a caller cannot replace
@@ -25,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from threading import Lock
-from typing import Tuple
+from typing import Optional, Tuple
 import weakref
 
 import torch
@@ -225,7 +226,7 @@ class PhysicalQuestionHorizonView:
 
 @dataclass(frozen=True)
 class PhysicalQuestionFinalBatch:
-    """Exact-tick recomputation; construction_reason is the sole admission fact."""
+    """Exact-tick launch state; construction_reason is the sole admission fact."""
 
     candidate_identity: torch.Tensor
     contact_tick: torch.Tensor
@@ -245,6 +246,7 @@ class _DiscoveryRecord:
     max_feasible_motion_ticks: torch.Tensor
     construction_reason: torch.Tensor
     producer_fault: torch.Tensor
+    motion_tick_state_f32: Optional[torch.Tensor] = None
 
 
 def _require_candidate_batch(batch: object) -> tuple[torch.device, tuple[int, ...]]:
@@ -321,11 +323,12 @@ def _rk4_step(
 
 
 @torch.no_grad()
-def _discover_horizon(
+def _discover_horizon_reference(
     batch: PhysicalQuestionCandidateBatch,
     *,
     params: PhysicalQuestionFlightParams,
     config: PhysicalQuestionNumericConfig,
+    _retain_motion_tick_state: bool = False,
 ) -> _DiscoveryRecord:
     _, shape = _require_candidate_batch(batch)
     candidate = batch.candidate_identity.clone()
@@ -364,6 +367,7 @@ def _discover_horizon(
         + float(params.ball_radius_m)
         + float(config.table_clearance_margin_m)
     )
+    motion_tick_states = [] if _retain_motion_tick_state else None
 
     # A failed partial policy tick is rolled back.  Motion therefore receives
     # a count of complete exact ticks, never a fractional scheduling hint.
@@ -398,6 +402,8 @@ def _discover_horizon(
         velocity = torch.where(tick_valid.unsqueeze(-1), work_velocity, tick_velocity)
         max_ticks = max_ticks + tick_valid.to(torch.int64)
         alive = tick_valid
+        if motion_tick_states is not None:
+            motion_tick_states.append(torch.cat((position, velocity), dim=-1))
 
     producer_fault = torch.zeros(shape, dtype=torch.int64, device=candidate.device)
     producer_fault = torch.where(
@@ -444,6 +450,29 @@ def _discover_horizon(
         max_feasible_motion_ticks=max_ticks.contiguous(),
         construction_reason=construction_reason,
         producer_fault=producer_fault,
+        motion_tick_state_f32=(
+            torch.stack(motion_tick_states, dim=-2).contiguous()
+            if motion_tick_states is not None
+            else None
+        ),
+    )
+
+
+@torch.no_grad()
+def _discover_horizon(
+    batch: PhysicalQuestionCandidateBatch,
+    *,
+    params: PhysicalQuestionFlightParams,
+    config: PhysicalQuestionNumericConfig,
+) -> _DiscoveryRecord:
+    device, _ = _require_candidate_batch(batch)
+    return _discover_horizon_reference(
+        batch,
+        params=params,
+        config=config,
+        # Discovery already computes every prefix. Six float32 values per
+        # policy tick replace the entire exact-tick RK4 replay on CUDA.
+        _retain_motion_tick_state=device.type == "cuda",
     )
 
 
@@ -488,43 +517,61 @@ def _finalize_exact_ticks(
     position = record.contact_position_env_m
     velocity = record.incoming_linear_velocity_world_mps
     omega = record.incoming_angular_velocity_world_radps
-    step_s = -float(config.motion_tick_s) / float(
-        config.integration_substeps_per_motion_tick
-    )
-    requested_substeps = exact_ticks.clamp(min=0) * int(
-        config.integration_substeps_per_motion_tick
-    )
+    tick_states = record.motion_tick_state_f32
+    if tick_states is not None:
+        state_index = (
+            exact_ticks.clamp(min=1, max=config.max_final_segment_motion_ticks)
+            - 1
+        )
+        state_index = state_index.unsqueeze(-1).unsqueeze(-1).expand(*shape, 1, 6)
+        selected_state = torch.gather(
+            tick_states, dim=-2, index=state_index
+        ).squeeze(-2)
+        position = selected_state[..., 0:3]
+        velocity = selected_state[..., 3:6]
+
     path_valid = recompute_requested
-    total_substeps = (
-        config.max_final_segment_motion_ticks
-        * config.integration_substeps_per_motion_tick
-    )
-    z_min = (
-        float(config.table_surface_z_m)
-        + float(params.ball_radius_m)
-        + float(config.table_clearance_margin_m)
-    )
-    for substep in range(total_substeps):
-        active = recompute_requested & (requested_substeps > substep)
-        proposed_position, proposed_velocity = _rk4_step(
-            position, velocity, omega, step_s, params
+    if tick_states is None:
+        step_s = -float(config.motion_tick_s) / float(
+            config.integration_substeps_per_motion_tick
         )
-        finite_state = (
-            torch.all(torch.isfinite(proposed_position), dim=-1)
-            & torch.all(torch.isfinite(proposed_velocity), dim=-1)
+        requested_substeps = exact_ticks.clamp(min=0) * int(
+            config.integration_substeps_per_motion_tick
         )
-        step_valid = (
-            finite_state
-            & (proposed_position[..., 2] > z_min)
-            & (
-                torch.linalg.vector_norm(proposed_velocity, dim=-1)
-                < float(config.reverse_speed_cap_mps)
+        total_substeps = (
+            config.max_final_segment_motion_ticks
+            * config.integration_substeps_per_motion_tick
+        )
+        z_min = (
+            float(config.table_surface_z_m)
+            + float(params.ball_radius_m)
+            + float(config.table_clearance_margin_m)
+        )
+        for substep in range(total_substeps):
+            active = recompute_requested & (requested_substeps > substep)
+            proposed_position, proposed_velocity = _rk4_step(
+                position, velocity, omega, step_s, params
             )
-        )
-        path_valid = path_valid & (~active | step_valid)
-        commit = active & step_valid
-        position = torch.where(commit.unsqueeze(-1), proposed_position, position)
-        velocity = torch.where(commit.unsqueeze(-1), proposed_velocity, velocity)
+            finite_state = (
+                torch.all(torch.isfinite(proposed_position), dim=-1)
+                & torch.all(torch.isfinite(proposed_velocity), dim=-1)
+            )
+            step_valid = (
+                finite_state
+                & (proposed_position[..., 2] > z_min)
+                & (
+                    torch.linalg.vector_norm(proposed_velocity, dim=-1)
+                    < float(config.reverse_speed_cap_mps)
+                )
+            )
+            path_valid = path_valid & (~active | step_valid)
+            commit = active & step_valid
+            position = torch.where(
+                commit.unsqueeze(-1), proposed_position, position
+            )
+            velocity = torch.where(
+                commit.unsqueeze(-1), proposed_velocity, velocity
+            )
 
     recompute_valid = recompute_requested & path_valid
     identity_quaternion = torch.zeros((*shape, 4), dtype=torch.float32, device=device)
@@ -650,7 +697,7 @@ class PhysicalQuestionNumericCore:
         contact_tick: torch.Tensor,
         launch_tick: torch.Tensor,
     ) -> PhysicalQuestionFinalBatch:
-        """Consume one receipt and recompute the candidate's exact launch state."""
+        """Consume one receipt and resolve the candidate's exact launch state."""
 
         record = self._require_pending(receipt)
         result = _finalize_exact_ticks(

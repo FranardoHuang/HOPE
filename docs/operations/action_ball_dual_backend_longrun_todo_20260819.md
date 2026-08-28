@@ -34,6 +34,12 @@ exact source和证据root继续只读，不hot-patch、不resume、不复用。R
   `.001 s×20=.020 s`、Euler/Newton/iterations100/noslip0。这把剩余原因收敛到编译后的
   plant/controller/integrator/contact响应，
   不是“动作输入对不上”；它仍只是first-divergence定位，不是physics parity裁决。
+- 该响应层不是抽象未知：Isaac使用`ImplicitActuatorCfg`，由PhysX drive在`.005 s`物理步内求解位置/速度
+  目标；Mu在每个`.001 s`子步显式计算并clamp `kp*(qdes-q)-kd*qd`。两边Kp/Kd与effort limit数值虽对齐，
+  离散控制实现并不同。更直接的是Isaac当前`friction`为无量纲、随传递空间力缩放的PhysX系数，Mu的
+  `frictionloss`是常值库仑关节力矩；`agibot_a3.py`已明确把这组相同数字标为未校准legacy port。
+  因而同qdes后的首步分叉有具体plant/controller语义来源；Jiayi本机只有提交同asset、同actuator backend、
+  同friction/contact/clock收据后，才可称与Pod实验匹配。
 
 ### 出生点合同的自查纠正
 
@@ -81,10 +87,14 @@ tilt/table=`8,064/5,868`为主。它证明mimic与physical launch入口已自然
 的`96.15%`其实是edge；recent50又塌到episode mean=`105.59 tick`、launch=0。它只证明旧错误plant谱系曾
 产生极稀疏selected hit后又遗忘，不能移签R8，也不能把update61零contact误写成不可学。
 
-`observed_at=2026-08-28T17:49Z`的active V9只读窗已经是明确negative、不是正常交接：Mu recent50 episode
-mean=`105.59 tick`且launch=0，四项mimic误差全面恶化；Isaac recent50 episode mean=`141.58 tick`，累计
-`0/144,824 launch` selected contact，四项中仅position近似持平、其余恶化，landing无eligible分母。
-V9两端继续只读只为保存反例；因为Mu plant身份错误，这些数不能裁决R8，但足以拒绝继续等待V9自然恢复。
+2026-08-29再次冻结的active V9只读窗已经是明确negative、不是“任务还没开放”：Mu updates
+`4926..4975`的due/reveal/launch/selected contact=`7,818/7,648/5,267/0`，episode mean=`233.25 tick`，
+四项mimic误差=`.364 m/1.067 mps/1.240 rad/1.228 rad`，wall median=`6.563 s/H48`；Isaac updates
+`1481..1530`的due/accept/playback/launch/selected contact=`8,454/8,451/8,431/7,392/0`，episode mean=
+`145.80 tick`，四项误差=`.286 m/.951 mps/1.350 rad/1.097 rad`，wall median=`23.36 s/H48`。
+两端都已有高eligible分母而hit仍为0，不能继续解释成
+balance或mimic阶段尚未打开。V9两端继续只读只为保存反例；因为Mu plant身份错误，这些数不能裁决R8，
+但足以拒绝继续等待V9自然恢复。
 
 Observation V3 `215/231`保持不变：现有四组同clock teacher-minus-achieved heading residual已经是对直接
 paddle目标的最小可观测闭环；本轮没有新增冗余obs，也没有向policy暴露不可观测未来量。当前阻塞在physical
@@ -111,9 +121,15 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    `98.72 s/12 updates`、collection中位`16.17 s`，相对旧dense profile的`18.16 s/8.05 s`严重回归；小batch、
    多次动态`nonzero`与kernel launch破坏GPU并行，已撤回。密度`3,584/290/22`保留为事实，不再推出该算法。
    首个非法shadow slotted Physical leaf的profiler也已删除，两个失败/归因root均只读且不作速度PASS。
-6. [ ] 保持单一mask-first compaction和三轮一次性dense compose；下一性能候选必须在dense kernel内部减少重复
-   工作或改善批处理/融合，并先用同R8 source的profile-on归因、再用profiler-off rate验收，不能增加逐轮
-   host/device控制流、缩RK4或降solver精度冒充等价优化。
+6. [ ] 保持单一mask-first compaction和三轮一次性dense compose；Pod exact CUDA已确认
+   `virtual_ball.coarse_landing`的100-step Triton融合真实启用，`N=512`仅`.0526 ms/call`，不是当前墙。
+   真正热点是Physical horizon：discovery固定`30 ticks×4`次eager reverse RK4，finalize又从同一contact state
+   重算最多`30×4`次；`[512,3,3]`实测分别=`202.2/54.1 ms`，与旧dense D05 question约
+   `245 ms/call`一一吻合。第一步候选已最小化为保留CUDA discovery逐tick state、finalize直接gather；它
+   只删除第二段约`54.1 ms`，须先经exact CUDA parity/direct benchmark，不能冒充大提速。其后仍须把第一段
+   `202.2 ms`固定horizon融合成单launch，才进入同R8 source的profile-on归因与profiler-off rate。两步都保留
+   CPU reference、完整candidate identity、三轮RNG、reason/fault/counter/safety与逐位输出；不得增加逐轮
+   host/device控制流、缩RK4、降solver精度或新增“成功即安全”Gate。
 7. [ ] 两端replacement均finite且无灾难性启动分布后，冻结最终clean commit和fresh namespace，再按exact
    PID/startticks/PGID/cwd/source/namespace停止V9并发射双长期run。后续只按预注册未来窗判断自然课程交接。
 8. [ ] replacement连续ACK后做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的
