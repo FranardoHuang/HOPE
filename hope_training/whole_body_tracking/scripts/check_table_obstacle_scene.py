@@ -6645,6 +6645,12 @@ def _configure_nominal_hold_cfg(
     rt.virtual_ball = False
     for name in ("anchor_pos", "anchor_ori", "ee_body_pos"):
         setattr(cfg.terminations, name, None)
+    # The training task keeps actual-q hard edges as attributed telemetry so a
+    # policy can recover from the softer forbidden band.  This finite hold has
+    # no training ledger; keep the same hard-edge detector, but make its true
+    # mechanical-limit result terminal so the hold receipt can attribute and
+    # reject it instead of requesting a recorder that does not exist here.
+    cfg.terminations.joint_actual_forbidden.params["terminate"] = True
     # Preserve the startup nominal-q capture, but make it deterministic.
     events = cfg.events
     events.add_joint_default_pos.params["pos_distribution_params"] = (0.0, 0.0)

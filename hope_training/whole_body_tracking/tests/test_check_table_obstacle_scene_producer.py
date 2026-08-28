@@ -1702,7 +1702,12 @@ def test_nominal_hold_cfg_replays_artifact_control_step_delay(
             racket_target=SimpleNamespace(),
         ),
         terminations=SimpleNamespace(
-            anchor_pos=object(), anchor_ori=object(), ee_body_pos=object()
+            anchor_pos=object(),
+            anchor_ori=object(),
+            ee_body_pos=object(),
+            joint_actual_forbidden=SimpleNamespace(
+                params={"terminate": False}
+            ),
         ),
         events=events,
         actions=SimpleNamespace(joint_pos=action_cfg),
@@ -1714,6 +1719,7 @@ def test_nominal_hold_cfg_replays_artifact_control_step_delay(
     assert action_cfg.control_step_action_delay_min == 0
     assert action_cfg.control_step_action_delay_max == delay_max_steps
     assert events.randomize_pd_gains is None
+    assert cfg.terminations.joint_actual_forbidden.params["terminate"] is True
 
 
 def test_direct_frame0_cfg_installs_exact_vendor_guard_and_hctrl(tmp_path):
@@ -1730,7 +1736,12 @@ def test_direct_frame0_cfg_installs_exact_vendor_guard_and_hctrl(tmp_path):
             motion=SimpleNamespace(), racket_target=SimpleNamespace()
         ),
         terminations=SimpleNamespace(
-            anchor_pos=object(), anchor_ori=object(), ee_body_pos=object()
+            anchor_pos=object(),
+            anchor_ori=object(),
+            ee_body_pos=object(),
+            joint_actual_forbidden=SimpleNamespace(
+                params={"terminate": False}
+            ),
         ),
         events=SimpleNamespace(
             add_joint_default_pos=SimpleNamespace(
@@ -1753,6 +1764,7 @@ def test_direct_frame0_cfg_installs_exact_vendor_guard_and_hctrl(tmp_path):
     assert action_cfg.pre_apply_guard_margin_rad == 0.0
     assert action_cfg.pre_apply_guard_margin_fraction == 0.06
     assert action_cfg.physx_control_position_limit_inset_fraction == 0.02
+    assert cfg.terminations.joint_actual_forbidden.params["terminate"] is True
 
 
 def test_nominal_hold_delay_match_accepts_only_runtime_disabled_omission():
