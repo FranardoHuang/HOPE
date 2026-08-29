@@ -52,8 +52,6 @@ def runner_module():
     try:
         yield module
     finally:
-        import sys
-
         for name, previous in reversed(tuple(saved.items())):
             if previous is None:
                 sys.modules.pop(name, None)
