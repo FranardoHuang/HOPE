@@ -292,8 +292,16 @@ def _env():
     return env, lease
 
 
+class _ControllerHistoryOwner:
+    def action_ball_full_mdp_restore_physical_birth_controller_history(
+        self, _env_ids
+    ):
+        return None
+
+
 def _components(env):
     values = [object() for _ in range(11)]
+    values[2] = _ControllerHistoryOwner()
     source = _ObservationSource(env, values[10], values[0])
     graph = _RewardGraph(values[0])
     return M.FullMdpLeanRuntimeComponents(
@@ -683,6 +691,11 @@ class _SelectedResetLeafPort:
     def _require(self, token):
         assert token in self._owned
         return token
+
+    def action_ball_full_mdp_restore_physical_birth_controller_history(
+        self, _env_ids
+    ):
+        return None
 
     def prepare_action_ball_continuous_motion_selected_reset(self, _prepared):
         return self._mint("prepare")

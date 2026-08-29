@@ -1334,6 +1334,7 @@ def test_formal_immutable_loader_never_reopens_checkpoint_path(
     )
     runner.require_exact_resume_state = True
     runner._formal_action_ball_runtime_bootstrap_required = lambda: True
+    runner._validate_task_first_exact_resume_terms = lambda: None
 
     def stop_after_safe_decode(*_args, **_kwargs):
         raise RuntimeError("safe preflight reached")

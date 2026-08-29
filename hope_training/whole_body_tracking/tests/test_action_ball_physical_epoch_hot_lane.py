@@ -331,11 +331,15 @@ def _bind_launch_stubs(owner, key):
     return epoch_owner, motion, r06
 
 
-def _accepted_view(owner, *, token, accepted):
+def _accepted_view(owner, *, token, accepted, playback=None):
     n = owner.num_envs
     shape = (n, 1)
     full_key = _shot_key(num_envs=n, device=owner.device, width=1)
     mask = accepted[:, None]
+    if playback is None:
+        playback_mask = mask
+    else:
+        playback_mask = playback[:, None] & mask
     key = physical._row_identity.ActionEpochShotKey(
         **{
             field.name: torch.where(
@@ -397,6 +401,7 @@ def _accepted_view(owner, *, token, accepted):
             task_f32=task_f32.contiguous(), task_valid=mask.contiguous()
         ),
         rng_counter=torch.zeros(shape, dtype=torch.int64),
+        playback_admissible=playback_mask.contiguous(),
     )
 
 
@@ -1195,6 +1200,28 @@ def test_full_n_d05_accept_view_stages_only_accepted_rows(num_envs):
             getattr(pending.shot_key, field.name)[accepted],
             getattr(view.identity.shot_key, field.name)[:, 0][accepted],
         )
+
+
+def test_not_ready_task_is_not_staged_as_physical_launch_or_fault():
+    owner, _scene = _physical_owner(torch.device("cpu"))
+    token = object()
+    view = _accepted_view(
+        owner,
+        token=token,
+        accepted=torch.tensor((True, False)),
+        playback=torch.tensor((False, False)),
+    )
+
+    class D05:
+        def require_owned_action_epoch_accepted(self, actual, *, owner_kind):
+            assert actual is token and owner_kind == "physical_ball"
+            return view
+
+    owner._action_epoch_device_r05_owner = D05()
+    owner.retain_action_epoch_launch(token)
+
+    assert not bool(owner._action_epoch_pending_launch.pending.any())
+    assert not bool(owner._action_epoch_runtime_fault_bits.any())
 
 
 def test_full_n_d05_allzero_accept_is_bytewise_noop():

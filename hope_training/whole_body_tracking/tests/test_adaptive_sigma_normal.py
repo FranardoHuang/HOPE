@@ -439,9 +439,9 @@ def test_driver_reuses_exact_strike_ema_pattern_in_radians():
     # 弧度先算,度数只是展示换算(第三通道驱动量纲 = 弧度,与 sigma_normal_min/max 一致)
     assert "normal_err_rad = torch.acos(cos_ang)" in src
     assert "normal_err_deg = normal_err_rad * (180.0 / math.pi)" in src
-    # 与 pos/vel 完全平行的同 decay/同掩码累加式。现役路径把三个误差 sum
-    # 放进同一次 batched host read,然后依次消费;两端都要钉住。
-    assert "(normal_err_rad * exact_strike).sum()" in src
+    # 与 pos/vel 完全平行的同 decay 累加式；各通道使用自己的复合 target
+    # eligibility，避免缺失 face target 被 exact-strike 分母误计。
+    assert "(normal_err_rad * face_target_eligible).sum()" in src
     assert "self._exact_nrm_err_sum = (" in src
     assert "decay * self._exact_nrm_err_sum + next(_exact_metric_values)" in src
     # pos/vel 的驱动累加式仍在(防止有人重构时顺手拆掉平行结构)
@@ -451,7 +451,8 @@ def test_driver_reuses_exact_strike_ema_pattern_in_radians():
 
 def test_update_metrics_delegates_to_extracted_sigma_updater():
     src = inspect.getsource(hope_commands_mod.RacketTargetCommand._update_metrics)
-    assert "self._update_adaptive_sigma(enough, denom)" in src
+    assert "self._update_adaptive_sigma(" in src
+    assert "_composite_target_enough, _composite_target_denom" in src
     # 摘出的方法保持原节拍闸门(adaptive_sigma & enough & sigma_update_every)
     upd = inspect.getsource(hope_commands_mod.RacketTargetCommand._update_adaptive_sigma)
     assert "self.cfg.adaptive_sigma" in upd

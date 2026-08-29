@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 import inspect
 from pathlib import Path
 import sys
@@ -170,6 +170,7 @@ def _install_exact_sources(
     device: torch.device,
     accept_mask: torch.Tensor,
     candidate_valid: torch.Tensor | None = None,
+    playback_admissible: torch.Tensor | None = None,
     mutated_key_field: str | None = None,
 ):
     epoch_mod = D05._require_action_epoch_module()
@@ -186,6 +187,13 @@ def _install_exact_sources(
         candidate_valid=candidate_valid.to(device=device, dtype=torch.bool),
         mutated_key_field=mutated_key_field,
     )
+    if playback_admissible is not None:
+        candidate = replace(
+            candidate,
+            playback_admissible=playback_admissible.to(
+                device=device, dtype=torch.bool
+            ).reshape(n, 1).contiguous(),
+        )
     accepted = accept_mask.to(device=device, dtype=torch.bool).contiguous()
     record = types.SimpleNamespace(
         token=token,
@@ -296,6 +304,9 @@ def _install_exact_sources(
                 mask,
                 current_candidate.rng_counter,
                 torch.zeros_like(current_candidate.rng_counter),
+            ).contiguous(),
+            playback_admissible=(
+                current_candidate.playback_admissible & mask
             ).contiguous(),
         )
 
@@ -761,6 +772,31 @@ def test_partial_accept_writes_only_exact_row_and_preserves_peer_bytes(
     assert (
         command._action_ball_continuous_motion_checkpoint_requires_global_drain_ack
         is checkpoint_debt
+    )
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_not_ready_accept_installs_task_without_starting_teacher_or_launch(
+    monkeypatch: pytest.MonkeyPatch, device: torch.device
+) -> None:
+    command, _owner, _epoch, token, _record, _calls = _install_exact_sources(
+        monkeypatch,
+        n=2,
+        device=device,
+        accept_mask=torch.tensor([True, False]),
+        playback_admissible=torch.tensor([False, False]),
+    )
+
+    command.commit_action_ball_full_mdp_motion_epoch_rows(token)
+
+    assert command._action_ball_continuous_task_committed.tolist() == [True, False]
+    assert command._action_ball_continuous_canonical_task_valid.tolist() == [True, False]
+    assert command._action_ball_continuous_current_policy_opportunity.tolist() == [True, False]
+    assert command._action_ball_continuous_motion_active.tolist() == [False, False]
+    assert command._action_ball_continuous_ready_reference_active.tolist() == [True, False]
+    assert command._action_ball_continuous_canonical_playback_started.tolist() == [False, False]
+    assert command._action_ball_continuous_phase[0].item() == (
+        C._ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE["recovery_unavailable"]
     )
 
 

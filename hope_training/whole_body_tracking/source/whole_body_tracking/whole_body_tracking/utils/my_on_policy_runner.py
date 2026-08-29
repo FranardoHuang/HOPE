@@ -2346,15 +2346,32 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         for shot in completed:
             row = encode_shot(shot, terminal=False)
             retirement_step = shot.retirement_step
-            if (
-                type(retirement_step) is not int
-                or row["motion_close_reason"] not in (1, 2)
-                or row["settlement_step"] < 0
-                or row["payment_step"] < row["settlement_step"]
-                or retirement_step < row["payment_step"]
-                or not all(row["evidence"]["lifecycle"][name] for name in (
+            retirement_is_int = type(retirement_step) is int
+            lifecycle = row["evidence"]["lifecycle"]
+            ordinary_paid = (
+                retirement_is_int
+                and row["motion_close_reason"] in (1, 2)
+                and row["settlement_step"] >= 0
+                and row["payment_step"] >= row["settlement_step"]
+                and retirement_step >= row["payment_step"]
+                and all(lifecycle[name] for name in (
                     "physical_launched", "outcome_settled", "payment_recorded",
                 ))
+            )
+            explicit_no_launch = (
+                retirement_is_int
+                and row["motion_close_reason"] == 2
+                and row["settlement_step"] == -1
+                and row["payment_step"] == -1
+                and retirement_step >= 0
+                and not any(lifecycle[name] for name in (
+                    "playback_started", "physical_launched",
+                    "outcome_settled", "payment_recorded",
+                ))
+            )
+            if (
+                not retirement_is_int
+                or ordinary_paid == explicit_no_launch
             ):
                 raise RuntimeError(
                     "diagnostic completed-shot telemetry values differ"
@@ -2430,7 +2447,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 or not 0 <= row.env_row < frontier.num_envs
                 or not 0 <= row.slot_index < expected_slots
                 or sum(flags[2:]) != 1
-                or (not row.selected and not row.censored)
+                or row.selected == row.deferred
                 or type(row.stroke_family) is not str
                 or (row.stroke_family in ("forehand", "backhand")) is not row.attribution_valid
                 or row.stroke_family not in ("unknown", "forehand", "backhand")
@@ -2452,7 +2469,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     "selected", "accepted", "censored", "rejected", "deferred",
                 )),
             )
-            or settlement.not_ready != settlement.deferred
+            or settlement.not_ready > settlement.accepted
         ):
             raise RuntimeError("diagnostic action-opportunity settlement differs")
 

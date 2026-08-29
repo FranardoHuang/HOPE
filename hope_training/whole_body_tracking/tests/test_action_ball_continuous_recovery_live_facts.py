@@ -1399,9 +1399,9 @@ def test_cold_idle_bad_reference_does_not_advance_or_self_authorize(monkeypatch)
         (False, True),
         (True, False),
     ),
-    ids=("construction_reject", "playback_defer"),
+    ids=("construction_reject", "not_ready_accept"),
 )
-def test_nonaccepted_event_keeps_public_idle_bootstrap_r07_reference(
+def test_reject_stays_idle_while_not_ready_accept_publishes_task(
     monkeypatch,
     device_name,
     construction_admissible,
@@ -1425,13 +1425,25 @@ def test_nonaccepted_event_keeps_public_idle_bootstrap_r07_reference(
     robot.data.body_lin_vel_w.zero_()
     record = epoch_owner.current()
     motion_slot = epoch_v1.OWNER_ORDER.index("motion")
-    assert torch.all(record.phase.eq(epoch_v1.PHASE_IDLE))
-    assert not torch.any(record.writes_started[:, :, motion_slot])
-    assert not torch.any(record.writes_committed[:, :, motion_slot])
+    expected_active = construction_admissible and not playback_admissible
+    expected_phase = [
+        epoch_v1.PHASE_REVEAL_COMMITTED if expected_active else epoch_v1.PHASE_IDLE,
+        epoch_v1.PHASE_IDLE,
+    ]
+    assert record.phase[:, 0].tolist() == expected_phase
+    assert record.writes_started[:, 0, motion_slot].tolist() == [
+        expected_active,
+        False,
+    ]
+    assert record.writes_committed[:, 0, motion_slot].tolist() == [
+        expected_active,
+        False,
+    ]
     env_ids = torch.arange(2, dtype=torch.int64, device=device)
     selected_slots = record.current_task_slot
     selected_uids = record.identity.action_uid[env_ids, selected_slots]
-    assert selected_uids.tolist() == [-1, -1]
+    assert (selected_uids[0].item() >= 0) is expected_active
+    assert selected_uids[1].item() == -1
     result = _publish_epoch_reward_facts(
         bundle,
         motion,
@@ -1440,7 +1452,10 @@ def test_nonaccepted_event_keeps_public_idle_bootstrap_r07_reference(
             2, dtype=torch.int64, device=device
         )
     )
-    assert result.reference_kind.tolist() == [1, 1]
+    assert result.reference_kind.tolist() == [
+        2 if expected_active else 1,
+        1,
+    ]
     assert result.facts_valid.tolist() == [True, True]
     assert result.infrastructure_fault.tolist() == [False, False]
     assert result.producer_fault_bits.tolist() == [0, 0]
@@ -1520,7 +1535,7 @@ def test_r07_censor_event_keeps_idle_upcoming_reference(monkeypatch):
             recovery.R07_REFERENCE_BOOTSTRAP_UPCOMING_ACTION_FRAME0,
         ),
         (
-            "playback_defer",
+            "not_ready_accept",
             {"playback_admissible": False},
             recovery.R07_REFERENCE_BOOTSTRAP_UPCOMING_ACTION_FRAME0,
         ),
@@ -1574,7 +1589,7 @@ def test_same_reference_writer_cannot_forge_epoch_or_parent_identity(
         motion_owner=motion,
         action_epoch_owner=epoch_owner,
     )
-    assert lifecycle in {"construction_reject", "playback_defer", "completed"}
+    assert lifecycle in {"construction_reject", "not_ready_accept", "completed"}
     assert result.facts_valid.tolist() == [False, False]
     assert torch.all(
         torch.bitwise_and(

@@ -54,6 +54,9 @@ D05_DECISION_CENSOR = 2
 D05_DECISION_REJECT = 3
 D05_DECISION_DEFER = 4
 
+MOTION_CLOSE_PLAYED_SUFFIX = 1
+MOTION_CLOSE_UNPLAYED = 2
+
 _B, _I = torch.bool, torch.int64
 _SHOT_PREFIX_SPEC = (("event_mask", _B, "shot"),) + tuple(
     ("shot_key." + field, _I, "shot") for field in SHOT_KEY_FIELDS
@@ -326,6 +329,7 @@ class ActionEpochDrainContinuation:
     playback_started: torch.Tensor
     motion_closed: torch.Tensor
     motion_close_reason: torch.Tensor
+    physical_launch_requested: torch.Tensor
     physical_launched: torch.Tensor
     physical_target_xy_m: torch.Tensor
     outcome_settled: torch.Tensor
@@ -366,6 +370,7 @@ class ActionEpochDrainContinuation:
             playback_started=boolean(),
             motion_closed=boolean(),
             motion_close_reason=integer(),
+            physical_launch_requested=boolean(),
             physical_launched=boolean(),
             physical_target_xy_m=torch.zeros((*shape, 2), dtype=torch.float32),
             outcome_settled=boolean(),
@@ -396,6 +401,7 @@ class ActionEpochDrainContinuation:
                     "playback_started",
                     "motion_closed",
                     "motion_close_reason",
+                    "physical_launch_requested",
                     "physical_launched",
                     "physical_target_xy_m",
                     "outcome_settled",
@@ -548,6 +554,7 @@ def _clear(state: ActionEpochDrainContinuation, mask):
         "reveal_committed",
         "playback_started",
         "motion_closed",
+        "physical_launch_requested",
         "physical_launched",
         "outcome_settled",
         "payment_recorded",
@@ -576,12 +583,20 @@ def _clear(state: ActionEpochDrainContinuation, mask):
         getattr(state, field)[mask] = 0
 
 
-def _activate(state: ActionEpochDrainContinuation, mask, key, family, attributed):
+def _activate(
+    state: ActionEpochDrainContinuation,
+    mask,
+    key,
+    family,
+    attributed,
+    launch_requested,
+):
     _clear(state, mask)
     for field in SHOT_KEY_FIELDS:
         getattr(state.key, field)[mask] = getattr(key, field)[mask]
     state.stroke_family_code[mask] = family[mask]
     state.action_attribution_valid[mask] = attributed[mask]
+    state.physical_launch_requested[mask] = launch_requested[mask]
     state.occupied[mask] = True
 
 
@@ -960,10 +975,12 @@ def decode_epoch_drain_suffix(
                 torch.any(selected & ~due).item()
             ):
                 raise ActionEpochDrainDecodeError("D05 denominators differ")
-            censor = due & (~selected | faulted | (selected & construction & ~valid))
+            censor = due & selected & (
+                faulted | (construction & ~valid)
+            )
             reject = selected & ~faulted & ~construction
-            defer = selected & valid & ~faulted & construction & ~playback
-            accept = selected & valid & ~faulted & construction & playback
+            defer = due & ~selected
+            accept = selected & valid & ~faulted & construction
             expected = torch.full_like(decision, D05_DECISION_NONE)
             for rows, value in (
                 (censor, D05_DECISION_CENSOR),
@@ -1002,7 +1019,14 @@ def decode_epoch_drain_suffix(
                     value == D05_DECISION_REJECT,
                     value == D05_DECISION_DEFER,
                 ))
-            _activate(state, accept, key, family, attributed)
+            _activate(
+                state,
+                accept,
+                key,
+                family,
+                attributed,
+                playback,
+            )
             count["transactions"] += 1
             count["due"] += int(due.sum().item())
             count["selected"] += int(selected.sum().item())
@@ -1016,7 +1040,7 @@ def decode_epoch_drain_suffix(
                 ("deferred", defer),
             ):
                 count[name] += int(rows.sum().item())
-            count["not_ready"] += int(defer.sum().item())
+            count["not_ready"] += int((accept & ~playback).sum().item())
             count["faults"] += int((due & faulted).sum().item())
             pending = _PendingD05(accept.clone(), key, publication)
             continue
@@ -1040,15 +1064,23 @@ def decode_epoch_drain_suffix(
             reason = data["motion_close_reason"]
             invalid = (
                 state.motion_closed
-                | (reason.eq(1) & ~state.playback_started)
-                | (reason.eq(2) & state.playback_started)
-                | (~reason.eq(1) & ~reason.eq(2))
+                | (
+                    reason.eq(MOTION_CLOSE_PLAYED_SUFFIX)
+                    & ~state.playback_started
+                )
+                | (reason.eq(MOTION_CLOSE_UNPLAYED) & state.playback_started)
+                | (
+                    ~reason.eq(MOTION_CLOSE_PLAYED_SUFFIX)
+                    & ~reason.eq(MOTION_CLOSE_UNPLAYED)
+                )
             )
             if bool(torch.any(mask & invalid).item()):
                 raise ActionEpochDrainDecodeError("Motion close differs")
             state.motion_closed[mask] = True
             state.motion_close_reason[mask] = reason[mask]
-            count["unplayed"] += int((mask & reason.eq(2)).sum().item())
+            count["unplayed"] += int(
+                (mask & reason.eq(MOTION_CLOSE_UNPLAYED)).sum().item()
+            )
         elif transition == "PHYSICAL_LAUNCH_ROWS":
             target = data["target_xy_m"]
             if bool(
@@ -1056,6 +1088,7 @@ def decode_epoch_drain_suffix(
                     mask
                     & (
                         ~state.reveal_committed
+                        | ~state.physical_launch_requested
                         | state.physical_launched
                         | data["publication_ordinal"].lt(0)
                         | ~torch.isfinite(target).all(dim=2)
@@ -1146,14 +1179,28 @@ def decode_epoch_drain_suffix(
             count["payment"] += int(mask.sum().item())
         elif transition == "RETIRED":
             retirement = data["retirement_step"]
+            ordinary_paid = (
+                state.motion_closed
+                & state.outcome_settled
+                & state.payment_recorded
+                & retirement.ge(state.payment_step)
+            )
+            explicit_no_launch = (
+                state.motion_closed
+                & state.motion_close_reason.eq(MOTION_CLOSE_UNPLAYED)
+                & ~state.physical_launch_requested
+                & ~state.playback_started
+                & ~state.physical_launched
+                & ~state.outcome_settled
+                & ~state.payment_recorded
+                & state.payment_step.eq(-1)
+                & retirement.ge(0)
+            )
             invalid = (
-                ~state.motion_closed
-                | ~state.outcome_settled
-                | ~state.payment_recorded
+                ~(ordinary_paid | explicit_no_launch)
                 | ~torch.isfinite(state.physical_target_xy_m).all(dim=2)
                 | data["motion_close_reason"].ne(state.motion_close_reason)
                 | data["payment_step"].ne(state.payment_step)
-                | retirement.lt(state.payment_step)
             )
             if bool(torch.any(mask & invalid).item()) or bool(
                 torch.any(~mask & retirement.ne(-1)).item()

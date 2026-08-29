@@ -476,6 +476,7 @@ class ActionEpochRecord:
     owner_fault_bits: torch.Tensor
     writes_started: torch.Tensor
     writes_committed: torch.Tensor
+    physical_launch_requested: torch.Tensor
     launch_succeeded: torch.Tensor
     late_launch: torch.Tensor
     outcome_code: torch.Tensor
@@ -709,6 +710,7 @@ _RECORD_DIRECT_TENSOR_NAMES = (
     "owner_fault_bits",
     "writes_started",
     "writes_committed",
+    "physical_launch_requested",
     "launch_succeeded",
     "late_launch",
     "outcome_code",
@@ -1707,6 +1709,7 @@ class ActionEpochOwner:
                 writes_committed=torch.zeros(
                     self._owner_shape, dtype=torch.bool, device=self.device
                 ),
+                physical_launch_requested=empty_bool.clone(),
                 launch_succeeded=empty_bool.clone(),
                 late_launch=empty_bool.clone(),
                 outcome_code=empty_i64.clone(),
@@ -2144,6 +2147,9 @@ class ActionEpochOwner:
             current_playback = self._gather_current(
                 record.motion_playback_started
             )
+            current_launch_requested = self._gather_current(
+                record.physical_launch_requested
+            )
             current_phase_for_close = self._gather_current(record.phase)
             close_has_active_row = (
                 current_key_valid
@@ -2152,6 +2158,11 @@ class ActionEpochOwner:
             causal = (
                 (~close_reason_rows.eq(MOTION_CLOSE_PLAYED_SUFFIX) | current_playback)
                 & (~close_reason_rows.eq(MOTION_CLOSE_UNPLAYED) | ~current_playback)
+                & (
+                    ~close_reason_rows.eq(MOTION_CLOSE_UNPLAYED)
+                    | ~current_launch_requested
+                    | ~current_phase_for_close.eq(PHASE_REVEAL_COMMITTED)
+                )
             )
             close_valid = (
                 valid_reason
@@ -2224,6 +2235,20 @@ class ActionEpochOwner:
                 & debt
                 & paid_safe
             )
+            # An accepted not-ready task owns a real task/key/clock but never
+            # requests a Physical launch.  Its typed UNPLAYED close therefore
+            # has no R06 payment or R07 recovery debt to wait for.  Retire that
+            # explicit no-launch lifecycle directly; do not fabricate a
+            # Physical outcome merely to free the single task slot.
+            no_launch_retire = (
+                closed
+                & close_reason_rows.eq(MOTION_CLOSE_UNPLAYED)
+                & current_phase_for_close.eq(PHASE_REVEAL_COMMITTED)
+                & ~current_playback
+                & ~current_launch_requested
+                & ~paid.valid
+                & paid_safe
+            )
             # R06 retains one paid mailbox until Motion close and the terminal
             # R07 producer cell both join.  Re-reading that same valid assertion
             # is chronology validation, not a new lifecycle event.  Keep scalar
@@ -2253,13 +2278,14 @@ class ActionEpochOwner:
                 values=(*values, close_reason),
                 changes={"motion_close_reason": close_reason},
             )
-            retire_rows = (
+            paid_retire_rows = (
                 paid_close_matches
                 & r07_window_complete
                 & r07_terminal_safe
             )
+            retire_rows = paid_retire_rows | no_launch_retire
             self._last_r06_paid_payment_step = torch.where(
-                retire_rows,
+                paid_retire_rows,
                 torch.maximum(
                     self._last_r06_paid_payment_step, paid.payment_step
                 ),
@@ -2295,7 +2321,9 @@ class ActionEpochOwner:
                 changes={"phase": phase},
             )
             self._current_closed_rows = ActionEpochClosedRows(
-                valid=retire_rows.clone(),
+                # R06 releases only a real previous-paid mailbox.  No-launch
+                # retirement deliberately projects an empty R06 release mask.
+                valid=paid_retire_rows.clone(),
                 shot_key=current_key.clone(),
             )
             try:
@@ -2413,12 +2441,10 @@ class ActionEpochOwner:
             any_fault = (
                 candidate_faults.ne(0).any(dim=-1) | ~device_safe[:, None]
             )
-            censor = due_slots & (
-                ~construct_slots
-                | any_fault
+            censor = due_slots & construct_slots & (
+                any_fault
                 | (
-                    construct_slots
-                    & candidate.construction_admissible
+                    candidate.construction_admissible
                     & ~key_valid
                 )
             )
@@ -2427,19 +2453,12 @@ class ActionEpochOwner:
                 & ~any_fault
                 & ~candidate.construction_admissible
             )
-            defer = (
-                construct_slots
-                & key_valid
-                & ~any_fault
-                & candidate.construction_admissible
-                & ~candidate.playback_admissible
-            )
+            defer = due_slots & ~construct_slots
             accept = (
                 construct_slots
                 & key_valid
                 & ~any_fault
                 & candidate.construction_admissible
-                & candidate.playback_admissible
             )
             decision = torch.full(
                 self._shot_shape,
@@ -2583,6 +2602,11 @@ class ActionEpochOwner:
                 ),
                 "writes_started": writes_started,
                 "writes_committed": writes_committed,
+                "physical_launch_requested": torch.where(
+                    accept,
+                    candidate.playback_admissible,
+                    record.physical_launch_requested,
+                ),
                 "launch_succeeded": torch.where(
                     accept, torch.zeros_like(record.launch_succeeded), record.launch_succeeded
                 ),
@@ -3703,10 +3727,14 @@ class ActionEpochOwner:
             current_publication = self._gather_current(
                 record.publication_ordinal
             )
+            current_launch_requested = self._gather_current(
+                record.physical_launch_requested
+            )
             joined = (
                 row_identity.action_epoch_shot_key_valid(shot_key)
                 & row_identity.action_epoch_shot_key_equal(shot_key, current_key)
                 & current_phase.eq(PHASE_REVEAL_COMMITTED)
+                & current_launch_requested
             )
             chronology = publication_ordinal.eq(current_publication)
             target_finite = torch.isfinite(target_xy_m).all(dim=1)
@@ -4274,6 +4302,7 @@ class ActionEpochOwner:
             ("owner_fault_bits", owner, torch.int64),
             ("writes_started", owner, torch.bool),
             ("writes_committed", owner, torch.bool),
+            ("physical_launch_requested", shot, torch.bool),
             ("launch_succeeded", shot, torch.bool),
             ("late_launch", shot, torch.bool),
             ("outcome_code", shot, torch.int64),

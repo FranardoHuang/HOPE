@@ -31,6 +31,7 @@ class SelectedResetRecordView(Protocol):
     owner_fault_bits: torch.Tensor
     writes_started: torch.Tensor
     writes_committed: torch.Tensor
+    physical_launch_requested: torch.Tensor
     launch_succeeded: torch.Tensor
     late_launch: torch.Tensor
     outcome_code: torch.Tensor
@@ -228,6 +229,8 @@ def _masked_after_image(
                 torch.zeros_like(record.writes_started), record.writes_started),
             "writes_committed": torch.where(owner_rows,
                 torch.zeros_like(record.writes_committed), record.writes_committed),
+            "physical_launch_requested": masked(
+                record.physical_launch_requested, False),
             "launch_succeeded": masked(record.launch_succeeded, False),
             "late_launch": masked(record.late_launch, False),
             "outcome_code": masked(record.outcome_code, -1),
@@ -262,6 +265,7 @@ def _masked_after_image(
         "owner_fault_bits",
         "writes_started",
         "writes_committed",
+        "physical_launch_requested",
         "launch_succeeded",
         "late_launch",
         "outcome_code",

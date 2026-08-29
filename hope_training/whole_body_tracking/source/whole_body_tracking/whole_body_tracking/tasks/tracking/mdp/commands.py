@@ -6373,6 +6373,11 @@ class MotionCommand(CommandTerm):
             name="task.task_valid",
             dtype=torch.bool,
         )
+        playback_grid = exact(
+            accepted.playback_admissible,
+            name="playback_admissible",
+            dtype=torch.bool,
+        )
         exact(
             accepted.publication_ordinal,
             name="publication_ordinal",
@@ -6418,17 +6423,33 @@ class MotionCommand(CommandTerm):
             raise RuntimeError(
                 "fresh Motion D05 write requires its exact ActionEpoch quarantine"
             )
+        # Task publication and teacher playback are separate facts.  A clean
+        # not-ready row still receives its task/key/clock and therefore gives
+        # the policy a real early opportunity; it simply stays on the ready
+        # reference until playback becomes admissible.
+        playback_rows = write_rows & playback_grid[:, 0]
         timing = timing_grid[:, 0, :epoch.MOTION_TASK_F32_WIDTH]
         false_rows = torch.zeros(n, dtype=torch.bool, device=device)
         true_rows = torch.ones(n, dtype=torch.bool, device=device)
         zero_f32 = torch.zeros(n, dtype=torch.float32, device=device)
-        legacy_phase = torch.full(
-            (n,),
-            _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
-                "active_opportunity"
-            ],
-            dtype=torch.int64,
-            device=device,
+        legacy_phase = torch.where(
+            playback_rows,
+            torch.full(
+                (n,),
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                    "active_opportunity"
+                ],
+                dtype=torch.int64,
+                device=device,
+            ),
+            torch.full(
+                (n,),
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                    "recovery_unavailable"
+                ],
+                dtype=torch.int64,
+                device=device,
+            ),
         )
         canonical_phase = torch.full(
             (n,),
@@ -6464,9 +6485,12 @@ class MotionCommand(CommandTerm):
             (self._action_ball_continuous_motion_reset_pending, false_rows),
             (self._action_ball_continuous_motion_release_pending, false_rows),
             (self._action_ball_continuous_motion_release_missed, false_rows),
-            (self._action_ball_continuous_motion_active, true_rows),
+            (self._action_ball_continuous_motion_active, playback_rows),
             (self._action_ball_continuous_suffix_complete, false_rows),
-            (self._action_ball_continuous_ready_reference_active, false_rows),
+            (
+                self._action_ball_continuous_ready_reference_active,
+                ~playback_rows,
+            ),
             (self._action_ball_continuous_phase, legacy_phase),
             (self._action_ball_continuous_current_policy_opportunity, true_rows),
             (

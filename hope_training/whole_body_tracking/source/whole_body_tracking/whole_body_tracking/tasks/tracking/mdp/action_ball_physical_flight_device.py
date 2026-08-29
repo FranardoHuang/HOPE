@@ -3669,6 +3669,11 @@ class ActionBallPhysicalFlightDeviceOwner:
         task_valid = exact(
             view.task.task_valid, label="task_valid", dtype=torch.bool
         )[:, 0]
+        playback_admissible = exact(
+            view.playback_admissible,
+            label="playback_admissible",
+            dtype=torch.bool,
+        )[:, 0]
         task = exact(
             view.task.task_f32, label="task_f32", dtype=torch.float32,
             width=epoch.TASK_F32_WIDTH,
@@ -3719,12 +3724,16 @@ class ActionBallPhysicalFlightDeviceOwner:
             & torch.isfinite(target_xy).all(dim=1)
             & deadline_tick.ge(launch_tick) & horizon_tick.gt(deadline_tick)
         )
-        invalid_accepted = task_valid & ~valid
+        # D05 publishes a task even while the teacher motion is not ready.
+        # Such a task is a policy opportunity, not a physical launch request
+        # and not an ACCEPT_NOT_LAUNCHABLE fault.
+        launch_requested = task_valid & playback_admissible
+        invalid_accepted = launch_requested & ~valid
         self._action_epoch_runtime_fault_bits |= (
             invalid_accepted.to(torch.int64)
             * _ACTION_EPOCH_RUNTIME_FAULT_ACCEPT_NOT_LAUNCHABLE
         )
-        accepted = task_valid & valid
+        accepted = launch_requested & valid
 
         def merge(value: torch.Tensor, prior: torch.Tensor) -> torch.Tensor:
             mask = accepted.reshape(self.num_envs, *((1,) * (prior.ndim - 1)))

@@ -1740,11 +1740,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         in_hold = motion_open & (
             elapsed <= self._full_a_pre_swing_wait_s + 1.0e-12
         )
-        # Motion's public hold boundary is time-owned: once active motion time
-        # is positive, publish the measured sampler even when rounding still
-        # selects frame zero.  The discrete frame ordinal is not an authority
-        # for leaving HOLD.
-        playback_started = motion_open & ~in_hold
+        # Playback starts only when the measured teacher has actually left
+        # frame zero.  This is the same observable edge used by Isaac Motion;
+        # treating a positive sub-frame clock as playback would multiply the
+        # paddle reward before the teacher pose changes.
+        playback_started = motion_open & ~in_hold & sampled["frame"].gt(0)
         prepare = motion_open & ~playback_started
         swing = (
             playback_started

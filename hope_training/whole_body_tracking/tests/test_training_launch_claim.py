@@ -167,7 +167,11 @@ def test_absent_claim_writes_no_launch_key_and_train_reads_only_top_level(monkey
 
     train_source = (ROOT / "scripts/train.py").read_text(encoding="utf-8")
     assert '_get(cfg, "training_launch_claim_sha256")' in train_source
-    assert "training_launch_claim_sha256=training_launch_claim_sha256" in train_source
+    compact_source = "".join(train_source.split())
+    assert (
+        "training_launch_claim_sha256=(effective_training_launch_claim_sha256),"
+        in compact_source
+    )
     assert 'hard_contract["training_launch_claim_sha256"]' not in train_source
 
 

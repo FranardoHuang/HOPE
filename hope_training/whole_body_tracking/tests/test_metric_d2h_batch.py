@@ -178,7 +178,8 @@ def test_update_metrics_batches_only_the_targeted_exact_reductions():
         "self._exact_n_acc = decay * self._exact_n_acc "
         "+ next(_exact_metric_values)"
     ) in source
-    assert "self._update_adaptive_sigma(enough, denom)" in source
+    assert "self._update_adaptive_sigma(" in source
+    assert "_composite_target_enough, _composite_target_denom" in source
     assert "self._curr_perturb_scale + float(" in source
 
 

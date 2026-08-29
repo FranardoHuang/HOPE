@@ -3938,7 +3938,7 @@ def test_d05_old_reset_generation_is_censored_and_device_latched(monkeypatch):
     ]
 
 
-def test_d05_defer_and_censor_are_event_only_with_exact_zero_writer_log(monkeypatch):
+def test_d05_not_ready_accepts_task_while_fault_is_censored(monkeypatch):
     monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
     epoch, d05, _cadence, _r06, _playback, motion, racket, _physical = (
         _ready_epoch()
@@ -3962,13 +3962,14 @@ def test_d05_defer_and_censor_are_event_only_with_exact_zero_writer_log(monkeypa
     before = epoch.current()
     epoch.settle_d05_transaction(d05.arm())
     after = epoch.current()
-    assert torch.equal(before.phase, after.phase)
+    assert before.phase[:, 0].tolist() == [E.PHASE_IDLE, E.PHASE_IDLE]
+    assert after.phase[:, 0].tolist() == [E.PHASE_REVEAL_COMMITTED, E.PHASE_IDLE]
     entries = _materialized_entries(epoch)
     settled = next(
         entry for entry in entries if entry.transition == "D05_SETTLED"
     )
     assert settled.delta.values[11][:, 0].tolist() == [
-        E.D05_DECISION_DEFER,
+        E.D05_DECISION_ACCEPT,
         E.D05_DECISION_CENSOR,
     ]
     tail = [
@@ -3983,11 +3984,202 @@ def test_d05_defer_and_censor_are_event_only_with_exact_zero_writer_log(monkeypa
         "WRITES_STARTED:r05_runtime", "WRITES_COMMITTED:r05_runtime",
         "D05_ACCEPT_PUBLISHED",
     ]
-    assert all(not bool(entry.delta.values[0].any()) for entry in tail)
+    assert all(entry.delta.values[0][:, 0].tolist() == [True, False] for entry in tail)
     assert motion.calls == racket.calls == 1 and d05.calls == ["r05_runtime"]
 
 
-def test_recovery_reference_masks_preserve_idle_and_carry_across_event_only_d05(
+def test_not_ready_unplayed_retires_and_next_due_accepts(monkeypatch):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    epoch, d05, cadence, r06, _playback, *_ = _ready_epoch()
+    row0 = torch.tensor([[True], [False]], dtype=torch.bool)
+    row0_flat = row0[:, 0]
+    base = d05.candidate
+    d05.candidate = replace(
+        base,
+        playback_admissible=torch.zeros_like(base.playback_admissible),
+    )
+    cadence.projection = _MotionProjection(
+        common_step=1,
+        reveal_due=row0_flat,
+        closed_mask=torch.zeros(2, dtype=torch.bool),
+        close_reason=torch.zeros(2, dtype=torch.int64),
+    )
+
+    first_rows = epoch.prepare_after_command_rows()
+    assert first_rows is not None
+    assert first_rows.construct_mask.tolist() == [True, False]
+    epoch.settle_d05_transaction(d05.arm())
+    first_key = epoch.current().identity.shot_key.action_uid[0, 0].item()
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_REVEAL_COMMITTED,
+        E.PHASE_IDLE,
+    ]
+    assert epoch.current().physical_launch_requested[:, 0].tolist() == [
+        False,
+        False,
+    ]
+    assert not bool(epoch.current().motion_playback_started.any())
+
+    cadence.projection = _MotionProjection(
+        common_step=2,
+        reveal_due=torch.zeros(2, dtype=torch.bool),
+        closed_mask=row0_flat,
+        close_reason=torch.tensor(
+            [E.MOTION_CLOSE_UNPLAYED, E.MOTION_CLOSE_NONE],
+            dtype=torch.int64,
+        ),
+    )
+    close_rows = epoch.prepare_after_command_rows()
+    assert close_rows is not None
+    assert not bool(close_rows.due_mask.any())
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_RETIRED,
+        E.PHASE_IDLE,
+    ]
+    assert r06.consumed is not None
+    assert not bool(r06.consumed.valid.any())
+    epoch.abort_d05_transaction(owner=d05.owner)
+
+    next_values = torch.tensor([[31], [32]], dtype=torch.int64)
+    d05.candidate = replace(
+        base,
+        identity=replace(
+            base.identity,
+            shot_key=_key(next_values, row0),
+        ),
+        task=replace(base.task, task_valid=row0),
+        construction_admissible=row0,
+        playback_admissible=torch.zeros_like(row0),
+    )
+    cadence.projection = _MotionProjection(
+        common_step=3,
+        reveal_due=row0_flat,
+        closed_mask=torch.zeros(2, dtype=torch.bool),
+        close_reason=torch.zeros(2, dtype=torch.int64),
+    )
+    next_rows = epoch.prepare_after_command_rows()
+    assert next_rows is not None
+    assert next_rows.construct_mask.tolist() == [True, False]
+    epoch.settle_d05_transaction(d05.arm())
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_REVEAL_COMMITTED,
+        E.PHASE_IDLE,
+    ]
+    assert epoch.current().identity.shot_key.action_uid[0, 0].item() != first_key
+
+    entries = _materialized_entries(epoch)
+    decisions = [
+        dict(zip(entry.delta.names, entry.delta.values))["decision"][:, 0].tolist()
+        for entry in entries
+        if entry.transition == "D05_SETTLED"
+    ]
+    assert decisions == [
+        [E.D05_DECISION_ACCEPT, E.D05_DECISION_NONE],
+        [E.D05_DECISION_ACCEPT, E.D05_DECISION_NONE],
+    ]
+    retired = [
+        entry
+        for entry in entries
+        if entry.transition == "RETIRED"
+        and bool(
+            dict(zip(entry.delta.names, entry.delta.values))["event_mask"].any()
+        )
+        and bool(
+            dict(zip(entry.delta.names, entry.delta.values))[
+                "motion_close_reason"
+            ].eq(E.MOTION_CLOSE_UNPLAYED).any()
+        )
+    ]
+    assert len(retired) == 1
+    retired_values = dict(zip(retired[0].delta.names, retired[0].delta.values))
+    assert retired_values["event_mask"][:, 0].tolist() == [True, False]
+    assert retired_values["payment_step"][:, 0].tolist() == [-1, -1]
+
+
+def test_ready_unplayed_without_physical_launch_faults_instead_of_retiring(
+    monkeypatch,
+):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    epoch, d05, cadence, r06, _playback, *_ = _ready_epoch()
+    row0 = torch.tensor([True, False], dtype=torch.bool)
+    cadence.projection = _MotionProjection(
+        common_step=1,
+        reveal_due=row0,
+        closed_mask=torch.zeros(2, dtype=torch.bool),
+        close_reason=torch.zeros(2, dtype=torch.int64),
+    )
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+    assert epoch.current().physical_launch_requested[:, 0].tolist() == [
+        True,
+        False,
+    ]
+
+    cadence.projection = _MotionProjection(
+        common_step=2,
+        reveal_due=torch.zeros(2, dtype=torch.bool),
+        closed_mask=row0,
+        close_reason=torch.tensor(
+            [E.MOTION_CLOSE_UNPLAYED, E.MOTION_CLOSE_NONE],
+            dtype=torch.int64,
+        ),
+    )
+    rows = epoch.prepare_after_command_rows()
+
+    assert rows is not None
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_REVEAL_COMMITTED,
+        E.PHASE_IDLE,
+    ]
+    assert epoch._undrained_row_fault_bits.tolist() == [
+        E.ROW_FAULT_MOTION_CLOSE_CONTRACT,
+        0,
+    ]
+    assert r06.consumed is not None
+    assert not bool(r06.consumed.valid.any())
+    epoch.abort_d05_transaction(owner=d05.owner)
+
+
+def test_not_ready_accept_rejects_forged_physical_launch(monkeypatch):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    monkeypatch.setitem(
+        sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
+    )
+    epoch, d05, cadence, _r06, _playback, *_middle, physical = _ready_epoch()
+    row0 = torch.tensor([True, False], dtype=torch.bool)
+    d05.candidate = replace(
+        d05.candidate,
+        playback_admissible=torch.zeros_like(
+            d05.candidate.playback_admissible
+        ),
+    )
+    cadence.projection = _MotionProjection(
+        common_step=1,
+        reveal_due=row0,
+        closed_mask=torch.zeros(2, dtype=torch.bool),
+        close_reason=torch.zeros(2, dtype=torch.int64),
+    )
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+    physical.launch = _launch_packet(
+        epoch.current(),
+        due=row0,
+    )
+
+    epoch.refresh_physical_launch_rows()
+
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_REVEAL_COMMITTED,
+        E.PHASE_IDLE,
+    ]
+    assert not bool(epoch.current().launch_succeeded.any())
+    assert epoch._undrained_row_fault_bits.tolist() == [
+        E.ROW_FAULT_PHYSICAL_LAUNCH_JOIN,
+        0,
+    ]
+
+
+def test_recovery_reference_masks_carry_busy_row_and_publish_not_ready_row(
     monkeypatch,
 ):
     monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
@@ -4025,10 +4217,10 @@ def test_recovery_reference_masks_preserve_idle_and_carry_across_event_only_d05(
     epoch.prepare_after_command_rows()
     epoch.settle_d05_transaction(d05.arm())
 
-    unchanged = epoch.current().recovery_reference_lifecycle_masks()
-    assert unchanged.upcoming[:, 0].tolist() == [False, True]
-    assert unchanged.completed[:, 0].tolist() == [True, False]
-    assert not bool((unchanged.upcoming & unchanged.completed).any())
+    carried = epoch.current().recovery_reference_lifecycle_masks()
+    assert carried.upcoming[:, 0].tolist() == [False, False]
+    assert carried.completed[:, 0].tolist() == [True, True]
+    assert not bool((carried.upcoming & carried.completed).any())
     entries = _materialized_entries(epoch)
     decisions = [
         entry.delta.values[11][:, 0].tolist()
@@ -4037,7 +4229,7 @@ def test_recovery_reference_masks_preserve_idle_and_carry_across_event_only_d05(
     ]
     assert decisions == [
         [E.D05_DECISION_ACCEPT, E.D05_DECISION_REJECT],
-        [E.D05_DECISION_CENSOR, E.D05_DECISION_DEFER],
+        [E.D05_DECISION_DEFER, E.D05_DECISION_ACCEPT],
     ]
 
 

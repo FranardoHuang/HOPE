@@ -360,6 +360,36 @@ def _completed_shot(lean, **changes):
     return replace(shot, **changes)
 
 
+def _no_launch_completed_shot(lean, **changes):
+    lifecycle_bits = lean.drain_v2.SHOT_LIFECYCLE_BITS
+    shot = _completed_shot(
+        lean,
+        target_x_m=0.0,
+        target_y_m=0.0,
+        motion_close_reason=2,
+        settlement_step=-1,
+        payment_step=-1,
+        retirement_step=43,
+        evidence=lean.drain_v2.ActionEpochShotEvidence(
+            lifecycle_bits=sum(
+                lifecycle_bits[name]
+                for name in ("reveal_committed", "motion_closed")
+            ),
+            r03_valid_bits=0,
+            r03_source_step=-1,
+            physical_valid_bits=0,
+            physical_actor_pair_contact_source_step=-1,
+            r06_valid_bits=-1,
+            r06_outcome_code=-1,
+            r06_predicate_bits=0,
+            r07_valid_bits=0,
+            r07_qualified_source_step=-1,
+            r07_first_ready_source_step=-1,
+        ),
+    )
+    return replace(shot, **changes)
+
+
 def _action_opportunity(lean, **changes):
     row = lean.drain_v2.D05ActionOpportunity(
         env_row=1, slot_index=0, action_uid=5, action_slot=0,
@@ -1144,6 +1174,57 @@ def test_diagnostic_marker_flattens_typed_completed_shots(
         "availability": "not_produced"
     }
     assert "receipt" not in payload
+
+
+def test_diagnostic_ack_and_wal_accept_explicit_no_launch_completion(
+    runner_module,
+):
+    owner, _env, lean, _epoch = _lean_owner(runner_module, [])
+    runner, _ = _diagnostic_runner(runner_module, owner, [])
+    _boundary, summary, _active = _prepare_pending_epoch_summary(
+        runner_module, owner, runner
+    )
+    shot = _no_launch_completed_shot(lean)
+    typed = replace(
+        summary,
+        lifecycle=replace(
+            summary.lifecycle,
+            closed_unplayed_rows=1,
+            retired_rows=1,
+        ),
+        completed_shots=(shot,),
+    )
+
+    record = runner._action_ball_full_mdp_prepare_epoch_ack_record(
+        typed,
+        update_index=0,
+        completed_environment_steps=4,
+    )
+    ack_json, wal_line = (
+        runner._action_ball_full_mdp_encode_durable_pending_ack(
+            record,
+            update_index=0,
+            completed_environment_steps=4,
+        )
+    )
+    decoded = json.loads(ack_json.decode("utf-8"))
+    completed = decoded["completed_shots"][0]
+    assert completed["target_x_m"] is None
+    assert completed["target_y_m"] is None
+    assert completed["motion_close_reason"] == 2
+    assert completed["settlement_step"] == -1
+    assert completed["payment_step"] == -1
+    assert completed["retirement_step"] == 43
+    assert completed["evidence"]["lifecycle"] == {
+        "reveal_committed": True,
+        "playback_started": False,
+        "motion_closed": True,
+        "physical_launched": False,
+        "outcome_settled": False,
+        "payment_recorded": False,
+    }
+    assert wal_line.endswith(b"\n")
+    assert wal_line.count(b"\n") == 1
 
 
 def test_diagnostic_marker_preserves_prelaunch_terminal_partial_without_false_zero(

@@ -41,13 +41,7 @@ def _milestone_with_episode_closures(*closures, paddle_unavailable=False):
             torch.tensor(reasons, dtype=torch.int64),
         )
     if paddle_unavailable:
-        first_paddle = (
-            D.milestone_tensors.REWARD_TERM_COUNT
-            - len(D.milestone_tensors.PADDLE_PLAYBACK_TERM_NAMES)
-        )
-        for ordinal in range(
-            first_paddle, D.milestone_tensors.REWARD_TERM_COUNT
-        ):
+        for ordinal in D.milestone_tensors.PADDLE_PLAYBACK_ORDINALS:
             milestone.add_paddle_motion_prior_unavailable(ordinal)
     return tuple(value.detach().clone() for value in milestone.pack_views())
 
@@ -103,7 +97,7 @@ def _selected_reset_entry(
 
 def _append_d05(
     entries, *, due_row, decision, valid_key, epoch, selected=True, key_seed=10_000,
-    family_code=0, attribution_valid=False,
+    family_code=0, attribution_valid=False, playback_ready=True,
 ):
     due = torch.zeros(SHAPE, dtype=torch.bool)
     due[due_row, 0] = True
@@ -123,9 +117,7 @@ def _append_d05(
     attributed[due] = attribution_valid
     if decision == D.D05_DECISION_ACCEPT:
         construction[due] = True
-        playback[due] = True
-    elif decision == D.D05_DECISION_DEFER:
-        construction[due] = True
+        playback[due] = playback_ready
     elif decision == D.D05_DECISION_CENSOR:
         faults[..., 0][due] = 1
     entries.append(
@@ -320,14 +312,8 @@ def test_schema7_4096_h48_unavailable_tail_is_not_episode_evidence():
     milestone = D.milestone_tensors.MilestoneTensorAccumulator(
         4096, torch.device("cpu")
     )
-    first_paddle = (
-        D.milestone_tensors.REWARD_TERM_COUNT
-        - len(D.milestone_tensors.PADDLE_PLAYBACK_TERM_NAMES)
-    )
     for _control in range(48):
-        for ordinal in range(
-            first_paddle, D.milestone_tensors.REWARD_TERM_COUNT
-        ):
+        for ordinal in D.milestone_tensors.PADDLE_PLAYBACK_ORDINALS:
             milestone.add_paddle_motion_prior_unavailable(ordinal)
     milestone_i64, milestone_f64 = tuple(
         value.detach().clone() for value in milestone.pack_views()
@@ -339,15 +325,14 @@ def test_schema7_4096_h48_unavailable_tail_is_not_episode_evidence():
 
     assert decoded.terminal_resets == ()
     assert decoded.milestone.episode_i64_counts == (0,) * 7
-    assert tuple(milestone_i64[-7:].tolist()) == (
-        0,
-        0,
-        0,
-        4096 * 48,
-        0,
-        0,
-        0,
+    paddle_i64 = milestone_i64[D.milestone_tensors._PI:].reshape(
+        len(D.milestone_tensors.PADDLE_PLAYBACK_TERM_NAMES),
+        len(D.milestone_tensors.PADDLE_PLAYBACK_I64_COLUMNS),
     )
+    assert paddle_i64[:, 0].tolist() == [
+        4096 * 48
+    ] * len(D.milestone_tensors.PADDLE_PLAYBACK_TERM_NAMES)
+    assert not bool(paddle_i64[:, 1:].any())
 
 
 def test_event_telemetry_and_business_journal_remain_separately_visible():
@@ -401,6 +386,7 @@ def test_episode_window_matches_exact_selected_reset_suffix():
 
 @pytest.mark.parametrize("reason_bits", (1, 2, 16))
 def test_due_tick_terminal_is_counted_beside_surviving_public_due(reason_bits):
+    due_tick = D.portable_catalog.FRESH_REFERENCE_DUE_TICKS[0]
     entries = []
     _append_d05(
         entries,
@@ -414,11 +400,11 @@ def test_due_tick_terminal_is_counted_beside_surviving_public_due(reason_bits):
             len(entries),
             selected=(True, False),
             generations=(1, 0),
-            facts=((10, 295, reason_bits), (-1, -1, 0)),
+            facts=((10, due_tick, reason_bits), (-1, -1, 0)),
         )
     )
     milestone_i64, milestone_f64 = _milestone_with_episode_closures(
-        ((True, False), (295, 0), (reason_bits, 0)),
+        ((True, False), (due_tick, 0), (reason_bits, 0)),
     )
     decoded = _decode(
         entries, milestone=(milestone_i64, milestone_f64)
@@ -562,12 +548,12 @@ def test_two_rowwise_transactions_conserve_due_not_global_n():
         decision=D.D05_DECISION_CENSOR,
         valid_key=False,
         epoch=5,
-        selected=False,
+        selected=True,
     )
     decoded = _decode(entries)
     assert decoded.settlement.transactions == 2
     assert decoded.settlement.due_rows == 2
-    assert decoded.settlement.selected_rows == 1
+    assert decoded.settlement.selected_rows == 2
     assert decoded.settlement.accepted == 1
     assert decoded.settlement.censored == 1
     assert decoded.reveal_commit.motion_committed_rows == 1
@@ -576,13 +562,191 @@ def test_two_rowwise_transactions_conserve_due_not_global_n():
     assert decoded.continuation.active_after == 1
 
 
+def test_not_ready_row_is_accepted_task_and_not_a_resource_defer():
+    entries = []
+    _append_d05(
+        entries,
+        due_row=0,
+        decision=D.D05_DECISION_ACCEPT,
+        valid_key=True,
+        epoch=4,
+        playback_ready=False,
+    )
+
+    decoded = _decode(entries)
+
+    assert decoded.settlement.accepted == 1
+    assert decoded.settlement.deferred == 0
+    assert decoded.settlement.not_ready == 1
+    assert decoded.continuation.active_after == 1
+    assert decoded.continuation.awaiting_playback_after == 1
+
+
+def test_not_ready_unplayed_close_retires_without_physical_or_payment_debt():
+    entries = []
+    key = _append_d05(
+        entries,
+        due_row=0,
+        decision=D.D05_DECISION_ACCEPT,
+        valid_key=True,
+        epoch=4,
+        playback_ready=False,
+    )
+    mask = torch.zeros(SHAPE, dtype=torch.bool)
+    mask[0, 0] = True
+    reason = torch.full(SHAPE, -1, dtype=torch.int64)
+    reason[mask] = D.MOTION_CLOSE_UNPLAYED
+    payment = torch.full(SHAPE, -1, dtype=torch.int64)
+    retirement = torch.full(SHAPE, -1, dtype=torch.int64)
+    retirement[mask] = 21
+    entries.extend(
+        (
+            _lifecycle_entry(
+                len(entries),
+                "MOTION_CLOSED",
+                mask,
+                key,
+                ("motion_close_reason",),
+                (reason,),
+            ),
+            _lifecycle_entry(
+                len(entries) + 1,
+                "RETIRED",
+                mask,
+                key,
+                (
+                    "motion_close_reason",
+                    "payment_step",
+                    "retirement_step",
+                ),
+                (reason, payment, retirement),
+            ),
+        )
+    )
+
+    decoded = _decode(entries)
+
+    assert decoded.settlement.accepted == 1
+    assert decoded.settlement.deferred == 0
+    assert decoded.settlement.not_ready == 1
+    assert decoded.lifecycle.closed_unplayed_rows == 1
+    assert decoded.lifecycle.playback_started_rows == 0
+    assert decoded.lifecycle.physical_launch_rows == 0
+    assert decoded.lifecycle.outcome_settled_rows == 0
+    assert decoded.lifecycle.payment_recorded_rows == 0
+    assert decoded.lifecycle.retired_rows == 1
+    assert decoded.continuation.active_after == 0
+    assert decoded.continuation.awaiting_playback_after == 0
+    assert decoded.continuation.awaiting_outcome_after == 0
+    assert decoded.continuation.awaiting_payment_after == 0
+    assert len(decoded.completed_shots) == 1
+    shot = decoded.completed_shots[0]
+    assert shot.motion_close_reason == D.MOTION_CLOSE_UNPLAYED
+    assert shot.settlement_step == -1
+    assert shot.payment_step == -1
+    assert shot.retirement_step == 21
+    assert shot.evidence is not None
+    assert shot.evidence.lifecycle_bits == sum(
+        D.SHOT_LIFECYCLE_BITS[name]
+        for name in ("reveal_committed", "motion_closed")
+    )
+
+
+def test_ready_unplayed_row_cannot_be_relabelled_as_no_launch_retirement():
+    entries = []
+    key = _append_d05(
+        entries,
+        due_row=0,
+        decision=D.D05_DECISION_ACCEPT,
+        valid_key=True,
+        epoch=4,
+        playback_ready=True,
+    )
+    mask = torch.zeros(SHAPE, dtype=torch.bool)
+    mask[0, 0] = True
+    reason = torch.full(SHAPE, -1, dtype=torch.int64)
+    reason[mask] = D.MOTION_CLOSE_UNPLAYED
+    payment = torch.full(SHAPE, -1, dtype=torch.int64)
+    retirement = torch.full(SHAPE, -1, dtype=torch.int64)
+    retirement[mask] = 21
+    entries.extend(
+        (
+            _lifecycle_entry(
+                len(entries),
+                "MOTION_CLOSED",
+                mask,
+                key,
+                ("motion_close_reason",),
+                (reason,),
+            ),
+            _lifecycle_entry(
+                len(entries) + 1,
+                "RETIRED",
+                mask,
+                key,
+                (
+                    "motion_close_reason",
+                    "payment_step",
+                    "retirement_step",
+                ),
+                (reason, payment, retirement),
+            ),
+        )
+    )
+
+    with pytest.raises(D.ActionEpochDrainDecodeError, match="retirement differs"):
+        _decode(entries)
+
+
+def test_not_ready_row_rejects_forged_physical_launch():
+    entries = []
+    key = _append_d05(
+        entries,
+        due_row=0,
+        decision=D.D05_DECISION_ACCEPT,
+        valid_key=True,
+        epoch=4,
+        playback_ready=False,
+    )
+    mask = torch.zeros(SHAPE, dtype=torch.bool)
+    mask[0, 0] = True
+    publication = torch.full(SHAPE, 4, dtype=torch.int64)
+    target = torch.zeros((*SHAPE, 2), dtype=torch.float32)
+    target[0, 0] = torch.tensor([0.2, -0.1])
+    entries.append(
+        _lifecycle_entry(
+            len(entries),
+            "PHYSICAL_LAUNCH_ROWS",
+            mask,
+            key,
+            (
+                "publication_ordinal",
+                "launch_succeeded",
+                "late_launch",
+                "owner_fault_bits",
+                "target_xy_m",
+            ),
+            (
+                publication,
+                mask.clone(),
+                torch.zeros(SHAPE, dtype=torch.bool),
+                torch.zeros(SHAPE, dtype=torch.int64),
+                target,
+            ),
+        )
+    )
+
+    with pytest.raises(D.ActionEpochDrainDecodeError, match="Physical launch differs"):
+        _decode(entries)
+
+
 @pytest.mark.parametrize(
     ("decision", "selected", "field"),
     (
         (D.D05_DECISION_ACCEPT, True, "accepted"),
-        (D.D05_DECISION_CENSOR, False, "censored"),
+        (D.D05_DECISION_CENSOR, True, "censored"),
         (D.D05_DECISION_REJECT, True, "rejected"),
-        (D.D05_DECISION_DEFER, True, "deferred"),
+        (D.D05_DECISION_DEFER, False, "deferred"),
     ),
 )
 def test_each_due_row_emits_one_typed_bh_action_decision(decision, selected, field):

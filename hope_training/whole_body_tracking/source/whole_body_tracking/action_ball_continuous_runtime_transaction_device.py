@@ -1059,6 +1059,7 @@ class DeviceR05AcceptedRowsView:
     clocks: object
     task: object
     rng_counter: torch.Tensor
+    playback_admissible: torch.Tensor
 
 
 class DeviceR05PreviewToken(_OpaqueDeviceR05Capability):
@@ -3315,8 +3316,8 @@ class DeviceR05Owner:
         )
         # Candidate construction is independent of the plant's playback
         # readiness.  A clean not-ready row retains the composed candidate and
-        # becomes ActionEpoch DEFERRED; it is not relabelled as infeasible or a
-        # producer fault.
+        # is still published as a task; readiness only controls whether Motion
+        # playback and Physical launch may start for that task.
         install_admissible = torch.logical_and(admissible, owner_fault_free)
         attempted_cells = attempted_round.unsqueeze(2)
         any_feasible = (round_feasible & attempted_cells).reshape(k, -1).any(
@@ -3769,12 +3770,14 @@ class DeviceR05Owner:
         clean = prepared.owner_fault_free
         valid_candidate = key_valid
         admitted = prepared.admissible
-        playable = prepared.projection.ready_at_reveal
-        accept = active & clean & admitted & valid_candidate & playable
+        accept = active & clean & admitted & valid_candidate
         reject = active & clean & ~admitted
-        defer = active & clean & admitted & valid_candidate & ~playable
-        censor = due_mask & (
-            ~construct_mask | (active & (~clean | (admitted & ~valid_candidate)))
+        # A due row whose prior shot still owns the single lifecycle slot is a
+        # real resource deferral.  Readiness is not: swallowing the task here
+        # would turn balance -> mimic into an implicit serial stage.
+        defer = due_mask & ~construct_mask
+        censor = due_mask & active & (
+            ~clean | (admitted & ~valid_candidate)
         )
         return _RowTransactionRecord(
             capability=token,
@@ -3916,6 +3919,9 @@ class DeviceR05Owner:
             task=task,
             rng_counter=torch.where(
                 mask, candidate.rng_counter, torch.zeros_like(candidate.rng_counter)
+            ).contiguous(),
+            playback_admissible=(
+                candidate.playback_admissible & mask
             ).contiguous(),
         )
 

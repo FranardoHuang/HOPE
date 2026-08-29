@@ -3842,9 +3842,7 @@ def test_full_a_teacher_holds_coherent_frame0_then_plays_and_retires_rowwise():
     assert torch.count_nonzero(env._full_a_teacher_joint_vel) == 0
     assert torch.equal(env._full_a_motion_phase_code, torch.zeros(2, dtype=torch.long))
 
-    # The exact end of the pre-wait is still stationary frame-zero HOLD.  The first strictly
-    # positive active-motion instant publishes the measured sampler; frame
-    # rounding is not the owner of that boundary.
+    # The exact end of the pre-wait is still stationary frame-zero HOLD.
     env.common_step_counter = 46
     wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
     assert torch.equal(
@@ -3863,9 +3861,9 @@ def test_full_a_teacher_holds_coherent_frame0_then_plays_and_retires_rowwise():
         ).any()
     )
 
-    # Opening playback is the authority, not the rounded frame ordinal.  A
-    # half-rate row still samples frame zero on its first open tick and must be
-    # included in the playback-only denominator.
+    # A half-rate row still rounds to frame zero on the first positive clock
+    # tick.  It remains PREPARE with zero teacher velocity and stays out of
+    # the playback-only reward denominator until the measured pose advances.
     env._full_a_teacher_rate[0] = 0.5
     env.common_step_counter = 47
     wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
@@ -3876,7 +3874,7 @@ def test_full_a_teacher_holds_coherent_frame0_then_plays_and_retires_rowwise():
     )
     assert torch.equal(
         env._full_a_teacher_joint_vel,
-        torch.stack((joint_vel[0] * 0.5, joint_vel[1])),
+        torch.stack((torch.zeros_like(joint_vel[0]), joint_vel[1])),
     )
     assert torch.equal(
         env._teacher_racket_site_pos_w,
@@ -3884,8 +3882,19 @@ def test_full_a_teacher_holds_coherent_frame0_then_plays_and_retires_rowwise():
     )
     assert torch.equal(
         env._teacher_racket_site_lin_vel_w,
-        torch.tensor([[0.25, 0.0, 0.0], [0.5, 0.0, 0.0]]),
+        torch.tensor([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]]),
     )
+    assert torch.equal(
+        env._full_a_motion_phase_code, torch.tensor([0, 1], dtype=torch.long)
+    )
+    assert torch.equal(
+        wait_env.FullMdpInitialWaitVecEnv._full_a_paddle_prior_playback_mask(env),
+        torch.tensor([False, True]),
+    )
+
+    env.common_step_counter = 48
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+    assert torch.equal(env._full_a_teacher_frame, torch.tensor([1, 2]))
     assert torch.equal(env._full_a_motion_phase_code, torch.ones(2, dtype=torch.long))
     assert bool(
         wait_env.FullMdpInitialWaitVecEnv._full_a_paddle_prior_playback_mask(
