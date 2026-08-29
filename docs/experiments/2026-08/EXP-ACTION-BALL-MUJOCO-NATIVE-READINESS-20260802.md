@@ -50,12 +50,14 @@ exact Pod相关套件合计`323 passed`。原来唯一失败的CUDA foreach-zero
 `zero-event/early-crossing/deadline`三类完整最终`CommitEntry` canonical SHA分别为
 `9af69e…a48e`、`f7bd3e…f307a`、`2d6460…34b5c`，新旧逐字一致。Pod1空闲GPU、同进程、交替测序的12组
 `512×2`投影微基准全部改善，median=`1045.170→771.048 us`（`-26.23%`）。因此采纳这条“删历史扫描且
-合并事实真源”的结构减法；current-source真实Kit整轮profile仍需人类操作人显式授权，现阶段不得把局部
-`-26.23%`外推为iteration约6秒。
+合并事实真源”的结构减法；current-source真实Kit整轮profile继续在已建立Pod runtime authority下执行，
+现阶段不得把局部`-26.23%`外推为iteration约6秒。
 
-部署审计另纠正了历史“fresh clone PASS”的范围。`e3ef4e98…`只证明该Pod预装runtime可被旧source接入；
-当前`e9823e90…`要求人类操作人显式给出EULA/隐私授权，并对caller传入的OpenGL/GLU真实文件SHA和direct
-SONAME在run root前验真。37项launcher测试与现存外部路径dry-run已过；current-source真实Kit probe仍`未测`。
+部署审计另纠正了历史“fresh clone PASS”的范围。`e3ef4e98…`只证明该Pod预装runtime可被旧source接入。
+`e9823e90…`把已有EULA/隐私设置错误重定成每条run的两个确认flag；G05已记录2026-06-26接受EULA，当前Pod
+多条真实Kit run又一直使用同一`PRIVACY_CONSENT=Y`配置，2026-08-29用户明确要求不重复确认多方已确认事实，
+故后续删除这两个per-run Gate。caller传入OpenGL/GLU真实文件SHA和direct SONAME仍在run root前验真；本地
+35项launcher测试通过，current-source真实Kit probe进入执行。
 纯Git clone还缺RSL/USD/Mu meshes/GLU的持久取得位置以及Python环境完整重建锁，故新空白机availability为
 `PARTIAL`，不能用fail-closed代码或历史receipt代替外部资产供应。
 

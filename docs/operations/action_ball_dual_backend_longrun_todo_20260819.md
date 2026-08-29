@@ -177,8 +177,9 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    fixed-action probe，0 done/time-out，退出后GPU释放。receipt见
    [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。
    因此该版本“repo + 该Pod已合法准备的exact外部runtime”有历史PASS；纯`git clone`不包含EULA二进制和
-   private assets，也不应伪装成自包含安装。当前`e9823e90…`已把两项operator consent改为显式flag，并把
-   OpenGL/GLU目录、真实库SHA与SONAME移出硬编码；37项launcher测试和真实外部路径dry-run已通过。
+   private assets，也不应伪装成自包含安装。后续复核判定`e9823e90…`把已在G05/现役Pod成立的一次性
+   EULA/隐私setup事实错做成per-run显式flag，已删除这两个重复Gate；OpenGL/GLU目录、真实库SHA与SONAME
+   继续由caller显式绑定并验真，本地35项launcher测试通过。
    但RSL wheel、split USD、A3P0807 Mu meshes、GLU及两个Python环境仍缺持久artifact locator或完整
    lock/wheelhouse/OCI recipe，当前source真实Kit probe也仍`未测`。所以代码身份闭合、空白机可获得性未闭合，
    item 8保持开；Jiayi历史本机/Pod逐位对比只作可选溯源，controller-response首差仍由item 11裁决。
@@ -256,7 +257,7 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     exact Pod相关套件`323 passed`；其中`25eb4c7a`删除Torch 2.7 CUDA event必须挂到CPU parent的错误测试
     假设，改验最小profile真实kernel数/名称与清零语义。三类完整CommitEntry canonical SHA新旧一致。
     Pod1空闲GPU同进程12组交替微基准median=`1045.170→771.048 us`（`-26.23%`），
-    故采纳该结构减法。current-source真实Kit整轮profile仍需人类操作人显式EULA/隐私授权，未测前不得把
+    故采纳该结构减法。current-source真实Kit整轮profile在已建立Pod runtime authority下继续，未测前不得把
     局部收益外推为约6秒；本项继续开放，下一步由新的整轮profile最大块决定，而不是继续堆gate。
 
 <a id="fullmdp-v9-superseded"></a>

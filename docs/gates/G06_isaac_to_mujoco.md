@@ -10,8 +10,8 @@ fixed tape仍把shared initial state、joint order、action decoder与qdes对齐
 独立检查；所以没有“Pod整体装坏”的证据。剩余first-divergence仍属于implicit PhysX drive与显式Mu PD、
 friction/contact/integrator响应，需同tape plant字段对签，不能用policy或额外Gate掩盖。
 
-当前repo部署合同也不等于跨机parity：`e9823e90…`已显式绑定操作人授权和GL bytes，37项测试/dry-run通过，
-但current-source真实Kit probe与空白机外部资产可获得性仍`未测/PARTIAL`。G06不从历史fresh-clone receipt
+当前repo部署合同也不等于跨机parity：一次性EULA/隐私setup事实不再被错做成per-run Gate，GL bytes仍由
+caller显式绑定并验真；current-source真实Kit probe正在补，空白机外部资产可获得性仍`PARTIAL`。G06不从历史fresh-clone receipt
 推导跨机器逐位曲线一致。
 
 ## 2026-08-29 R8 matched first-divergence（仍`Partial`）

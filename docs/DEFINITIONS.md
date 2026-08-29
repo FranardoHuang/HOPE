@@ -27,13 +27,15 @@
 NUMA放置，不改变训练语义，也不是性能或安全Gate；收益必须另做同GPU profiler-off实测。
 
 <a id="isaac-operator-runtime-authority"></a>
-**Isaac FullMDP operator runtime authority / 操作人运行时授权与图形库身份**：
-[`--accept-isaac-eula`](#isaac-operator-runtime-authority)表示本次启动的**人类操作人**亲自确认已接受Isaac
-EULA；[`--consent-isaac-privacy`](#isaac-operator-runtime-authority)表示该操作人对本次运行显式选择隐私
-同意。launcher不得替人默认写入这两个决定。`--opengl-lib-dir`和`--glu-lib-dir`分别定位headless
-OpenGL/GLU目录；launcher在创建run root前核canonical目录、真实库文件SHA-256和direct SONAME symlink，
-再从这两个输入唯一构造`LD_LIBRARY_PATH`，不读取开发者私有硬编码路径。这四个flag只绑定许可与loader
-输入，不证明学习、physics parity、部署完成或真机安全。
+**Isaac FullMDP established runtime authority / 已建立运行时授权与图形库身份**：
+EULA接受是机器/runtime provisioning的一次性前置事实，不是每次训练的业务输入；当前项目已在
+[G05](gates/G05_isaac_training_first_loop.md)记录2026-06-26接受并完成真实Kit训练，当前Pod也沿用已建立的
+`ACCEPT_EULA=Y`与`PRIVACY_CONSENT=Y`运行配置。launcher只把该已建立配置封入窄child环境，不再用
+per-run flag要求重复确认。新机器仍必须由人类在安装Isaac前完成一次合法授权，代码不能代签。
+`--opengl-lib-dir`和`--glu-lib-dir`分别定位headless OpenGL/GLU目录；launcher在创建run root前核canonical
+目录、真实库文件SHA-256和direct SONAME symlink，再从这两个输入唯一构造`LD_LIBRARY_PATH`，不读取
+开发者私有硬编码路径。该合同只绑定既有runtime与loader输入，不证明学习、physics parity、部署完成或
+真机安全。
 
 **`HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT` / fresh namespace训练产物根**：Isaac one-shot launcher内部写给
 FullMDP child的canonical目录，令checkpoint、WAL和training contract归属于当前fresh run root。它不是

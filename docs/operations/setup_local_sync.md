@@ -49,8 +49,9 @@ NVIDIA EULA或生成private asset。
 `PARTIAL`。RSL wheel、split USD、A3P0807 Mu meshes和GLU只有现存team/Pod locator，Python site与Mu venv
 也没有完整lock/wheelhouse/OCI重建配方；这些路径是保存点，不是持久制品服务。新机器必须先由团队提供合法
 来源、逐项核SHA，再创建fresh root/namespace；不得让path-autodiscovery静默替换IsaacLab/Python/plant。
-当前launcher用显式[操作人授权和GL目录](../DEFINITIONS.md#isaac-operator-runtime-authority)在root前拒绝缺失或
-错误输入，但代码层fail-closed不能替代外部字节的可获得性。
+当前launcher复用已建立的[运行时授权](../DEFINITIONS.md#isaac-operator-runtime-authority)，并用显式GL目录在
+root前拒绝缺失或错误loader输入；新机器仍在安装阶段由人类完成一次合法授权。代码层fail-closed不能替代
+外部字节的可获得性。
 
 ## Current Local Assets
 

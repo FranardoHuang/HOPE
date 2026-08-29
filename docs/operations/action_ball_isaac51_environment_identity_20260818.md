@@ -99,10 +99,10 @@ checkout，完成了以下闭环：
 完整路径与字节receipt见
 [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。
 这把当时源码“能否接入该Pod已经合法准备好的精确外部runtime”裁决为历史`PASS`；它**不**宣称纯Git
-自包含安装，也不授权学习、physics parity、promotion、部署或真机。当前source `e9823e90…`进一步要求
-操作人显式传入两项[runtime authority](../DEFINITIONS.md#isaac-operator-runtime-authority)，并把OpenGL/GLU
-目录和真实库SHA、direct SONAME链接纳入pre-root身份。exact Pod launcher测试与真实外部路径dry-run已通过；
-当前source的真实Kit fixed-action probe仍为`未测`。
+自包含安装，也不授权学习、physics parity、promotion、部署或真机。后续复核确认G05已记录EULA接受、
+当前Pod长期运行同一隐私配置，故删除`e9823e90…`错误新增的两个per-run确认Gate；OpenGL/GLU目录和真实库
+SHA、direct SONAME链接仍纳入pre-root身份。本地35项launcher测试通过，当前source真实Kit fixed-action
+probe进入执行。
 
 新空白机器的**可获得性**仍为`PARTIAL`：RSL wheel、split USD、A3P0807 Mu meshes和GLU现在只有team/Pod
 保存路径，Python site与Mu venv也没有完整lock/wheelhouse/OCI配方。仓库已能拒绝错误输入，却尚不能仅凭
@@ -138,7 +138,7 @@ URDF/meshes仍是非 Git 资产；如复现 Jiayi 的 Hitter baseline，必须�
 - `PASS-Pod-CUDA`：clean Git `2c8ef444…`在Jiayi Python3.11/Torch2.7-cu128完成LM info/NaN/finite-overflow三参数，CUDA context存活。
 - `PASS-environment / FAIL-first-4096-entry`：commit `5ee1ffa6…` 的first one-shot通过GPU preexec、sealed RSL和真实Kit Python身份，但身份代码在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault；Hydra解析成功，scene/PPO/WAL零调用。successor必须把class/source attestation移到AppLauncher成功后的同一Kit进程，不能用pre-App import代签。
 - `PASS-repo-to-runtime-historical`：remote clean clone `e3ef4e98…`完成dry-run、52项focused test和真实Kit/PhysX fixed-action probe；边界只覆盖“该Pod已有精确外部runtime时仓库能启动”。
-- `PASS-current-source-contract / PARTIAL-current-real-probe`：`e9823e90…`的37项launcher测试与真实路径dry-run通过，显式operator authority和GL bytes已绑定；当前source真实Kit probe仍`未测`。
+- `PASS-current-source-contract / CURRENT-real-probe`：一次性runtime authority不再错误地逐run确认；35项launcher测试通过，GL bytes继续显式绑定；current-source真实Kit probe正在补。
 - `PARTIAL-fresh-machine-availability`：上述ignored/private/runtime字节缺少全部可持久取得的位置与环境重建锁；纯clone不能完成。
 - `未测`：可信4096 A1000趋势、C、完整checkpoint/restore、跨机器逐位曲线一致性。
 

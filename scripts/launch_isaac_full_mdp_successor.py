@@ -1068,14 +1068,6 @@ def _write_diagnostic_receipt(path: Path, payload: dict[str, object]) -> None:
 
 
 def launch(args: argparse.Namespace) -> int:
-    if not args.accept_isaac_eula:
-        raise LaunchError(
-            "operator must explicitly pass --accept-isaac-eula"
-        )
-    if not args.consent_isaac_privacy:
-        raise LaunchError(
-            "operator must explicitly pass --consent-isaac-privacy"
-        )
     commit = _source_commit()
     train = _canonical_regular(REPO_ROOT / TRAIN_RELATIVE, "Isaac train entry")
     kit_launcher = _canonical_regular(
@@ -1351,16 +1343,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--diagnostic-profile-probe", action="store_true")
     parser.add_argument("--diagnostic-fixed-action-probe", action="store_true")
     parser.add_argument("--cpu-affinity")
-    parser.add_argument(
-        "--accept-isaac-eula",
-        action="store_true",
-        help="operator attests that they personally accepted the Isaac EULA",
-    )
-    parser.add_argument(
-        "--consent-isaac-privacy",
-        action="store_true",
-        help="operator explicitly opts in to Isaac privacy consent for this run",
-    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 

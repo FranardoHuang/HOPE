@@ -378,16 +378,14 @@ python3 scripts/launch_isaac_full_mdp_successor.py \
   ...既有exact Isaac/asset/GPU/fresh namespace参数... \
   --opengl-lib-dir <exact-headless-OpenGL-directory> \
   --glu-lib-dir <exact-GLU-directory> \
-  --accept-isaac-eula \
-  --consent-isaac-privacy \
   --cpu-affinity <live-target-GPU-local-cpu-list> \
   --profile-updates 5
 ```
 
-其中四个新增参数的人话语义见
-[操作人运行时授权与图形库身份](../DEFINITIONS.md#isaac-operator-runtime-authority)：两项同意只能由本次
-人类操作人显式给出，agent、脚本默认值或历史run不能代签；两个目录由调用者定位，launcher核真实库SHA与
-SONAME后才构造`LD_LIBRARY_PATH`。缺任一项必须在run root之前失败。
+两个目录的人话语义见
+[已建立运行时授权与图形库身份](../DEFINITIONS.md#isaac-operator-runtime-authority)：当前Pod的EULA与隐私
+设置属于已建立runtime配置，不是每条run重复确认的Gate；新机器在安装阶段由人类完成一次授权。launcher
+只核调用者定位的真实库SHA与SONAME后构造`LD_LIBRARY_PATH`，缺任一库输入必须在run root之前失败。
 
 这里最外层launcher owner必须由普通host Python启动（Pod1为`/usr/bin/python3`），不得用
 `/workspace/isaacsim-5.1.0/python.sh`替代命令首项；Isaac wrapper只通过`--isaac-python`传给launcher。

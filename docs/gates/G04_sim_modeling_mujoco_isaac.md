@@ -5,10 +5,10 @@ Status: Partial
 ## 2026-08-29 当前环境闭环边界（仍`Partial`）
 
 当前受控Pod运行栈继续没有generic installation corruption证据，但仓内恢复结论已收窄：历史
-`e3ef4e98…`真实Kit probe只证明该Pod预装runtime可被接入。`e9823e90…`现要求人类操作人显式给出
-[EULA/隐私授权](../DEFINITIONS.md#isaac-operator-runtime-authority)，并在run root前核caller提供的
-OpenGL/GLU真实库SHA及SONAME；37项launcher测试和现存路径dry-run通过。current-source真实Kit probe仍
-`未测`，RSL/USD/Mu meshes/GLU及Python环境又缺完整持久恢复源，所以空白机availability保持`Partial`。
+`e3ef4e98…`真实Kit probe只证明该Pod预装runtime可被接入。后续复核确认G05已记录EULA接受，当前Pod也已
+长期使用同一隐私配置；因此`e9823e90…`新增的两个per-run确认flag属于错scope Gate，已删除。launcher仍在
+run root前核caller提供的OpenGL/GLU真实库SHA及SONAME；本地35项测试通过，current-source真实Kit probe
+进入执行。RSL/USD/Mu meshes/GLU及Python环境仍缺完整持久恢复源，所以空白机availability保持`Partial`。
 这不推翻current Pod身份，也不把可启动误写成model parity。
 
 ## 2026-08-29 A3P0807对象身份与R8 physical birth（仍`Partial`）

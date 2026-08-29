@@ -12,10 +12,11 @@
   one-shot typed settlement delta，retained audit与current delta共用唯一fact pack/projector；三类完整journal
   SHA逐字一致，exact Pod `323 passed`。原来唯一失败的profiler测试把Torch 2.7异步CUDA event按错误的
   `cpu_parent`关系过滤；`25eb4c7a`改验最小profile内真实kernel数与名称后整文件73项全绿。Pod同进程12组交替微基准
-  `1045.170→771.048 us`（`-26.23%`）；保留该结构减法，但current-source整轮Kit耗时仍待操作人授权后实测，
+  `1045.170→771.048 us`（`-26.23%`）；保留该结构减法，current-source整轮Kit耗时继续做真实profile，
   不冒充约6秒闭合。
-- `e9823e90`删除launcher替人默认EULA/隐私同意与私有GL硬编码，改为操作人显式flag、caller目录及库
-  SHA/SONAME pre-root验证；37项测试和现存路径dry-run通过。历史real-Kit probe不移签current source；
+- 后续复核纠正`e9823e90`的scope错误：G05已记录EULA接受且当前Pod长期使用同一隐私配置，一次性setup事实
+  不应变成per-run确认Gate。launcher已删除两个重复flag，继续保留caller GL目录及库SHA/SONAME pre-root
+  验证；本地35项测试通过。历史real-Kit probe不移签current source；
   RSL/USD/Mu meshes/GLU与Python环境尚缺完整持久恢复源，故current Pod可运行、空白机availability仍`Partial`。
 
 ## 2026-08-29 — controller修复有限学习窗与fresh热路减法

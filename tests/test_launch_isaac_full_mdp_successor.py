@@ -175,8 +175,6 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
             "--gpu-index", "0",
             "--expected-gpu-uuid", expected,
             "--lock-file", str(lock),
-            "--accept-isaac-eula",
-            "--consent-isaac-privacy",
         ]
         return values + (["--dry-run"] if dry else [])
 
@@ -278,25 +276,6 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     assert f"hydra.run.dir={rig.root / 'training' / 'hydra'}" in payload["argv"]
     assert payload["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "0"
     assert "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES" not in payload["runtime_env"]
-    assert not rig.root.exists()
-
-
-@pytest.mark.parametrize(
-    ("missing_flag", "message"),
-    (
-        ("--accept-isaac-eula", "accept-isaac-eula"),
-        ("--consent-isaac-privacy", "consent-isaac-privacy"),
-    ),
-)
-def test_operator_terms_attestation_is_explicit_and_fails_before_root(
-    rig,
-    capsys: pytest.CaptureFixture[str],
-    missing_flag: str,
-    message: str,
-) -> None:
-    argv = [value for value in rig.argv(dry=True) if value != missing_flag]
-    assert rig.module.main(argv) == 2
-    assert message in capsys.readouterr().err
     assert not rig.root.exists()
 
 
