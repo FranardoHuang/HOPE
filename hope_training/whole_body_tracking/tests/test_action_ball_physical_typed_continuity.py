@@ -36,6 +36,7 @@ class _R06(hot._R06InstallProbe):
         super().__init__(owner)
         self.postphysics = []
         self.retire = False
+        self.latest = None
     def publish_action_ball_full_mdp_epoch_post_physics(self):
         view = self.owner.require_owned_action_epoch_r06_postphysics_projection()
         self.postphysics.append(SimpleNamespace(
@@ -46,22 +47,40 @@ class _R06(hot._R06InstallProbe):
         accepted = view.observe_mask.clone()
         settled = accepted & self.retire
         zeros = torch.zeros_like(view.observation_ordinal)
+        self.latest = R06.ActionEpochR06PostPhysicsSample(
+            accepted=accepted, rejected=torch.zeros_like(accepted),
+            settled_mask=settled, flight_slot=view.flight_slot.clone(),
+        )
+        return self.latest
+    def sample_action_ball_full_mdp_epoch_post_physics(self):
+        return self.publish_action_ball_full_mdp_epoch_post_physics()
+    def finalize_action_ball_full_mdp_epoch_post_physics_control(
+        self, *, physics_substeps_per_control
+    ):
+        assert physics_substeps_per_control == 4
+        zeros = torch.zeros_like(self.latest.flight_slot)
         return R06.ActionEpochR06PostPhysicsResult(
-            accepted=accepted, rejected=torch.zeros_like(accepted), fault_bits=zeros,
-            settled_mask=settled, settlement_cause=zeros,
-            new_valid_contact_mask=view.selected_contact_event.clone(),
-            observation_ordinal=view.observation_ordinal.clone(),
-            mutation_version=zeros, flight_slot=view.flight_slot.clone(),
+            accepted=self.latest.accepted,
+            rejected=self.latest.rejected,
+            fault_bits=zeros,
+            settled_mask=self.latest.settled_mask,
+            settlement_cause=zeros,
+            new_valid_contact_mask=torch.zeros_like(self.latest.accepted),
+            observation_ordinal=zeros,
+            mutation_version=zeros,
+            flight_slot=self.latest.flight_slot,
         )
     def retire_action_ball_full_mdp_epoch_post_physics(self):
-        view = self.owner.require_owned_action_epoch_r06_postphysics_projection()
-        retired = view.observe_mask & self.retire
+        retired = self.latest.settled_mask
         return R06.ActionEpochR06RetireResult(
             retired_mask=retired, mailbox_retired_mask=torch.zeros_like(retired),
-            flight_slot=view.flight_slot.clone(),
-            mutation_version=torch.zeros_like(view.observation_ordinal),
+            flight_slot=self.latest.flight_slot.clone(),
+            mutation_version=torch.zeros_like(self.latest.flight_slot),
         )
     def publish_action_ball_full_mdp_epoch_facts(self): return None
+    def publish_action_ball_full_mdp_epoch_control_substep_facts(
+        self, *, substep_index
+    ): return None
     def poison_global_reveal_epoch(self, *_args): return None
 @pytest.mark.parametrize("legacy_value", (0, 23))
 def test_typed_launch_three_substeps_and_retire_preserve_exact_continuity(monkeypatch, legacy_value):

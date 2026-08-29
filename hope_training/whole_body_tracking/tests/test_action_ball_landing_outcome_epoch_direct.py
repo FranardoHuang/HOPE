@@ -1154,6 +1154,7 @@ def _real_physical_r06_packet(
     publication,
     control_step,
     observation_ordinal,
+    physics_substep=0,
     contact=False,
     crossing=False,
     previous_center=None,
@@ -1219,7 +1220,7 @@ def _real_physical_r06_packet(
         event_phase = torch.full(shape, -1, dtype=torch.int8, device=device)
         if active:
             control[0, 0] = control_step
-            substep[0, 0] = 0
+            substep[0, 0] = physics_substep
             event_phase[0, 0] = phase
         return hot.physical.PhysicsStampGrid(
             control_step=control,
@@ -1382,6 +1383,94 @@ def _publish_contact_without_settlement():
     assert not result.settled_mask.any()
     assert not retire.retired_mask.any()
     return physical_owner, r06_owner, epoch_owner, row_key, publication, packet
+
+
+def test_control_window_samples_early_crossing_before_one_mailbox_finalize():
+    physical, r06_owner, epoch_owner, row_key, publication = (
+        _launch_selected_reset_clock_tape_into_real_r06()
+    )
+    contact = _real_physical_r06_packet(
+        physical_owner=physical,
+        epoch_owner=epoch_owner,
+        row_key=row_key,
+        publication=publication,
+        control_step=100,
+        physics_substep=0,
+        observation_ordinal=0,
+        contact=True,
+        crossing=False,
+    )
+    physical._action_epoch_active_r06_postphysics = contact
+    try:
+        first = r06_owner.sample_action_ball_full_mdp_epoch_post_physics()
+    finally:
+        physical._action_epoch_active_r06_postphysics = None
+    assert first.accepted[0, 0]
+    assert not first.settled_mask.any()
+
+    crossing = _real_physical_r06_packet(
+        physical_owner=physical,
+        epoch_owner=epoch_owner,
+        row_key=row_key,
+        publication=publication,
+        control_step=100,
+        physics_substep=1,
+        observation_ordinal=1,
+        contact=False,
+        crossing=True,
+        previous_center=contact.current_ball_center_m[0, 0],
+    )
+    physical._action_epoch_active_r06_postphysics = crossing
+    try:
+        second = r06_owner.sample_action_ball_full_mdp_epoch_post_physics()
+    finally:
+        physical._action_epoch_active_r06_postphysics = None
+    assert second.settled_mask.tolist() == [[True, False], [False, False]]
+    assert not r06_owner._mailbox_history_valid.any()
+    assert r06_owner._flight_state[0, 0] == D.FLIGHT_OPEN
+    with pytest.raises(D.LandingOutcomeDeviceError, match="lifetime differs"):
+        r06_owner.finalize_action_ball_full_mdp_epoch_post_physics_control(
+            physics_substeps_per_control=4
+        )
+    with pytest.raises(D.LandingOutcomeDeviceError, match="control window"):
+        r06_owner.project_current_action_epoch_outcome_rows()
+
+    for physics_substep in (2, 3):
+        inactive = _real_physical_r06_packet(
+            physical_owner=physical,
+            epoch_owner=epoch_owner,
+            row_key=row_key,
+            publication=publication,
+            control_step=100,
+            physics_substep=physics_substep,
+            observation_ordinal=-1,
+        )
+        inactive.observe_mask.zero_()
+        physical._action_epoch_active_r06_postphysics = inactive
+        try:
+            sampled = r06_owner.sample_action_ball_full_mdp_epoch_post_physics()
+        finally:
+            physical._action_epoch_active_r06_postphysics = None
+        assert not sampled.settled_mask.any()
+
+    finalized = r06_owner.finalize_action_ball_full_mdp_epoch_post_physics_control(
+        physics_substeps_per_control=4
+    )
+    assert finalized.settled_mask.tolist() == [[True, False], [False, False]]
+    assert r06_owner._mailbox_history_valid[0].any()
+    retired = r06_owner.retire_action_ball_full_mdp_epoch_post_physics()
+    assert retired.retired_mask.tolist() == [[True, False], [False, False]]
+
+    before = len(epoch_owner._publication.pending_log)
+    for substep in range(4):
+        r06_owner.publish_action_ball_full_mdp_epoch_control_substep_facts(
+            substep_index=substep
+        )
+    entries = epoch_owner._publication.pending_log[before:]
+    assert [entry.transition for entry in entries] == ["R06_OUTCOME_ROWS"] * 4
+    masks = [dict(zip(entry.delta.names, entry.delta.values))["event_mask"] for entry in entries]
+    assert [bool(mask.any()) for mask in masks] == [False, True, False, False]
+    assert r06_owner._action_epoch_control_replay is None
 
 
 def test_current_settlement_zero_event_does_not_pull_retained_projector():

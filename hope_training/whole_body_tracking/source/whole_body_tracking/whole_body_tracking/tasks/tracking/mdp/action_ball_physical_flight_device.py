@@ -2691,6 +2691,11 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._action_epoch_active_r06_postphysics: (
             ActionEpochR06PostPhysicsProjection | None
         ) = None
+        self._action_epoch_control_postphysics_projections: list[
+            ActionEpochR06PostPhysicsProjection
+        ] = []
+        self._action_epoch_control_postphysics_control: int | None = None
+        self._action_epoch_control_postphysics_count: int | None = None
         self._action_epoch_active_physics_fact_allocation: (
             ActionEpochPhysicsFactAllocationProjection | None
         ) = None
@@ -3762,6 +3767,11 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._action_epoch_active_physics_fact_allocation,
             self._active_postphysics_capture,
             self._active_postphysics_capture_image,
+            (
+                self._action_epoch_control_postphysics_projections
+                if self._action_epoch_control_postphysics_projections
+                else None
+            ),
         )
         if any(value is not None for value in active_transactions):
             raise PhysicalEpochIntegrationHold(
@@ -5279,6 +5289,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             or self._active_postphysics_capture is not None
             or self._active_postphysics_capture_image is not None
             or self._action_epoch_substep_pair is not None
+            or bool(self._action_epoch_control_postphysics_projections)
             or self._active_r06_ack is not None
             or self._active_physical_hot_prepare is not None
             or self._active_physical_hot_commit is not None
@@ -7214,6 +7225,9 @@ class ActionBallPhysicalFlightDeviceOwner:
                 self._active_r06_ack = None
                 self._active_r06_ack_image = None
                 self._action_epoch_active_r06_postphysics = None
+                self._action_epoch_control_postphysics_projections.clear()
+                self._action_epoch_control_postphysics_control = None
+                self._action_epoch_control_postphysics_count = None
                 r06_owner = self._r06_owner
                 poison_r06 = getattr(r06_owner, "poison_global_reveal_epoch", None)
                 if callable(poison_r06):
@@ -7393,8 +7407,13 @@ class ActionBallPhysicalFlightDeviceOwner:
             torch.zeros_like(image.observation_ordinal, dtype=torch.float32),
         )
         owner = self._r06_owner
-        publish_direct = getattr(
-            owner, "publish_action_ball_full_mdp_epoch_post_physics", None
+        sample_direct = getattr(
+            owner, "sample_action_ball_full_mdp_epoch_post_physics", None
+        )
+        finalize_direct = getattr(
+            owner,
+            "finalize_action_ball_full_mdp_epoch_post_physics_control",
+            None,
         )
         retire_direct = getattr(
             owner, "retire_action_ball_full_mdp_epoch_post_physics", None
@@ -7402,17 +7421,29 @@ class ActionBallPhysicalFlightDeviceOwner:
         owner_type = type(owner)
         if (
             owner is None
-            or not callable(publish_direct)
+            or not callable(sample_direct)
+            or not callable(finalize_direct)
             or not callable(retire_direct)
-            or getattr(publish_direct, "__self__", None) is not owner
+            or getattr(sample_direct, "__self__", None) is not owner
+            or getattr(finalize_direct, "__self__", None) is not owner
             or getattr(retire_direct, "__self__", None) is not owner
-            or getattr(publish_direct, "__func__", None)
-            is not getattr(owner_type, "publish_action_ball_full_mdp_epoch_post_physics", None)
+            or getattr(sample_direct, "__func__", None)
+            is not getattr(
+                owner_type,
+                "sample_action_ball_full_mdp_epoch_post_physics",
+                None,
+            )
+            or getattr(finalize_direct, "__func__", None)
+            is not getattr(
+                owner_type,
+                "finalize_action_ball_full_mdp_epoch_post_physics_control",
+                None,
+            )
             or getattr(retire_direct, "__func__", None)
             is not getattr(owner_type, "retire_action_ball_full_mdp_epoch_post_physics", None)
         ):
             raise PhysicalEpochIntegrationHold(
-                "R06 direct ActionEpoch postphysics/retire owner API is absent or patched"
+                "R06 direct ActionEpoch sample/finalize/retire API is absent or patched"
             )
         fixed_flight_slot = self._fixed_flight_slot_grid
         self._action_epoch_active_r06_postphysics = (
@@ -7487,37 +7518,30 @@ class ActionBallPhysicalFlightDeviceOwner:
                 _token=_ACTION_EPOCH_R06_POSTPHYSICS_TOKEN,
             )
         )
-        refresh_epoch = getattr(
-            epoch_owner, "refresh_physical_postphysics_rows", None
-        )
-        direct_refresh_epoch = getattr(
-            type(epoch_owner), "refresh_physical_postphysics_rows", None
-        )
-        if (
-            not callable(refresh_epoch)
-            or not callable(direct_refresh_epoch)
-            or getattr(refresh_epoch, "__self__", None) is not epoch_owner
-            or getattr(refresh_epoch, "__func__", None) is not direct_refresh_epoch
+        if substep == 0:
+            if (
+                self._action_epoch_control_postphysics_projections
+                or self._action_epoch_control_postphysics_control is not None
+                or self._action_epoch_control_postphysics_count is not None
+            ):
+                raise PhysicalEpochIntegrationHold(
+                    "Physical postphysics control window overlapped its predecessor"
+                )
+            self._action_epoch_control_postphysics_control = control
+            self._action_epoch_control_postphysics_count = image.exact_stamp[2]
+        elif (
+            self._action_epoch_control_postphysics_control != control
+            or self._action_epoch_control_postphysics_count != image.exact_stamp[2]
+            or len(self._action_epoch_control_postphysics_projections) != substep
         ):
             raise PhysicalEpochIntegrationHold(
-                "Epoch exact Physical postphysics row consumer is absent or patched"
+                "Physical postphysics control window is skipped or out of order"
             )
-        profiled_call("physical_epoch_refresh", refresh_epoch)
+        projection = self.require_owned_action_epoch_r06_postphysics_projection()
+        self._action_epoch_control_postphysics_projections.append(projection)
         post_result = _require_final_r06_type(
-            profiled_call("r06_postphysics_settle", publish_direct),
-            expected_name="ActionEpochR06PostPhysicsResult",
-        )
-        retire_result = _require_final_r06_type(
-            profiled_call("r06_postphysics_retire", retire_direct),
-            expected_name="ActionEpochR06RetireResult",
-        )
-        self.require_owned_action_epoch_r06_postphysics_projection()
-        retired = _tensor(
-            getattr(retire_result, "retired_mask", None),
-            label="R06 direct retired_mask",
-            shape=shape,
-            dtype=torch.bool,
-            device=self.device,
+            profiled_call("r06_postphysics_sample", sample_direct),
+            expected_name="ActionEpochR06PostPhysicsSample",
         )
         settled = _tensor(
             getattr(post_result, "settled_mask", None),
@@ -7540,23 +7564,19 @@ class ActionBallPhysicalFlightDeviceOwner:
             dtype=torch.bool,
             device=self.device,
         )
-        slot_match = torch.ones(shape, dtype=torch.bool, device=self.device)
-        for result in (post_result, retire_result):
-            slot_match &= _tensor(
-                getattr(result, "flight_slot", None),
-                label="R06 direct flight_slot",
-                shape=shape,
-                dtype=torch.int64,
-                device=self.device,
-            ).eq(fixed_flight_slot)
-        retire_mismatch = (
-            ~slot_match | (accepted & rejected) | (retired ^ settled)
-        )
+        slot_match = _tensor(
+            getattr(post_result, "flight_slot", None),
+            label="R06 direct flight_slot",
+            shape=shape,
+            dtype=torch.int64,
+            device=self.device,
+        ).eq(fixed_flight_slot)
+        retire_mismatch = ~slot_match | (accepted & rejected)
         self._action_epoch_runtime_fault_bits |= (
             retire_mismatch.any(dim=1).to(torch.int64)
             * _ACTION_EPOCH_RUNTIME_FAULT_R06_RETIRE_MISMATCH
         )
-        safe_retired = retired & ~retire_mismatch
+        safe_retired = settled & ~retire_mismatch
         safe_accepted = accepted & ~retire_mismatch
         # R06 accepted this exact typed publication and continuity image.  It
         # is now the sole authority for the next direct substep.  Masked
@@ -7596,25 +7616,104 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._published &= ~safe_retired
         self._slot_version += safe_retired.to(torch.int64)
         self._action_epoch_active_r06_postphysics = None
+        self._active_postphysics_capture = None
+        self._active_postphysics_capture_image = None
+        self._action_epoch_substep_pair = None
+        if substep != image.exact_stamp[2] - 1:
+            return None
+
+        final_result = _require_final_r06_type(
+            profiled_call(
+                "r06_postphysics_settle",
+                finalize_direct,
+                physics_substeps_per_control=image.exact_stamp[2],
+            ),
+            expected_name="ActionEpochR06PostPhysicsResult",
+        )
+        retire_result = _require_final_r06_type(
+            profiled_call("r06_postphysics_retire", retire_direct),
+            expected_name="ActionEpochR06RetireResult",
+        )
+        retired = _tensor(
+            getattr(retire_result, "retired_mask", None),
+            label="R06 direct retired_mask",
+            shape=shape,
+            dtype=torch.bool,
+            device=self.device,
+        )
+        finalized = _tensor(
+            getattr(final_result, "settled_mask", None),
+            label="R06 direct finalized_mask",
+            shape=shape,
+            dtype=torch.bool,
+            device=self.device,
+        )
+        final_slot_match = torch.ones(
+            shape, dtype=torch.bool, device=self.device
+        )
+        for result in (final_result, retire_result):
+            final_slot_match &= _tensor(
+                getattr(result, "flight_slot", None),
+                label="R06 direct finalized flight_slot",
+                shape=shape,
+                dtype=torch.int64,
+                device=self.device,
+            ).eq(fixed_flight_slot)
+        final_mismatch = ~final_slot_match | (retired ^ finalized)
+        self._action_epoch_runtime_fault_bits |= (
+            final_mismatch.any(dim=1).to(torch.int64)
+            * _ACTION_EPOCH_RUNTIME_FAULT_R06_RETIRE_MISMATCH
+        )
+        retired &= ~final_mismatch
+
+        refresh_epoch = getattr(
+            epoch_owner, "refresh_physical_postphysics_rows", None
+        )
+        direct_refresh_epoch = getattr(
+            type(epoch_owner), "refresh_physical_postphysics_rows", None
+        )
         r06_publish = getattr(
-            self._r06_owner, "publish_action_ball_full_mdp_epoch_facts", None
+            self._r06_owner,
+            "publish_action_ball_full_mdp_epoch_control_substep_facts",
+            None,
         )
         direct_r06_publish = getattr(
             type(self._r06_owner),
-            "publish_action_ball_full_mdp_epoch_facts",
+            "publish_action_ball_full_mdp_epoch_control_substep_facts",
             None,
         )
         if (
-            not callable(r06_publish)
+            not callable(refresh_epoch)
+            or not callable(direct_refresh_epoch)
+            or getattr(refresh_epoch, "__self__", None) is not epoch_owner
+            or getattr(refresh_epoch, "__func__", None)
+            is not direct_refresh_epoch
+            or not callable(r06_publish)
             or not callable(direct_r06_publish)
             or getattr(r06_publish, "__self__", None) is not self._r06_owner
-            or getattr(r06_publish, "__func__", None) is not direct_r06_publish
+            or getattr(r06_publish, "__func__", None)
+            is not direct_r06_publish
         ):
             raise PhysicalEpochIntegrationHold(
-                "R06 ActionEpoch fact publisher is absent or patched"
+                "postphysics control-window Epoch replay API is absent or patched"
             )
-        profiled_call("r06_epoch_facts_publish", r06_publish)
-        retired = ~self._published & self._parked
+        replay = tuple(self._action_epoch_control_postphysics_projections)
+        if len(replay) != image.exact_stamp[2]:
+            raise PhysicalEpochIntegrationHold(
+                "Physical postphysics control window cardinality differs"
+            )
+        for replay_substep, replay_projection in enumerate(replay):
+            self._action_epoch_active_r06_postphysics = replay_projection
+            profiled_call("physical_epoch_refresh", refresh_epoch)
+            self._action_epoch_active_r06_postphysics = None
+            profiled_call(
+                "r06_epoch_facts_publish",
+                r06_publish,
+                substep_index=replay_substep,
+            )
+        self._action_epoch_control_postphysics_projections.clear()
+        self._action_epoch_control_postphysics_control = None
+        self._action_epoch_control_postphysics_count = None
         active_slots = self._action_epoch_active_flight_slot
         safe_active_slots = active_slots.clamp(0, self.flight_capacity - 1)
         active_slot_valid = active_slots.ge(0) & active_slots.lt(
@@ -7666,9 +7765,6 @@ class ActionBallPhysicalFlightDeviceOwner:
             torch.full_like(active_slots, -1),
             active_slots,
         )
-        self._active_postphysics_capture = None
-        self._active_postphysics_capture_image = None
-        self._action_epoch_substep_pair = None
         return None
 
     def build_post_physics_publication(

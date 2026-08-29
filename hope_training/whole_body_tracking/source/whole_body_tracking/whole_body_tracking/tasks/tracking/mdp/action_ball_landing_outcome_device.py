@@ -416,6 +416,10 @@ SETTLEMENT_CAUSE_PRODUCER_CONTRACT_FAULT = 5
 SETTLEMENT_CAUSE_ENGINE_OVERFLOW = 6
 SETTLEMENT_CAUSE_PROTOCOL_FAULT = 7
 
+_CONTROL_CROSSING_NONE = 0
+_CONTROL_CROSSING_VALID = 1
+_CONTROL_CROSSING_NONFINITE = 2
+
 # Infrastructure settlement is intentionally outside C04's reason namespace.
 CANONICAL_REASON_NOT_SCORED = -4
 
@@ -4515,6 +4519,16 @@ class ActionEpochR06PostPhysicsResult:
 
 
 @dataclass(frozen=True)
+class ActionEpochR06PostPhysicsSample:
+    """Minimal per-substep stop/continuity verdict before control finalize."""
+
+    accepted: torch.Tensor
+    rejected: torch.Tensor
+    settled_mask: torch.Tensor
+    flight_slot: torch.Tensor
+
+
+@dataclass(frozen=True)
 class ActionEpochR06RetireResult:
     """Typed rows actually retired by R06's private direct-lane decision."""
 
@@ -5840,6 +5854,35 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             ActionEpochR06CurrentSettlementDelta | None
         ) = None
         self._action_epoch_current_settlement_delta_sequence = 0
+        # Fresh ActionEpoch direct post-physics is sampled at physics cadence,
+        # while scoring/mailbox materialization is committed once at the final
+        # substep of the control window.  These tensors are R06's sole private
+        # terminal-candidate owner; Physical receives only a typed stop mask.
+        self._action_epoch_control_pending_cause = torch.full(
+            self._flight_shape,
+            SETTLEMENT_CAUSE_NONE,
+            dtype=torch.int8,
+            device=self.device,
+        )
+        self._action_epoch_control_pending_crossing_kind = torch.full(
+            self._flight_shape,
+            _CONTROL_CROSSING_NONE,
+            dtype=torch.int8,
+            device=self.device,
+        )
+        self._action_epoch_control_pending_crossing_xy = torch.zeros(
+            self._flight_shape + (2,), dtype=torch.float32, device=self.device
+        )
+        self._action_epoch_control_pending_crossing_control = torch.full(
+            self._flight_shape, -1, dtype=torch.int64, device=self.device
+        )
+        self._action_epoch_control_pending_crossing_substep = torch.full(
+            self._flight_shape, -1, dtype=torch.int32, device=self.device
+        )
+        self._action_epoch_control_substep_count: int | None = None
+        self._action_epoch_control_replay: _ActionEpochOutcomeCandidateGrid | None = None
+        self._action_epoch_control_replay_substep: torch.Tensor | None = None
+        self._action_epoch_control_outcome_next_index = 0
         self._active_post_physics_contact_authority: (
             _RetainedPostPhysicsContactAuthority | None
         ) = None
@@ -6858,16 +6901,27 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 owner_fault_bits=prepared.owner_fault_bits,
             )
         )
-        sequence = self._action_epoch_current_settlement_delta_sequence
-        self._action_epoch_current_settlement_delta_sequence += 1
+        return self._mint_action_epoch_outcome_rows(projection)
+
+    def _mint_action_epoch_outcome_rows(
+        self, rows: ActionEpochR06OutcomeRows
+    ) -> ActionEpochR06CurrentSettlementDelta:
+        if (
+            type(rows) is not ActionEpochR06OutcomeRows
+            or self._pending_action_epoch_current_settlement_delta is not None
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 current-settlement rows lifetime differs"
+            )
         delta = ActionEpochR06CurrentSettlementDelta(
-            rows=projection,
-            sequence=sequence,
+            rows=rows,
+            sequence=self._action_epoch_current_settlement_delta_sequence,
             r06_owner=self,
             epoch_owner=self._action_ball_full_mdp_epoch_owner,
             _owner_identity=self,
             _token=_ACTION_EPOCH_R06_CURRENT_SETTLEMENT_DELTA_TOKEN,
         )
+        self._action_epoch_current_settlement_delta_sequence += 1
         self._pending_action_epoch_current_settlement_delta = delta
         return delta
 
@@ -6938,6 +6992,54 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 "R06 ActionEpoch current-settlement consumer differs"
             )
         refresh(delta)
+
+    def publish_action_ball_full_mdp_epoch_control_substep_facts(
+        self, *, substep_index: int
+    ) -> None:
+        """Replay one retained control-window outcome row in causal order."""
+
+        replay = self._action_epoch_control_replay
+        replay_substep = self._action_epoch_control_replay_substep
+        count = self._action_epoch_control_substep_count
+        owner = self._action_ball_full_mdp_epoch_owner
+        if (
+            type(replay) is not _ActionEpochOutcomeCandidateGrid
+            or type(replay_substep) is not torch.Tensor
+            or type(count) is not int
+            or owner is None
+            or type(substep_index) is not int
+            or substep_index != self._action_epoch_control_outcome_next_index
+            or substep_index < 0
+            or substep_index >= count
+            or self._pending_action_epoch_current_settlement_delta is not None
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 ActionEpoch control outcome replay is stale or out of order"
+            )
+        rows = self._project_action_epoch_outcome_candidates(
+            _ActionEpochOutcomeCandidateGrid(
+                candidate=replay.candidate & replay_substep.eq(substep_index),
+                shot_key_values=replay.shot_key_values,
+                publication_ordinal=replay.publication_ordinal,
+                settlement_step=replay.settlement_step,
+                policy_eligible=replay.policy_eligible,
+                fact_values=replay.fact_values,
+                outcome_code=replay.outcome_code,
+                owner_fault_bits=replay.owner_fault_bits,
+            )
+        )
+        self._mint_action_epoch_outcome_rows(rows)
+        self.publish_action_ball_full_mdp_epoch_facts()
+        if self._pending_action_epoch_current_settlement_delta is not None:
+            raise LandingOutcomeDeviceError(
+                "Epoch did not consume the control outcome delta"
+            )
+        self._action_epoch_control_outcome_next_index += 1
+        if self._action_epoch_control_outcome_next_index == count:
+            self._action_epoch_control_replay = None
+            self._action_epoch_control_replay_substep = None
+            self._action_epoch_control_outcome_next_index = 0
+            self._action_epoch_control_substep_count = None
 
     def require_owned_action_epoch_current_settlement_delta(
         self,
@@ -8193,6 +8295,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         allow_pending_post_physics_settlement: bool = False,
         allow_pending_post_physics_contact_authority: bool = False,
         allow_pending_action_epoch_current_settlement_delta: bool = False,
+        allow_action_epoch_control_window: bool = False,
         allow_full_mdp_reward_cycle: bool = False,
     ) -> None:
         if self._poisoned:
@@ -8249,6 +8352,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         ):
             raise LandingOutcomeDeviceError(
                 "unconsumed ActionEpoch current-settlement delta blocks owner mutation/drain/checkpoint"
+            )
+        if (
+            self._action_epoch_control_substep_count is not None
+            and not allow_action_epoch_control_window
+        ):
+            raise LandingOutcomeDeviceError(
+                "open ActionEpoch postphysics control window blocks unrelated mutation/drain/checkpoint"
             )
         if (
             (
@@ -10615,6 +10725,27 @@ class ActionBallLandingOutcomeDeviceCoordinator:
     ) -> ActionEpochR06PostPhysicsResult:
         """Pull and settle Physical's one active typed packet without a caller payload."""
 
+        return self._pull_action_ball_full_mdp_epoch_post_physics(
+            defer_control_finalize=False
+        )
+
+    def sample_action_ball_full_mdp_epoch_post_physics(
+        self,
+    ) -> ActionEpochR06PostPhysicsSample:
+        """Consume one causal substep and retain terminal work for control flush."""
+
+        return self._pull_action_ball_full_mdp_epoch_post_physics(
+            defer_control_finalize=True
+        )
+
+    def _pull_action_ball_full_mdp_epoch_post_physics(
+        self, *, defer_control_finalize: bool
+    ) -> ActionEpochR06PostPhysicsResult | ActionEpochR06PostPhysicsSample:
+        if type(defer_control_finalize) is not bool:
+            raise LandingOutcomeDeviceError(
+                "R06 epoch postphysics finalize mode differs"
+            )
+
         epoch_owner = self._action_ball_full_mdp_epoch_owner
         park_authority = self._physical_park_token_authority
         if epoch_owner is None or park_authority is None:
@@ -10650,17 +10781,42 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             raise LandingOutcomeDeviceError(
                 "R06 epoch postphysics Physical projection is foreign"
             )
-        result = self._publish_post_physics_impl(view, action_epoch_direct=True)
-        if type(result) is not ActionEpochR06PostPhysicsResult:
+        result = self._publish_post_physics_impl(
+            view,
+            action_epoch_direct=True,
+            defer_action_epoch_control_finalize=defer_control_finalize,
+        )
+        expected = (
+            ActionEpochR06PostPhysicsSample
+            if defer_control_finalize
+            else ActionEpochR06PostPhysicsResult
+        )
+        if type(result) is not expected:
             raise LandingOutcomeDeviceError("R06 epoch postphysics result type differs")
         return result
 
     def _publish_post_physics_impl(
-        self, batch: object, *, action_epoch_direct: bool
-    ) -> PostPhysicsMutationResult | ActionEpochR06PostPhysicsResult:
+        self,
+        batch: object,
+        *,
+        action_epoch_direct: bool,
+        defer_action_epoch_control_finalize: bool = False,
+    ) -> (
+        PostPhysicsMutationResult
+        | ActionEpochR06PostPhysicsResult
+        | ActionEpochR06PostPhysicsSample
+    ):
         """Shared physics math after either legacy or typed-direct ingress."""
 
-        self._require_operable()
+        self._require_operable(
+            allow_action_epoch_control_window=(
+                action_epoch_direct and defer_action_epoch_control_finalize
+            )
+        )
+        if defer_action_epoch_control_finalize and not action_epoch_direct:
+            raise LandingOutcomeDeviceError(
+                "legacy postphysics cannot defer an ActionEpoch control finalize"
+            )
         if not action_epoch_direct and not isinstance(batch, PostPhysicsFlightBatch):
             raise LandingOutcomeDeviceError("batch must be PostPhysicsFlightBatch")
         physical_publication_identity = (
@@ -10834,7 +10990,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             | (self._flight_state == FLIGHT_OPEN)
         )
         if action_epoch_direct:
-            live = live & self._flight_action_epoch
+            live = (
+                live
+                & self._flight_action_epoch
+                & self._action_epoch_control_pending_cause.eq(
+                    SETTLEMENT_CAUSE_NONE
+                )
+            )
         observed_nonlive = observe & ~live
         missing_live = live & ~observe
         if action_epoch_direct:
@@ -11327,6 +11489,24 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             self._flight_net_stamp_substep, net_stamp.physics_substep, valid_new_net
         )
 
+        if action_epoch_direct and defer_action_epoch_control_finalize:
+            assert direct_flight_slot is not None
+            return self._sample_action_epoch_control_substep(
+                bound=bound,
+                missing_live=missing_live,
+                observe=observe,
+                fault_bits=fault_bits,
+                settlement_cause=settlement_cause,
+                policy_nonfinite_crossing=policy_nonfinite_crossing,
+                safe_crossing=safe_crossing,
+                chosen_crossing_xy=chosen_crossing_xy,
+                effective_crossing_stamp=effective_crossing_stamp,
+                observation_stamp=observation_stamp,
+                observation_ordinal=ordinal,
+                current_ball_center_m=current,
+                direct_flight_slot=direct_flight_slot,
+            )
+
         policy_settlement = (
             (settlement_cause == SETTLEMENT_CAUSE_FIRST_CROSSING)
             | (settlement_cause == SETTLEMENT_CAUSE_CONTACT_DEADLINE)
@@ -11597,6 +11777,242 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         )
         return result
 
+    def _sample_action_epoch_control_substep(
+        self,
+        *,
+        bound: torch.Tensor,
+        missing_live: torch.Tensor,
+        observe: torch.Tensor,
+        fault_bits: torch.Tensor,
+        settlement_cause: torch.Tensor,
+        policy_nonfinite_crossing: torch.Tensor,
+        safe_crossing: torch.Tensor,
+        chosen_crossing_xy: torch.Tensor,
+        effective_crossing_stamp: PhysicsStampBatch,
+        observation_stamp: PhysicsStampBatch,
+        observation_ordinal: torch.Tensor,
+        current_ball_center_m: torch.Tensor,
+        direct_flight_slot: torch.Tensor,
+    ) -> ActionEpochR06PostPhysicsSample:
+        """Advance the causal R06 FSA without scoring or mailbox materialization."""
+
+        if self._action_epoch_control_replay is not None:
+            raise LandingOutcomeDeviceError(
+                "R06 ActionEpoch postphysics sample crossed unconsumed replay"
+            )
+        if self._action_epoch_control_substep_count is None:
+            self._action_epoch_control_substep_count = 0
+        self._action_epoch_control_substep_count += 1
+
+        crossing_valid = settlement_cause.eq(SETTLEMENT_CAUSE_FIRST_CROSSING)
+        safe_xy = torch.where(
+            crossing_valid.unsqueeze(-1),
+            chosen_crossing_xy,
+            torch.zeros_like(chosen_crossing_xy),
+        )
+        settle = settlement_cause.ne(SETTLEMENT_CAUSE_NONE)
+        reservation_ok = self._action_epoch_flight_reservation_ok()
+        copy_collision = settle & ~reservation_ok
+        collision_bits = torch.where(
+            copy_collision,
+            torch.full_like(fault_bits, FAULT_MAILBOX_COPY_COLLISION),
+            torch.zeros_like(fault_bits),
+        )
+        fault_bits = torch.bitwise_or(fault_bits, collision_bits)
+        self._post_fault_bits.bitwise_or_(collision_bits)
+        self._flight_fault_bits.copy_(
+            torch.where(
+                copy_collision,
+                torch.bitwise_or(self._flight_fault_bits, collision_bits),
+                self._flight_fault_bits,
+            )
+        )
+        settle &= reservation_ok
+        new_pending = settle & self._action_epoch_control_pending_cause.eq(
+            SETTLEMENT_CAUSE_NONE
+        )
+        _masked_copy_(
+            self._action_epoch_control_pending_cause,
+            settlement_cause,
+            new_pending,
+        )
+        _masked_copy_(
+            self._action_epoch_control_pending_crossing_kind,
+            torch.where(
+                crossing_valid,
+                torch.full_like(
+                    settlement_cause, _CONTROL_CROSSING_VALID
+                ),
+                torch.where(
+                    policy_nonfinite_crossing,
+                    torch.full_like(
+                        settlement_cause, _CONTROL_CROSSING_NONFINITE
+                    ),
+                    torch.full_like(
+                        settlement_cause, _CONTROL_CROSSING_NONE
+                    ),
+                ),
+            ),
+            new_pending,
+        )
+        _masked_copy_(
+            self._action_epoch_control_pending_crossing_xy,
+            safe_xy,
+            new_pending,
+        )
+        _masked_copy_(
+            self._action_epoch_control_pending_crossing_control,
+            effective_crossing_stamp.control_step,
+            new_pending,
+        )
+        _masked_copy_(
+            self._action_epoch_control_pending_crossing_substep,
+            effective_crossing_stamp.physics_substep,
+            new_pending,
+        )
+        _masked_copy_(
+            self._flight_observation_ordinal, observation_ordinal, bound
+        )
+        _masked_copy_(
+            self._flight_last_ball_center_m, current_ball_center_m, bound
+        )
+        _masked_copy_(
+            self._flight_last_observation_control,
+            observation_stamp.control_step,
+            bound,
+        )
+        _masked_copy_(
+            self._flight_last_observation_substep,
+            observation_stamp.physics_substep,
+            bound,
+        )
+
+        accepted = bound & fault_bits.eq(0)
+        rejected = missing_live | (observe & ~accepted)
+        self._record_fault_events(fault_bits)
+        self._increment_mutation()
+        return ActionEpochR06PostPhysicsSample(
+            accepted=accepted.detach().clone(),
+            rejected=rejected.detach().clone(),
+            settled_mask=settle.detach().clone(),
+            flight_slot=direct_flight_slot.detach().clone(),
+        )
+
+    def finalize_action_ball_full_mdp_epoch_post_physics_control(
+        self, *, physics_substeps_per_control: int
+    ) -> ActionEpochR06PostPhysicsResult:
+        """Score and materialize one sampled ActionEpoch control window."""
+
+        sampled_count = self._action_epoch_control_substep_count
+        if (
+            type(physics_substeps_per_control) is not int
+            or physics_substeps_per_control < 1
+            or sampled_count != physics_substeps_per_control
+            or self._action_epoch_post_physics_result is not None
+            or self._prepared_action_epoch_current_settlement_delta is not None
+            or self._action_epoch_control_replay is not None
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 ActionEpoch control finalize lifetime differs"
+            )
+        cause = self._action_epoch_control_pending_cause
+        pending = cause.ne(SETTLEMENT_CAUSE_NONE)
+        crossing_kind = self._action_epoch_control_pending_crossing_kind
+        crossing_present = crossing_kind.ne(_CONTROL_CROSSING_NONE)
+        crossing_valid = crossing_kind.eq(_CONTROL_CROSSING_VALID)
+        crossing_nonfinite = crossing_kind.eq(_CONTROL_CROSSING_NONFINITE)
+        policy = pending & (
+            cause.eq(SETTLEMENT_CAUSE_FIRST_CROSSING)
+            | cause.eq(SETTLEMENT_CAUSE_CONTACT_DEADLINE)
+            | cause.eq(SETTLEMENT_CAUSE_CROSSING_HORIZON)
+            | crossing_nonfinite
+        )
+        score = self._score_action_epoch_policy_subset(
+            policy_mask=policy,
+            target_xy_m=self._flight_target_xy_m,
+            contact_valid=self._flight_contact_valid,
+            crossing_present=crossing_present,
+            crossing_valid=crossing_valid,
+            crossing_nonfinite=crossing_nonfinite,
+            crossing_xy_m=self._action_epoch_control_pending_crossing_xy,
+            net_crossed=self._flight_net_crossed,
+            net_clear=self._flight_net_clear,
+        )
+        # The typed ActionEpoch scorer has no task-drain branch.  Keep that
+        # first-principles contract explicit: a later scorer change may not
+        # silently move physical-stop authority from the substep sampler.
+        if score.drain_fault.shape != self._flight_shape:
+            raise LandingOutcomeDeviceError(
+                "R06 ActionEpoch control score drain ABI differs"
+            )
+        observation_stamp = PhysicsStampBatch(
+            control_step=self._flight_last_observation_control,
+            physics_substep=self._flight_last_observation_substep,
+            event_phase=torch.full(
+                self._flight_shape,
+                PHASE_LANDING,
+                dtype=torch.int8,
+                device=self.device,
+            ),
+        )
+        crossing_stamp = PhysicsStampBatch(
+            control_step=self._action_epoch_control_pending_crossing_control,
+            physics_substep=self._action_epoch_control_pending_crossing_substep,
+            event_phase=torch.full(
+                self._flight_shape,
+                PHASE_LANDING,
+                dtype=torch.int8,
+                device=self.device,
+            ),
+        )
+        self._copy_settlements(
+            settle=pending,
+            observation_ordinal=self._flight_observation_ordinal,
+            settlement_cause=cause,
+            policy_settlement=policy,
+            crossing_present=crossing_present,
+            crossing_valid=crossing_valid,
+            crossing_nonfinite=crossing_nonfinite,
+            crossing_xy=self._action_epoch_control_pending_crossing_xy,
+            observation_stamp=observation_stamp,
+            crossing_stamp=crossing_stamp,
+            score=score,
+            action_epoch_direct=True,
+        )
+        prepared = self._prepare_action_epoch_current_settlement_delta(
+            settle=pending,
+            observation_stamp=observation_stamp,
+            settlement_cause=cause,
+            policy_settlement=policy,
+            crossing_valid=crossing_valid,
+            crossing_xy=self._action_epoch_control_pending_crossing_xy,
+            score=score,
+        )
+        fault_bits = self._flight_fault_bits
+        result = ActionEpochR06PostPhysicsResult(
+            accepted=(pending & fault_bits.eq(0)).detach().clone(),
+            rejected=(pending & fault_bits.ne(0)).detach().clone(),
+            fault_bits=fault_bits.detach().clone(),
+            settled_mask=pending.detach().clone(),
+            settlement_cause=torch.where(
+                pending,
+                cause,
+                torch.full_like(
+                    cause,
+                    SETTLEMENT_CAUSE_NONE,
+                ),
+            ).detach().clone(),
+            new_valid_contact_mask=torch.zeros_like(pending),
+            observation_ordinal=self._flight_observation_ordinal.detach().clone(),
+            mutation_version=self._mutation_version.detach().clone(),
+            flight_slot=self._flight_slot_ids.expand(self._flight_shape)
+            .detach().clone(),
+        )
+        self._action_epoch_post_physics_result = result
+        self._prepared_action_epoch_current_settlement_delta = prepared
+        self._action_epoch_post_physics_settled_mask = prepared.candidate
+        return result
+
     def retire_action_ball_full_mdp_epoch_post_physics(
         self,
     ) -> ActionEpochR06RetireResult:
@@ -11653,7 +12069,39 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             flight_slot=result.flight_slot.detach().clone(),
             mutation_version=self._mutation_version.detach().clone(),
         )
-        self._mint_action_epoch_current_settlement_delta(retire_valid)
+        if self._action_epoch_control_substep_count is not None:
+            prepared = self._prepared_action_epoch_current_settlement_delta
+            if type(prepared) is not _ActionEpochOutcomeCandidateGrid:
+                raise LandingOutcomeDeviceError(
+                    "R06 ActionEpoch control outcome source differs"
+                )
+            self._action_epoch_control_replay = (
+                _ActionEpochOutcomeCandidateGrid(
+                    candidate=retire_valid,
+                    shot_key_values=prepared.shot_key_values,
+                    publication_ordinal=prepared.publication_ordinal,
+                    settlement_step=prepared.settlement_step,
+                    policy_eligible=prepared.policy_eligible,
+                    fact_values=prepared.fact_values,
+                    outcome_code=prepared.outcome_code,
+                    owner_fault_bits=prepared.owner_fault_bits,
+                )
+            )
+            self._action_epoch_control_replay_substep = (
+                self._flight_last_observation_substep.detach().clone()
+            )
+            self._action_epoch_control_outcome_next_index = 0
+            self._action_epoch_control_pending_cause.fill_(
+                SETTLEMENT_CAUSE_NONE
+            )
+            self._action_epoch_control_pending_crossing_kind.fill_(
+                _CONTROL_CROSSING_NONE
+            )
+            self._action_epoch_control_pending_crossing_xy.zero_()
+            self._action_epoch_control_pending_crossing_control.fill_(-1)
+            self._action_epoch_control_pending_crossing_substep.fill_(-1)
+        else:
+            self._mint_action_epoch_current_settlement_delta(retire_valid)
         self._action_epoch_post_physics_result = None
         self._action_epoch_post_physics_settled_mask = None
         self._prepared_action_epoch_current_settlement_delta = None
@@ -15441,6 +15889,7 @@ __all__ = [
     "ActionEpochR06CurrentFlightObservationView",
     "ActionEpochR06OutcomeRows",
     "ActionEpochR06PostPhysicsResult",
+    "ActionEpochR06PostPhysicsSample",
     "ActionEpochR06RetireResult",
     "ActionBallLandingOutcomeDeviceCoordinator",
     "ArmedPhysicalRetire",

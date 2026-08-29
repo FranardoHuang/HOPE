@@ -785,7 +785,7 @@ def test_launch_source_orders_r06_then_epoch_pull_before_projection_clear():
     assert positions == tuple(sorted(positions))
 
 
-def test_postphysics_source_orders_one_capture_through_physical_and_r06_retire():
+def test_postphysics_source_samples_then_finalizes_control_window_in_causal_order():
     source = inspect.getsource(
         physical.ActionBallPhysicalFlightDeviceOwner.
         publish_action_epoch_post_physics
@@ -793,20 +793,22 @@ def test_postphysics_source_orders_one_capture_through_physical_and_r06_retire()
     ordered = (
         "facts = self.capture_post_physics_facts(stamp)",
         "ActionEpochR06PostPhysicsProjection(",
-        'profiled_call("physical_epoch_refresh", refresh_epoch)',
-        'profiled_call("r06_postphysics_settle", publish_direct)',
-        'profiled_call("r06_postphysics_retire", retire_direct)',
+        'profiled_call("r06_postphysics_sample", sample_direct)',
         'kind="retire"',
-        'profiled_call("r06_epoch_facts_publish", r06_publish)',
         "self._active_postphysics_capture = None",
+        '"r06_postphysics_settle",',
+        'profiled_call("r06_postphysics_retire", retire_direct)',
+        'profiled_call("physical_epoch_refresh", refresh_epoch)',
+        '"r06_epoch_facts_publish",',
     )
     assert source.count(ordered[0]) == 1
-    positions = tuple(
-        source.rindex(fragment)
-        if fragment == "self._active_postphysics_capture = None"
-        else source.index(fragment)
-        for fragment in ordered
-    )
+    positions = []
+    cursor = 0
+    for fragment in ordered:
+        cursor = source.index(fragment, cursor)
+        positions.append(cursor)
+        cursor += len(fragment)
+    positions = tuple(positions)
     assert positions == tuple(sorted(positions))
     assert "retired[env_ids" not in source
     assert "clear_slot_mask = retired & active_slot_mask" in source
