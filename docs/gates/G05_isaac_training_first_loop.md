@@ -7024,3 +7024,17 @@ clean `3343fe90` centered record两端48 tick均无Done，却显示Isaac相对�
 先逼近hard-inner的后果。shared decoder错误已排除。旧nominal-hold PASS末端其实已是
 `waist_roll=-.3205 rad, dq=-1.19 rad/s`，今后只称60-tick nonterminal prefix，不称稳定hold/readiness。
 G05继续`Partial`且`diagnostic_unauthorized=true`。
+
+### 2026-08-30 D05任务节拍与playback解耦（Gate仍`Partial`）
+
+此前Isaac D05把`ready_at_reveal`作为task ACCEPT的必要条件，导致尚未ready的合法题不发布；
+这不是plant/finite/key/optimizer安全事实，而是把课程成功变成启动门。clean `8200c4a2`现在只按
+due、空闲slot、construction/key和owner fault发布task；readiness仅决定Motion/Physical是否开始。
+新增的内部`physical_launch_requested`只区分明确no-launch与ready-but-missing-launch fault，不进obs或新Gate。
+
+Pod1 exact Epoch/Drain/Runner=`232 passed`，与Mu wait/exact-resume合并为`342 passed, 7 skipped`。真实Kit
+fixed-action root=`/workspace/franco/runs/fullmdp-r35-8200c4a2-isaac-fixedprobe-20260829T1758Z`；
+`512×48×31`、`tape=b633da…def8`、`arrays=23dd2a…1c6f`、`done/time-out=0/0`，source clean且自然退出。
+fresh Isaac H48 namespace=`fullmdp-r35-8200c4a2-isaac-h48-20260829T1804Z`已在GPU0启动；首个
+durable ACK已给出`due/selected/accepted=512/512/512`、`deferred/censored/rejected=0/0/0`，证明任务入口开放。
+它不证明balance/mimic/hit/landing成功，也不授权checkpoint resume、promotion、部署或真机；G05保持`Partial`。

@@ -1,5 +1,16 @@
 # 简短进度记录
 
+## 2026-08-30 — D05节拍纠正、双fixed-action与fresh H48重启
+
+- `8200c4a2`把D05 task发布与Motion/Physical playback readiness解耦：不ready合法题仍发布，
+  明确no-launch无债退休，ready但缺launch仍报contract fault；Mu只在teacher离开frame 0时开始
+  playback。这不新增Stage/Gate/obs。Pod exact核心=`232 passed`，合并门=`342 passed,7 skipped`。
+- clean commit的Isaac/Mu真实fixed-action均为`512×48×31`、同tape、`done/time-out=0/0`。fresh
+  `fullmdp-r35-8200c4a2-{isaac,mujoco}-h48-20260829T1804Z`已从GPU0/GPU2启动，无resume/复用；后续按
+  balance→mimic→hit→landing的due/playback/launch/contact/landing分母判读。首前缀中Isaac为
+  `512 due / 512 accepted`，Mu为`512 due / 512 reveal / 0 defer`并在update2出现`241 launch`；两端
+  finite/conservation clean。这关闭实现入口，不使用return平均掩盖零格或宣告课程已学成。
+
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 
 - fresh 4× Mu到ACK623后，matched旧Mu的raw/selected/crossing=`56/5/2` vs `1,665/334/281`，最近10轮

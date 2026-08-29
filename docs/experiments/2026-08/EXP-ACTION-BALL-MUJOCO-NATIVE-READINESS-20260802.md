@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`corrected-dual-fresh-running / active-flight-profile-complete / no-authorized-formal-run`
+- 状态：`cadence-playback-decoupled / corrected-dual-fresh-running / no-authorized-formal-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -8,7 +8,7 @@
 - 复核/决策负责人：Franco
 - 本 successor 当前最高证据等级：最终V3/PPO V6两端各自runtime/rate与fresh prefix达到诊断`E2`；
   跨引擎physics parity、formal learning与promotion仍低于`E2`，历史negative-control的`E3`不向新系统传递
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-29
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-30
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
@@ -350,6 +350,31 @@ direct-paddle 4× fresh Mu到ACK623已最终判负：matched prefix新/旧raw/se
 `56/5/2` vs `1,665/334/281`，最近10轮四项mimic也全部更差。在`5,079,000` playback rows后不再等
 update1000。下一学习候选只在Motion-owned playback期增强同核；Build4 warm-start/replay继续独立延后，
 不新增Observation或把它们和权重混跑。
+
+### 2026-08-30 D05 cadence/playback因果合同纠正
+
+旧FullMDP把`ready_at_reveal`/可播放性直接并入D05 ACCEPT，使每个合法但尚未ready的题被写成
+`DEFER`。这等价于先让policy满足readiness，才发布task/key/clock，把设计上的
+balance→mimic→hit→landing自然重叠串行化。按
+[`HANDOFF_TO_CODEX_20260808.md`](../../operations/HANDOFF_TO_CODEX_20260808.md)的判据，它不防plant、
+finite、key/generation、optimizer或durable事实，而是把task success当成启动门；因此必须重定范围，
+不能继续用“安全”名义保留。
+
+`8200c4a2` 采用最小分层：D05只决定due任务是否发布，Motion/Physical各自从同一
+`playback_admissible`决定是否播放/发球。不ready的ACCEPT仍有真task/key/clock，但用`UNPLAYED`
+无launch/outcome/payment债退休；ready但缺launch仍会contract-fault，不会被无债分支吞掉。内部
+`physical_launch_requested`仅用于这个互斥归因，不进actor/critic observation、公开telemetry或新Gate。
+Mu的playback也与Isaac统一为“量化teacher真正离开frame 0”，不再在姿态未变时提前×4 reward。
+
+exact Pod组合回归=`342 passed, 7 skipped`，其中Epoch/Drain/Runner=`232 passed`；独立反例同时
+证明该拦的“未请求却伪造launch”仍拒绝，误拦的“未ready不发task”已解除。同一clean commit的
+Isaac/Mu真实CUDA fixed-action均为`512×48×31`、tape SHA=`b633da…def8`、`done/time-out=0/0`。
+fresh双端H48/PPO V6已从独立GPU/CPU/namespace启动；其早期验收只看上述课程分母是否按合同开放，
+不会因为第一个update没有hit而新增Stage或判负。
+首个durable前缀已证实这一点：Isaac ACK0的`due/selected/accepted=512/512/512`，
+`deferred/censored/rejected=0/0/0`；Mu update0的`scheduled/due/reveal/deferred=512/512/512/0`，
+update2已有`241 launch`。两端Reward nonfinite与conservation fault均0。这只关闭任务节拍实现；
+mimic误差趋势、selected contact和legal landing仍需更长且有分母的窗口。
 
 采用/延后/拒绝如下：
 

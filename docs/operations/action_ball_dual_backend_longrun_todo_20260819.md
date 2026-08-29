@@ -1,9 +1,9 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`corrected-dual-fresh-running / active-flight-profile-complete / branch-scoped / diagnostic_unauthorized`
+> 状态：`cadence-playback-decoupled / corrected-dual-fresh-running / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-29
+> 更新：2026-08-30
 >
 > `origin/main:docs/NOW.md` 是全项目唯一优先级权威。本页只维护
 > [FullMDP](../DEFINITIONS.md)（完整球路、击球、落点与恢复状态机）单动作双后端
@@ -325,6 +325,30 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    `checkpoint_authority=false/resume_authority=false`。当前FullMDP也没有贯通env/owner/WAL的resume consumer，
    所以不写extractor偷用；未来若实现“全env重置后的numerical continuation”，必须另用新schema、新namespace
    和parent SHA，且不能冒充step-exact resume。本轮不为此再造一套臃肿状态机。
+16. [x] 关闭D05把“任务发布”与“教师可播放”混为同一门的实现错误。旧`b0d7d562`
+   对不ready候选写`DEFER`，实际把balance→mimic→hit串成“先证明readiness才给题”；
+   这不是安全事实，也与自然重叠课程相反。`8200c4a2`把D05 ACCEPT收回到due、空闲slot、
+   construction/key有效和owner fault-free；readiness只决定Motion playback与Physical launch。
+   明确未请求launch的task用typed `UNPLAYED`无债退休，ready但缺launch仍走原contract fault；
+   内部`physical_launch_requested`只用于区分两者，不进obs、metric或新Gate。Mu playback同步收紧为
+   teacher真正离开frame 0，不再提前一个sub-frame放大paddle reward。
+
+   三条旧run已按精确进程组停止，receipt在
+   `/workspace/franco/operator/fullmdp-stop-20260829T1649Z`，root保留且不resume/复用。它们不是“太早”：
+   baseline Mu已有`612,855 launch / 715 selected / 621 crossing / 0 legal`与
+   `0/510,489 recovery`；无条件4× Mu为`401,843 / 38 / 29 / 0`与`0/260,795`；
+   Isaac也在已有physical-launch分母下仍无R03/contact。因此旧曲线作为negative冻结，不移签新实现。
+
+   Pod1 exact组合门为`342 passed, 7 skipped`；关键Epoch/Drain/Runner为`232 passed`，包含未请求
+   launch却伪造Physical的反例。双端真实CUDA fixed-action均从clean `8200c4a2`自然完成：
+   共同`512×48×31`、tape SHA=`b633da…def8`、`done/time-out=0/0`；Isaac arrays SHA=
+   `23dd2a…1c6f`，Mu修正playback时钟后为`94d142…d5220`。这是runtime/fixed-input证据，不是physics parity。
+   fresh H48/PPO V6已分别从GPU0/GPU2启动为
+   `fullmdp-r35-8200c4a2-{isaac,mujoco}-h48-20260829T1804Z`。两端首个durable ACK均已闭合：
+   Isaac ACK0为`due/selected/accepted=512/512/512`、其余决策均0；Mu update0为
+   `scheduled/due/reveal/deferred=512/512/512/0`，update2已有`241 launch`。两端Reward finite且
+   conservation fault=0，因此“发布→playback→launch自然重叠”的实现闭环已通过；
+   短前缀仍不判定mimic/hit/landing成败，学习候选item 15继续开放。
 
 <a id="fullmdp-v9-superseded"></a>
 

@@ -2656,3 +2656,25 @@ Mu summary的`business_chain_complete`当前只代表producer逐row attestation�
 
 当前仍未闭合自然mimic/hit/landing分母、12500 completion、formal independent playback、keyed chain replay、physics/transfer
 parity以及promotion/deploy。两条fresh run均不授权resume、export、部署或真机，G06保持`Partial`。
+
+### 2026-08-30 D05/playback跨后端合同纠正（Gate仍`Partial`）
+
+clean `8200c4a2`同时修正两个可观测的跨端错位：D05不再用readiness吞掉合法task；Mu只在
+teacher量化帧离开frame 0时开始playback，不再比Isaac早一个sub-frame放大paddle reward。Observation V3
+保持`215/231`；本轮没有添加冗余或未来不可观测量。
+
+同一clean exact checkout的真实fixed-action分别为：
+
+- Isaac：`/workspace/franco/runs/fullmdp-r35-8200c4a2-isaac-fixedprobe-20260829T1758Z`，arrays SHA=
+  `23dd2a…1c6f`；
+- MuJoCo：`/workspace/franco/runs/fullmdp-r35-8200c4a2-mujoco-fixedprobe-20260829T1758Z`，arrays SHA=
+  `94d142…d5220`。
+
+两者均为`512×48×31`、同`tape=b633da…def8`、`done/time-out=0/0`，各自source clean并自然退出。
+Mu新arrays与旧`b0d7d562`不同是本次playback时钟语义修正的预期结果，不是physics parity PASS或FAIL。
+fresh双端namespace=`fullmdp-r35-8200c4a2-{isaac,mujoco}-h48-20260829T1804Z`已用GPU0/GPU2和不重叠
+CPU affinity启动，无checkpoint/resume/namespace reuse。Mu首个durable update为
+`scheduled/due/reveal/deferred=512/512/512/0`，update2已有`241 launch`；Isaac首ACK为
+`due/selected/accepted=512/512/512`。两端Reward finite且conservation fault=0，证明自然重叠入口已开放。
+自然阶段交接的学习趋势、physics/transfer parity与formal
+promotion仍未闭合，G06继续`Partial`。
