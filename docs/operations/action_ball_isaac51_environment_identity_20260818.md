@@ -1,8 +1,9 @@
 # ActionBall Isaac 5.1 环境身份合同
 
 > 状态：`PASS-environment / branch-scoped`
-> 更新：2026-08-19
-> 来源：Jiayi 的 `ENVIRONMENT_REPRODUCTION.md` 与 Pod2 实际 import/ABI/AppLauncher 验证。
+> 更新：2026-08-29
+> 来源：Jiayi 的 `ENVIRONMENT_REPRODUCTION.md`、Pod2 import/ABI/AppLauncher验证，以及
+> `origin/build_4@324e60d1`与Pod1实际路径/import复核。
 > 本页不改变 `origin/main:docs/NOW.md` 的项目优先级。
 
 ## 为什么必须换环境
@@ -36,6 +37,33 @@ PPO.process_env_step(self, obs: TensorDict, rewards, dones, extras)
 ```
 
 如果看到 `act(obs, critic_obs)`，立即停止；不能用代码兼容把它升级成等价证据。
+
+## Build4 本机与 Pod 曲线差异：先关闭运行身份漂移
+
+`origin/build_4`的exact commit是`324e60d120856556875d65eb26931c6f89d7f5de`。该branch自己的README目标仍是
+Isaac Sim `4.5.0`、IsaacLab `2.1.0`、Python `3.10`，且没有提交`ENVIRONMENT_REPRODUCTION.md`或
+package lock。更关键的是`hope_training/whole_body_tracking/setup_train_env.sh`只按路径存在性自动选择执行面：
+Python依次探测`/workspace/isaacsim/python.sh`、`/workspace/hope_isaac_venv/bin/python`、
+`/opt/isaacsim/python.sh`；IsaacLab依次探测`/workspace/omni_drones/.../IsaacLab`、
+`/workspace/IsaacLab`、`/opt/IsaacLab`。它不核对版本、commit、ABI或PPO签名。因此同一个Build4 commit在
+两台机器上可以静默成为两个训练系统。
+
+2026-08-29在当前Pod1按该脚本默认选择顺序做live import，结果与当前受控FullMDP进程如下：
+
+| 项 | Build4脚本在Pod1默认命中 | 当前受控FullMDP进程 |
+| --- | --- | --- |
+| Python入口 | `/workspace/hope_isaac_venv/bin/python` → `/usr/bin/python3.10` | `/workspace/isaacsim-5.1.0/python.sh` |
+| IsaacLab | `/workspace/IsaacLab@21f71363…` | `/opt/IsaacLab-8320e0be@8320e0be…` |
+| Python / Isaac Sim / IsaacLab | `3.10.18 / 4.5.0.0 / 0.36.21` | `3.11.13 / 5.1路径 / 0.54.2` |
+| RSL-RL / TensorDict / TorchRL | `2.3.1 / 0.9.1 / missing` | `3.1.2 / 0.10.0 / 0.10.1` |
+| gymnasium / wandb | `1.3.0 / 0.28.0` | `1.2.1 / 0.25.1` |
+| PPO接口 | `act(obs, critic_obs)` | `act(obs: TensorDict)` |
+
+所以，若Jiayi本机Build4跑在5.1/RSL3而Pod直接`source setup_train_env.sh`，两条曲线不是同环境对照；这一层
+漂移已经坐实。尚不能声称它解释了历史曲线差异的全部，因为缺少Jiayi本机和历史Pod run的actual
+`setup_train_env.local.sh`、argv、asset/motion/checkpoint SHA、seed和runtime receipt。下一次Build4复现不再
+使用path autodiscovery作权威：显式指定Python与IsaacLab exact路径，在进程内记录上述版本、两个PPO签名和
+全部输入SHA，不匹配就不启动。这里需要的是一个简单的唯一运行身份，不是更多事后success/safety Gate。
 
 ## Pod2 路径
 

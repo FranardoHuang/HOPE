@@ -7,7 +7,11 @@ Status: Partial
 V9 MuJoCo长期run实际载入legacy root `70c4fd65…36c0a`，不是合同要求的A3P0807
 `7bbda723…bcae1`；这是wrong-object实现错误，不是run name能证明的身份。新的probe在import前绑定显式root，
 legacy输入直接拒绝。pinned IsaacLab/Kit/RSL/USD与Mu runtime均能在Pod1构造、训练、写ACK，因此目前没有
-generic installation corruption证据。
+当前受控FullMDP installation corruption证据。这个结论不外推到Build4的自动环境选择：
+`origin/build_4@324e60d1`在当前Pod1默认命中Python3.10/Isaac Sim4.5/IsaacLab `21f71363…`/RSL2.3.1，
+而现役受控run是Python3.11/Isaac Sim5.1/IsaacLab `8320e0be…`/RSL3.1.2。若Jiayi本机Build4使用后者，
+本机/Pod曲线已经不是同环境；缺actual override/argv/input SHA前不能继续归因。G04要求显式runtime identity，
+不接受path autodiscovery、branch名或兼容代码代签模型一致。
 
 R8把immutable teacher frame0与physical birth分开：旧ready仅作optimizer start，13项具名reserve是固定
 可行域，不再用数值正slack冒充robust。Pod真实PhysX `60/240/1.2 s` prefix双足接触率`1.0`、无terminal或

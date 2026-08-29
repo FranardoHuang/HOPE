@@ -156,22 +156,39 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    `fullmdp-r12-0807-mujoco-rewardpack-954200d5-20260828T2254Z-r2`（GPU2；首个同名root因ignored
    `meshes/`缺失在首ACK前fail-closed且未复用），fresh Isaac使用
    `fullmdp-r12-0807-isaac-rewardpack-954200d5-20260828T2245Z`（GPU0）。启动验收Mu ACK0..7明确绑定
-   plant SHA `7bbda723…bcae1`。`observed_at=2026-08-28T23:53:00Z`时Isaac ACK0..196、Mu ACK0..492；
-   两端Reward28、finite、conservation与attributed fault均clean。Isaac recent50
-   due/accept/playback/launch/contact=`9,725/9,716/9,683/4,337/0`，episode length/return=
-   `126.54/13.06`，wall p50/p90=`20.940/21.215 s/H48`；累计contact=`0/12,847 launch`。Mu recent50 due/launch/R03-valid/selected/raw/landing=
-   `8,183/6,788/5,425/1/30/0`，episode length/return=`150.67/16.90`，wall p50/p90=
-   `6.638/6.728 s/H48`。两端balance明显改善但mimic仍混合；Mu单次selected contact只说明hit可达，不能代签
-   hit基本成功，opponent landing仍为0。后续只按预注册未来窗判断自然课程交接。
-8. [ ] 在不停止两条fresh训练的前提下闭合controller-response对照：向Jiayi索取其本机exact asset、actuator
-   backend、friction/contact、clock与同tape结果；本端按首20 ms与tick47 q/dq/root/racket逐字段比较。
-   先对齐implicit PhysX drive与显式clamped PD/Coulomb friction的语义，再判断是否调plant参数；不把
-   namespace、相同Kp/Kd数字或“看起来差不多”做成新Gate，也不围绕未闭合的sim差异改policy/reward。
+   plant SHA `7bbda723…bcae1`。`observed_at=2026-08-29T04:13:40Z`时Isaac ACK0..971、Mu ACK0..2828；
+   两端Reward28、finite、conservation与attributed fault均clean。Isaac first50→recent50的episode
+   length/return=`105.07/11.30→244.27/23.71`，paddle position/velocity/face/long-axis误差=
+   `.2811/1.2040/.3561/.4092→.1983/.9276/.3775/.2873`；recent50 due/admitted/launch/contact=
+   `7,006/7,001/6,379/0`，累计contact=`0/110,212 launch`，wall p50/p90=`20.750/21.132 s/H48`。
+   生存与三项mimic改善，但face变差、actual-hard-edge joint-sample=`7.13%→8.94%`，故不能称balance或mimic
+   已基本成功。Mu first50→recent50的episode length/return=`136.78/15.64→270.18/29.10`，四项误差=
+   `.2059/1.1556/.3318/.2840→.2105/.9578/.2926/.2432`；recent50
+   due/launch/R03-valid/raw/selected/legal-landing=`8,914/4,883/4,816/10/1/0`，累计selected=
+   `37/365,375 launch`、legal landing=`0/37 selected`，wall p50/p90=`6.709/6.858 s/H48`。
+   Mu触球自然可达但极稀疏，且actual-hard-edge/qdes-guard rows=`4.90%/5.62%→28.19%/29.31%`；episode增长
+   可能部分来自关节边界套利。当前课程裁决仍是balance/mimic在进步、hit未基本成功、landing为`0/37`，
+   不是等待更多step即可自动晋级的证据。
+8. [ ] 在不停止两条fresh训练的前提下闭合本机/Pod与controller-response对照。第一层环境审计已完成：
+   `origin/build_4@324e60d1`没有环境lock，其path-autodiscovery在当前Pod1默认命中Python3.10、Isaac Sim4.5、
+   `/workspace/IsaacLab@21f71363…`、RSL2.3.1；当前受控run则是Python3.11、Isaac Sim5.1、
+   `/opt/IsaacLab-8320e0be`、RSL3.1.2。若Jiayi本机使用后者而Pod直接source Build4脚本，两条Build4曲线已不是
+   同环境。仍需向Jiayi索取实际local override/argv、asset/motion/checkpoint SHA、seed、actuator backend、
+   friction/contact、clock与同tape结果；本端再按首20 ms与tick47 q/dq/root/racket逐字段比较。先关闭运行
+   身份，再对齐implicit PhysX drive与显式clamped PD/Coulomb friction语义；不把同branch名或相同Kp/Kd
+   数字做成新Gate，也不围绕未知差异改policy/reward。
 9. [ ] 做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的exact-only/self-echo
    procedural branches，并用相同artifact/固定tape/receipt反例证明语义未变。当前四个主文件合计约
    `13,167`行，问题不是行数本身，而是construction事实、runtime动态量、诊断身份与durable账本仍有交叉；
    每次只切一个owner边界，不做全文件重写。Epoch每step约`5.95 MiB`的44次record clone和14份payment image
    只有在journal bytes/chronology/carry逐项保持后才可收敛，不能为追求简洁删掉独立可消费证据。
+   Build4的环境path-autodiscovery是同类结构债：procedural fallback同时决定Python、IsaacLab与ABI，却没有
+   唯一运行身份。后续替换为显式typed runtime identity和一次进程内receipt，删除fallback authority；这会
+   减少分支与误比较，不是再加一圈启动后Gate。
+10. [ ] 对Mu `model_2000.pt`做隔离、只读checkpoint轨迹诊断，定位actual-hard-edge与qdes-guard的具体关节、
+    phase和action方向，再决定是controller语义、动作scale还是Reward28权重问题。现有`qdes_limit_barrier=0`
+    不是dead term：processed qdes已被soft inset投影；actual joint仍可因显式PD、积分与惯性碰hard edge，且
+    `joint_limit`已经产生非零付款。未定位前不盲加权、不把hard edge改成Done，也不停止当前只读长期run。
 
 <a id="fullmdp-v9-superseded"></a>
 

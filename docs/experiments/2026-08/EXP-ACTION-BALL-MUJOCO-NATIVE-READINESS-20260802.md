@@ -25,8 +25,8 @@
 当前差异不是一个单因果“sim坏了”。V9 MuJoCo长期run实际选择legacy A3 root MJCF
 `70c4fd65…36c0a`，而teacher/runtime合同要求A3P0807 `7bbda723…bcae1`；这是确定的wrong-object实现错误，
 足以让Jiayi本机matched sim2sim与Pod V9不是同一实验。新的Mu probe在导入合同前绑定所选root，legacy输入
-现会按SHA拒绝。与此同时，pinned IsaacLab/Kit/RSL/USD和mjlab stack都能构造、训练并durable ACK，故仍无
-证据支持Pod整体安装损坏。
+现会按SHA拒绝。与此同时，当前pinned IsaacLab/Kit/RSL/USD和mjlab stack都能构造、训练并durable ACK，故
+仍无证据支持当前受控FullMDP Pod执行面整体损坏；这不等于任意branch的自动环境选择都正确。
 
 用正确0807 root、R8 physical birth、joint order和从唯一pinned dynamic-ready artifact导出的
 `512×H48×31` actor-centered tape重测：两端initial q/dq逐位相同，root/racket位置差只有
@@ -43,6 +43,16 @@ physics parity，也不要求两个backend逐位相同才能各自学习。
 `frictionloss`则是常值库仑关节力矩；Isaac源码明确将这份逐数值照搬标为未校准legacy choice。
 所以当前首步分叉已有具体配置/实现来源，不能归为pip/Kit安装损坏；Jiayi本机sim2sim若要对签，必须给出
 同asset、同actuator backend、同friction/contact/clock的runtime收据，而不能只比较动作或配置名称。
+
+Build4本机/Pod曲线差异另有一个已经坐实的更上游混杂。`origin/build_4@324e60d1`的
+`setup_train_env.sh`只按路径存在性自动挑Python/IsaacLab，不锁version、commit、ABI或PPO签名；在当前Pod1
+会默认选`/workspace/hope_isaac_venv/bin/python`、`/workspace/IsaacLab@21f71363…`，live import为
+Python3.10.18、Isaac Sim4.5.0.0、IsaacLab0.36.21、RSL2.3.1、TensorDict0.9.1及
+`PPO.act(obs, critic_obs)`。当前受控run实际是Python3.11.13、Isaac Sim5.1路径、
+`IsaacLab@8320e0be…`、RSL3.1.2、TensorDict0.10.0及`PPO.act(obs: TensorDict)`。所以“同Build4 commit”
+不能证明本机/Pod同环境；若Jiayi本机使用5.1而Pod使用脚本默认值，曲线比较已经污染。历史两条run仍缺actual
+local override/argv、asset/motion/checkpoint SHA和seed，故暂不把全部差异归因给环境。修法是显式唯一运行
+身份和进程内receipt，不是用兼容代码或额外学习Gate把两套ABI拼成一套。
 
 第二个实现错误来自physical birth定义。exact teacher frame0在0807 plant静态不可执行：waist-pitch hold
 需要约`-49.155 Nm`，可执行position-control authority约`-21.704 Nm`。R7正确地把teacher与physical birth
@@ -105,13 +115,19 @@ controller或学习结论，也不支持为追求速度删除跨writer/journal�
 `fullmdp-r12-0807-isaac-rewardpack-954200d5-20260828T2245Z`；Mu namespace=
 `fullmdp-r12-0807-mujoco-rewardpack-954200d5-20260828T2254Z-r2`。首个Mu root因ignored `meshes/`未同步而在
 source-closure scan、首ACK前fail-closed；补齐现有受控资产后使用fresh `-r2`，失败root未复用。
-`observed_at=2026-08-28T23:53:00Z`时Isaac已到ACK196：recent50 episode length/return=`126.54/13.06`，wall p50/p90=`20.940/21.215 s/H48`，
-due/accept/playback/launch/contact=`9,725/9,716/9,683/4,337/0`，累计contact=`0/12,847 launch`。
-Mu已到ACK492：recent50 episode length/return=`150.67/16.90`，due/launch/R03-valid/selected/raw/landing=
-`8,183/6,788/5,425/1/30/0`，wall p50/p90=`6.638/6.728 s/H48`；累计selected=`1/63,605 launch`。
+`observed_at=2026-08-29T04:13:40Z`时Isaac到ACK971：first50→recent50 episode length/return=
+`105.07/11.30→244.27/23.71`，paddle position/velocity/face/long-axis误差=
+`.2811/1.2040/.3561/.4092→.1983/.9276/.3775/.2873`；recent50 due/admitted/launch/contact=
+`7,006/7,001/6,379/0`，累计contact=`0/110,212 launch`，wall p50/p90=`20.750/21.132 s/H48`。
+Mu到ACK2828：first50→recent50 episode length/return=`136.78/15.64→270.18/29.10`，四项误差=
+`.2059/1.1556/.3318/.2840→.2105/.9578/.2926/.2432`；recent50
+due/launch/R03-valid/raw/selected/legal-landing=`8,914/4,883/4,816/10/1/0`，累计selected=
+`37/365,375 launch`、legal landing=`0/37 selected`，wall p50/p90=`6.709/6.858 s/H48`。
 两端均Reward28、finite、conservation/attributed fault0；Mu每条ACK绑定正确A3P0807 SHA
-`7bbda723…bcae1`。balance生存已改善，mimic仍方向混合；单次selected contact只证明hit可达，不证明
-sim2sim parity、mimic成功、hit基本成功或landing。
+`7bbda723…bcae1`。课程已有自然重叠，但hit仍只有约`.010%`累计selected/launch且无合法落点。Isaac
+actual-hard-edge joint-sample first50→recent50=`7.13%→8.94%`；Mu actual-hard-edge/qdes-guard rows=
+`4.90%/5.62%→28.19%/29.31%`。所以生存曲线改善不能单独代签balance/mimic成功，Mu还存在明显关节边界
+套利风险；先做per-joint/phase checkpoint诊断，再决定controller、scale或reward，不盲目加权或改Done。
 
 Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝试给带`__slots__`、无instance
 `__dict__`的`PhysicalQuestionNumericCore`安装3个leaf wrapper。production/profile-off不受影响；修复是删除

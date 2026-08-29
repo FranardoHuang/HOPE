@@ -43,14 +43,21 @@
   `11,380/11,380` tilt episode且launch归零。旧错误plant谱系只证明极稀疏hit曾可达后遗忘，不能移签R8，
   也不能用generic contact冒充课程交接。
 - V9最终冻结后已按精确进程身份停止；正确A3P0807、同clean source `954200d5`的fresh Isaac/Mu长期run
-  已在GPU0/2持续训练。`observed_at=2026-08-28T23:53:00Z`时分别到ACK196/492；两端Reward28全finite、
-  conservation/attributed fault0。Isaac recent50 launch/contact=`4,337/0`，累计=`12,847/0`；Mu recent50
-  launch/selected/raw/landing=`6,788/1/30/0`，累计=`63,605/1/31/0`。两端episode length/return分别从
-  首10轮`97.26/10.95→126.54/13.06`与`135.79/15.59→150.67/16.90`，说明balance在进步；mimic误差仍
-  方向混合，Mu的单次selected contact远未达到hit基本成功，landing仍未形成。
+  已在GPU0/2持续训练。`observed_at=2026-08-29T04:13:40Z`时分别到ACK971/2828；两端Reward28全finite、
+  conservation/attributed fault0。Isaac first50→recent50 episode length=`105.07→244.27`，三项mimic改善、
+  face变差，recent50 launch/contact=`6,379/0`、累计=`110,212/0`，wall p50/p90=`20.750/21.132 s/H48`。
+  Mu episode length=`136.78→270.18`，recent50 launch/raw/selected/legal=`4,883/10/1/0`、累计selected/legal=
+  `37/0`（累计launch=`365,375`），wall=`6.709/6.858 s/H48`。课程自然重叠但hit约`.010%`且无合法落点；
+  Isaac hard-edge joint-sample=`7.13%→8.94%`，Mu hard-edge/qdes-guard rows=`4.90%/5.62%→28.19%/29.31%`，
+  因此生存增长不单独代签balance/mimic成功，先做per-joint/phase诊断再改controller/scale/reward。
 - old Mu launcher被证实显式使用legacy `a3_pingpong.xml`而非A3P0807；这足以否定旧sim2sim比较，但不证明
   Pod安装整体损坏。同初态/action tape仍在首20 ms产生q/dq差`.00973/.89084`，剩余根因收敛到implicit
   PhysX drive与显式clamped PD/friction语义；需要Jiayi同tape runtime receipt再裁决。
+- Build4本机/Pod差异另有已证环境混杂：`origin/build_4@324e60d1`没有环境lock，其脚本在Pod1默认选择
+  Python3.10/Isaac Sim4.5/IsaacLab `21f71363…`/RSL2.3.1，现役受控run则明确绑定Python3.11/Isaac Sim5.1/
+  IsaacLab `8320e0be…`/RSL3.1.2。若Jiayi本机Build4用后者而Pod使用默认脚本，曲线不属于同环境对照；仍缺
+  历史actual override/argv/input SHA，故不把全部差异归因给它。后续用显式唯一runtime identity取代path
+  autodiscovery，不新增事后learning/safety Gate。
 - `7ce9f120`把regularization静态关节几何从每个Reward热调用移到construction一次验证，并补one-shot、
   unbound fail-loud与静态source mutation反例。Pod组合=`123 passed,5 skipped`，exact CUDA lean Reward=
   `52 passed`；12-update profile的reward span `24.87→22.59 ms/call`。同GPU profiler-off 50个measured

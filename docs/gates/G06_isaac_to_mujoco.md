@@ -18,15 +18,19 @@ PASS阈值，行为接近也不等于数值parity；G06仍`Partial / diagnostic_
 这使旧run的sim2sim差异不可比，但不推出整个Pod安装损坏。correct-0807、同clean source `954200d5`的fresh
 双端现持续训练；首个Mu root因fresh checkout缺ignored 0807 `meshes/`在首ACK前fail-closed，恢复
 [setup记录](../operations/setup_local_sync.md#restore-the-ignored-a3p0807-mujoco-mesh-closure)后以新root启动，
-没有复用失败namespace。`observed_at=2026-08-28T23:53:00Z`时Isaac/Mu到ACK196/492；Isaac累计
-contact=`0/12,847 launch`，Mu recent50 launch/selected/raw/landing=`6,788/1/30/0`、累计selected=
-`1/63,605 launch`。这是真实学习证据，不是physics parity分母；唯一selected contact远未达到hit基本成功。
-Mu recent50 p50/p90=`6.638/6.728 s/H48`，两端finite与durable边界clean。
+没有复用失败namespace。`observed_at=2026-08-29T04:13:40Z`时Isaac/Mu到ACK971/2828；Isaac recent50
+launch/contact=`6,379/0`、累计=`110,212/0`。Mu recent50
+launch/raw/selected/legal-landing=`4,883/10/1/0`、累计selected/legal=`37/0`，累计launch=`365,375`。
+这是真实学习证据，不是physics parity分母；约`.010%`累计selected/launch远未达到hit基本成功。
+Mu recent50 p50/p90=`6.709/6.858 s/H48`，两端finite与durable边界clean；Mu actual-hard-edge/qdes-guard
+rows却从first50 `4.90%/5.62%`升到recent50 `28.19%/29.31%`，因此也不能用episode增长代签两端行为接近。
 
 当前Isaac run的live identity又直接记录Python `3.11.13`、Torch `2.7.0+cu128`、RSL-RL `3.1.2`、
 TensorDict `0.10.0`，AppLauncher来自`IsaacLab-8320e0be`、Isaac Sim路径为`5.1.0`；这些与Jiayi的
-environment reproduction合同一致。因此已证wrong-object是Mu plant选择，不是通用软件栈装错。若Jiayi
-本机动作仍不同，差异必须由其actual runtime/asset/controller receipt来定位，不能把文档版本名代替行为对照。
+environment reproduction合同一致。因此已证wrong-object是旧Mu plant选择，不是当前受控FullMDP软件栈装错。
+但Build4 branch本身没有锁这套环境：其path-autodiscovery在当前Pod1默认命中Python3.10、Isaac Sim4.5、
+`IsaacLab@21f71363…`、RSL2.3.1和旧PPO接口。若Jiayi本机Build4用5.1/RSL3而Pod用默认脚本，两条曲线确实
+不是同一运行环境。历史actual override/argv/input SHA仍缺，故不能把差异的全部比例归因给这项漂移。
 
 当前sim2sim裁决缺的不是另一个“响应差异必须小”的安全Gate，而是匹配对象：Jiayi本机exact asset SHA、
 implicit/explicit actuator backend、clamp/effort、friction/contact参数、substep clock以及同一31-D tape。
