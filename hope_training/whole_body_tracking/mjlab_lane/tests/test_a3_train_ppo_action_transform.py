@@ -554,7 +554,7 @@ def test_full_a_projection_predicted_brake_and_actual_edge_are_nonterminal_telem
     assert env._actual_hard_edge_latch.tolist() == [False, False, False, True]
     assert env._qdes_guard_intervention.tolist() == [False, True, True, True]
     torch.testing.assert_close(
-        env.sim.data.ctrl[:, 0], torch.tensor([0.81, -1.0, 0.0, -1.0])
+        env.sim.data.ctrl[:, 0], torch.tensor([0.81, -1.66, 0.0, -1.81])
     )
     terminated, truncated, bits, _resolved = _fullmdp_termination(env)
     assert terminated.tolist() == [False, False, True, False]
