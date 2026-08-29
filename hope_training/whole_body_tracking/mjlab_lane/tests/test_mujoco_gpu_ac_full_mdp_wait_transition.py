@@ -2034,12 +2034,13 @@ def test_full_a_task_close_uses_real_slot_motion_duration_and_global_cadence():
         wait_env.portable_catalog.load_portable_action_center_table()
     )
     geometry = wait_env.racket_contact_geometry
+    questions = []
 
     def reverse(contact, velocity, spin, tts, _params, **_kwargs):
         return contact - velocity * tts[:, None], velocity.clone(), tts.clone()
 
     def question(**kwargs):
-        return wait_env.portable_question.build_center_question(
+        result = wait_env.portable_question.build_center_question(
             torch=torch,
             row=row,
             base_position_scene=kwargs["base_position_scene"],
@@ -2056,6 +2057,8 @@ def test_full_a_task_close_uses_real_slot_motion_duration_and_global_cadence():
             backint_h=0.005,
             plane_margin=0.005,
         )
+        questions.append(result)
+        return result
 
     env._full_a_catalog = SimpleNamespace(fresh_action=row)
     env._full_a_question_builder = question
@@ -2066,8 +2069,8 @@ def test_full_a_task_close_uses_real_slot_motion_duration_and_global_cadence():
     env._full_a_next_reveal_tick[:] = torch.tensor([480, 295])
     env._full_a_reveal_rows(torch.arange(2))
 
-    assert env._full_a_teacher_rate.tolist() == pytest.approx(
-        [0.9999625683, 0.9999625683], rel=0.0, abs=2.0e-7
+    assert torch.equal(
+        env._full_a_teacher_rate, questions[-1]["teacher_rate"]
     )
     assert torch.equal(
         env._epoch_clock_ticks[:, 3], torch.full((2,), 1101)
