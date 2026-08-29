@@ -314,10 +314,11 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    balance→mimic→hit→landing自然重叠。host静态验证后必须过Pod exact Reward/配置/fixed-action，再以fresh
    namespace做matched训练；三卡当前仍由三条只读run占用，禁止为取卡signal、同卡混跑或复用namespace。
 
-   clean exact source=`ff7a6c4f`已完成Pod CPU/Torch组合门`444 passed,36 skipped`和launcher/setup
-   `98 passed`。首个候选的旧weight断言与scaled-payment污染normalized kernel telemetry两项失败均已修复；
-   validated training checkout=`8a57a522`又在fresh exact目录恢复并核过Mu mesh/EPA48/RSL3，Mu/Isaac完整
-   launcher dry-run均RC0。current-source真实Kit/MuJoCo CUDA fixed-action因三卡占用仍为`未测`，不能据
+   静态双端消费审计否决了`8a57a522`：它只有Isaac读取playback scale，Mu没有。final source=`b0d7d562`
+   已在Mu reward/ledger镜像同一Motion playback事实并保持窄ABI；Pod exact Mu=`354 passed,7 skipped`、共享
+   十文件同进程=`367 passed,25 skipped`、launcher/setup=`98 passed`。final exact目录恢复并核过Mu
+   mesh/EPA48/RSL3，Mu/Isaac完整launcher dry-run均RC0。同进程测试alias污染也已限制在fixture生命周期并恢复，
+   不再要求靠分进程掩盖假失败。current-source真实Kit/MuJoCo CUDA fixed-action因三卡占用仍为`未测`，不能据
    CPU门或dry-run勾选本项或发训练。
 
    Build4的mandatory actor warm-start仍是最强混杂项，但现有`model_2000.pt`明确

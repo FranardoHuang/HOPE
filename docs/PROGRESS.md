@@ -6,20 +6,22 @@
   四项mimic也全部更差；这已最终否决
   无条件`4/4/4/2`，不是早期或工程fault。下一候选恢复full-phase `1/1/1/.5`，只在Motion-owned真实
   playback行把同一kernel乘`4`，消除ready hold先吃满高收入的局部经济；不增加Stage/Gate/obs。
-- 旧Mu/Isaac刷新到ACK2431/833：前者legal=`0/666 selected`、recovery=`0/230,866`且最近10轮0 contact，后者
-  `0 R03 / 90,779 launch`。分别确认hit→landing/recovery和mimic→hit交接失败；landing无selected的格仍写
+- 旧Mu/Isaac刷新到ACK2654/913：前者legal=`0/666 selected`、recovery=`0/254,017`且最近10轮0 contact，后者
+  `0 R03 / 102,646 launch`。分别确认hit→landing/recovery和mimic→hit交接失败；landing无selected的格仍写
   `未测`，不看total return粉饰。
 - checkpoint自查确认现有snapshot只有model/optimizer/iter且明确无resume authority；缺env/owner/RNG/WAL
   consumer。旧`model_2000.pt`继续硬拒绝，不为仿Build4写extractor。R06候选只抽同义candidate-grid helper并
   删除死参数，不在GPU profile前合并不同事务。
 - 新机文档把GPU lock provisioning改为absent+`noclobber`，避免重写正在持锁的inode；RSL3主恢复源改为
   public exact PyPI wheel，Pod路径只作备用；G05旧2026-06-26命令标成历史并路由到machine-local EULA/privacy。
-- clean exact `ff7a6c4f`在Pod完成CPU/Torch组合门`444 passed,36 skipped`、launcher/setup=`98 passed`。
-  首轮测试发现并闭合旧weight断言及scaled-payment污染normalized kernel telemetry；三卡仍被现役run占用，
-  current-source真实Kit/Mu CUDA fixed-action、profile和fresh双端训练继续诚实写`未测`。
-- validated training checkout=`8a57a522`已在Pod fresh exact目录恢复并核过92个Mu mesh、EPA48/RSL3；
-  Mu/Isaac完整launcher dry-run均RC0。由repo部署新环境的public lock和显式外部恢复链已可执行，合法Isaac
-  下载、private USD/mesh locator仍不是Git字节；dry-run不代签真实CUDA或学习。
+- 静态双端审计发现`8a57a522`只在Isaac消费playback scale，Mu仍按baseline付款，故该checkout撤销训练候选资格。
+  `3d314847`以同一Motion phase在Mu reward与ledger镜像语义，并删除一度扩大的mask调用参数；Pod exact Mu=
+  `354 passed,7 skipped`，共享十文件同进程=`367 passed,25 skipped`。同进程广域命令暴露module alias假失败后，
+  `b0d7d562`把归一化限制在runner test fixture并恢复旧namespace，并消除Pytest 10 generator弃用；
+  launcher/setup=`98 passed`。
+- final exact checkout=`b0d7d562`已在Pod恢复并核过92个Mu mesh、EPA48/RSL3；Mu/Isaac完整launcher dry-run均
+  RC0且共同钉定H48/PPO V6/source。由repo部署新环境的public lock和显式外部恢复链可执行；合法Isaac下载、
+  private USD/mesh locator仍不是Git字节，真实双端CUDA fixed-action与学习在无空闲GPU时继续写`未测`。
 
 ## 2026-08-29 — 可重建环境、R06 control-boundary减法与训练裁决
 

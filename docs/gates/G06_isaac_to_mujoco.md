@@ -26,10 +26,12 @@ friction/contact/integrator响应，需同tape plant字段对签，不能用poli
 backend内的Reward经济反例，不是sim2sim差异。后继只在playback-active行增强paddle kernel，先分别在两端
 做exact fixed-action与fresh learning；三卡未自然空闲前保持`未测`。现有snapshot无resume authority，不能
 用旧checkpoint跳过fresh对照或把Build4 warm-start混进跨引擎判定。
-clean exact source=`ff7a6c4f`已过Pod CPU/Torch `444 passed,36 skipped`和launcher/setup `98 passed`；这只
-关闭shared contract、账本、R06与启动参数回归，不是双引擎CUDA fixed-action或physics parity。
-validated training checkout=`8a57a522`已恢复Mu ignored资产并让两端完整launcher dry-run RC0；真实双端
-fixed-action与fresh matched仍等自然空闲GPU，继续写`未测`。
+静态cross-backend消费审计发现`8a57a522`只让Isaac读取playback scale、Mu没有读取，故此前双dry-run不能让它
+成为训练源。final exact source=`b0d7d562`已在Mu reward/ledger镜像同一Motion playback事实，且没有扩大reward
+ABI；Pod exact Mu=`354 passed,7 skipped`、共享十文件同进程=`367 passed,25 skipped`、launcher/setup=
+`98 passed`。final exact目录恢复Mu ignored资产后，两端完整launcher dry-run仍RC0；这关闭代码语义和启动输入
+组合，不是双引擎CUDA fixed-action或physics parity。真实双端fixed-action与fresh matched仍等自然空闲GPU，
+继续写`未测`。
 
 当前repo部署合同也不等于跨机parity：一次性EULA/隐私setup事实不再被错做成per-run Gate；setup已删除
 环境path discovery，GL由caller显式绑定、核SONAME并记录观察SHA。最新`bb0be1a2`从全新exact checkout完成

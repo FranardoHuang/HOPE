@@ -4,13 +4,13 @@ Status: Partial (the base training-loop mechanics are proven; the current-fresh 
 
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
-validated code source=`ff7a6c4f`保留`255df4a1`的每control一次R06 finalize与每substep Scene capture、terminal
+validated code source=`b0d7d562`保留`255df4a1`的每control一次R06 finalize与每substep Scene capture、terminal
 即时park、`P0,R0…` durable顺序；并把已判负的全程4× paddle改成只在Motion-owned playback行增强。
-Pod1 clean exact CPU/Torch组合门=`444 passed,36 skipped`，launcher/setup=`98 passed`。首个候选
-`e6300c1b`曾由同一组合门真实检出2个失败：旧weight断言和把4×实际付款误记成`[0,1]` fidelity kernel；
-`ff7a6c4f`已让fidelity继续报未缩放kernel、configured/actual income报真实付款，并全量复测通过。
-validated training checkout=`8a57a522`已在Pod1 fresh exact目录恢复92个A3P0807 Mu mesh、EPA48与RSL3，
-逐项核XML/mesh数量与字节/RSL wheel SHA；Mu和Isaac完整launcher dry-run均RC0。
+静态审计撤销了`8a57a522`的候选资格：它只在Isaac消费新scale，Mu仍按baseline付款。`3d314847`已在Mu reward
+和ledger镜像同一语义，同时删除不必要的mask调用参数；Pod exact Mu=`354 passed,7 skipped`、共享十文件同进程=
+`367 passed,25 skipped`、launcher/setup=`98 passed`。`b0d7d562`另把同进程测试的canonical/standalone alias
+归一化限制在fixture生命周期，并消除Pytest 10 generator弃用，不把测试污染冒充生产失败。final exact目录恢复92个A3P0807 Mu mesh、EPA48与
+RSL3，逐项核XML/mesh数量与字节/RSL wheel SHA；Mu和Isaac完整launcher dry-run均RC0。
 三张GPU仍分别被旧Mu、旧Isaac和fresh 4× Mu占用，所以current source真实Kit fixed tape、CUDA parity与
 profiler-off matched active strata为`未测`，本Gate不把CPU语义门或profile硬上界写成速度PASS。
 
@@ -18,12 +18,11 @@ fresh direct-paddle 4× Mu到ACK623后已最终判负。matched ACK0..623新/旧
 selected=`5/334`、crossing=`2/281`；ACK614..623的新run四项mimic误差又全部坏于旧baseline，不能再写
 “太早”、等1000或采用。代码复核又发现4× manager weight在容易的pre-playback ready hold也持续支付最高`14`；
 下一最小候选恢复baseline manager weight=`1/1/1/.5`，只在Motion-owned playback-active行把同核乘`4`。
-它不是Stage/Gate，仍由原due状态机自然开放。旧Mu到ACK2431仍`0/666` legal、recovery=`0/230,866`；
-旧Isaac到ACK833仍`0 R03 / 90,779 launch`。这些事实不支持新增Observation或继续盲加权。
+它不是Stage/Gate，仍由原due状态机自然开放；这些事实不支持新增Observation或继续盲加权。
 
-现役long已于`2026-08-29T12:19:19Z`只读刷新到Mu ACK2431、Isaac ACK833。两端
-reward/fact/conservation fault仍为0；Mu累计selected/legal/recovery=`666/0/0`（recovery分母`230,866`），
-Isaac则是`0 R03-valid / 90,779 launch`。Mu最近10轮contact仍为0；因此不是证据失真，也不再称
+现役long已于`2026-08-29T12:44:41Z`只读刷新到Mu ACK2654、Isaac ACK913。两端
+reward/fact/conservation fault仍为0；Mu累计selected/legal/recovery=`666/0/0`（recovery分母`254,017`），
+Isaac则是`0 R03-valid / 102,646 launch`。Mu最近10轮contact仍为0；因此不是证据失真，也不再称
 “太早无法判断”：当前mimic→hit及
 hit→landing/recovery交接失败，G05不晋级。无条件`4/4/4/2`后继也已由上段matched反例否决；唯一fresh
 候选是baseline ready economy加Motion playback期同核4倍，且仍须以matched未来窗而不是Build4历史曲线

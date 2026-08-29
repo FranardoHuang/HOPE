@@ -1325,15 +1325,19 @@ coarse+precision kernel乘`4`。网络、PPO V6/H48、Observation V3、任务、
 所有事实源不变，仍从rollout 0使用完整图；这只是连续Reward的eligibility/scale，不是success后才开放的门。
 该因果解释仍需fresh matched run验证，未提前采用。
 
-clean exact source=`ff7a6c4f`的Pod CPU/Torch组合门为`444 passed,36 skipped`，launcher/setup=
-`98 passed`。首轮`e6300c1b`曾诚实失败2项：一项是测试仍期待已否决weight；另一项暴露scaled payment被误当
-`[0,1]` normalized fidelity kernel。后者现保持两条事实：milestone kernel/error继续表达学习质量，
-configured/actual income表达真正4×付款。三卡占用下真实Kit/Mu CUDA fixed-action与fresh learning仍`未测`。
-Pod1另从validated training checkout=`8a57a522`建立fresh exact launch目录，恢复并核过92个A3P0807 Mu mesh、
-EPA48/RSL3与外部Isaac USD/GL locator；两个launcher的完整dry-run均RC0。该证据只关闭下一次发射的输入组合，
-不把dry-run冒充真实GPU probe。
+静态双端消费审计随后否决`8a57a522`作为训练源：Isaac读取了playback scale，但Mu没有。`3d314847`已让
+Mu reward和ledger消费同一Motion playback事实，并删除一度扩大的mask调用参数；normalized kernel/error仍
+表达学习质量，configured/actual income才表达4×付款。Pod exact Mu=`354 passed,7 skipped`、共享十文件同进程=
+`367 passed,25 skipped`、launcher/setup=`98 passed`。同进程广域命令暴露canonical/standalone module alias
+污染后，`b0d7d562`把归一化限制在runner test fixture并在退出时恢复，同时消除Pytest 10 generator弃用；
+这些都不改变生产图。
 
-旧Mu到ACK2431：`666/321,213` selected/launch、599 crossing、`0/666` legal、recovery=`0/230,866`；
-最近10轮仍0 contact。旧Isaac到ACK833：`0 R03 / 90,779 launch`，landing仍因0 selected为`未测`。二者分别确认hit→landing/recovery
-和mimic→hit失败。现有snapshot均明确无resume authority；Build4 warm-start不能从这些字节伪造。三张GPU
+Pod1 final exact checkout=`b0d7d562`恢复并核过92个A3P0807 Mu mesh、EPA48/RSL3与外部Isaac USD/GL locator；
+两个launcher的完整dry-run均RC0。三卡占用下真实Kit/Mu CUDA fixed-action与fresh learning仍`未测`；该证据只
+关闭下一次发射的代码与输入组合，不把dry-run冒充真实GPU probe。
+
+旧Mu到ACK2654：`666/344,720` selected/launch、599 crossing、`0/666` legal、recovery=`0/254,017`；
+最近10轮仍0 contact。旧Isaac到ACK913：`0 R03 / 102,646 launch`，landing仍因0 selected为`未测`。二者分别确认hit→landing/recovery
+和mimic→hit失败。已判负4× Mu继续只读到ACK851，累计`329/28/19/0` raw/selected/cross/legal，最近10轮仍
+0 contact；它没有翻转ACK623裁决。现有snapshot均明确无resume authority；Build4 warm-start不能从这些字节伪造。三张GPU
 未自然空闲前只完成exact source、CPU/fixed-action与launch准备，不停止只读run换卡。

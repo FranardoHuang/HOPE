@@ -337,11 +337,13 @@ privacy改为machine provisioning显式选择，launcher不再硬编码`PRIVACY_
 但合法Isaac二进制、split USD、92个Mu mesh与private凭据仍是外部输入，空白机状态继续`PARTIAL`。
 第二，`79efd71c`让Physical每substep继续capture/sample/立即park，只把R06重型score/mailbox/finalize收成
 control boundary一次，再按`P0,R0…`原顺序回放Epoch；没有删engine事实或durable chronology。Pod1 final
-clean exact validated code source=`ff7a6c4f`的Pod CPU/Torch组合与launcher/setup分别为
-`444 passed,36 skipped`、`98 passed`。
-测试harness原先在collection时全局替换canonical modules、使合并运行产生27个假失败，也已改成test-scope
-namespace并由同一合并命令闭合。真实GPU fixed tape与matched profile因三卡仍被只读训练占用而`未测`；不从
-CPU门外推速度。当前相对`79efd71c^`的production净增为`460-21=439`行，因此也不以“typed”名称冒充结构已经优雅：GPU收益不足则
+静态双端消费审计发现旧candidate=`8a57a522`只有Isaac读取playback scale，Mu没有，故撤销其训练源资格。
+final code source=`b0d7d562`已让Mu reward/ledger消费同一Motion playback事实且没有扩大reward ABI；Pod exact
+Mu=`354 passed,7 skipped`、共享十文件同进程=`367 passed,25 skipped`、launcher/setup=`98 passed`。
+测试harness原先在collection时全局替换canonical modules、使合并运行产生假失败；这次再发现runner的
+canonical/standalone alias也会跨文件残留，现已把临时归一与恢复都限制在module fixture生命周期。真实GPU
+fixed tape与matched profile因三卡仍被只读训练占用而`未测`；不从CPU门外推速度。当前相对`79efd71c^`的
+production净增为`460-21=439`行，因此也不以“typed”名称冒充结构已经优雅：GPU收益不足则
 撤回；若保留，再把即时/deferred finalize的重复数学收成同一内部primitive，减少维护面。
 
 direct-paddle 4× fresh Mu到ACK623已最终判负：matched prefix新/旧raw/selected/crossing=

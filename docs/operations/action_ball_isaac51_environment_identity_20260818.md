@@ -159,9 +159,11 @@ private repo/artifact凭据仍需团队持久locator；RSL wheel有公共安装�
 tracked constraints，OpenGL/GLU有系统包来源。历史Jiayi本机和旧Pod曲线不保证逐位可比，也不阻塞当前
 Pod受控运行；真正要比较曲线时必须同时保存source、runtime、全部输入、seed和实际argv receipt。
 
-同日validated training checkout=`8a57a522`又以当前machine-provisioned EULA/privacy authority、固定
-Isaac5.1/IsaacLab8320/RSL3/split USD/GL路径完成完整Isaac successor launcher dry-run RC0。它证明按本文从
-repo加显式外部输入可以到达可发射状态；真实Kit fixed-action仍因GPU占用写`未测`。
+同日final checkout=`b0d7d562`以现役Kit进程已经使用的EULA=`Y`/privacy=`Y`选择、固定
+Isaac5.1/IsaacLab8320/RSL3/split USD/GL路径完成完整Isaac successor launcher dry-run RC0。新机器仍必须由
+operator在machine-local setup中自行写入一次选择，不能从仓库默认。该结果证明按本文从repo加显式外部输入
+可以到达可发射状态；此前`8a57a522`因Mu未消费playback scale已撤销训练源资格，真实Kit fixed-action仍因GPU
+占用写`未测`。
 
 ## Git 与非 Git 资产
 
