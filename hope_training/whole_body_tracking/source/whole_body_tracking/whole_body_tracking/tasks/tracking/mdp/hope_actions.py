@@ -4343,6 +4343,15 @@ class ClampedJointPositionAction(JointPositionAction):
         self._joint_safety_pending_consume_token = token
         return token, snapshot
 
+    def assert_joint_safety_ledger_consume_idle(self) -> None:
+        """Reject a save while an exact safety generation is frozen."""
+
+        if self._joint_safety_pending_consume_token is not None:
+            raise RuntimeError(
+                "joint-safety ledger has a prepared consume awaiting "
+                "acknowledgement"
+            )
+
     def acknowledge_joint_safety_ledger(
         self, token: tuple[Any, ...]
     ) -> None:

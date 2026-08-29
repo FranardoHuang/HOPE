@@ -572,6 +572,31 @@ def test_post_update_summary_is_non_destructive_until_exact_ack():
     assert owner._active_post_update_summary is None
 
 
+def test_optimizer_boundary_idle_guard_rejects_active_and_pending_durable_ack():
+    owner, _epoch, _graph = _owner()
+    owner.require_optimizer_boundary_idle()
+    boundary = owner.prepare_pre_optimizer_ppo_boundary(
+        update_index=0, completed_environment_steps=8
+    )
+
+    with pytest.raises(
+        L.ActionBallFullMdpLeanRuntimeError,
+        match="optimizer boundary is active",
+    ):
+        owner.require_optimizer_boundary_idle()
+
+    owner.mark_optimizer_returned(boundary, update_index=0)
+    summary = owner.prepare_post_update_summary(boundary, update_index=0)
+    owner.acknowledge_post_update(boundary, summary, update_index=0)
+    assert owner._active_boundary is None
+    assert owner._pending_durable_ack_summary is summary
+    with pytest.raises(
+        L.ActionBallFullMdpLeanRuntimeError,
+        match="awaiting durable ACK",
+    ):
+        owner.require_optimizer_boundary_idle()
+
+
 def test_post_update_ack_rejects_equal_copy_before_destructive_epoch_ack(
     monkeypatch,
 ):

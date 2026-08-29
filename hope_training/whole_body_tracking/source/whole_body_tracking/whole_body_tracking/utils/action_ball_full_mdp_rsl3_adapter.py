@@ -953,6 +953,9 @@ class ActionBallFullMdpRsl3Adapter:
         self._runtime = runtime
         self._owner = owner
         self._require_healthy = _bound(owner, "require_healthy")
+        self._require_owner_idle = _bound(
+            owner, "require_optimizer_boundary_idle"
+        )
         self._prepare = _bound(owner, "prepare_pre_optimizer_ppo_boundary")
         self._mark_returned = _bound(owner, "mark_optimizer_returned")
         self._prepare_summary = _bound(owner, "prepare_post_update_summary")
@@ -1068,6 +1071,9 @@ class ActionBallFullMdpRsl3Adapter:
         self._safety_prepare = _bound(
             action_term, "prepare_joint_safety_ledger_consume"
         )
+        self._safety_assert_idle = _bound(
+            action_term, "assert_joint_safety_ledger_consume_idle"
+        )
         self._safety_ack = _bound(action_term, "acknowledge_joint_safety_ledger")
         self._wal = importlib.import_module(
             "whole_body_tracking.utils.action_ball_full_mdp_durable_wal"
@@ -1078,6 +1084,7 @@ class ActionBallFullMdpRsl3Adapter:
         self._size = 0
         self._last_update = -1
         self._update_in_progress = False
+        self._failure_reason = None
         self._safety_pending = None
         self._safety_last_completed_environment_steps = 0
         self._safety_last_consume_sequence = None
@@ -1179,6 +1186,8 @@ class ActionBallFullMdpRsl3Adapter:
             raise RuntimeError(
                 "single_action_lean optimizer boundary is already active"
             )
+        if self._failure_reason is not None:
+            raise RuntimeError(self._failure_reason)
         self._update_in_progress = True
         boundary = None
         try:
@@ -1336,6 +1345,7 @@ class ActionBallFullMdpRsl3Adapter:
                 "single_action_lean optimizer boundary failed; retry forbidden: "
                 f"{type(exc).__module__}.{type(exc).__qualname__}"
             )
+            self._failure_reason = reason
             try:
                 self._poison(boundary, update_index=update_index, reason=reason)
             except BaseException:
@@ -1362,11 +1372,14 @@ class ActionBallFullMdpRsl3Adapter:
             raise RuntimeError(
                 "single_action_lean snapshot crossed an active optimizer boundary"
             )
-        self._require_healthy()
+        if self._failure_reason is not None:
+            raise RuntimeError(self._failure_reason)
+        self._require_owner_idle()
         if self._safety_pending is not None:
             raise RuntimeError(
                 "single_action_lean snapshot crossed an active optimizer boundary"
             )
+        self._safety_assert_idle()
         # This assertion covers the exact FullMDP metric-row tape only.  It
         # does not claim that every command-side D2H in the process is batched.
         self._command_assert_materialized()

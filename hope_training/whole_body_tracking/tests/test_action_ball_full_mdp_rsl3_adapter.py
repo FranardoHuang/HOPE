@@ -295,6 +295,12 @@ class ClampedJointPositionAction(ABC):
         self.events.append("safety_prepare")
         return self.pending, self.snapshot
 
+    def assert_joint_safety_ledger_consume_idle(self):
+        if self.pending is not None:
+            raise RuntimeError(
+                "joint-safety ledger has a prepared consume awaiting acknowledgement"
+            )
+
     def acknowledge_joint_safety_ledger(self, token):
         if token != self.pending:
             raise RuntimeError("joint-safety token differs")
@@ -332,6 +338,9 @@ class RacketTargetCommand:
         # first H=24 rollout, so update zero must drain H+1 rows.
         self.pending_rows = 25
         self.materialize_calls = 0
+        self.events = None
+        self.materialize_failure = None
+        self.assert_failure = None
 
     def _action_ball_full_mdp_deferred_exact_metrics_enabled(self):
         return True
@@ -344,6 +353,10 @@ class RacketTargetCommand:
     def materialize_action_ball_diagnostic_metrics_for_report(
         self, *, expected_full_mdp_exact_row_counts=None
     ):
+        if self.events is not None:
+            self.events.append("metric_materialize")
+        if self.materialize_failure is not None:
+            raise self.materialize_failure
         if expected_full_mdp_exact_row_counts is not None:
             if self.pending_rows not in expected_full_mdp_exact_row_counts:
                 raise RuntimeError("full-MDP exact metric rollout row count differs")
@@ -351,6 +364,10 @@ class RacketTargetCommand:
         self.pending_rows = 0
 
     def assert_action_ball_diagnostic_metrics_materialized_for_report(self):
+        if self.events is not None:
+            self.events.append("metric_assert")
+        if self.assert_failure is not None:
+            raise self.assert_failure
         if self.pending_rows:
             raise RuntimeError("full-MDP exact metrics are pending on device")
 
@@ -358,6 +375,10 @@ class RacketTargetCommand:
 RacketTargetCommand.__module__ = (
     "whole_body_tracking.tasks.tracking.mdp.hope_commands"
 )
+
+
+class _ForeignRacketTargetCommand(RacketTargetCommand):
+    pass
 
 
 class _CommandManager:
@@ -384,6 +405,11 @@ class _Owner:
         if self.poisoned:
             raise RuntimeError("owner is poisoned")
         self.events.append("healthy")
+
+    def require_optimizer_boundary_idle(self):
+        self.require_healthy()
+        if self.active is not None:
+            raise RuntimeError("owner optimizer boundary is active")
 
     def prepare_pre_optimizer_ppo_boundary(
         self, *, update_index, completed_environment_steps
@@ -773,25 +799,10 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
     boundary = adapter.ActionBallFullMdpRsl3Adapter(
         env=env, owner=env.owner, log_dir=str(tmp_path)
     )
-    command_materialize = boundary._command_materialize
-    command_assert = boundary._command_assert_materialized
-
-    def logged_command_materialize(**kwargs):
-        env.owner.events.append("metric_materialize")
-        return command_materialize(**kwargs)
-
-    def logged_command_assert():
-        env.owner.events.append("metric_assert")
-        return command_assert()
-
-    monkeypatch.setattr(
-        boundary, "_command_materialize", logged_command_materialize
-    )
-    monkeypatch.setattr(
-        boundary, "_command_assert_materialized", logged_command_assert
-    )
+    env.command_term.events = env.owner.events
 
     def update():
+        assert env.command_term.pending_rows == 0
         env.owner.events.append("update")
         return {"loss": 1.0}
 
@@ -911,18 +922,15 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
 
 
 def test_command_metric_drain_failure_poisons_before_optimizer(
-    tmp_path, _fake_imports, monkeypatch
+    tmp_path, _fake_imports
 ):
     env = _Env()
     boundary = adapter.ActionBallFullMdpRsl3Adapter(
         env=env, owner=env.owner, log_dir=str(tmp_path)
     )
+    env.command_term.events = env.owner.events
+    env.command_term.materialize_failure = RuntimeError("metric drain failed")
     optimizer_calls = []
-
-    def fail_materialize(**_kwargs):
-        raise RuntimeError("metric drain failed")
-
-    monkeypatch.setattr(boundary, "_command_materialize", fail_materialize)
     with pytest.raises(RuntimeError, match="optimizer boundary failed"):
         boundary.update(
             lambda: optimizer_calls.append(True),
@@ -937,6 +945,25 @@ def test_command_metric_drain_failure_poisons_before_optimizer(
     assert len(poison) == 1
     assert poison[0][1] is env.owner.active
     assert boundary._last_update == -1
+    names = [
+        event if isinstance(event, str) else event[0]
+        for event in env.owner.events
+    ]
+    assert "metric_materialize" in names
+    assert not {
+        "metric_assert",
+        "safety_prepare",
+        "update",
+        "mark",
+        "summary",
+        "wal_pending",
+        "ack",
+        "wal_epoch_ack",
+        "latch",
+        "safety_ack",
+    }.intersection(names)
+    assert boundary._path.read_bytes() == b""
+    events_after_failure = list(env.owner.events)
     with pytest.raises(RuntimeError, match="retry forbidden"):
         boundary.update(
             lambda: optimizer_calls.append(True),
@@ -944,6 +971,51 @@ def test_command_metric_drain_failure_poisons_before_optimizer(
             completed_environment_steps=48,
         )
     assert optimizer_calls == []
+    assert env.owner.events == events_after_failure
+    assert boundary._path.read_bytes() == b""
+
+
+def test_command_metric_failure_is_sticky_when_owner_poison_hook_fails(
+    tmp_path, _fake_imports, monkeypatch
+):
+    env = _Env()
+    boundary = adapter.ActionBallFullMdpRsl3Adapter(
+        env=env, owner=env.owner, log_dir=str(tmp_path)
+    )
+    env.command_term.events = env.owner.events
+    env.command_term.materialize_failure = RuntimeError("metric drain failed")
+    optimizer_calls = []
+    monkeypatch.setattr(
+        boundary,
+        "_poison",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("owner poison hook failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="retry forbidden"):
+        boundary.update(
+            lambda: optimizer_calls.append(True),
+            update_index=0,
+            completed_environment_steps=48,
+        )
+
+    assert env.owner.poisoned is False
+    assert boundary._failure_reason is not None
+    assert optimizer_calls == []
+    assert boundary._path.read_bytes() == b""
+    events_after_failure = list(env.owner.events)
+    with pytest.raises(RuntimeError, match="retry forbidden"):
+        boundary.update(
+            lambda: optimizer_calls.append(True),
+            update_index=0,
+            completed_environment_steps=48,
+        )
+    with pytest.raises(RuntimeError, match="retry forbidden"):
+        boundary.assert_snapshot_boundary_clean()
+    assert env.owner.events == events_after_failure
+    assert optimizer_calls == []
+    assert boundary._path.read_bytes() == b""
 
 
 def test_first_update_requires_genesis_plus_rollout_metric_rows(
@@ -1006,18 +1078,17 @@ def test_later_update_requires_exactly_one_rollout_of_metric_rows(
 
 
 def test_command_metric_assert_failure_poisons_before_optimizer(
-    tmp_path, _fake_imports, monkeypatch
+    tmp_path, _fake_imports
 ):
     env = _Env()
     boundary = adapter.ActionBallFullMdpRsl3Adapter(
         env=env, owner=env.owner, log_dir=str(tmp_path)
     )
+    env.command_term.events = env.owner.events
+    env.command_term.assert_failure = RuntimeError(
+        "metric tape remained pending"
+    )
     optimizer_calls = []
-
-    def fail_assert():
-        raise RuntimeError("metric tape remained pending")
-
-    monkeypatch.setattr(boundary, "_command_assert_materialized", fail_assert)
     with pytest.raises(RuntimeError, match="optimizer boundary failed"):
         boundary.update(
             lambda: optimizer_calls.append(True),
@@ -1032,6 +1103,24 @@ def test_command_metric_assert_failure_poisons_before_optimizer(
     assert len(poison) == 1
     assert poison[0][1] is env.owner.active
     assert boundary._last_update == -1
+    names = [
+        event if isinstance(event, str) else event[0]
+        for event in env.owner.events
+    ]
+    assert names.index("metric_materialize") < names.index("metric_assert")
+    assert not {
+        "safety_prepare",
+        "update",
+        "mark",
+        "summary",
+        "wal_pending",
+        "ack",
+        "wal_epoch_ack",
+        "latch",
+        "safety_ack",
+    }.intersection(names)
+    assert boundary._path.read_bytes() == b""
+    events_after_failure = list(env.owner.events)
     with pytest.raises(RuntimeError, match="retry forbidden"):
         boundary.update(
             lambda: optimizer_calls.append(True),
@@ -1039,6 +1128,8 @@ def test_command_metric_assert_failure_poisons_before_optimizer(
             completed_environment_steps=48,
         )
     assert optimizer_calls == []
+    assert env.owner.events == events_after_failure
+    assert boundary._path.read_bytes() == b""
 
 
 def test_snapshot_guard_rejects_active_optimizer_boundary(
@@ -1080,6 +1171,55 @@ def test_snapshot_guard_rejects_before_owner_prepare(
 
     assert len(guard_errors) == 1
     assert boundary._update_in_progress is False
+
+
+@pytest.mark.parametrize(
+    ("dirty_state", "error"),
+    (
+        ("owner_poisoned", "owner is poisoned"),
+        ("owner_active", "optimizer boundary is active"),
+        ("safety_pending", "prepared consume awaiting"),
+        ("metric_pending", "metrics are pending"),
+    ),
+)
+def test_runner_save_real_adapter_rejects_every_dirty_boundary_before_write(
+    tmp_path, _fake_imports, monkeypatch, dirty_state, error
+):
+    env = _Env()
+    boundary = adapter.ActionBallFullMdpRsl3Adapter(
+        env=env, owner=env.owner, log_dir=str(tmp_path)
+    )
+    if dirty_state != "metric_pending":
+        env.command_term.pending_rows = 0
+    if dirty_state == "owner_poisoned":
+        env.owner.poisoned = True
+    elif dirty_state == "owner_active":
+        boundary._prepare(update_index=0, completed_environment_steps=48)
+    elif dirty_state == "safety_pending":
+        env.action_term.prepare_joint_safety_ledger_consume()
+    elif dirty_state != "metric_pending":
+        raise AssertionError("unknown dirty snapshot state")
+
+    base_save_calls = []
+    monkeypatch.setattr(
+        adapter.OnPolicyRunner,
+        "save",
+        lambda *_args, **_kwargs: base_save_calls.append(True),
+        raising=False,
+    )
+    runner = object.__new__(adapter.ActionBallFullMdpRsl3Runner)
+    runner._full_mdp_adapter = boundary
+    requested = tmp_path / "model_1000.pt"
+
+    with pytest.raises(RuntimeError, match=error):
+        runner.save(str(requested))
+
+    assert base_save_calls == []
+    assert not requested.exists()
+    assert not (tmp_path / "model_1000.diagnostic_nonresumable.pt").exists()
+    assert not (
+        tmp_path / "model_1000.diagnostic_nonresumable.pt.receipt.json"
+    ).exists()
 
 
 def test_runner_alg_update_executes_real_optimizer_inside_boundary_and_returns_result(
@@ -1982,6 +2122,26 @@ def test_adapter_rejects_foreign_same_type_command_term_before_wal(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_adapter_rejects_foreign_command_subclass_even_when_graph_identity_matches(
+    tmp_path, _fake_imports
+):
+    env = _Env()
+    foreign = _ForeignRacketTargetCommand()
+    env.command_term = foreign
+    env.command_manager.term = foreign
+    env.owner._racket = foreign
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"deferred-metric command producer: racket_target_type=",
+    ):
+        adapter.ActionBallFullMdpRsl3Adapter(
+            env=env, owner=env.owner, log_dir=str(tmp_path)
+        )
+
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_adapter_rejects_instance_shadowed_command_predicate_before_wal(
     tmp_path, _fake_imports
 ):
@@ -1993,6 +2153,70 @@ def test_adapter_rejects_instance_shadowed_command_predicate_before_wal(
     with pytest.raises(
         RuntimeError,
         match=r"deferred-metric command producer: deferred_exact_metrics",
+    ):
+        adapter.ActionBallFullMdpRsl3Adapter(
+            env=env, owner=env.owner, log_dir=str(tmp_path)
+        )
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    (
+        "materialize_action_ball_diagnostic_metrics_for_report",
+        "assert_action_ball_diagnostic_metrics_materialized_for_report",
+    ),
+)
+def test_adapter_rejects_instance_shadowed_command_metric_methods_before_wal(
+    tmp_path, _fake_imports, method_name
+):
+    env = _Env()
+    setattr(env.command_term, method_name, lambda *args, **kwargs: None)
+
+    with pytest.raises(
+        RuntimeError,
+        match="FullMDP owner lacks exact bound method " + method_name,
+    ):
+        adapter.ActionBallFullMdpRsl3Adapter(
+            env=env, owner=env.owner, log_dir=str(tmp_path)
+        )
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_adapter_rejects_instance_shadowed_owner_idle_guard_before_wal(
+    tmp_path, _fake_imports
+):
+    env = _Env()
+    env.owner.require_optimizer_boundary_idle = lambda: None
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "FullMDP owner lacks exact bound method "
+            "require_optimizer_boundary_idle"
+        ),
+    ):
+        adapter.ActionBallFullMdpRsl3Adapter(
+            env=env, owner=env.owner, log_dir=str(tmp_path)
+        )
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_adapter_rejects_instance_shadowed_safety_idle_guard_before_wal(
+    tmp_path, _fake_imports
+):
+    env = _Env()
+    env.action_term.assert_joint_safety_ledger_consume_idle = lambda: None
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "FullMDP owner lacks exact bound method "
+            "assert_joint_safety_ledger_consume_idle"
+        ),
     ):
         adapter.ActionBallFullMdpRsl3Adapter(
             env=env, owner=env.owner, log_dir=str(tmp_path)

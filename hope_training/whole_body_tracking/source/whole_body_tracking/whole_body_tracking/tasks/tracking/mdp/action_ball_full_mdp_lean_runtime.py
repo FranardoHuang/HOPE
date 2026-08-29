@@ -655,6 +655,21 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     "device epoch owner decoded a terminal fault"
                 )
 
+    def require_optimizer_boundary_idle(self) -> None:
+        """Reject observation of an active or not-yet-durable update boundary."""
+
+        with self._lock:
+            self.require_healthy()
+            if (
+                self._operation_active
+                or self._active_boundary is not None
+                or self._pending_durable_ack_summary is not None
+            ):
+                raise ActionBallFullMdpLeanRuntimeError(
+                    "lean runtime optimizer boundary is active or awaiting "
+                    "durable ACK"
+                )
+
     @staticmethod
     def _bound_plain_method(owner: object, name: str):
         function = vars(type(owner)).get(name)

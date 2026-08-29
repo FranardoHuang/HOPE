@@ -2986,8 +2986,11 @@ def test_two_phase_consume_freezes_every_mutator_and_requires_exact_token():
     action.process_actions(torch.zeros(2, 2))
     _finish_guarded_policy_step(action, asset)
 
+    action.assert_joint_safety_ledger_consume_idle()
     token, snapshot = action.prepare_joint_safety_ledger_consume()
     assert snapshot["since_last_consume"]["has_data"] is True
+    with pytest.raises(RuntimeError, match="prepared consume awaiting"):
+        action.assert_joint_safety_ledger_consume_idle()
     with pytest.raises(RuntimeError, match="prepared but not acknowledged"):
         action.prepare_joint_safety_ledger_consume()
     with pytest.raises(RuntimeError, match="refusing process_actions"):
@@ -3005,6 +3008,7 @@ def test_two_phase_consume_freezes_every_mutator_and_requires_exact_token():
     ] is True
 
     action.acknowledge_joint_safety_ledger(token)
+    action.assert_joint_safety_ledger_consume_idle()
     assert action.joint_safety_ledger_snapshot()["since_last_consume"][
         "has_data"
     ] is False
