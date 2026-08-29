@@ -711,6 +711,186 @@ def _full_a_artifact_root(
     return root
 
 
+def _fresh_controller_trace_root(raw: str | None) -> Path:
+    """Create one absent, canonical directory for a no-clobber diagnostic."""
+
+    if type(raw) is not str or not raw:
+        raise ValueError("controller trace output root is not bound")
+    root = Path(raw)
+    if not root.is_absolute() or root.name in ("", ".", "..") or os.path.lexists(root):
+        raise ValueError("controller trace output root must be one absent absolute path")
+    try:
+        parent = root.parent.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("controller trace output parent differs") from exc
+    if parent != root.parent:
+        raise ValueError("controller trace output parent differs")
+    root.mkdir(mode=0o700)
+    row = root.lstat()
+    if (
+        not stat.S_ISDIR(row.st_mode)
+        or stat.S_ISLNK(row.st_mode)
+        or root.resolve(strict=True) != root
+    ):
+        raise ValueError("controller trace output root differs")
+    return root
+
+
+def _write_fresh_bytes(path: Path, payload: bytes) -> None:
+    """Durably write one regular no-clobber diagnostic artifact."""
+
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(fd, payload[offset:])
+        os.fsync(fd)
+        row = os.fstat(fd)
+        current = os.stat(path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(row.st_mode)
+            or row.st_nlink != 1
+            or row.st_size != len(payload)
+            or (row.st_dev, row.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise RuntimeError("controller trace artifact differs")
+    finally:
+        os.close(fd)
+
+
+def _run_controller_trace(
+    *, runner, env, root: Path, checkpoint: str, steps: int,
+    action_tape: str | None, torch_module,
+) -> dict:
+    """Trace the live MuJoCo PD owner under a frozen policy/action tape."""
+
+    import io
+    import numpy as np
+
+    checkpoint_path = Path(checkpoint)
+    if (
+        not checkpoint_path.is_absolute()
+        or checkpoint_path.resolve(strict=True) != checkpoint_path
+        or not stat.S_ISREG(checkpoint_path.lstat().st_mode)
+        or checkpoint_path.lstat().st_nlink != 1
+    ):
+        raise ValueError("controller trace checkpoint differs")
+    checkpoint_sha256 = _stable_file_sha256(checkpoint_path)
+    runner.load(str(checkpoint_path), load_optimizer=False, map_location=env.device)
+    runner.eval_mode()
+
+    selected_names = ("waist_pitch_joint", "waist_roll_joint", "left_ankle_roll_joint")
+    names = tuple(env._action_joint_names)
+    try:
+        selected = tuple(names.index(name) for name in selected_names)
+    except ValueError as exc:
+        raise RuntimeError("controller trace selected joint contract differs") from exc
+
+    replay_actions = None
+    action_tape_sha256 = None
+    if action_tape is not None:
+        tape_path = Path(action_tape)
+        if (
+            not tape_path.is_absolute()
+            or tape_path.resolve(strict=True) != tape_path
+            or not stat.S_ISREG(tape_path.lstat().st_mode)
+            or tape_path.lstat().st_nlink != 1
+        ):
+            raise ValueError("controller trace action tape differs")
+        action_tape_sha256 = _stable_file_sha256(tape_path)
+        with np.load(tape_path, allow_pickle=False) as archive:
+            replay_actions = np.asarray(archive["actions"], dtype=np.float32)
+        if replay_actions.shape != (steps, env.num_envs, env.num_actions):
+            raise ValueError("controller trace replay action shape differs")
+        if not np.isfinite(replay_actions).all():
+            raise ValueError("controller trace replay actions are non-finite")
+
+    env.enable_controller_trace()
+    obs = env.get_observations()
+    torch_module.manual_seed(20260829)
+    rows = {name: [] for name in (
+        "actions", "q_before", "dq_before", "pre_clamp_qdes",
+        "executable_qdes", "q_min", "q_max", "q_after", "dq_after",
+        "tau_raw_first", "tau_clamped_first", "tau_raw_last",
+        "tau_clamped_last", "tau_raw_abs_max", "tau_clamped_abs_max",
+        "tau_clamp_count", "hard_lower", "hard_upper",
+    )}
+    phases, dones = [], []
+    selected_tensor = torch_module.tensor(selected, dtype=torch_module.long, device=env.device)
+    with torch_module.inference_mode():
+        for step in range(steps):
+            if replay_actions is None:
+                actions = runner.alg.policy.act(obs)
+            else:
+                actions = torch_module.from_numpy(replay_actions[step]).to(env.device)
+            obs, _reward, done, extras = env.step(actions)
+            trace = env.controller_trace()
+            rows["actions"].append(actions.detach().cpu().numpy().copy())
+            for name in rows:
+                if name == "actions":
+                    continue
+                value = trace[name].index_select(1, selected_tensor)
+                rows[name].append(value.detach().cpu().numpy().copy())
+            phase = extras.get("full_a_phase_before_reset")
+            if not torch_module.is_tensor(phase):
+                raise RuntimeError("controller trace phase surface differs")
+            phases.append(phase.detach().cpu().numpy().copy())
+            dones.append(done.detach().cpu().numpy().copy())
+
+    arrays = {name: np.stack(values) for name, values in rows.items()}
+    arrays["phase"] = np.stack(phases)
+    arrays["done"] = np.stack(dones)
+    arrays["selected_joint_indices"] = np.asarray(selected, dtype=np.int64)
+    buffer = io.BytesIO()
+    np.savez_compressed(buffer, **arrays)
+    trace_path = root / "controller_trace.npz"
+    _write_fresh_bytes(trace_path, buffer.getvalue())
+    trace_sha256 = hashlib.sha256(buffer.getvalue()).hexdigest()
+
+    hard = np.logical_or(arrays["hard_lower"], arrays["hard_upper"])
+    clamp = arrays["tau_clamp_count"] > 0
+    per_joint = []
+    for ordinal, name in enumerate(selected_names):
+        per_joint.append({
+            "joint_name": name,
+            "hard_rows": int(hard[:, :, ordinal].sum()),
+            "lower_rows": int(arrays["hard_lower"][:, :, ordinal].sum()),
+            "upper_rows": int(arrays["hard_upper"][:, :, ordinal].sum()),
+            "torque_clamp_rows": int(clamp[:, :, ordinal].sum()),
+            "maximum_abs_tau_raw": float(arrays["tau_raw_abs_max"][:, :, ordinal].max()),
+            "maximum_abs_tau_clamped": float(
+                arrays["tau_clamped_abs_max"][:, :, ordinal].max()
+            ),
+        })
+    phase_counts = {
+        str(int(code)): int((arrays["phase"] == code).sum())
+        for code in np.unique(arrays["phase"])
+    }
+    summary = {
+        "schema_version": 1,
+        "kind": "action_ball_mujoco_full_mdp_controller_trace_v1",
+        "diagnostic_unauthorized": True,
+        "training_authorized": False,
+        "checkpoint_authority": False,
+        "num_envs": int(env.num_envs),
+        "policy_steps": int(steps),
+        "joint_names": list(selected_names),
+        "checkpoint_path": str(checkpoint_path),
+        "checkpoint_sha256": checkpoint_sha256,
+        "action_source": "replay_npz" if replay_actions is not None else "seeded_checkpoint_policy",
+        "input_action_tape_sha256": action_tape_sha256,
+        "trace_npz": trace_path.name,
+        "trace_npz_sha256": trace_sha256,
+        "sample_rows": int(steps * env.num_envs),
+        "done_rows": int(np.count_nonzero(arrays["done"])),
+        "phase_counts": phase_counts,
+        "per_joint": per_joint,
+    }
+    payload = json.dumps(summary, sort_keys=True, separators=(",", ":")).encode()
+    _write_fresh_bytes(root / "summary.json", payload + b"\n")
+    return summary
+
+
 def _snapshot_root(raw: str | None) -> Path | None:
     if raw is None:
         return None
@@ -944,9 +1124,18 @@ def main(
     mujoco_warp_runtime_site: str | None = None,
     save_interval: int = FULL_A_SAVE_INTERVAL,
     diagnostic_rate_probe: bool = False,
+    diagnostic_controller_trace_checkpoint: str | None = None,
+    diagnostic_controller_trace_output: str | None = None,
+    diagnostic_controller_trace_action_tape: str | None = None,
+    diagnostic_controller_trace_steps: int = 240,
     _test_allow_small_full_a: bool = False,
 ) -> int:
     num_steps_per_env = NUM_STEPS_PER_ENV
+    controller_trace = any(value is not None for value in (
+        diagnostic_controller_trace_checkpoint,
+        diagnostic_controller_trace_output,
+        diagnostic_controller_trace_action_tape,
+    ))
     if (
         type(num_envs) is not int
         or num_envs <= 0
@@ -954,13 +1143,25 @@ def main(
         or num_updates <= 0
         or type(full_a_mode) is not bool
         or type(diagnostic_rate_probe) is not bool
+        or type(diagnostic_controller_trace_steps) is not int
         or type(_test_allow_small_full_a) is not bool
         or type(save_interval) is not int or save_interval != FULL_A_SAVE_INTERVAL
     ):
         raise ValueError("runner dimensions/mode differ")
     if diagnostic_rate_probe and not full_a_mode:
         raise ValueError("diagnostic rate probe requires --full-a")
-    production_full_a = full_a_mode and not diagnostic_rate_probe
+    if controller_trace and (
+        not full_a_mode
+        or diagnostic_controller_trace_checkpoint is None
+        or diagnostic_controller_trace_output is None
+        or diagnostic_controller_trace_steps != 240
+        or diagnostic_rate_probe
+    ):
+        raise ValueError(
+            "controller trace requires --full-a, checkpoint/output, exactly 240 steps, "
+            "and no rate probe"
+        )
+    production_full_a = full_a_mode and not diagnostic_rate_probe and not controller_trace
     if production_full_a and (
         evidence_jsonl is None or snapshot_dir is None or completion_json is None
     ):
@@ -971,6 +1172,10 @@ def main(
         raise ValueError(
             "diagnostic rate probe requires evidence and forbids snapshot/completion paths"
         )
+    if controller_trace and any(value is not None for value in (
+        evidence_jsonl, snapshot_dir, completion_json,
+    )):
+        raise ValueError("controller trace forbids training evidence/snapshot/completion paths")
     if not full_a_mode and any(value is not None for value in (
         evidence_jsonl, snapshot_dir, completion_json, source_commit, run_namespace,
         mujoco_warp_runtime_site,
@@ -980,9 +1185,14 @@ def main(
         RATE_PROBE_NUM_UPDATES if diagnostic_rate_probe else FULL_A_NUM_UPDATES
     )
     if full_a_mode and not _test_allow_small_full_a and (
-        num_envs != FULL_A_NUM_ENVS or num_updates != expected_updates
+        num_envs != FULL_A_NUM_ENVS
+        or (not controller_trace and num_updates != expected_updates)
     ):
-        label = "diagnostic rate probe" if diagnostic_rate_probe else "production MuJoCo Full-A"
+        label = (
+            "controller trace" if controller_trace else
+            "diagnostic rate probe" if diagnostic_rate_probe else
+            "production MuJoCo Full-A"
+        )
         raise ValueError(
             f"{label} shape must be "
             f"{FULL_A_NUM_ENVS}x{NUM_STEPS_PER_ENV}x{expected_updates}"
@@ -1010,10 +1220,15 @@ def main(
         _bind_full_a_runtime(mujoco_warp_runtime_site, runtime_preimport)
         if full_a_mode else None
     )
-    artifact_root = (
-        _full_a_artifact_root(evidence_jsonl, snapshot_dir, completion_json)
-        if full_a_mode else None
-    )
+    artifact_root = None
+    if controller_trace:
+        artifact_root = _fresh_controller_trace_root(
+            diagnostic_controller_trace_output
+        )
+    elif full_a_mode:
+        artifact_root = _full_a_artifact_root(
+            evidence_jsonl, snapshot_dir, completion_json
+        )
 
     # Full-A must bind the exact EPA48/RSL3 site before importing torch or any
     # environment path that can import MJLab/MuJoCo-Warp.
@@ -1117,6 +1332,21 @@ def main(
     _require_rsl3_runtime(distribution, runner, torch)
     if full_a_mode:
         _apply_full_a_policy_bootstrap(runner, torch, env)
+    if controller_trace:
+        summary = _run_controller_trace(
+            runner=runner,
+            env=env,
+            root=artifact_root,
+            checkpoint=diagnostic_controller_trace_checkpoint,
+            steps=diagnostic_controller_trace_steps,
+            action_tape=diagnostic_controller_trace_action_tape,
+            torch_module=torch,
+        )
+        _best_effort_stdout_marker(
+            "ACTION_BALL_MUJOCO_CONTROLLER_TRACE_JSON="
+            + json.dumps(summary, sort_keys=True)
+        )
+        return 0
     runner.disable_logs = True
     # RSL-RL 3.1.2 initializes this field only when a logging writer exists,
     # but its stock save() reads it unconditionally before checking disable_logs.
@@ -1357,6 +1587,12 @@ if __name__ == "__main__":
     parser.add_argument("--num-updates", type=int, default=1)
     parser.add_argument("--full-a", dest="full_a_mode", action="store_true")
     parser.add_argument("--diagnostic-rate-probe", action="store_true")
+    parser.add_argument("--diagnostic-controller-trace-checkpoint")
+    parser.add_argument("--diagnostic-controller-trace-output")
+    parser.add_argument("--diagnostic-controller-trace-action-tape")
+    parser.add_argument(
+        "--diagnostic-controller-trace-steps", type=int, default=240
+    )
     parser.add_argument("--evidence-jsonl")
     parser.add_argument("--snapshot-dir")
     parser.add_argument("--completion-json")

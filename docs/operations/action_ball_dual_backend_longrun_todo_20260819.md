@@ -198,7 +198,10 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
 11. [ ] 用同checkpoint与固定随机action tape只追三项关节的`q/dq/qdes/tau-before-clamp/tau-after-clamp`，覆盖
     launch→outcome→recovery边界，并与Isaac implicit-drive同字段对照。先判断是actuator mapping/符号、扭矩
     clamp/积分还是recovery reference过激，再选择controller、action scale或连续reward的最小修复；未闭合前
-    不盲加权、不把hard edge改成Done，也不停止当前长期run。
+    不盲加权、不把hard edge改成Done，也不停止当前长期run。仓内probe现已接到**真实plant owner**：默认
+    training path不分配trace，只在显式diagnostic模式记录每个`.001 s`子步的raw/clamped torque包络与真实
+    q极值；首跑会同时落固定action tape，后续controller反事实和Isaac都复用该tape，避免闭环policy把plant
+    差异重新混进输入。exact Pod model2000运行与反事实结果尚未完成，所以本项仍为未闭合。
 
 <a id="fullmdp-v9-superseded"></a>
 

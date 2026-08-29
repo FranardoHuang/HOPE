@@ -1325,6 +1325,11 @@ class A3ReadyBallVecEnv:
       N, dtype=torch.bool, device=self.device)
     self._qdes_guard_intervention = torch.zeros_like(
       self._actual_hard_edge_latch)
+    # Disabled by default and therefore allocation-free on the training path.
+    # The isolated controller diagnostic reads the live plant owner's latest
+    # step instead of reimplementing the PD law in a same-writer probe.
+    self._controller_trace_enabled = False
+    self._controller_trace_latest = None
     self.gravity_w = torch.tensor([0.0, 0.0, -1.0], device=self.device).repeat(N, 1)
     self.common_step_counter = 0
     self._ball_reserve_steps = int(round(task_cfg.ball_reserve_after_s / self.step_dt))
@@ -1960,14 +1965,44 @@ class A3ReadyBallVecEnv:
         (self.jnt_hi - self.jnt_lo).unsqueeze(0).expand_as(q_des))
       self._qdes_reward_operand_valid.fill_(True)
 
+    trace_enabled = self._controller_trace_enabled
+    trace = None
+    if trace_enabled:
+      q_before = self._qpos_act().clone()
+      dq_before = self._qvel_act().clone()
+      trace = {
+        "q_before": q_before,
+        "dq_before": dq_before,
+        "pre_clamp_qdes": pre_clamp_qdes.clone(),
+        "executable_qdes": q_des.clone(),
+        "q_min": q_before.clone(),
+        "q_max": q_before.clone(),
+        "tau_raw_abs_max": torch.zeros_like(q_before),
+        "tau_clamped_abs_max": torch.zeros_like(q_before),
+        "tau_clamp_count": torch.zeros_like(q_before, dtype=torch.int16),
+      }
     tau_sq = torch.zeros(self.num_envs, device=self.device)
     for substep_index in range(self.decimation):
-      tau = self.kp * (q_des - self._qpos_act()) - self.kd * self._qvel_act()
-      tau = torch.clamp(tau, self.tau_lo, self.tau_hi)
+      tau_raw = self.kp * (q_des - self._qpos_act()) - self.kd * self._qvel_act()
+      tau = torch.clamp(tau_raw, self.tau_lo, self.tau_hi)
+      if trace_enabled:
+        if substep_index == 0:
+          trace["tau_raw_first"] = tau_raw.clone()
+          trace["tau_clamped_first"] = tau.clone()
+        if substep_index == self.decimation - 1:
+          trace["tau_raw_last"] = tau_raw.clone()
+          trace["tau_clamped_last"] = tau.clone()
+        trace["tau_raw_abs_max"].maximum_(tau_raw.abs())
+        trace["tau_clamped_abs_max"].maximum_(tau.abs())
+        trace["tau_clamp_count"].add_(tau_raw.ne(tau).to(torch.int16))
       d.ctrl[:] = tau[:, self.actuator_from_runtime]
       tau_n = tau / self.tau_scale
       tau_sq += (tau_n * tau_n).mean(dim=-1)
       self.sim.step()
+      if trace_enabled:
+        q_now = self._qpos_act()
+        trace["q_min"].minimum_(q_now)
+        trace["q_max"].maximum_(q_now)
       self._latch_actual_hard_edge()
       contact_census = None
       if self._contact_ok:
@@ -1982,12 +2017,32 @@ class A3ReadyBallVecEnv:
         self._probe_capacity("step")
     tau_sq /= self.decimation
 
+    if trace_enabled:
+      trace["q_after"] = self._qpos_act().clone()
+      trace["dq_after"] = self._qvel_act().clone()
+      trace["hard_lower"] = trace["q_min"].le(self.jnt_lo)
+      trace["hard_upper"] = trace["q_max"].ge(self.jnt_hi)
+      self._controller_trace_latest = trace
+
     self.episode_length_buf += 1
     self.ball_age_buf += 1
     self.common_step_counter += 1
 
     st = self._state()
     return st, tau_sq, pre_clamp_qdes
+
+  def enable_controller_trace(self) -> None:
+    """Opt into the latest-step trace produced by the real PD plant loop."""
+
+    self._controller_trace_enabled = True
+    self._controller_trace_latest = None
+
+  def controller_trace(self):
+    """Return the latest live trace without constructing a synthetic result."""
+
+    if not self._controller_trace_enabled or self._controller_trace_latest is None:
+      raise RuntimeError("controller trace is not enabled or no plant step has run")
+    return self._controller_trace_latest
 
   def step(self, actions):
     torch = self._torch

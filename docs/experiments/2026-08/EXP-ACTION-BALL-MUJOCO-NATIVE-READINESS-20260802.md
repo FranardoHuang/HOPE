@@ -145,6 +145,12 @@ action=`-.551`，按offset0/scale`.59`得到nominal qdes约`-.325 rad`，方向�
 reference，再改controller/scale/reward。完整receipt见
 [`action_ball_fullmdp_mu_model2000_jointdiag_20260829.json`](../../../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
 
+该反事实的producer现已收窄到一个真实owner：`A3ReadyBallVecEnv`默认关闭trace，显式diagnostic时才在原
+`.001 s×20` plant loop内记录raw/clamped tau、q极值和本步前后q/dq；runner只冻结checkpoint/seed并把首跑
+action保存进no-clobber NPZ，后续plant/controller候选必须复用这份action tape。这样既不复制PD公式作
+same-writer自证，也不让闭环policy因obs分叉而改变反事实输入。运行形状固定`512×240`，并禁止训练
+evidence、snapshot与completion；exact Pod首跑、Isaac同字段和最小修复均仍未完成，不得提前写成结论。
+
 Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝试给带`__slots__`、无instance
 `__dict__`的`PhysicalQuestionNumericCore`安装3个leaf wrapper。production/profile-off不受影响；修复是删除
 非法wrapper并继续由既有`d05_question_compose`总段归因，而不是放宽对象身份或改class。失败namespace只读，

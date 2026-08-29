@@ -1336,6 +1336,45 @@ def test_rate_probe_cli_has_no_resume_surface():
     assert "unrecognized arguments: --resume" in result.stderr
 
 
+def test_controller_trace_is_bounded_and_cannot_share_training_artifacts(
+    monkeypatch, tmp_path,
+):
+    module = _load()
+    monkeypatch.setattr(
+        module, "_rsl3_runner",
+        lambda: pytest.fail("controller-trace validation must precede RSL construction"),
+    )
+    common = dict(
+        full_a_mode=True,
+        num_envs=512,
+        diagnostic_controller_trace_checkpoint=str(tmp_path / "model.pt"),
+        diagnostic_controller_trace_output=str(tmp_path / "trace"),
+        source_commit=SOURCE_COMMIT,
+        run_namespace=RUN_NAMESPACE,
+        mujoco_warp_runtime_site=str(tmp_path / "runtime_site"),
+    )
+    with pytest.raises(ValueError, match="exactly 240 steps"):
+        module.main(diagnostic_controller_trace_steps=239, **common)
+    with pytest.raises(ValueError, match="forbids training evidence"):
+        module.main(evidence_jsonl=str(tmp_path / "updates.jsonl"), **common)
+    incomplete = dict(common)
+    incomplete.pop("diagnostic_controller_trace_checkpoint")
+    with pytest.raises(ValueError, match="requires --full-a, checkpoint/output"):
+        module.main(**incomplete)
+
+
+def test_controller_trace_reads_the_live_pd_owner_not_a_copied_law():
+    source = inspect.getsource(
+        _load()._run_controller_trace
+    )
+    plant = (LANE / "a3_train_ppo.py").read_text()
+    assert "env.enable_controller_trace()" in source
+    assert "trace = env.controller_trace()" in source
+    assert "tau_raw = self.kp * (q_des - self._qpos_act()) - self.kd * self._qvel_act()" in plant
+    assert 'trace["tau_raw_first"] = tau_raw.clone()' in plant
+    assert 'trace["tau_clamped_first"] = tau.clone()' in plant
+
+
 def test_evidence_jsonl_is_created_exclusively(monkeypatch, tmp_path):
     module = _load()
     existing = tmp_path / "updates.jsonl"

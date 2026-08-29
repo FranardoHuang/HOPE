@@ -32,6 +32,11 @@ Mu `model_2000.pt`的GPU1隔离`512×240`诊断把aggregate hard edge收敛到�
 `q/dq/qdes/tau-before-clamp/tau-after-clamp`，不是再加task Gate。receipt见
 [`model2000 joint diagnostic`](../../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
 
+该三关节probe现已接到真实Mu plant owner：默认训练路径不构造trace；显式隔离模式固定`512×240`，在原
+`.001 s×20`循环内记录q/dq、raw/executable qdes、raw/clamped tau和hard-edge，并保存可供后续Mu反事实与
+Isaac复用的action tape。它避免复制PD公式作same-writer自证，但exact Pod结果与Isaac同字段尚未取得，
+因此G06状态不变，仍不得把实现存在写成parity PASS。
+
 当前Isaac run的live identity又直接记录Python `3.11.13`、Torch `2.7.0+cu128`、RSL-RL `3.1.2`、
 TensorDict `0.10.0`，AppLauncher来自`IsaacLab-8320e0be`、Isaac Sim路径为`5.1.0`；这些与Jiayi的
 environment reproduction合同一致。因此已证wrong-object是旧Mu plant选择，不是当前受控FullMDP软件栈装错。

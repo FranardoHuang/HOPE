@@ -57,6 +57,10 @@
   `-.325 rad`，正在远离上限；故raw qdes越界/策略正向顶边被否决。下一步改为同tape三关节
   q/dq/qdes与clamp前后tau对照，不盲加reward或Done。receipt=
   [`configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json`](../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
+- controller反事实不再靠另一份复制PD公式：显式diagnostic入口从真实Mu plant owner按`.001 s`子步记录三项
+  hard关节的q/dq、raw/executable qdes及clamp前后tau，固定`512×240`且首跑保存可复用action tape；默认训练
+  路径不分配trace，输出root no-clobber并拒绝训练evidence/snapshot/completion。exact Pod结果尚未取得，本项
+  仍是诊断实现而不是controller修复或新Gate。
 - old Mu launcher被证实显式使用legacy `a3_pingpong.xml`而非A3P0807；这足以否定旧sim2sim比较，但不证明
   Pod安装整体损坏。同初态/action tape仍在首20 ms产生q/dq差`.00973/.89084`，剩余根因收敛到implicit
   PhysX drive与显式clamped PD/friction语义；需要Jiayi同tape runtime receipt再裁决。
