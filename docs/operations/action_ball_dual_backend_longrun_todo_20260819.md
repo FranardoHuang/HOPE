@@ -185,10 +185,18 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    Build4的环境path-autodiscovery是同类结构债：procedural fallback同时决定Python、IsaacLab与ABI，却没有
    唯一运行身份。后续替换为显式typed runtime identity和一次进程内receipt，删除fallback authority；这会
    减少分支与误比较，不是再加一圈启动后Gate。
-10. [ ] 对Mu `model_2000.pt`做隔离、只读checkpoint轨迹诊断，定位actual-hard-edge与qdes-guard的具体关节、
-    phase和action方向，再决定是controller语义、动作scale还是Reward28权重问题。现有`qdes_limit_barrier=0`
-    不是dead term：processed qdes已被soft inset投影；actual joint仍可因显式PD、积分与惯性碰hard edge，且
-    `joint_limit`已经产生非零付款。未定位前不盲加权、不把hard edge改成Done，也不停止当前只读长期run。
+10. [x] 已在GPU1隔离、严格加载Mu `model_2000.pt`做`512×240`随机policy轨迹诊断；optimizer未加载，当前
+    GPU0/2长期run未改。`8,081/122,880=6.58%` policy rows有actual hard edge，`8,373/122,880=6.81%`
+    有qdes guard，非零hard joint只有`waist_pitch/waist_roll/left_ankle_roll`三项；其中`77.47%` hard rows在
+    outcome-settled/recovery phase。`waist_pitch`全部撞上限，但撞边时mean action=`-.551`、nominal qdes约
+    `-.325 rad`，明确朝远离上限方向；因此“raw qdes越界/策略正向顶住”已被否决，首因更像显式PD、惯性、
+    recovery目标或actuator response。receipt见
+    [`action_ball_fullmdp_mu_model2000_jointdiag_20260829.json`](../../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
+    `qdes_limit_barrier=0`不是dead term：processed qdes已被soft inset投影，actual `joint_limit`仍有付款。
+11. [ ] 用同checkpoint与固定随机action tape只追三项关节的`q/dq/qdes/tau-before-clamp/tau-after-clamp`，覆盖
+    launch→outcome→recovery边界，并与Isaac implicit-drive同字段对照。先判断是actuator mapping/符号、扭矩
+    clamp/积分还是recovery reference过激，再选择controller、action scale或连续reward的最小修复；未闭合前
+    不盲加权、不把hard edge改成Done，也不停止当前长期run。
 
 <a id="fullmdp-v9-superseded"></a>
 

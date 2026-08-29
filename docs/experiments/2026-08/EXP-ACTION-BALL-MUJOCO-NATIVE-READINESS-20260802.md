@@ -129,6 +129,17 @@ actual-hard-edge joint-sample first50→recent50=`7.13%→8.94%`；Mu actual-har
 `4.90%/5.62%→28.19%/29.31%`。所以生存曲线改善不能单独代签balance/mimic成功，Mu还存在明显关节边界
 套利风险；先做per-joint/phase checkpoint诊断，再决定controller、scale或reward，不盲目加权或改Done。
 
+该checkpoint诊断现已完成，不再停在aggregate猜测。GPU1隔离进程严格加载Mu `model_2000.pt`
+（SHA `46d78c4e…bd1c`）、同source/0807 plant/RSL3/EPA48、seed0，跑`512 env×240 policy step`随机policy
+轨迹；optimizer未加载且未触碰长期run。hard/guard=`8,081/8,373`，共同分母`122,880`；只有
+`waist_pitch/waist_roll/left_ankle_roll`三个关节发生hard sample，`6,260/8,081=77.47%` hard rows位于
+outcome-settled/recovery phase。`waist_pitch`的`131,641`个substep hard sample全部是上限，但此时mean
+action=`-.551`，按offset0/scale`.59`得到nominal qdes约`-.325 rad`，方向明确远离机械上限`.418879 rad`。
+所以direct out-of-range qdes与“policy正向顶住”不是首因；下一最小反事实是同tape三关节
+`q/dq/qdes/tau-before/after-clamp`与Isaac implicit-drive对照，先判actuator mapping、clamp/积分或recovery
+reference，再改controller/scale/reward。完整receipt见
+[`action_ball_fullmdp_mu_model2000_jointdiag_20260829.json`](../../../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
+
 Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝试给带`__slots__`、无instance
 `__dict__`的`PhysicalQuestionNumericCore`安装3个leaf wrapper。production/profile-off不受影响；修复是删除
 非法wrapper并继续由既有`d05_question_compose`总段归因，而不是放宽对象身份或改class。失败namespace只读，

@@ -74,6 +74,14 @@ Mu actual-hard-edge/qdes-guard rows从`4.90%/5.62%→28.19%/29.31%`；episode生
 成功，尤其Mu可能部分利用关节边界。G05不把hard edge改成Done；下一项是隔离checkpoint的per-joint/phase
 归因，再决定controller、action scale或连续reward。
 
+该归因已在GPU1用Mu `model_2000.pt`、同0807 plant/RSL3/EPA48、seed0完成`512×240`随机policy step：
+hard/guard=`8,081/8,373`，分母`122,880`；非零hard joint仅`waist_pitch/waist_roll/left_ankle_roll`，
+`77.47%` hard rows在outcome-settled/recovery。`waist_pitch`全部撞上限，但撞边mean action=`-.551`、nominal
+qdes约`-.325 rad`，方向远离`.418879 rad`机械上限。因此不能把问题读成raw qdes越界或policy正向顶边；
+下一证据是同tape三关节`q/dq/qdes/tau`和clamp前后值，与Isaac implicit drive逐步对照。G05在该
+controller/recovery反事实闭合前不改reward/Done，保持`Partial`。receipt见
+[`model2000 joint diagnostic`](../../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
+
 同初态、同31-D action tape已排除joint order和decoder：initial q/dq逐位相同，qdes最大差`5.96e-8 rad`；
 但首20 ms q/dq已差`.00973 rad/.89084 rad/s`，tick47 q/root/racket差`.13028 rad/.07872 m/.05263 m`。
 源码对账显示Isaac是5 ms×4的implicit PhysX drive，Mu是1 ms×20的显式clamped PD；相同Kp/Kd/friction数值

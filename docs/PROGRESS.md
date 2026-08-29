@@ -50,6 +50,12 @@
   `37/0`（累计launch=`365,375`），wall=`6.709/6.858 s/H48`。课程自然重叠但hit约`.010%`且无合法落点；
   Isaac hard-edge joint-sample=`7.13%→8.94%`，Mu hard-edge/qdes-guard rows=`4.90%/5.62%→28.19%/29.31%`，
   因此生存增长不单独代签balance/mimic成功，先做per-joint/phase诊断再改controller/scale/reward。
+- GPU1已严格加载Mu `model_2000.pt`完成隔离`512×240`随机policy诊断：hard/guard=
+  `8,081/8,373`、共同分母`122,880`，hard只来自`waist_pitch/waist_roll/left_ankle_roll`，其中`77.47%`在
+  outcome-settled/recovery。最大项`waist_pitch`全部撞上限，但mean action=`-.551`、nominal qdes约
+  `-.325 rad`，正在远离上限；故raw qdes越界/策略正向顶边被否决。下一步改为同tape三关节
+  q/dq/qdes与clamp前后tau对照，不盲加reward或Done。receipt=
+  [`configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json`](../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
 - old Mu launcher被证实显式使用legacy `a3_pingpong.xml`而非A3P0807；这足以否定旧sim2sim比较，但不证明
   Pod安装整体损坏。同初态/action tape仍在首20 ms产生q/dq差`.00973/.89084`，剩余根因收敛到implicit
   PhysX drive与显式clamped PD/friction语义；需要Jiayi同tape runtime receipt再裁决。

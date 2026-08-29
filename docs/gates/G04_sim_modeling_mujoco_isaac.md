@@ -22,6 +22,12 @@ hard-edge、最终最小hard gap=`.21966 rad`；它只证明有限稳定出生�
 plant/controller/integrator/contact response，却不提供physics parity阈值。G04保留独立plant、geometry、
 finite和真实write事实，拒绝same-writer echo、task成功或额外rollout安全Gate，故仍为`Partial`。
 
+Mu `model_2000.pt`隔离`512×240`轨迹又把响应债定位到三个关节，`77.47%` hard rows在
+outcome-settled/recovery；最大项`waist_pitch`只撞上限，但撞边时nominal qdes约`-.325 rad`，方向远离
+`.418879 rad`上限。故raw qdes越界不是首因，G04下一模型证据是三关节同tape的q/dq/qdes与clamp前后tau，
+用于区分actuator mapping、显式PD/积分和recovery reference；不通过调reward掩盖plant差异。receipt见
+[`model2000 joint diagnostic`](../../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
+
 ## 2026-08-28 V9同源初态与课程纠正（仍`Partial`）
 
 Pod1的pinned `/opt/IsaacLab-8320e0be`、Kit、sealed RSL与A3 USD已在真实训练中工作；当前没有“Pod安装

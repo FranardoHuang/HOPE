@@ -25,6 +25,13 @@ launch/raw/selected/legal-landing=`4,883/10/1/0`、累计selected/legal=`37/0`�
 Mu recent50 p50/p90=`6.709/6.858 s/H48`，两端finite与durable边界clean；Mu actual-hard-edge/qdes-guard
 rows却从first50 `4.90%/5.62%`升到recent50 `28.19%/29.31%`，因此也不能用episode增长代签两端行为接近。
 
+Mu `model_2000.pt`的GPU1隔离`512×240`诊断把aggregate hard edge收敛到三关节：
+`waist_pitch/waist_roll/left_ankle_roll`，且`77.47%` hard rows发生在outcome-settled/recovery。
+`waist_pitch`全部撞上限时mean action=`-.551`、nominal qdes约`-.325 rad`，实际目标方向远离上限；这进一步
+反驳“相同qdes应产生相同响应”或“policy直接顶边”的简化解释。下一parity输入是这三关节的同tape
+`q/dq/qdes/tau-before-clamp/tau-after-clamp`，不是再加task Gate。receipt见
+[`model2000 joint diagnostic`](../../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
+
 当前Isaac run的live identity又直接记录Python `3.11.13`、Torch `2.7.0+cu128`、RSL-RL `3.1.2`、
 TensorDict `0.10.0`，AppLauncher来自`IsaacLab-8320e0be`、Isaac Sim路径为`5.1.0`；这些与Jiayi的
 environment reproduction合同一致。因此已证wrong-object是旧Mu plant选择，不是当前受控FullMDP软件栈装错。

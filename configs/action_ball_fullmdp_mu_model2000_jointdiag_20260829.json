@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "kind": "action_ball_fullmdp_mu_checkpoint_joint_edge_diagnostic_v1",
+  "diagnostic_unauthorized": true,
+  "formal_evidence": false,
+  "safety_gate": false,
+  "source_commit": "954200d5beb770d9622e922aabff508b6181409a",
+  "pod_run_root": "/workspace/franco/runs/fullmdp-mu-model2000-jointdiag-5tJ75R5z",
+  "checkpoint": {
+    "path": "/workspace/franco/runs/fullmdp-r12-0807-mujoco-rewardpack-954200d5-20260828T2254Z-r2/snapshots/model_2000.pt",
+    "sha256": "46d78c4eafe9d0898e68179bd4fbed615f8bf85127a4cb29eabaf5852bf9bd1c",
+    "iteration": 2000,
+    "strict_policy_load": true,
+    "optimizer_loaded": false
+  },
+  "runtime": {
+    "gpu_uuid": "GPU-a8f7dd24-1162-15d4-2f22-7552ce2a6cb6",
+    "rsl_rl": "3.1.2",
+    "plant_root_sha256": "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1",
+    "physics_dt_s": 0.001,
+    "decimation": 20,
+    "policy_dt_s": 0.02
+  },
+  "execution": {
+    "seed": 0,
+    "num_envs": 512,
+    "policy_steps": 240,
+    "policy_row_denominator": 122880,
+    "physics_latch_calls_per_policy_step": 21,
+    "stochastic_policy": true,
+    "elapsed_seconds_with_diagnostic_counters": 21.16900948714465
+  },
+  "policy_row_events": {
+    "actual_hard_edge_rows": 8081,
+    "actual_hard_edge_fraction": 0.0657633,
+    "qdes_guard_rows": 8373,
+    "qdes_guard_fraction": 0.0681396,
+    "selected_contact_rows": 0,
+    "legal_landing_rows": 0
+  },
+  "hard_edge_epoch_phase_rows": {
+    "idle_0": 0,
+    "reveal_committed_2": 515,
+    "launch_settled_5": 1142,
+    "outcome_settled_6": 6260,
+    "retired_8": 164
+  },
+  "qdes_guard_epoch_phase_rows": {
+    "idle_0": 0,
+    "reveal_committed_2": 573,
+    "launch_settled_5": 1233,
+    "outcome_settled_6": 6403,
+    "retired_8": 164
+  },
+  "nonzero_joint_rows": [
+    {
+      "joint": "waist_pitch_joint",
+      "hard_substep_samples": 131641,
+      "lower_samples": 0,
+      "upper_samples": 131641,
+      "nonfinite_samples": 0,
+      "mean_action_when_hard": -0.550987866622101,
+      "action_offset_rad": 0.0,
+      "action_scale_rad": 0.5899999737739563,
+      "mean_nominal_qdes_when_hard_rad": -0.325083,
+      "hard_lower_rad": -0.488692,
+      "hard_upper_rad": 0.418879,
+      "guard_policy_rows": 6563
+    },
+    {
+      "joint": "waist_roll_joint",
+      "hard_substep_samples": 64457,
+      "lower_samples": 30256,
+      "upper_samples": 34201,
+      "nonfinite_samples": 0,
+      "mean_action_when_hard": -0.3681217165610407,
+      "action_offset_rad": 0.0,
+      "action_scale_rad": 0.23000000417232513,
+      "mean_nominal_qdes_when_hard_rad": -0.084668,
+      "hard_lower_rad": -0.349066,
+      "hard_upper_rad": 0.349066,
+      "guard_policy_rows": 3436
+    },
+    {
+      "joint": "left_ankle_roll_joint",
+      "hard_substep_samples": 1941,
+      "lower_samples": 0,
+      "upper_samples": 1941,
+      "nonfinite_samples": 0,
+      "mean_action_when_hard": 0.6913231088598016,
+      "action_offset_rad": -0.007799999788403511,
+      "action_scale_rad": 0.2737500071525574,
+      "mean_nominal_qdes_when_hard_rad": 0.18145,
+      "hard_lower_rad": -0.349066,
+      "hard_upper_rad": 0.349066,
+      "guard_policy_rows": 118
+    }
+  ],
+  "interpretation": {
+    "nonzero_hard_edge_joint_count": 3,
+    "outcome_settled_share_of_hard_rows": 0.774657,
+    "waist_pitch_target_points_away_from_observed_upper_edge": true,
+    "direct_out_of_range_qdes_explanation_rejected": true,
+    "next_counterfactual": "replay the same checkpoint and stochastic tape with per-joint q_dq_qdes_tau_clamp traces around outcome-to-recovery; compare explicit PD against the matched Isaac implicit-drive trace before changing reward weights, action scale, or Done semantics"
+  }
+}
