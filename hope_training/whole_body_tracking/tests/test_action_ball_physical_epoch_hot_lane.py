@@ -793,11 +793,11 @@ def test_postphysics_source_orders_one_capture_through_physical_and_r06_retire()
     ordered = (
         "facts = self.capture_post_physics_facts(stamp)",
         "ActionEpochR06PostPhysicsProjection(",
-        "refresh_epoch()",
-        "publish_direct()",
-        "retire_direct()",
+        'profiled_call("physical_epoch_refresh", refresh_epoch)',
+        'profiled_call("r06_postphysics_settle", publish_direct)',
+        'profiled_call("r06_postphysics_retire", retire_direct)',
         'kind="retire"',
-        "r06_publish()",
+        'profiled_call("r06_epoch_facts_publish", r06_publish)',
         "self._active_postphysics_capture = None",
     )
     assert source.count(ordered[0]) == 1
