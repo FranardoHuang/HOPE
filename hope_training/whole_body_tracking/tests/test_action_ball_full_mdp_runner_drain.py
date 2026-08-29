@@ -32,6 +32,15 @@ from test_joint_limit_safety import (
 
 @pytest.fixture(scope="module")
 def runner_module():
+    focused_names = (
+        "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_epoch",
+        "action_ball_full_mdp_epoch",
+        "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_lean_rewards",
+        "action_ball_full_mdp_lean_rewards",
+        "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_lean_runtime",
+        "_runner_drain_lean_runtime",
+    )
+    focused_prior = {name: sys.modules.get(name) for name in focused_names}
     module, saved = _load_runner_module()
     module.MotionOnPolicyRunner._bind_joint_safety_action_term = (
         lambda self, *, required: (
@@ -46,6 +55,11 @@ def runner_module():
         import sys
 
         for name, previous in reversed(tuple(saved.items())):
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+        for name, previous in focused_prior.items():
             if previous is None:
                 sys.modules.pop(name, None)
             else:
@@ -119,7 +133,12 @@ def _load_focused_module_once(
         else sys.modules.get(standalone_name)
     )
     if canonical is not None and standalone is not None:
-        assert canonical is standalone
+        if canonical is not standalone:
+            # Another focused test may have loaded the same source through its
+            # standalone key during collection.  Canonical identity owns the
+            # production ABI; alias it only for this module-scoped fixture and
+            # restore the prior namespace when the fixture exits.
+            sys.modules[standalone_name] = canonical
         return canonical
     module = canonical if canonical is not None else standalone
     if module is None:
