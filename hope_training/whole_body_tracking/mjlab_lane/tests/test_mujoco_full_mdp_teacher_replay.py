@@ -64,6 +64,78 @@ def test_teacher_replay_frozen_counter_and_hash_are_content_exact():
     assert replay.tensor_f32_sha256(value) == expected
 
 
+def test_pre_step_snapshot_drives_request_while_post_step_is_independent():
+    env = types.SimpleNamespace(
+        _epoch_task_valid=torch.tensor([True]),
+        _full_a_teacher_frame=torch.tensor([4]),
+        _full_a_motion_phase_code=torch.tensor([1]),
+        _full_a_teacher_joint_pos=torch.tensor([[2.0, 4.0]]),
+        _epoch_clock_ticks=torch.tensor([[10, 11, 12, 13, 14]]),
+        _full_a_pre_swing_wait_s=torch.tensor([0.0]),
+    )
+    pre = replay.capture_teacher_replay_pre_step(env)
+    env._epoch_task_valid.fill_(False)
+    env._full_a_teacher_frame.fill_(9)
+    env._full_a_motion_phase_code.fill_(4)
+    env._full_a_teacher_joint_pos.fill_(99.0)
+    requested = replay.frozen_teacher_qdes(
+        torch=torch,
+        task_valid=pre.task_valid,
+        hold_qdes=torch.zeros((1, 2)),
+        previous_qdes=torch.zeros((1, 2)),
+        teacher_qdes=pre.teacher_qdes,
+        frozen_steps=torch.zeros(1, dtype=torch.long),
+        bridge=wait_env.portable_question.step_diagnostic_split_ready_qdes_bridge,
+    )
+    assert pre.task_valid.tolist() == [True]
+    assert pre.teacher_frame.tolist() == [4]
+    assert pre.motion_phase.tolist() == [1]
+    assert requested.tolist() == [[2.0, 4.0]]
+    assert env._epoch_task_valid.tolist() == [False]
+    assert env._full_a_teacher_frame.tolist() == [9]
+
+
+def test_contact_patch_boundary_does_not_alias_final_forward_to_substep():
+    substep = replay.contact_capture_boundary(
+        transition_start_step=17,
+        capture_boundary="physics_substep_poststate",
+        physics_substep_index=19,
+        decimation=20,
+    )
+    final = replay.contact_capture_boundary(
+        transition_start_step=17,
+        capture_boundary="post_forward_final",
+        physics_substep_index=None,
+        decimation=20,
+    )
+    assert substep["completed_physics_substeps"] == 20
+    assert final["completed_physics_substeps"] == 20
+    assert substep["physics_substep_index"] == 19
+    assert final["physics_substep_index"] is None
+    with pytest.raises(ValueError, match="final-forward"):
+        replay.contact_capture_boundary(
+            transition_start_step=17,
+            capture_boundary="post_forward_final",
+            physics_substep_index=20,
+            decimation=20,
+        )
+
+
+def test_different_shot_generation_is_not_a_valid_patch_key():
+    question = torch.tensor([1.0, 2.0])
+    question_sha = replay.tensor_f32_sha256(question)
+    with pytest.raises(RuntimeError, match="different shot"):
+        replay.validate_contact_patch_shot(
+            contact_patch={
+                "present": True,
+                "reset_generation": 4,
+                "question_f32_sha256": question_sha,
+            },
+            question_reset_generation=3,
+            question_f32_sha256=question_sha,
+        )
+
+
 def test_contact_patch_is_absent_until_explicitly_enabled():
     bare = types.SimpleNamespace()
     with pytest.raises(RuntimeError, match="not enabled"):

@@ -26,11 +26,13 @@ try:
     from .a3_train_ppo import A3ReadyBallVecEnv, SimCfg, TaskCfg
     from . import mujoco_full_mdp_portable_question as portable_question
     from . import mujoco_full_mdp_portable_outcome as portable_outcome
+    from . import mujoco_full_mdp_teacher_replay as teacher_replay
     from .mujoco_gpu_ac_table_keepout import DeviceExactTableKeepout
 except ImportError:  # Direct execution with mjlab_lane on PYTHONPATH.
     from a3_train_ppo import A3ReadyBallVecEnv, SimCfg, TaskCfg
     import mujoco_full_mdp_portable_question as portable_question
     import mujoco_full_mdp_portable_outcome as portable_outcome
+    import mujoco_full_mdp_teacher_replay as teacher_replay
     from mujoco_gpu_ac_table_keepout import DeviceExactTableKeepout
 
 
@@ -570,7 +572,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
 
     def _capture_diagnostic_first_generic_contact_patch(
-        self, *, first_contact, classification, substep_index
+        self, *, first_contact, classification, substep_index, capture_boundary
     ) -> None:
         """Capture the first live generic ball/racket row without reclassifying."""
 
@@ -608,11 +610,20 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         raw_frame = [float(value) for value in host_values("frame")]
         raw_normal = raw_frame[:3]
         normal_sign = 1.0 if geom_ids[0] == self._ball_gid else -1.0
+        boundary = teacher_replay.contact_capture_boundary(
+            transition_start_step=int(
+                self._diagnostic_contact_patch_transition_start_step
+            ),
+            capture_boundary=capture_boundary,
+            physics_substep_index=substep_index,
+            decimation=int(self.decimation),
+        )
         self._diagnostic_first_generic_contact_patch = {
             "present": True,
-            "control_step_before_advance": int(self.common_step_counter),
-            "physics_substep_index": (
-                None if substep_index is None else int(substep_index)
+            **boundary,
+            "reset_generation": int(self.reset_generation[0].item()),
+            "question_f32_sha256": teacher_replay.tensor_f32_sha256(
+                self._epoch_task_f32[0]
             ),
             "contact_row_index": index,
             "geom_ids": geom_ids,
@@ -1102,7 +1113,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         return reveal, due, deferred, due_terminal_overlap
 
     def _full_a_latch_ball_contacts(
-        self, contact_census=None, diagnostic_substep_index=None
+        self, contact_census=None, diagnostic_substep_index=None,
+        diagnostic_capture_boundary=None,
     ) -> None:
         """Consume one shared census, then latch net/landing-plane crossings."""
 
@@ -1138,6 +1150,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 first_contact=first_contact,
                 classification=classification,
                 substep_index=diagnostic_substep_index,
+                capture_boundary=diagnostic_capture_boundary,
             )
         self._full_a_contact_center.copy_(
             torch.where(first_contact[:, None], center, self._full_a_contact_center)
@@ -2201,6 +2214,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 self._full_a_latch_ball_contacts(
                     contact_census,
                     diagnostic_substep_index=substep_index,
+                    diagnostic_capture_boundary="physics_substep_poststate",
                 )
 
     def _latch_post_forward_table_keepout(self) -> None:
@@ -3154,6 +3168,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         """Advance the one real reveal/launch/flight/outcome vertical slice."""
 
         torch = self._torch
+        if getattr(self, "_diagnostic_contact_patch_consumer", None) is not None:
+            self._diagnostic_contact_patch_transition_start_step = int(
+                self.common_step_counter
+            )
         self._full_a_begin_control_step()
         scheduled_due_event, launch_event, missed_launch_event = (
             self._full_a_prepare_step()
@@ -3165,7 +3183,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._latch_post_forward_table_keepout()
         self._full_a_latch_ball_contacts(
             final_contact_census,
-            diagnostic_substep_index=self.decimation,
+            diagnostic_substep_index=None,
+            diagnostic_capture_boundary="post_forward_final",
         )
         if self._cap_ok:
             self._probe_capacity("forward")

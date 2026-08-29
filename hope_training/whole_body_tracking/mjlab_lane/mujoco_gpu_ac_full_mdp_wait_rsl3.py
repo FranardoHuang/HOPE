@@ -953,8 +953,9 @@ def _run_teacher_replay(
     previous_qdes = env._full_a_policy_bootstrap_qdes.unsqueeze(0).clone()
     hold_qdes = previous_qdes.clone()
     rows = {name: [] for name in (
-        "common_step", "phase", "task_valid", "teacher_frame",
-        "motion_phase", "frozen_steps", "requested_qdes", "raw_action",
+        "common_step", "phase", "pre_task_valid", "pre_teacher_frame",
+        "pre_motion_phase", "post_task_valid", "post_teacher_frame",
+        "post_motion_phase", "frozen_steps", "requested_qdes", "raw_action",
         "executable_qdes", "actual_joint_pos", "actual_joint_vel",
         "ball_center_w", "ball_lin_vel_w", "racket_site_w",
         "racket_velocity_w", "racket_normal_w", "scheduled_due", "reveal",
@@ -964,21 +965,24 @@ def _run_teacher_replay(
         "termination_bits", "qdes_guard_intervention",
     )}
     question = launch = None
+    question_reset_generation = None
+    shot_boundary_reason = None
     with torch_module.inference_mode():
         for _ordinal in range(steps):
+            pre = helper.capture_teacher_replay_pre_step(env)
             frozen = helper.remaining_teacher_frozen_steps(
                 torch=torch_module,
                 common_step=int(env.common_step_counter),
-                reveal_tick=env._epoch_clock_ticks[:, 0],
-                pre_swing_wait_s=env._full_a_pre_swing_wait_s,
+                reveal_tick=pre.reveal_tick,
+                pre_swing_wait_s=pre.pre_swing_wait_s,
                 step_dt=float(env.step_dt),
             )
             requested = helper.frozen_teacher_qdes(
                 torch=torch_module,
-                task_valid=env._epoch_task_valid,
+                task_valid=pre.task_valid,
                 hold_qdes=hold_qdes,
                 previous_qdes=previous_qdes,
-                teacher_qdes=env._full_a_teacher_joint_pos,
+                teacher_qdes=pre.teacher_qdes,
                 frozen_steps=frozen,
                 bridge=(
                     _wait_module().portable_question
@@ -997,15 +1001,21 @@ def _run_teacher_replay(
             if bool(extras["full_a_reveal_event"][0]) and question is None:
                 question = env._epoch_task_f32[0].detach().clone()
                 launch = env._full_a_launch_state_f32[0].detach().clone()
+                question_reset_generation = int(
+                    extras["reset_generation"][0].detach().cpu().item()
+                )
 
             def host(value):
                 return value.detach().cpu().numpy().copy()
 
             rows["common_step"].append(int(env.common_step_counter))
             rows["phase"].append(host(extras["full_a_phase_before_reset"]))
-            rows["task_valid"].append(host(env._epoch_task_valid))
-            rows["teacher_frame"].append(host(env._full_a_teacher_frame))
-            rows["motion_phase"].append(host(env._full_a_motion_phase_code))
+            rows["pre_task_valid"].append(host(pre.task_valid))
+            rows["pre_teacher_frame"].append(host(pre.teacher_frame))
+            rows["pre_motion_phase"].append(host(pre.motion_phase))
+            rows["post_task_valid"].append(host(env._epoch_task_valid))
+            rows["post_teacher_frame"].append(host(env._full_a_teacher_frame))
+            rows["post_motion_phase"].append(host(env._full_a_motion_phase_code))
             rows["frozen_steps"].append(host(frozen))
             rows["requested_qdes"].append(host(requested))
             rows["raw_action"].append(host(action))
@@ -1041,8 +1051,20 @@ def _run_teacher_replay(
                 extras["full_a_qdes_guard_intervention_event"]
             ))
             previous_qdes = requested
+            if bool(done[0]):
+                shot_boundary_reason = "first_done"
+                break
+            if bool(extras["full_a_completed_action_epoch_event"][0]):
+                shot_boundary_reason = "first_completed_action_epoch"
+                break
     if question is None or launch is None:
         raise RuntimeError("teacher replay never received a live accepted question")
+    contact_patch = env.diagnostic_first_generic_contact_patch()
+    helper.validate_contact_patch_shot(
+        contact_patch=contact_patch,
+        question_reset_generation=question_reset_generation,
+        question_f32_sha256=helper.tensor_f32_sha256(question),
+    )
     arrays = {
         name: np.asarray(values) if name == "common_step" else np.stack(values)
         for name, values in rows.items()
@@ -1064,6 +1086,9 @@ def _run_teacher_replay(
         "ppo_update_calls": 0,
         "num_envs": int(env.num_envs),
         "policy_steps": int(steps),
+        "executed_policy_steps": int(len(rows["common_step"])),
+        "shot_boundary_reason": shot_boundary_reason or "step_budget_exhausted",
+        "question_reset_generation": question_reset_generation,
         "run_identity": identity,
         "manifest_file_sha256": catalog.manifest_file_sha256,
         "manifest_canonical_sha256": catalog.manifest_canonical_sha256,
@@ -1077,7 +1102,7 @@ def _run_teacher_replay(
         "action_delay": {"steps": 0, "source": "live MuJoCo action ABI"},
         "trace_npz": "teacher_replay.npz",
         "trace_npz_sha256": hashlib.sha256(trace_bytes).hexdigest(),
-        "generic_contact_patch": env.diagnostic_first_generic_contact_patch(),
+        "generic_contact_patch": contact_patch,
         "event_counts": {
             name: int(np.count_nonzero(arrays[name]))
             for name in (

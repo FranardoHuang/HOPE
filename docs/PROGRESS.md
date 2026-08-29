@@ -6,6 +6,9 @@
   due/task/launch，请求qdes走dynamic-ready hold、frame0 bridge、vendor affine decoder、shared guard和
   真实PD plant；不跑PPO、不保存checkpoint。另增首个backend generic ball/racket contact
   patch的显式opt-in取证，默认训练热路不分配patch tensor、不D2H、不调force kernel。
+  trace将构造request所消费的pre-step teacher标签与post-step标签分列；回放在首次done或首个action
+  epoch结束时停止，contact patch以reset generation和question SHA拒绝跨shot误归因，并显式区分
+  physics-substep poststate与final-forward capture boundary。
   当前只有静态AST/`git diff --check`证据；Pod CPU单测、真实CUDA N=1回放与contact patch
   finite/lineage验收仍为`unverified`，不授权训练或物理结论。
 

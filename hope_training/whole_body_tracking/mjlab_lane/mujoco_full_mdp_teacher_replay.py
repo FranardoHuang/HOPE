@@ -11,12 +11,88 @@ from __future__ import annotations
 
 import hashlib
 import math
+from dataclasses import dataclass
 
 
 TEACHER_REPLAY_SCHEMA_VERSION = 1
 TEACHER_REPLAY_DEFAULT_STEPS = 180
 TEACHER_REPLAY_NUM_ENVS = 1
 TEACHER_REPLAY_ACTION_DELAY_STEPS = 0
+
+
+@dataclass(frozen=True)
+class TeacherReplayPreStep:
+    """The exact Motion-owned state consumed to construct one request."""
+
+    task_valid: object
+    teacher_frame: object
+    motion_phase: object
+    teacher_qdes: object
+    reveal_tick: object
+    pre_swing_wait_s: object
+
+
+def capture_teacher_replay_pre_step(env) -> TeacherReplayPreStep:
+    """Clone the input state before physics can advance or reset the row."""
+
+    return TeacherReplayPreStep(
+        task_valid=env._epoch_task_valid.clone(),
+        teacher_frame=env._full_a_teacher_frame.clone(),
+        motion_phase=env._full_a_motion_phase_code.clone(),
+        teacher_qdes=env._full_a_teacher_joint_pos.clone(),
+        reveal_tick=env._epoch_clock_ticks[:, 0].clone(),
+        pre_swing_wait_s=env._full_a_pre_swing_wait_s.clone(),
+    )
+
+
+def contact_capture_boundary(
+    *, transition_start_step: int, capture_boundary: str,
+    physics_substep_index, decimation: int,
+) -> dict:
+    """Name a contact patch boundary without conflating final forward with a step."""
+
+    if (
+        type(transition_start_step) is not int
+        or transition_start_step < 0
+        or type(decimation) is not int
+        or decimation <= 0
+    ):
+        raise ValueError("contact patch transition boundary differs")
+    if capture_boundary == "physics_substep_poststate":
+        if (
+            type(physics_substep_index) is not int
+            or physics_substep_index < 0
+            or physics_substep_index >= decimation
+        ):
+            raise ValueError("contact patch physics substep differs")
+        completed = physics_substep_index + 1
+    elif capture_boundary == "post_forward_final":
+        if physics_substep_index is not None:
+            raise ValueError("final-forward contact patch has a substep index")
+        completed = decimation
+    else:
+        raise ValueError("contact patch capture boundary differs")
+    return {
+        "transition_start_step": transition_start_step,
+        "capture_boundary": capture_boundary,
+        "physics_substep_index": physics_substep_index,
+        "completed_physics_substeps": completed,
+    }
+
+
+def validate_contact_patch_shot(
+    *, contact_patch: dict, question_reset_generation: int,
+    question_f32_sha256: str,
+) -> None:
+    """Reject a captured patch from any later reset generation or question."""
+
+    if not contact_patch.get("present", False):
+        return
+    if (
+        contact_patch.get("reset_generation") != question_reset_generation
+        or contact_patch.get("question_f32_sha256") != question_f32_sha256
+    ):
+        raise RuntimeError("contact patch belongs to a different shot")
 
 
 def remaining_teacher_frozen_steps(
@@ -117,6 +193,10 @@ __all__ = [
     "TEACHER_REPLAY_DEFAULT_STEPS",
     "TEACHER_REPLAY_NUM_ENVS",
     "TEACHER_REPLAY_ACTION_DELAY_STEPS",
+    "TeacherReplayPreStep",
+    "capture_teacher_replay_pre_step",
+    "contact_capture_boundary",
+    "validate_contact_patch_shot",
     "remaining_teacher_frozen_steps",
     "frozen_teacher_qdes",
     "decode_teacher_qdes_to_action",
