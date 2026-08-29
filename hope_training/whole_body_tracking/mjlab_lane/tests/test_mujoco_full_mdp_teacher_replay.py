@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import inspect
 from pathlib import Path
 import sys
+import textwrap
 import types
 
 import numpy as np
@@ -62,6 +64,29 @@ def test_teacher_replay_frozen_counter_and_hash_are_content_exact():
         np.asarray([[1.0, 2.0]], dtype="<f4").tobytes()
     ).hexdigest()
     assert replay.tensor_f32_sha256(value) == expected
+
+
+def test_teacher_replay_frozen_counter_only_snaps_dtype_roundoff_at_tick_boundary():
+    encoded_boundary = torch.tensor([0.10], dtype=torch.float32)
+    below_boundary = torch.nextafter(
+        encoded_boundary, torch.full_like(encoded_boundary, -torch.inf)
+    )
+    above_boundary = torch.nextafter(
+        encoded_boundary, torch.full_like(encoded_boundary, torch.inf)
+    )
+    frozen = replay.remaining_teacher_frozen_steps(
+        torch=torch,
+        common_step=12,
+        reveal_tick=torch.tensor([10, 10, 10]),
+        pre_swing_wait_s=torch.cat(
+            (below_boundary, encoded_boundary, above_boundary)
+        ),
+        step_dt=0.02,
+    )
+    # The encoded 0.10 schedule and its lower neighbour both end at tick 5.
+    # One representable float above it is a real positive margin and must keep
+    # the sixth tick instead of being swallowed by boundary normalization.
+    assert frozen.tolist() == [3, 3, 4]
 
 
 def test_pre_step_snapshot_drives_request_while_post_step_is_independent():
@@ -152,8 +177,43 @@ def test_contact_patch_is_absent_until_explicitly_enabled():
     source = inspect.getsource(
         wait_env.FullMdpInitialWaitVecEnv._full_a_latch_ball_contacts
     )
-    assert 'getattr(self, "_diagnostic_contact_patch_consumer", None)' in source
-    assert "patch_consumer is not None" in source
+    tree = ast.parse(textwrap.dedent(source))
+    getattr_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) == 3
+        and isinstance(node.args[1], ast.Constant)
+        and node.args[1].value == "_diagnostic_contact_patch_consumer"
+        and isinstance(node.args[2], ast.Constant)
+        and node.args[2].value is None
+    ]
+    assert len(getattr_calls) == 1
+    guarded_calls = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.If)
+            and isinstance(node.test, ast.Compare)
+            and isinstance(node.test.left, ast.Name)
+            and node.test.left.id == "patch_consumer"
+            and len(node.test.ops) == 1
+            and isinstance(node.test.ops[0], ast.IsNot)
+            and len(node.test.comparators) == 1
+            and isinstance(node.test.comparators[0], ast.Constant)
+            and node.test.comparators[0].value is None
+        ):
+            continue
+        guarded_calls.extend(
+            child
+            for statement in node.body
+            for child in ast.walk(statement)
+            if isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id == "patch_consumer"
+        )
+    assert len(guarded_calls) == 1
 
 
 def test_teacher_replay_cli_is_n1_zero_ppo_and_reuses_live_owner():

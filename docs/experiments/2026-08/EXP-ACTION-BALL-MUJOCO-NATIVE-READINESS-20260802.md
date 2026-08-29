@@ -20,6 +20,17 @@
 > 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
 
+## 2026-08-30 frozen-teacher targeted修复候选
+
+Pod CPU targeted对`5f1ee728`的结果是两个可定位的实现失败，不是teacher replay
+科学否定：`0.10 s`与`0.02 s`的float32表示在“先减elapsed seconds、再`ceil`”时
+把剩3 tick误计4 tick；另一失败只由`getattr(...)`换行触发。修复候选改为
+全等待期按policy boundary离散化后再减elapsed tick，用输入dtype的相邻可表示值定义
+半ULP归一区；测试同时固定了边界下方/边界/边界上方三个反例，上方真实
+余量仍向上取整。contact patch接线改用AST检查optional `getattr`及non-None守卫下
+的consumer call，不再把格式当语义。当前仅`git diff --check`；Pod targeted、N=1 CUDA
+和首contact patch仍是`unverified`，不改变`diagnostic_unauthorized=true`。
+
 ## 2026-08-29 current correction
 
 ### 重新判读：学习阶段、R06热路与部署边界

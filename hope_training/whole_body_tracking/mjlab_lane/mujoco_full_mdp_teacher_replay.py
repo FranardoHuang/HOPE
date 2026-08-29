@@ -100,7 +100,18 @@ def validate_contact_patch_shot(
 def remaining_teacher_frozen_steps(
     *, torch, common_step: int, reveal_tick, pre_swing_wait_s, step_dt: float
 ):
-    """Return Motion's integer frame-zero hold counter at one actor boundary."""
+    """Return Motion's integer frame-zero hold counter at one actor boundary.
+
+    The wait contract is defined on policy boundaries.  Convert the complete
+    wait to a tick count first, then subtract elapsed integer ticks.  Subtracting
+    float32 seconds before ``ceil`` can turn the exact decimal schedule
+    ``(0.10 - 0.04) / 0.02 == 3`` into ``3.0000002`` and silently add a tick.
+
+    A configured tick boundary can itself be represented just above the exact
+    decimal in a floating dtype.  Snap only when that boundary lies within half
+    an input-dtype ULP; the immediately larger representable value remains an
+    off-grid wait and is still rounded upward, preserving real safety margin.
+    """
 
     if type(common_step) is not int or common_step < 0:
         raise ValueError("teacher replay common step differs")
@@ -110,15 +121,38 @@ def remaining_teacher_frozen_steps(
         reveal_tick.ndim != 1
         or tuple(pre_swing_wait_s.shape) != tuple(reveal_tick.shape)
         or reveal_tick.dtype != torch.long
+        or not pre_swing_wait_s.dtype.is_floating_point
     ):
         raise ValueError("teacher replay frozen-step tensors differ")
-    elapsed = torch.clamp(
-        (common_step - reveal_tick).to(dtype=pre_swing_wait_s.dtype)
-        * float(step_dt),
-        min=0.0,
+
+    # Do the boundary comparison in float64, but derive the admissible snap
+    # radius from the adjacent values of the storage dtype that carried
+    # ``pre_swing_wait_s``.  This is a representation repair, not a physical
+    # tolerance or a reduced wait.
+    wait_s_f64 = pre_swing_wait_s.to(dtype=torch.float64)
+    wait_ratio = wait_s_f64 / float(step_dt)
+    nearest_tick = torch.round(wait_ratio)
+    nearest_boundary_s = nearest_tick * float(step_dt)
+    lower_stored_s = torch.nextafter(
+        pre_swing_wait_s,
+        torch.full_like(pre_swing_wait_s, -float("inf")),
+    ).to(dtype=torch.float64)
+    upper_stored_s = torch.nextafter(
+        pre_swing_wait_s,
+        torch.full_like(pre_swing_wait_s, float("inf")),
+    ).to(dtype=torch.float64)
+    half_input_ulp_s = 0.5 * torch.minimum(
+        wait_s_f64 - lower_stored_s,
+        upper_stored_s - wait_s_f64,
     )
-    remaining = torch.clamp(pre_swing_wait_s - elapsed, min=0.0)
-    frozen = torch.ceil(remaining / float(step_dt) - 1.0e-12).to(torch.long)
+    on_encoded_tick_boundary = torch.abs(
+        wait_s_f64 - nearest_boundary_s
+    ) <= half_input_ulp_s
+    total_wait_ticks = torch.ceil(
+        torch.where(on_encoded_tick_boundary, nearest_tick, wait_ratio)
+    ).to(torch.long)
+    elapsed_ticks = torch.clamp(common_step - reveal_tick, min=0)
+    frozen = torch.clamp(total_wait_ticks - elapsed_ticks, min=0)
     torch._assert_async(torch.isfinite(pre_swing_wait_s).all())
     torch._assert_async(torch.all(frozen >= 0))
     return frozen

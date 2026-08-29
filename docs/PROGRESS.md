@@ -1,5 +1,14 @@
 # 简短进度记录
 
+## 2026-08-30 — frozen-teacher Pod targeted失败修复候选
+
+- Pod CPU targeted在`5f1ee728`暴露两个实现问题：float32秒数先相减再`ceil`
+  会把本应剩3个policy tick的frame0 bridge误拖到4个；contact patch测试把单行
+  源码排版当成了合同。本候选改为“完整等待期先离散化为tick，再减已过tick”；
+  只对落在输入dtype半个ULP内的精确tick边界做表示归一，紧邻上方的可表示反例
+  仍向上取整，不减少真实安全余量。patch wiring改用AST验证，不再依赖换行。
+  本地只做`git diff --check`；Pod targeted复跑仍为`unverified`，不授权训练或物理结论。
+
 ## 2026-08-30 — FullMDP N=1 frozen-teacher replay候选实现
 
 - 基于`8200c4a2`增加opt-in MuJoCo frozen-teacher诊断候选：仍由现役owner生成

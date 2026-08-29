@@ -2,6 +2,15 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+## 2026-08-30 frozen-teacher targeted修复候选（仍`Partial`）
+
+`5f1ee728`的Pod CPU targeted首轮没有通过：float32等待秒数在相减后`ceil`产生
+了无意多一tick，另一项测试把Python换行当成contact patch接线合同。后继候选将
+frame0等待显式定义在policy tick边界：先将完整`pre_swing_wait_s`转为整数tick，
+只对输入dtype半ULP内的精确tick边界消除表示误差，再减已过整数tick；上方紧邻
+浮点反例仍保留额外等待。contact consumer改为AST结构验证。当前仅有静态检查，
+必须在Pod重跑targeted，再进入N=1 CUDA replay；不提升G06证据等级。
+
 ## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
 
 新机可复现边界现已具体化：Mu的Python3.12.3基础venv有133项tracked lock，Pod fresh resolver精确闭合；
