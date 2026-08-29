@@ -364,7 +364,7 @@ def test_full_mdp_exact_rows_preserve_every_global_and_bucket_float_transition()
     assert actual == expected
 
 
-def test_full_mdp_deferred_fixed_tape_matches_legacy_public_exact_metrics():
+def test_full_mdp_deferred_fixed_tape_matches_independent_public_formulas():
     deferred = _deferred_exact_command(num_buckets=2)
     immediate = _deferred_exact_command(num_buckets=2)
     global_attributes = (
@@ -417,16 +417,63 @@ def test_full_mdp_deferred_fixed_tape_matches_legacy_public_exact_metrics():
     deferred.materialize_action_ball_diagnostic_metrics_for_report(
         expected_full_mdp_exact_row_counts=(3,)
     )
-    immediate._refresh_action_ball_diagnostic_public_metrics()
-    immediate._refresh_action_ball_exact_public_metrics()
+    n = immediate._exact_n_acc
+    expected = {
+        "swing_completion_rate": min(n / immediate._swing_starts_acc, 1.0),
+        "strike_composite_success_exact": immediate._exact_pass_comp_acc / n,
+        "strike_pos_pass_exact": immediate._exact_pass_pos_acc / n,
+        "strike_vel_pass_exact": immediate._exact_pass_vel_acc / n,
+        "strike_normal_pass_exact": immediate._exact_pass_normal_acc / n,
+        "exact_strike_pos_success_5cm": immediate._exact_pass_5cm_acc / n,
+        "exact_strike_pos_success_10cm": immediate._exact_pass_10cm_acc / n,
+        "exact_strike_sample_count_decayed": n,
+        "strike_pos_target_eligible_sample_count_decayed": n,
+        "strike_vel_target_eligible_sample_count_decayed": n,
+        "strike_normal_target_eligible_sample_count_decayed": n,
+        "strike_composite_target_eligible_sample_count_decayed": n,
+    }
+    for bucket in bucket_order:
+        suffix = immediate._clip_names[bucket]
+        bucket_n = immediate._exact_n_acc_c[bucket]
+        expected.update(
+            {
+                f"swing_completion_rate_{suffix}": min(
+                    bucket_n / immediate._swing_starts_acc_c[bucket], 1.0
+                ),
+                f"strike_pos_pass_exact_{suffix}": (
+                    immediate._exact_pass_pos_acc_c[bucket] / bucket_n
+                ),
+                f"strike_vel_pass_exact_{suffix}": (
+                    immediate._exact_pass_vel_acc_c[bucket] / bucket_n
+                ),
+                f"strike_normal_pass_exact_{suffix}": (
+                    immediate._exact_pass_normal_acc_c[bucket] / bucket_n
+                ),
+                f"strike_composite_success_exact_{suffix}": (
+                    immediate._exact_pass_comp_acc_c[bucket] / bucket_n
+                ),
+                f"racket_pos_error_exact_strike_{suffix}": (
+                    immediate._exact_pos_err_sum_c[bucket] / bucket_n
+                ),
+                f"racket_vel_error_exact_strike_{suffix}": (
+                    immediate._exact_vel_err_sum_c[bucket] / bucket_n
+                ),
+                f"racket_normal_error_deg_exact_strike_{suffix}": (
+                    immediate._exact_nrm_err_sum_c[bucket] / bucket_n
+                ),
+                f"strike_pos_target_eligible_sample_count_decayed_{suffix}": bucket_n,
+                f"strike_vel_target_eligible_sample_count_decayed_{suffix}": bucket_n,
+                f"strike_normal_target_eligible_sample_count_decayed_{suffix}": bucket_n,
+                f"strike_composite_target_eligible_sample_count_decayed_{suffix}": bucket_n,
+            }
+        )
 
     assert deferred.metrics
-    assert set(deferred.metrics) == set(immediate.metrics)
-    assert "swing_completion_rate" in deferred.metrics
-    assert "swing_completion_rate_clip0" in deferred.metrics
-    assert "strike_composite_success_exact_clip1" in deferred.metrics
-    for name in sorted(deferred.metrics):
-        assert torch.equal(deferred.metrics[name], immediate.metrics[name]), name
+    assert set(deferred.metrics) == set(expected)
+    for name, value in sorted(expected.items()):
+        actual = deferred.metrics[name]
+        independent = torch.tensor([value], dtype=actual.dtype)
+        assert torch.equal(actual, independent), name
 
 
 def test_full_mdp_exact_deferral_keeps_immediate_consumers_on_old_path():
