@@ -109,6 +109,7 @@ _PHYSICAL_RETIRE_CLEANUP_CAP_TOKEN = object()
 _SELECTED_RESET_PHYSICAL_PARK_AUTHORITY_MINT_TOKEN = object()
 _REVEAL_TERMINAL_AUTH_TOKEN = object()
 _POSTPHYSICS_CONTACT_AUTH_TOKEN = object()
+_ACTION_EPOCH_R06_CURRENT_SETTLEMENT_DELTA_TOKEN = object()
 _R06_GLOBAL_DRAIN_OWNER_KIND = "r06_landing_outcome"
 _R06_LEGACY_DRAIN_PROTOCOL = "legacy_r06_ppo_boundary_v1"
 _R06_GLOBAL_DRAIN_PROTOCOL = "global_pre_optimizer_ppo_boundary_v1"
@@ -3412,6 +3413,18 @@ class ActionEpochR06OutcomeRows:
     owner_fault_bits: torch.Tensor
 
 
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionEpochR06CurrentSettlementDelta:
+    """One-shot current-substep settlement facts for the bound Epoch owner."""
+
+    rows: ActionEpochR06OutcomeRows
+    sequence: int
+    r06_owner: object
+    epoch_owner: object
+    _owner_identity: object
+    _token: object
+
+
 @dataclass(frozen=True)
 class PostPhysicsMutationResult:
     """Post-physics verdict plus one exact owner-issued contact authority.
@@ -4030,6 +4043,20 @@ class _RetainedPostPhysicsSettlement:
     mailbox_slot: torch.Tensor
     observation_ordinal: torch.Tensor
     mutation_version: torch.Tensor
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class _ActionEpochOutcomeCandidateGrid:
+    """One source-grid ABI shared by retained audit and current settlement."""
+
+    candidate: torch.Tensor
+    shot_key_values: torch.Tensor
+    publication_ordinal: torch.Tensor
+    settlement_step: torch.Tensor
+    policy_eligible: torch.Tensor
+    fact_values: torch.Tensor
+    outcome_code: torch.Tensor
+    owner_fault_bits: torch.Tensor
 
 
 @dataclass(frozen=True, eq=False)
@@ -5806,6 +5833,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         ) = None
         self._action_epoch_post_physics_settled_mask: torch.Tensor | None = None
         self._action_epoch_post_physics_result: ActionEpochR06PostPhysicsResult | None = None
+        self._prepared_action_epoch_current_settlement_delta: (
+            _ActionEpochOutcomeCandidateGrid | None
+        ) = None
+        self._pending_action_epoch_current_settlement_delta: (
+            ActionEpochR06CurrentSettlementDelta | None
+        ) = None
+        self._action_epoch_current_settlement_delta_sequence = 0
         self._active_post_physics_contact_authority: (
             _RetainedPostPhysicsContactAuthority | None
         ) = None
@@ -6572,52 +6606,169 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             ball_identity=self._previous_paid_ball_identity,
         )
 
-    def project_current_action_epoch_outcome_rows(
+    def _pack_action_epoch_fact_grid(
         self,
-    ) -> ActionEpochR06OutcomeRows:
-        """Project the newest retained settlement per environment by exact key."""
+        *,
+        common_on_table: torch.Tensor,
+        canonical_total: torch.Tensor,
+        placement_gain: torch.Tensor,
+        crossing_xy: torch.Tensor,
+        placement_error: torch.Tensor,
+        on_opponent_table: torch.Tensor,
+        contact_valid: torch.Tensor,
+        crossing_valid: torch.Tensor,
+        net_crossed: torch.Tensor,
+        net_clear: torch.Tensor,
+    ) -> torch.Tensor:
+        """Pack the one R06 fact ABI used by both retained and current grids."""
 
-        self._require_operable()
-        candidate = (
-            self._mailbox_action_epoch
-            & self._mailbox_history_valid
-            & self._mailbox_physical_retired
-            & self._mailbox_state.eq(MAILBOX_SETTLED_UNPAID)
+        used = torch.cat(
+            (
+                common_on_table.to(torch.float32).unsqueeze(-1),
+                canonical_total.to(torch.float32).unsqueeze(-1),
+                placement_gain.to(torch.float32).unsqueeze(-1),
+                crossing_xy.to(torch.float32),
+                placement_error.to(torch.float32).unsqueeze(-1),
+                on_opponent_table.to(torch.float32).unsqueeze(-1),
+                contact_valid.to(torch.float32).unsqueeze(-1),
+                crossing_valid.to(torch.float32).unsqueeze(-1),
+                net_crossed.to(torch.float32).unsqueeze(-1),
+                net_clear.to(torch.float32).unsqueeze(-1),
+            ),
+            dim=-1,
         )
+        return torch.cat(
+            (
+                used,
+                torch.zeros(
+                    canonical_total.shape
+                    + (R06_ACTION_EPOCH_FACT_F32_WIDTH - R06_ACTION_EPOCH_FACT_F32_USED,),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+            ),
+            dim=-1,
+        )
+
+    def _prepare_action_epoch_current_settlement_delta(
+        self,
+        *,
+        settle: torch.Tensor,
+        observation_stamp: PhysicsStampBatch,
+        settlement_cause: torch.Tensor,
+        policy_settlement: torch.Tensor,
+        crossing_valid: torch.Tensor,
+        crossing_xy: torch.Tensor,
+        score: _PolicyScoreGrid,
+    ) -> _ActionEpochOutcomeCandidateGrid:
+        """Pack only this direct publication's source facts, never mailbox history."""
+
+        policy = policy_settlement & settle
+        score_total = score.total.reshape(self._flight_shape).to(torch.float32)
+        score_error = score.placement_error_m.reshape(self._flight_shape).to(
+            torch.float32
+        )
+        score_on_table = score.on_opponent_table.reshape(self._flight_shape)
+        zeros = torch.zeros_like(score_total)
+        canonical_total = torch.where(policy, score_total, zeros)
+        placement_error = torch.where(policy, score_error, zeros)
+        common_on_table = (
+            policy
+            & self._flight_contact_valid
+            & crossing_valid
+            & self._flight_net_crossed
+            & self._flight_net_clear
+            & score_on_table
+        )
+        fact_values = self._pack_action_epoch_fact_grid(
+            common_on_table=common_on_table,
+            canonical_total=canonical_total,
+            placement_gain=torch.full_like(
+                canonical_total, self._placement_treatment_gain
+            ),
+            crossing_xy=crossing_xy,
+            placement_error=placement_error,
+            on_opponent_table=torch.where(
+                policy, score_on_table, torch.zeros_like(score_on_table)
+            ),
+            contact_valid=self._flight_contact_valid,
+            crossing_valid=crossing_valid,
+            net_crossed=self._flight_net_crossed,
+            net_clear=self._flight_net_clear,
+        )
+        flight_key = self._flight_action_epoch_shot_key()
+        return _ActionEpochOutcomeCandidateGrid(
+            candidate=settle.detach().clone(),
+            shot_key_values=torch.stack(
+                tuple(getattr(flight_key, field.name) for field in fields(
+                    _row_identity.ActionEpochShotKey
+                )),
+                dim=-1,
+            ),
+            publication_ordinal=self._flight_publication_ordinal,
+            settlement_step=observation_stamp.control_step,
+            policy_eligible=policy,
+            fact_values=fact_values,
+            outcome_code=settlement_cause.to(torch.int64),
+            owner_fault_bits=self._flight_fault_bits,
+        )
+
+    def _project_action_epoch_outcome_candidates(
+        self,
+        grid: _ActionEpochOutcomeCandidateGrid,
+    ) -> ActionEpochR06OutcomeRows:
+        """Select and normalize one typed row from any owner-local candidate grid."""
+
         ordinal_grid = torch.where(
-            candidate,
-            self._mailbox_publication_ordinal,
-            torch.full_like(self._mailbox_publication_ordinal, -1),
+            grid.candidate,
+            grid.publication_ordinal,
+            torch.full_like(grid.publication_ordinal, -1),
         )
-        newest_ordinal = ordinal_grid.amax(dim=1)
-        selected = candidate & self._mailbox_publication_ordinal.eq(
-            newest_ordinal.unsqueeze(1)
+        newest = ordinal_grid.amax(dim=1)
+        selected = grid.candidate & grid.publication_ordinal.eq(
+            newest.unsqueeze(1)
         )
         safe_rows = self._latch_action_epoch_row_fault(
             selected.to(torch.int64).sum(dim=1).gt(1).contiguous(),
-            epoch_reason_bit=(
-                R06_EPOCH_ROW_FAULT_OUTCOME_PROJECTION_DUPLICATE
-            ),
+            epoch_reason_bit=R06_EPOCH_ROW_FAULT_OUTCOME_PROJECTION_DUPLICATE,
         )
         selected = selected & safe_rows.unsqueeze(1)
         valid = selected.any(dim=1)
-        mailbox_slot = torch.argmax(selected.to(torch.int64), dim=1)
+        flight_slot = torch.argmax(selected.to(torch.int64), dim=1)
 
         def gather(value: torch.Tensor) -> torch.Tensor:
             suffix = (1,) * (value.ndim - 2)
-            index = mailbox_slot.reshape(self.num_envs, 1, *suffix).expand(
+            index = flight_slot.reshape(self.num_envs, 1, *suffix).expand(
                 self.num_envs, 1, *value.shape[2:]
             )
             return torch.gather(value, 1, index).squeeze(1)
 
-        mailbox_fault = gather(self._mailbox_fault_bits)
-        cause = gather(self._mailbox_settlement_cause).to(torch.int64)
+        key_values = gather(grid.shot_key_values)
+        metadata = gather(
+            torch.stack(
+                (
+                    grid.publication_ordinal,
+                    grid.settlement_step,
+                    grid.outcome_code.to(torch.int64),
+                    grid.owner_fault_bits,
+                    grid.policy_eligible.to(torch.int64),
+                ),
+                dim=-1,
+            )
+        )
+        invalid_metadata = torch.tensor(
+            (-1, -1, -1, 0, 0), dtype=torch.int64, device=self.device
+        )
+        metadata = torch.where(
+            valid.unsqueeze(1), metadata, invalid_metadata.unsqueeze(0)
+        )
+        source_fault = metadata[:, 3]
+        cause = metadata[:, 2]
         producer_cause = (
             cause.eq(SETTLEMENT_CAUSE_PRODUCER_CONTRACT_FAULT)
             | cause.eq(SETTLEMENT_CAUSE_ENGINE_OVERFLOW)
             | cause.eq(SETTLEMENT_CAUSE_PROTOCOL_FAULT)
         )
-        source_fault = torch.where(valid, mailbox_fault, torch.zeros_like(mailbox_fault))
         source_fault = torch.where(
             valid & producer_cause & source_fault.eq(0),
             torch.full_like(source_fault, FAULT_PRODUCER_CONTRACT),
@@ -6630,17 +6781,20 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             ),
             source_fault,
         )
-        canonical_total = gather(self._mailbox_canonical_total).to(torch.float32)
-        placement_gain = gather(
-            self._mailbox_placement_treatment_gain
-        ).to(torch.float32)
-        crossing_xy = gather(self._mailbox_crossing_xy_m).to(torch.float32)
-        placement_error = gather(self._mailbox_placement_error_m).to(torch.float32)
+        selected_facts = gather(grid.fact_values)
         numeric_finite = (
-            torch.isfinite(canonical_total)
-            & torch.isfinite(placement_gain)
-            & torch.isfinite(crossing_xy).all(dim=1)
-            & torch.isfinite(placement_error)
+            torch.isfinite(
+                selected_facts[:, R06_ACTION_EPOCH_CANONICAL_TOTAL_F32]
+            )
+            & torch.isfinite(
+                selected_facts[:, R06_ACTION_EPOCH_PLACEMENT_GAIN_F32]
+            )
+            & torch.isfinite(
+                selected_facts[:, R06_ACTION_EPOCH_CROSSING_XY_F32]
+            ).all(dim=1)
+            & torch.isfinite(
+                selected_facts[:, R06_ACTION_EPOCH_PLACEMENT_ERROR_F32]
+            )
         )
         source_fault = torch.where(
             valid & ~numeric_finite,
@@ -6650,81 +6804,167 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             source_fault,
         )
         source_valid = valid & source_fault.eq(0)
-        policy_eligible = source_valid & gather(self._mailbox_policy_eligible)
+        policy_eligible = source_valid & metadata[:, 4].to(torch.bool)
         valid_bits = (
             valid.to(torch.int64) * R06_ACTION_EPOCH_PRESENT
             + policy_eligible.to(torch.int64) * R06_ACTION_EPOCH_POLICY_ELIGIBLE
             + source_valid.to(torch.int64) * R06_ACTION_EPOCH_SOURCE_VALID
         )
-        values = torch.zeros(
-            (self.num_envs, R06_ACTION_EPOCH_FACT_F32_WIDTH),
-            dtype=torch.float32,
-            device=self.device,
+        facts = torch.where(
+            source_valid.unsqueeze(1), selected_facts, torch.zeros_like(selected_facts)
         )
-        values[:, R06_ACTION_EPOCH_COMMON_ON_TABLE_F32] = torch.where(
-            source_valid,
-            gather(self._mailbox_common_on_table).to(torch.float32),
-            torch.zeros_like(canonical_total),
-        )
-        values[:, R06_ACTION_EPOCH_CANONICAL_TOTAL_F32] = torch.where(
-            source_valid, canonical_total, torch.zeros_like(canonical_total)
-        )
-        values[:, R06_ACTION_EPOCH_PLACEMENT_GAIN_F32] = torch.where(
-            source_valid, placement_gain, torch.zeros_like(placement_gain)
-        )
-        values[:, R06_ACTION_EPOCH_CROSSING_XY_F32] = torch.where(
-            source_valid.unsqueeze(1), crossing_xy, torch.zeros_like(crossing_xy)
-        )
-        values[:, R06_ACTION_EPOCH_PLACEMENT_ERROR_F32] = torch.where(
-            source_valid, placement_error, torch.zeros_like(placement_error)
-        )
-        for offset, value in (
-            (R06_ACTION_EPOCH_ON_TABLE_F32, self._mailbox_on_opponent_table),
-            (R06_ACTION_EPOCH_CONTACT_VALID_F32, self._mailbox_contact_valid),
-            (R06_ACTION_EPOCH_CROSSING_VALID_F32, self._mailbox_crossing_valid),
-            (R06_ACTION_EPOCH_NET_CROSSED_F32, self._mailbox_net_crossed),
-            (R06_ACTION_EPOCH_NET_CLEAR_F32, self._mailbox_net_clear),
-        ):
-            values[:, offset] = torch.where(
-                source_valid,
-                gather(value).to(torch.float32),
-                torch.zeros_like(canonical_total),
-            )
-
-        mailbox_key = self._mailbox_action_epoch_shot_key()
-        invalid_i64 = torch.full(
-            (self.num_envs,), -1, dtype=torch.int64, device=self.device
-        )
+        invalid_key = torch.full_like(key_values, -1)
+        key_values = torch.where(valid.unsqueeze(1), key_values, invalid_key)
         key = _row_identity.ActionEpochShotKey(
             **{
-                field.name: torch.where(
-                    valid, gather(getattr(mailbox_key, field.name)), invalid_i64
-                )
-                for field in fields(_row_identity.ActionEpochShotKey)
+                field.name: key_values[:, index]
+                for index, field in enumerate(fields(_row_identity.ActionEpochShotKey))
             }
         )
         return ActionEpochR06OutcomeRows(
-            valid=valid.detach().clone(),
-            shot_key=key.clone(),
-            publication_ordinal=torch.where(
-                valid, gather(self._mailbox_publication_ordinal), invalid_i64
-            ).detach().clone(),
-            settlement_step=torch.where(
-                valid, gather(self._mailbox_settlement_control_step), invalid_i64
-            ).detach().clone(),
-            valid_bits=valid_bits.detach().clone(),
-            fact_values=values.detach().clone(),
-            outcome_code=torch.where(valid, cause, invalid_i64).detach().clone(),
-            owner_fault_bits=source_fault.detach().clone(),
+            valid=valid,
+            shot_key=key,
+            publication_ordinal=metadata[:, 0],
+            settlement_step=metadata[:, 1],
+            valid_bits=valid_bits,
+            fact_values=facts,
+            outcome_code=cause,
+            owner_fault_bits=source_fault,
+        )
+
+    def _mint_action_epoch_current_settlement_delta(
+        self, retire_valid: torch.Tensor
+    ) -> ActionEpochR06CurrentSettlementDelta:
+        """Mint the one exact per-environment delta after physical retirement."""
+
+        prepared = self._prepared_action_epoch_current_settlement_delta
+        if (
+            type(prepared) is not _ActionEpochOutcomeCandidateGrid
+            or prepared.candidate is not self._action_epoch_post_physics_settled_mask
+            or self._pending_action_epoch_current_settlement_delta is not None
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 current-settlement delta lifetime differs"
+            )
+        projection = self._project_action_epoch_outcome_candidates(
+            _ActionEpochOutcomeCandidateGrid(
+                candidate=retire_valid,
+                shot_key_values=prepared.shot_key_values,
+                publication_ordinal=prepared.publication_ordinal,
+                settlement_step=prepared.settlement_step,
+                policy_eligible=prepared.policy_eligible,
+                fact_values=prepared.fact_values,
+                outcome_code=prepared.outcome_code,
+                owner_fault_bits=prepared.owner_fault_bits,
+            )
+        )
+        sequence = self._action_epoch_current_settlement_delta_sequence
+        self._action_epoch_current_settlement_delta_sequence += 1
+        delta = ActionEpochR06CurrentSettlementDelta(
+            rows=projection,
+            sequence=sequence,
+            r06_owner=self,
+            epoch_owner=self._action_ball_full_mdp_epoch_owner,
+            _owner_identity=self,
+            _token=_ACTION_EPOCH_R06_CURRENT_SETTLEMENT_DELTA_TOKEN,
+        )
+        self._pending_action_epoch_current_settlement_delta = delta
+        return delta
+
+    def project_current_action_epoch_outcome_rows(
+        self,
+    ) -> ActionEpochR06OutcomeRows:
+        """Project the newest retained settlement per environment by exact key."""
+
+        self._require_operable()
+        candidate = (
+            self._mailbox_action_epoch
+            & self._mailbox_history_valid
+            & self._mailbox_physical_retired
+            & self._mailbox_state.eq(MAILBOX_SETTLED_UNPAID)
+        )
+        values = self._pack_action_epoch_fact_grid(
+            common_on_table=self._mailbox_common_on_table,
+            canonical_total=self._mailbox_canonical_total,
+            placement_gain=self._mailbox_placement_treatment_gain,
+            crossing_xy=self._mailbox_crossing_xy_m,
+            placement_error=self._mailbox_placement_error_m,
+            on_opponent_table=self._mailbox_on_opponent_table,
+            contact_valid=self._mailbox_contact_valid,
+            crossing_valid=self._mailbox_crossing_valid,
+            net_crossed=self._mailbox_net_crossed,
+            net_clear=self._mailbox_net_clear,
+        )
+        mailbox_key = self._mailbox_action_epoch_shot_key()
+        return self._project_action_epoch_outcome_candidates(
+            _ActionEpochOutcomeCandidateGrid(
+                candidate=candidate,
+                shot_key_values=torch.stack(
+                    tuple(
+                        getattr(mailbox_key, field.name)
+                        for field in fields(_row_identity.ActionEpochShotKey)
+                    ),
+                    dim=-1,
+                ),
+                publication_ordinal=self._mailbox_publication_ordinal,
+                settlement_step=self._mailbox_settlement_control_step,
+                policy_eligible=self._mailbox_policy_eligible,
+                fact_values=values,
+                outcome_code=self._mailbox_settlement_cause,
+                owner_fault_bits=self._mailbox_fault_bits,
+            )
         )
 
     def publish_action_ball_full_mdp_epoch_facts(self) -> None:
-        """Ask the bound Epoch owner to pull R06's exact retained row projection."""
+        """Push R06's exact one-shot current-settlement delta to Epoch."""
 
         owner = self._action_ball_full_mdp_epoch_owner
-        if owner is None:
+        delta = self._pending_action_epoch_current_settlement_delta
+        if owner is None or type(delta) is not ActionEpochR06CurrentSettlementDelta:
             raise LandingOutcomeDeviceError("R06 ActionEpoch owner is not bound")
-        owner.refresh_r06_outcome_rows()
+        if __package__:
+            from . import action_ball_full_mdp_epoch as epoch_v1
+        else:
+            import action_ball_full_mdp_epoch as epoch_v1
+        refresh = getattr(owner, "refresh_r06_outcome_rows", None)
+        if (
+            type(owner) is not epoch_v1.ActionEpochOwner
+            or not callable(refresh)
+            or getattr(refresh, "__self__", None) is not owner
+            or getattr(refresh, "__func__", None)
+            is not epoch_v1.ActionEpochOwner.refresh_r06_outcome_rows
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 ActionEpoch current-settlement consumer differs"
+            )
+        refresh(delta)
+
+    def require_owned_action_epoch_current_settlement_delta(
+        self,
+        delta: ActionEpochR06CurrentSettlementDelta,
+        *,
+        expected_epoch_owner: object,
+    ) -> ActionEpochR06CurrentSettlementDelta:
+        """Consume the exact pending current-settlement delta once."""
+
+        pending = self._pending_action_epoch_current_settlement_delta
+        if (
+            type(delta) is not ActionEpochR06CurrentSettlementDelta
+            or pending is None
+            or delta is not pending
+            or delta.r06_owner is not self
+            or delta.epoch_owner is not expected_epoch_owner
+            or expected_epoch_owner is not self._action_ball_full_mdp_epoch_owner
+            or delta._owner_identity is not self
+            or delta._token is not _ACTION_EPOCH_R06_CURRENT_SETTLEMENT_DELTA_TOKEN
+            or type(delta.sequence) is not int
+            or delta.sequence != self._action_epoch_current_settlement_delta_sequence - 1
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 current-settlement delta is stale, foreign, replayed, or owner-swapped"
+            )
+        self._pending_action_epoch_current_settlement_delta = None
+        return delta
 
     def close_action_ball_full_mdp_epoch_reward_rows(self) -> None:
         """Fail-stop boundary for the owner-derived direct reward close."""
@@ -8025,6 +8265,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         allow_active_selected_reset: bool = False,
         allow_pending_post_physics_settlement: bool = False,
         allow_pending_post_physics_contact_authority: bool = False,
+        allow_pending_action_epoch_current_settlement_delta: bool = False,
         allow_full_mdp_reward_cycle: bool = False,
     ) -> None:
         if self._poisoned:
@@ -8074,6 +8315,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         ):
             raise LandingOutcomeDeviceError(
                 "unconsumed post-physics contact authority blocks owner mutation/drain/checkpoint"
+            )
+        if (
+            self._pending_action_epoch_current_settlement_delta is not None
+            and not allow_pending_action_epoch_current_settlement_delta
+        ):
+            raise LandingOutcomeDeviceError(
+                "unconsumed ActionEpoch current-settlement delta blocks owner mutation/drain/checkpoint"
             )
         if (
             (
@@ -11301,6 +11549,19 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         self._record_fault_events(fault_bits)
         self._increment_mutation()
         if action_epoch_direct:
+            if self._prepared_action_epoch_current_settlement_delta is not None:
+                raise LandingOutcomeDeviceError(
+                    "R06 epoch postphysics current-settlement source was not retired"
+                )
+            prepared_delta = self._prepare_action_epoch_current_settlement_delta(
+                settle=settle,
+                observation_stamp=observation_stamp,
+                settlement_cause=settlement_cause,
+                policy_settlement=policy_settlement,
+                crossing_valid=crossing_valid,
+                crossing_xy=safe_xy,
+                score=score,
+            )
             result = ActionEpochR06PostPhysicsResult(
                 accepted=accepted.detach().clone(),
                 rejected=rejected.detach().clone(),
@@ -11317,7 +11578,8 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 flight_slot=direct_flight_slot.detach().clone(),
             )
             self._action_epoch_post_physics_result = result
-            self._action_epoch_post_physics_settled_mask = settle.detach().clone()
+            self._prepared_action_epoch_current_settlement_delta = prepared_delta
+            self._action_epoch_post_physics_settled_mask = prepared_delta.candidate
             return result
         contact_authority = object.__new__(
             LandingOutcomePostPhysicsContactAuthority
@@ -11464,8 +11726,10 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             flight_slot=result.flight_slot.detach().clone(),
             mutation_version=self._mutation_version.detach().clone(),
         )
+        self._mint_action_epoch_current_settlement_delta(retire_valid)
         self._action_epoch_post_physics_result = None
         self._action_epoch_post_physics_settled_mask = None
+        self._prepared_action_epoch_current_settlement_delta = None
         return retire_result
 
     def consume_owned_post_physics_contact_authority(

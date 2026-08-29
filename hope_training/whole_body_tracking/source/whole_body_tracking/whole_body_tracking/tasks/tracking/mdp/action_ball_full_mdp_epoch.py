@@ -2934,21 +2934,56 @@ class ActionEpochOwner:
                 first_contact,
             )
 
-    def refresh_r06_outcome_rows(self) -> None:
-        """Pull and full-key join R06's current settled outcome rows."""
+    def refresh_r06_outcome_rows(
+        self, current_settlement_delta: object | None = None
+    ) -> None:
+        """Full-key join either the explicit audit view or one current delta."""
 
         with self._operation("refresh R06 outcome rows"):
             self._healthy()
             record = self._publication.current
-            if record is None or self._r06_outcome_projection is None:
-                raise ActionEpochError("R06 outcome row projection is not bound")
-            projection = self._r06_outcome_projection()
             try:
                 from . import action_ball_landing_outcome_device as r06_device
             except ImportError:  # pragma: no cover - focused standalone import
                 import action_ball_landing_outcome_device as r06_device
-            if type(projection) is not r06_device.ActionEpochR06OutcomeRows:
-                raise ActionEpochError("R06 must return exact ActionEpochR06OutcomeRows")
+            if record is None or self._r06_owner is None:
+                raise ActionEpochError("R06 outcome row owner is not bound")
+            if current_settlement_delta is None:
+                if self._r06_outcome_projection is None:
+                    raise ActionEpochError("R06 outcome row projection is not bound")
+                projection = self._r06_outcome_projection()
+                expected_type = r06_device.ActionEpochR06OutcomeRows
+            else:
+                validator = getattr(
+                    self._r06_owner,
+                    "require_owned_action_epoch_current_settlement_delta",
+                    None,
+                )
+                direct = getattr(
+                    type(self._r06_owner),
+                    "require_owned_action_epoch_current_settlement_delta",
+                    None,
+                )
+                if (
+                    type(self._r06_owner)
+                    is not r06_device.ActionBallLandingOutcomeDeviceCoordinator
+                    or not callable(validator)
+                    or not callable(direct)
+                    or getattr(validator, "__self__", None) is not self._r06_owner
+                    or getattr(validator, "__func__", None) is not direct
+                ):
+                    raise ActionEpochError(
+                        "R06 current-settlement validator is not exact-bound"
+                    )
+                delta = validator(
+                    current_settlement_delta, expected_epoch_owner=self
+                )
+                if type(delta) is not r06_device.ActionEpochR06CurrentSettlementDelta:
+                    raise ActionEpochError("R06 current-settlement delta type differs")
+                projection = delta.rows
+                expected_type = r06_device.ActionEpochR06OutcomeRows
+            if type(projection) is not expected_type:
+                raise ActionEpochError("R06 outcome projection type differs")
             valid = self._tensor(
                 projection.valid,
                 label="R06.outcome.valid",

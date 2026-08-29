@@ -1317,6 +1317,7 @@ def test_selected_reset_local_clock_maps_once_across_real_physical_r06_owners(
         retire = r06_owner.retire_action_ball_full_mdp_epoch_post_physics()
     finally:
         physical_owner._action_epoch_active_r06_postphysics = None
+    r06_owner.publish_action_ball_full_mdp_epoch_facts()
 
     if mode == "contact_no_cross_horizon":
         assert result.accepted[0, 0]
@@ -1340,6 +1341,7 @@ def test_selected_reset_local_clock_maps_once_across_real_physical_r06_owners(
             retire = r06_owner.retire_action_ball_full_mdp_epoch_post_physics()
         finally:
             physical_owner._action_epoch_active_r06_postphysics = None
+        r06_owner.publish_action_ball_full_mdp_epoch_facts()
 
     assert result.accepted.tolist() == [[True, False], [False, False]]
     assert not result.rejected.any()
@@ -1355,3 +1357,123 @@ def test_selected_reset_local_clock_maps_once_across_real_physical_r06_owners(
     assert r06_owner._flight_state[1, 0] == D.FLIGHT_EMPTY
     assert not r06_owner._mailbox_reserved[1].any()
     assert epoch_owner._undrained_row_fault_bits.tolist() == [0, 0]
+
+
+def _publish_contact_without_settlement():
+    physical_owner, r06_owner, epoch_owner, row_key, publication = (
+        _launch_selected_reset_clock_tape_into_real_r06()
+    )
+    packet = _real_physical_r06_packet(
+        physical_owner=physical_owner,
+        epoch_owner=epoch_owner,
+        row_key=row_key,
+        publication=publication,
+        control_step=100,
+        observation_ordinal=0,
+        contact=True,
+        crossing=False,
+    )
+    physical_owner._action_epoch_active_r06_postphysics = packet
+    try:
+        result = r06_owner.publish_action_ball_full_mdp_epoch_post_physics()
+        retire = r06_owner.retire_action_ball_full_mdp_epoch_post_physics()
+    finally:
+        physical_owner._action_epoch_active_r06_postphysics = None
+    assert not result.settled_mask.any()
+    assert not retire.retired_mask.any()
+    return physical_owner, r06_owner, epoch_owner, row_key, publication, packet
+
+
+def test_current_settlement_zero_event_does_not_pull_retained_projector():
+    _physical, r06_owner, epoch_owner, _key, _publication, _packet = (
+        _publish_contact_without_settlement()
+    )
+    pending = r06_owner._pending_action_epoch_current_settlement_delta
+    assert type(pending) is D.ActionEpochR06CurrentSettlementDelta
+    assert not pending.rows.valid.any()
+    mailbox_before = r06_owner._mailbox_history_valid.detach().clone()
+
+    def forbidden_retained_scan():
+        raise AssertionError("hot current-settlement publish rescanned mailbox history")
+
+    epoch_owner._r06_outcome_projection = forbidden_retained_scan
+    journal_size = len(epoch_owner._publication.pending_log)
+    r06_owner.publish_action_ball_full_mdp_epoch_facts()
+
+    assert r06_owner._pending_action_epoch_current_settlement_delta is None
+    assert torch.equal(r06_owner._mailbox_history_valid, mailbox_before)
+    assert len(epoch_owner._publication.pending_log) == journal_size + 1
+    entry = epoch_owner._publication.pending_log[-1]
+    assert entry.transition == "R06_OUTCOME_ROWS"
+    delta = dict(zip(entry.delta.names, entry.delta.values))
+    assert not delta["event_mask"].any()
+    assert not delta["owner_fault_bits"].any()
+    assert not delta["predicate_bits"].any()
+
+
+def test_current_settlement_delta_blocks_overwrite_and_replay():
+    physical, r06_owner, epoch_owner, row_key, publication, first = (
+        _publish_contact_without_settlement()
+    )
+    pending = r06_owner._pending_action_epoch_current_settlement_delta
+    second = _real_physical_r06_packet(
+        physical_owner=physical,
+        epoch_owner=epoch_owner,
+        row_key=row_key,
+        publication=publication,
+        control_step=101,
+        observation_ordinal=1,
+        previous_center=first.current_ball_center_m[0, 0],
+    )
+    physical._action_epoch_active_r06_postphysics = second
+    try:
+        with pytest.raises(D.LandingOutcomeDeviceError, match="unconsumed ActionEpoch"):
+            r06_owner.publish_action_ball_full_mdp_epoch_post_physics()
+    finally:
+        physical._action_epoch_active_r06_postphysics = None
+
+    epoch_owner.refresh_r06_outcome_rows(pending)
+    assert r06_owner._pending_action_epoch_current_settlement_delta is None
+    with pytest.raises(D.LandingOutcomeDeviceError, match="stale, foreign, replayed"):
+        epoch_owner.refresh_r06_outcome_rows(pending)
+
+
+def test_current_settlement_duplicate_newest_is_named_and_neutral():
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    epoch, _physical = _bound_epoch(owner)
+    settled = torch.tensor(
+        ((True, True), (False, False)), dtype=torch.bool, device=owner.device
+    )
+    prepared = D._ActionEpochOutcomeCandidateGrid(
+        candidate=settled,
+        shot_key_values=torch.zeros(
+            (2, 2, len(E.fields(E.ActionEpochShotKey))),
+            dtype=torch.int64,
+            device=owner.device,
+        ),
+        publication_ordinal=torch.tensor(
+            ((7, 7), (-1, -1)), dtype=torch.int64, device=owner.device
+        ),
+        settlement_step=torch.zeros((2, 2), dtype=torch.int64, device=owner.device),
+        policy_eligible=torch.zeros((2, 2), dtype=torch.bool, device=owner.device),
+        fact_values=torch.zeros(
+            (2, 2, D.R06_ACTION_EPOCH_FACT_F32_WIDTH),
+            dtype=torch.float32,
+            device=owner.device,
+        ),
+        outcome_code=torch.zeros((2, 2), dtype=torch.int64, device=owner.device),
+        owner_fault_bits=torch.zeros((2, 2), dtype=torch.int64, device=owner.device),
+    )
+    owner._prepared_action_epoch_current_settlement_delta = prepared
+    owner._action_epoch_post_physics_settled_mask = settled
+
+    delta = owner._mint_action_epoch_current_settlement_delta(settled)
+
+    assert not delta.rows.valid.any()
+    assert delta.rows.publication_ordinal.tolist() == [-1, -1]
+    _assert_row_fault_words(
+        epoch, E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE
+    )
+    assert owner.require_owned_action_epoch_current_settlement_delta(
+        delta, expected_epoch_owner=epoch
+    ) is delta
