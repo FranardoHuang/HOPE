@@ -4,12 +4,13 @@ Status: Partial (the base training-loop mechanics are proven; the current-fresh 
 
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
-final branch source=`255df4a1`已把逐physics-substep的R06重型finalize收为每control一次，同时保留每substep
-Scene capture、terminal即时park和`P0,R0…` durable顺序。Pod1 clean exact CPU门为核心
-`286 passed,19 skipped`、lean/Scene合并`145 passed,8 skipped`、launcher/setup=`45 passed`、cfg=
-`13 passed,25 skipped`；原来合并pytest时由test loader污染canonical module造成的27个假失败也已闭合。
-三张GPU仍分别被旧Mu、旧Isaac和fresh 4× Mu占用，所以current source真实Kit fixed tape与profiler-off
-matched active strata为`未测`，本Gate不把host语义门或profile硬上界写成速度PASS。
+validated code source=`ff7a6c4f`保留`255df4a1`的每control一次R06 finalize与每substep Scene capture、terminal
+即时park、`P0,R0…` durable顺序；并把已判负的全程4× paddle改成只在Motion-owned playback行增强。
+Pod1 clean exact CPU/Torch组合门=`444 passed,36 skipped`，launcher/setup=`98 passed`。首个候选
+`e6300c1b`曾由同一组合门真实检出2个失败：旧weight断言和把4×实际付款误记成`[0,1]` fidelity kernel；
+`ff7a6c4f`已让fidelity继续报未缩放kernel、configured/actual income报真实付款，并全量复测通过。
+三张GPU仍分别被旧Mu、旧Isaac和fresh 4× Mu占用，所以current source真实Kit fixed tape、CUDA parity与
+profiler-off matched active strata为`未测`，本Gate不把CPU语义门或profile硬上界写成速度PASS。
 
 fresh direct-paddle 4× Mu到ACK423后已足够判负。matched ACK0..423新/旧raw contact=`42/1,627`、
 selected=`1/332`、crossing=`0/279`；新run虽有三项累计mimic误差略好，却把mimic→hit入口显著破坏，不能

@@ -13,6 +13,9 @@
   删除死参数，不在GPU profile前合并不同事务。
 - 新机文档把GPU lock provisioning改为absent+`noclobber`，避免重写正在持锁的inode；RSL3主恢复源改为
   public exact PyPI wheel，Pod路径只作备用；G05旧2026-06-26命令标成历史并路由到machine-local EULA/privacy。
+- clean exact `ff7a6c4f`在Pod完成CPU/Torch组合门`444 passed,36 skipped`、launcher/setup=`98 passed`。
+  首轮测试发现并闭合旧weight断言及scaled-payment污染normalized kernel telemetry；三卡仍被现役run占用，
+  current-source真实Kit/Mu CUDA fixed-action、profile和fresh双端训练继续诚实写`未测`。
 
 ## 2026-08-29 — 可重建环境、R06 control-boundary减法与训练裁决
 

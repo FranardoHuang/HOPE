@@ -292,7 +292,9 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    `286 passed,19 skipped`、lean+Scene合并`145 passed,8 skipped`、launcher/setup=`45 passed`、cfg=
    `13 passed,25 honest skips`。GPU fixed tape、journal/WAL逐字对拍与profiler-off matched active strata仍因三卡
    均被三条只读训练占用而未测，故item 14不关闭，也不先声称速度收益。
-   这刀production净增约545行，虽没有增加外部Gate/owner，也不能仅凭语义测试称为最终优雅结构；先用GPU
+   当前相对`79efd71c^`的production净增为`460-21=439`行；本轮只抽出唯一candidate-grid换mask primitive并
+   删除一个死参数，未合并语义不同的即时/deferred事务。虽没有增加外部Gate/owner，也不能仅凭语义测试称为
+   最终优雅结构；先用GPU
    profile裁决收益，若不足以覆盖维护成本则撤回，若保留则再把legacy即时finalize与deferred finalize的重复数学
    收进同一内部primitive。后续性能依赖顺序已按profile固定为：(a) adaptive-sigma关闭时把command metric
    D2H从48次/update收为一次；(b) selected reset保留唯一preflight而让各owner只写`K`行；(c) Reward28同周期
@@ -310,6 +312,10 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    Observation V3、due cadence、plant、regularization、事件与安全事实均不变。它不增加Stage/Gate，仍是
    balance→mimic→hit→landing自然重叠。host静态验证后必须过Pod exact Reward/配置/fixed-action，再以fresh
    namespace做matched训练；三卡当前仍由三条只读run占用，禁止为取卡signal、同卡混跑或复用namespace。
+
+   clean exact source=`ff7a6c4f`已完成Pod CPU/Torch组合门`444 passed,36 skipped`和launcher/setup
+   `98 passed`。首个候选的旧weight断言与scaled-payment污染normalized kernel telemetry两项失败均已修复；
+   current-source真实Kit/MuJoCo CUDA fixed-action因三卡占用仍为`未测`，不能据CPU门勾选本项或发训练。
 
    Build4的mandatory actor warm-start仍是最强混杂项，但现有`model_2000.pt`明确
    `checkpoint_authority=false/resume_authority=false`。当前FullMDP也没有贯通env/owner/WAL的resume consumer，

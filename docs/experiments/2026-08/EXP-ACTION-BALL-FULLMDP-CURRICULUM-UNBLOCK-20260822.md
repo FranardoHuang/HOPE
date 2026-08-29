@@ -1326,6 +1326,11 @@ coarse+precision kernel乘`4`。网络、PPO V6/H48、Observation V3、任务、
 所有事实源不变，仍从rollout 0使用完整图；这只是连续Reward的eligibility/scale，不是success后才开放的门。
 该因果解释仍需fresh matched run验证，未提前采用。
 
+clean exact source=`ff7a6c4f`的Pod CPU/Torch组合门为`444 passed,36 skipped`，launcher/setup=
+`98 passed`。首轮`e6300c1b`曾诚实失败2项：一项是测试仍期待已否决weight；另一项暴露scaled payment被误当
+`[0,1]` normalized fidelity kernel。后者现保持两条事实：milestone kernel/error继续表达学习质量，
+configured/actual income表达真正4×付款。三卡占用下真实Kit/Mu CUDA fixed-action与fresh learning仍`未测`。
+
 旧Mu到ACK2232：`665/298,932` selected/launch、598 crossing、`0/665` legal、recovery=`0/208,696`；
 旧Isaac到ACK763：`0 R03 / 80,173 launch`，landing仍因0 selected为`未测`。二者分别确认hit→landing/recovery
 和mimic→hit失败。现有snapshot均明确无resume authority；Build4 warm-start不能从这些字节伪造。三张GPU
