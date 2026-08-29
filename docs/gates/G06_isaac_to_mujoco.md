@@ -14,6 +14,11 @@ G06保持`Partial / diagnostic_unauthorized=true`。
 fresh R07→Motion ready传递经消费者审计为无下游读取的self-echo，已删除而保留R07事实/critic与legacy API；
 这减少同写者自证，不删除跨backend独立plant事实。exact Pod复核和新source双端replacement仍是下一验收项。
 
+clean `75373daa`的exact Pod复核现已完成：Isaac fixed-action action/state SHA与父版逐字一致、0 done/timeout；
+Mu 61-update窗finite且hard/guard降至`.789%/5.727%`，但`0/6,001 launch` contact、0 landing。它证明
+shared fresh路径删减没有破坏固定输入执行，并支持替换旧negative；跨backend response、hit与landing仍未闭合，
+所以不改变G06状态。
+
 旧V9不是matched 0807实验：Mu实际载入legacy root。R8固定带现从同一clean commit、同一0807 plant身份、
 同一artifact actor center、同一joint order与`512×H48×31` tape运行；两端initial q/dq exact、0 done/timeout，
 逐tick qdes最大差`5.96e-8 rad`。Isaac clock=`.005 s×4`，Mu clock=`.001 s×20`，共同policy step为`.020 s`。

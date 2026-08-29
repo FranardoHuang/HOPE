@@ -188,6 +188,12 @@ acceptance from the user, and then use the launcher dry-run before a bounded dia
 [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json).
 That is a repo-to-preprovisioned-runtime deployment check, not learning, physics-parity, deployment, or robot authority.
 
+`whole_body_tracking` now declares `cryptography>=44,<51`, because tracked ActionBall authority signing and
+verification use Ed25519. The range covers the verified Isaac 5.1 bundled `44.0.0` and the Pod operation venv
+`50.0.0`; a new environment must import one compatible version rather than silently skipping signed-authority tests.
+The Pod operation venv has executed the focused signed-authority module as `59 passed / 0 skipped`. This dependency
+does not replace the exact runtime and asset identities above.
+
 #### Legacy Isaac 4.5 / grasping box
 
 Older G04/G05 tasks may still require the following pre-provisioned stack:

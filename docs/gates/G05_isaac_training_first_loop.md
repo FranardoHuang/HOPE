@@ -14,6 +14,13 @@ maximum-inward修复后的同源码Mu有限学习窗已经自然完成：`512×H
 结构自查删除了fresh路径中无消费者的R07→Motion ready self-echo；R07事实、critic、legacy消费者和durable
 边界不变。该变更只有本地分进程聚焦测试，exact Pod重跑与新source长期replacement尚未完成，不能用于Gate
 晋级或formal训练结论。
+HANDOFF中已知的新机欠账`cryptography`也已声明为package依赖`>=44,<51`，覆盖当前两个实测runtime版本；
+这只关闭Ed25519操作依赖缺失，不把环境可启动升级成学习或安全PASS。
+
+clean `75373daa`的Pod exact分进程测试为`35/24/12 passed`（另`1 skipped`），signed-authority为
+`59 passed / 0 skipped`；Isaac fixed tape仍0 done/timeout且action/state SHA逐字一致。Mu新源码61轮
+p50/p90=`6.671/6.740 s`，hard/guard=`.789%/5.727%`，first10→recent10都下降；但
+launch/raw/selected/landing=`6,001/0/0/0`，所以只授权长期replacement，G05仍`Partial`且速度方向未闭合。
 
 R7被审出并非robust：右脚/support/torque slack低于自身reserve；其Isaac 61-update窗hard-edge
 `6.13%→6.79%`、contact=`0/1,242 launch`，只作weak-margin反例。R8已在真实PhysX完成

@@ -190,7 +190,8 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    第一刀已删除fresh FullMDP的R07→Motion ready self-echo：fresh Motion从自身可观测task/teacher event推进，
    没有读取该opaque capability；R07 publish/critic和legacy消费者保持。较大的R06 settle/retire融合与Epoch
    snapshot窄化暂不采纳，先等active-flight matched profile证明其收益并逐项保持journal/reason/carry。
-   当前本地分进程聚焦测试为`35/24/12 passed`（另`1 skipped`）；exact Pod复核尚未完成，所以item 9仍开。
+   当前本地与Pod exact分进程聚焦测试均为`35/24/12 passed`（另`1 skipped`），Isaac fixed tape的
+   action/state SHA与父版逐字一致。第一刀已验证，但完整typed owner清债尚未完成，所以item 9仍开。
 10. [x] 已在GPU1隔离、严格加载Mu `model_2000.pt`做`512×240`随机policy轨迹诊断；optimizer未加载，当前
     GPU0/2长期run未改。`8,081/122,880=6.58%` policy rows有actual hard edge，`8,373/122,880=6.81%`
     有qdes guard，非零hard joint只有`waist_pitch/waist_roll/left_ankle_roll`三项；其中`77.47%` hard rows在
@@ -226,6 +227,12 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     fresh双端长期replacement。长期判读按自然重叠课程分别报告episode/mimic、due/playback/launch、
     raw/selected contact与legal landing分母；上阶段基本形成时，下阶段必须已经出现入口增长，但不新增
     “成功后才允许开始学”的自动Gate。Observation V3保持`215/231`，除非证明有新的可观测、非冗余状态。
+    新机恢复同时关闭HANDOFF遗留的`cryptography`手装欠账：package声明`>=44,<51`，兼容已验证的Isaac
+    bundled `44.0.0`和Pod操作venv `50.0.0`；外部Isaac/EULA/private assets仍按显式SHA恢复，不伪装纯Git自包含。
+    当前前半段已闭合：clean `75373daa` Pod exact=`35/24/12 passed`（另`1 skipped`）、signed-authority=
+    `59 passed / 0 skipped`、Isaac fixed tape=0 done/timeout且SHA一致；Mu 61-update p50/p90=
+    `6.671/6.740 s`、hard/guard=`.789%/5.727%`、launch/contact/landing=`6,001/0/0`。剩余项只有final
+    dependency/docs commit的exact复核与双端长期replacement ACK；完成前item 13保持打开。
 
 <a id="fullmdp-v9-superseded"></a>
 

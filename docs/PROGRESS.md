@@ -15,6 +15,15 @@
   self-echo；保留R07事实、critic和legacy消费者。MuJoCo immutable geometry改为显式owned tensor copy，
   不再让Torch别名不可写NumPy内存。三组聚焦测试分进程为`35/24/12 passed`（后者另`1 skipped`）；组合
   collection的canonical namespace污染不冒充production失败。exact Pod复核与新source双端replacement仍待完成。
+- HANDOFF遗留的`cryptography`手装欠账已进入package依赖：`>=44,<51`覆盖当前Isaac bundled `44.0.0`与
+  Pod运维venv `50.0.0`，新机不再因缺包静默跳过signed-authority测试；它不替代外部Isaac/EULA/私有资产恢复。
+- clean `75373daa`已在Pod1新exact checkout完成分进程`35/24/12 passed`（另`1 skipped`），signed-authority
+  为`59 passed / 0 skipped`；Isaac fixed tape仍为0 done/timeout，action/state SHA与父版逐字一致。Mu
+  `512×H48×61` profiler-off窗p50/p90=`6.671/6.740 s`，hard/guard=
+  `11,823/1,499,136=.789%` / `85,856/1,499,136=5.727%`；first10→recent10分别
+  `.781%→.294%` / `4.852%→3.208%`。全窗due/launch/R03/raw/selected/landing=
+  `11,120/6,001/4,123/0/0/0`，finite/conservation/fact fault均0。该窗支持长期replacement，不证明学习成功，
+  也不把随机训练窗改善因果归给self-echo删除；约6秒方向仍未达到。
 
 ## 2026-08-29 — 0807 wrong-object根因、R8 robust birth与matched first-divergence
 

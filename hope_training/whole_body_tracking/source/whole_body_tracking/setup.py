@@ -15,6 +15,10 @@ INSTALL_REQUIRES = [
     "psutil",
     "onnxscript",
     "wandb>=0.19",
+    # Ed25519 authority signing/verification is part of the tracked ActionBall
+    # operations path.  Isaac 5.1 currently supplies 44.x while the dedicated
+    # Pod operation environments carry 50.0.0; both expose the required API.
+    "cryptography>=44,<51",
 ]
 
 # Installation operation

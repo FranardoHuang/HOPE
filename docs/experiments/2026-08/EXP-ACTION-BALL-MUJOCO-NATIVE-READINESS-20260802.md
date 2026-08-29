@@ -44,6 +44,16 @@ tensor，消除别名不可写NumPy内存的undefined-write警告。更大的R06
 必须先在active-flight matched profile下证明它们是主墙并保持journal/reason/carry语义，避免为“简洁”做
 跨owner大重写。
 
+该减法的clean source `75373daa`随后在Pod1全新exact checkout完成三组分进程回归=
+`35/24/12 passed`（另`1 skipped`），signed-authority=`59 passed / 0 skipped`。Isaac真实fixed-action
+仍为0 done/timeout，action tape SHA=`b633da…def8`、state arrays SHA=`23dd2a…1c6f`，与父版逐字一致。
+Mu `512×H48×61` profiler-off窗自然完成，p50/p90=`6.671/6.740 s`；hard/guard=
+`11,823/1,499,136=.789%` / `85,856/1,499,136=5.727%`，first10→recent10为
+`.781%→.294%` / `4.852%→3.208%`。四项mimic误差为位置略坏、速度改善、拍面小幅改善、长轴改善；全窗
+due/launch/R03-valid/raw/selected/legal-landing=`11,120/6,001/4,123/0/0/0`，finite、conservation与
+fact fault均0。fixed tape证明删除路径不改变固定行为；随机训练窗比父版更好不能单独证明因果。它只授权
+启动长期replacement，约6秒目标仍未达到，balance/mimic/hit/landing均不晋级。
+
 MuJoCo attach日志一度显示parent `.002 s`、child `.001 s`，但独立加载该run最终`runtime.mjb`实测为
 `.001 s`、Euler、Newton、iterations100、noslip0；故实际policy clock仍`.001×20=.020 s`，warning来自
 中间attach状态，不能据日志字符串声称运行时钟错误。Isaac launcher的outer owner必须使用host
