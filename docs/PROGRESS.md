@@ -17,6 +17,9 @@
 - clean exact `ff7a6c4f`在Pod完成CPU/Torch组合门`444 passed,36 skipped`、launcher/setup=`98 passed`。
   首轮测试发现并闭合旧weight断言及scaled-payment污染normalized kernel telemetry；三卡仍被现役run占用，
   current-source真实Kit/Mu CUDA fixed-action、profile和fresh双端训练继续诚实写`未测`。
+- validated training checkout=`8a57a522`已在Pod fresh exact目录恢复并核过92个Mu mesh、EPA48/RSL3；
+  Mu/Isaac完整launcher dry-run均RC0。由repo部署新环境的public lock和显式外部恢复链已可执行，合法Isaac
+  下载、private USD/mesh locator仍不是Git字节；dry-run不代签真实CUDA或学习。
 
 ## 2026-08-29 — 可重建环境、R06 control-boundary减法与训练裁决
 

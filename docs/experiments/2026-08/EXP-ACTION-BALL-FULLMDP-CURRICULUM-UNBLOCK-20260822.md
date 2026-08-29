@@ -1329,6 +1329,9 @@ clean exact source=`ff7a6c4f`的Pod CPU/Torch组合门为`444 passed,36 skipped`
 `98 passed`。首轮`e6300c1b`曾诚实失败2项：一项是测试仍期待已否决weight；另一项暴露scaled payment被误当
 `[0,1]` normalized fidelity kernel。后者现保持两条事实：milestone kernel/error继续表达学习质量，
 configured/actual income表达真正4×付款。三卡占用下真实Kit/Mu CUDA fixed-action与fresh learning仍`未测`。
+Pod1另从validated training checkout=`8a57a522`建立fresh exact launch目录，恢复并核过92个A3P0807 Mu mesh、
+EPA48/RSL3与外部Isaac USD/GL locator；两个launcher的完整dry-run均RC0。该证据只关闭下一次发射的输入组合，
+不把dry-run冒充真实GPU probe。
 
 旧Mu到ACK2431：`666/321,213` selected/launch、599 crossing、`0/666` legal、recovery=`0/230,866`；
 最近10轮仍0 contact。旧Isaac到ACK833：`0 R03 / 90,779 launch`，landing仍因0 selected为`未测`。二者分别确认hit→landing/recovery

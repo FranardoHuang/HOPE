@@ -72,3 +72,7 @@ diff -u configs/action_ball_mujoco_base_venv_constraints_20260829.txt \
 
 因此“repo + 本文package来源 + setup_local_sync列出的外部字节”具备可复现步骤；“纯Git clone立即训练”仍为
 `FALSE`。缺失private/ignored输入必须报告为`PARTIAL`，不能用更多success Gate掩盖。
+
+`2026-08-29`在Pod1以validated training checkout=`8a57a522`建立fresh exact目录，恢复92个mesh并复核
+root XML SHA=`7bbda723…bcae1`、payload=`92 files / 25,331,878 bytes`、RSL3 wheel SHA=
+`40686735…e06d`；完整Mu successor launcher dry-run RC0。真实CUDA fixed-action因三卡占用仍`未测`。

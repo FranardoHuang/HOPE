@@ -9,6 +9,8 @@ validated code source=`ff7a6c4f`保留`255df4a1`的每control一次R06 finalize�
 Pod1 clean exact CPU/Torch组合门=`444 passed,36 skipped`，launcher/setup=`98 passed`。首个候选
 `e6300c1b`曾由同一组合门真实检出2个失败：旧weight断言和把4×实际付款误记成`[0,1]` fidelity kernel；
 `ff7a6c4f`已让fidelity继续报未缩放kernel、configured/actual income报真实付款，并全量复测通过。
+validated training checkout=`8a57a522`已在Pod1 fresh exact目录恢复92个A3P0807 Mu mesh、EPA48与RSL3，
+逐项核XML/mesh数量与字节/RSL wheel SHA；Mu和Isaac完整launcher dry-run均RC0。
 三张GPU仍分别被旧Mu、旧Isaac和fresh 4× Mu占用，所以current source真实Kit fixed tape、CUDA parity与
 profiler-off matched active strata为`未测`，本Gate不把CPU语义门或profile硬上界写成速度PASS。
 

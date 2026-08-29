@@ -28,6 +28,8 @@ backend内的Reward经济反例，不是sim2sim差异。后继只在playback-act
 用旧checkpoint跳过fresh对照或把Build4 warm-start混进跨引擎判定。
 clean exact source=`ff7a6c4f`已过Pod CPU/Torch `444 passed,36 skipped`和launcher/setup `98 passed`；这只
 关闭shared contract、账本、R06与启动参数回归，不是双引擎CUDA fixed-action或physics parity。
+validated training checkout=`8a57a522`已恢复Mu ignored资产并让两端完整launcher dry-run RC0；真实双端
+fixed-action与fresh matched仍等自然空闲GPU，继续写`未测`。
 
 当前repo部署合同也不等于跨机parity：一次性EULA/隐私setup事实不再被错做成per-run Gate；setup已删除
 环境path discovery，GL由caller显式绑定、核SONAME并记录观察SHA。最新`bb0be1a2`从全新exact checkout完成

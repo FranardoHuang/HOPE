@@ -316,7 +316,9 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
 
    clean exact source=`ff7a6c4f`已完成Pod CPU/Torch组合门`444 passed,36 skipped`和launcher/setup
    `98 passed`。首个候选的旧weight断言与scaled-payment污染normalized kernel telemetry两项失败均已修复；
-   current-source真实Kit/MuJoCo CUDA fixed-action因三卡占用仍为`未测`，不能据CPU门勾选本项或发训练。
+   validated training checkout=`8a57a522`又在fresh exact目录恢复并核过Mu mesh/EPA48/RSL3，Mu/Isaac完整
+   launcher dry-run均RC0。current-source真实Kit/MuJoCo CUDA fixed-action因三卡占用仍为`未测`，不能据
+   CPU门或dry-run勾选本项或发训练。
 
    Build4的mandatory actor warm-start仍是最强混杂项，但现有`model_2000.pt`明确
    `checkpoint_authority=false/resume_authority=false`。当前FullMDP也没有贯通env/owner/WAL的resume consumer，
