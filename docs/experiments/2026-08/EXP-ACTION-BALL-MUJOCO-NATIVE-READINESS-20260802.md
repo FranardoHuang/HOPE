@@ -25,15 +25,17 @@
 Pod CPU targeted对`5f1ee728`的结果是两个可定位的实现失败，不是teacher replay
 科学否定：`0.10 s`与`0.02 s`的float32表示在“先减elapsed seconds、再`ceil`”时
 把剩3 tick误计4 tick；另一失败只由`getattr(...)`换行触发。修复候选改为
-全等待期按policy boundary离散化后再减elapsed tick，用输入dtype的相邻可表示值定义
-半ULP归一区；测试同时固定了边界下方/边界/边界上方三个反例，上方真实
-余量仍向上取整。contact patch接线改用AST检查optional `getattr`及non-None守卫下
+全等待期按policy boundary离散化后再减elapsed tick。`ff219672` Pod证明半ULP容差
+仍会把float64 `nextafter(0.06,+inf)`误归一；最终候选改为用integer candidate和
+`step_dt`在float64构造唯一canonical边界，cast回输入dtype后只接受逐值相等，
+其余严格`ceil`。contact patch接线改用AST检查optional `getattr`及non-None守卫下
 的consumer call，不再把格式当语义。后继`09d0eda0` Pod teacher-replay文件已
 `8 passed`。module union的3个新红项只是
 `wait_transition` fixture仍用旧单参lambda，无法消费现行substep/capture-boundary kwargs；
 它们不是replay行为或physics反例。后继fixture显式核对final-forward边界，新AST
 同时固定physics-substep和final-forward caller的具名参数，现有live generic contact反例
-又核对一次consumer payload；tick反例扩到float32/float64与`0.10/0.06 s`。当前
+又核对一次consumer payload；tick反例扩到float32/float64、`0.10/0.06 s`、
+`nextafter±`与`0.061 s`非边界。当前
 新union、N=1 CUDA和首contact patch仍是`unverified`，不改变
 `diagnostic_unauthorized=true`。
 

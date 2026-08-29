@@ -101,6 +101,18 @@ def test_teacher_replay_frozen_counter_only_snaps_dtype_roundoff_at_tick_boundar
     assert frozen.tolist() == expected
 
 
+@pytest.mark.parametrize("dtype", (torch.float32, torch.float64))
+def test_teacher_replay_frozen_counter_strictly_ceils_non_boundary_wait(dtype):
+    frozen = replay.remaining_teacher_frozen_steps(
+        torch=torch,
+        common_step=12,
+        reveal_tick=torch.tensor([10]),
+        pre_swing_wait_s=torch.tensor([0.061], dtype=dtype),
+        step_dt=0.02,
+    )
+    assert frozen.tolist() == [2]
+
+
 def test_pre_step_snapshot_drives_request_while_post_step_is_independent():
     env = types.SimpleNamespace(
         _epoch_task_valid=torch.tensor([True]),

@@ -7,13 +7,15 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 `5f1ee728`的Pod CPU targeted首轮没有通过：float32等待秒数在相减后`ceil`产生
 了无意多一tick，另一项测试把Python换行当成contact patch接线合同。后继候选将
 frame0等待显式定义在policy tick边界：先将完整`pre_swing_wait_s`转为整数tick，
-只对输入dtype半ULP内的精确tick边界消除表示误差，再减已过整数tick；上方紧邻
-浮点反例仍保留额外等待。contact consumer改为AST结构验证。当前仅有静态检查，
+再减已过整数tick。Pod后继证明半ULP容差仍会吞掉float64的上方紧邻值；最终规则
+因此只认“integer candidate + `step_dt`在float64构造、cast回输入dtype”的唯一canonical
+encoding逐值相等，其余严格`ceil`。contact consumer改为AST结构验证。
 `09d0eda0` Pod teacher-replay文件已`8 passed`；module union的3个新红项是
 `wait_transition` fixture仍使用只接一个census的lambda，没有接收生产已显式传递的
 substep index和capture boundary。后继fixture现在显式核对final-forward边界，AST固定
-substep/final两类caller，行为反例固定consumer收到的payload；另增float64和第二秒数
-边界的tick反例。新union仍须Pod复跑，再进入N=1 CUDA replay；不提升G06证据等级。
+substep/final两类caller，行为反例固定consumer收到的payload；tick反例覆盖float32/64、
+`0.10/0.06 s`、`nextafter±`与`0.061 s`非边界。新union仍须Pod复跑，再进入N=1
+CUDA replay；不提升G06证据等级。
 
 ## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
 
