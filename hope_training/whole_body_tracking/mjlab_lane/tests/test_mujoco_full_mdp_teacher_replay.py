@@ -256,6 +256,37 @@ def test_contact_patch_is_absent_until_explicitly_enabled():
     assert len(guarded_calls) == 1
 
 
+def test_contact_patch_bridge_distinguishes_torch_proxy_warp_and_device_duck():
+    calls = []
+
+    class FakeWarpArray:
+        pass
+
+    class FakeWarp:
+        array = FakeWarpArray
+
+        @staticmethod
+        def to_torch(value):
+            calls.append(value)
+            return torch.tensor([3.0])
+
+    direct = torch.tensor([1.0])
+    proxy_view = torch.tensor([2.0])
+    proxy = types.SimpleNamespace(torch=proxy_view, device=proxy_view.device)
+    warp_value = FakeWarpArray()
+    bridge = wait_env.FullMdpInitialWaitVecEnv._diagnostic_contact_field_torch_view
+
+    assert bridge(torch=torch, warp=FakeWarp, value=direct) is direct
+    assert bridge(torch=torch, warp=FakeWarp, value=proxy) is proxy_view
+    bridged_warp = bridge(torch=torch, warp=FakeWarp, value=warp_value)
+    assert torch.equal(bridged_warp, torch.tensor([3.0]))
+    assert calls == [warp_value]
+
+    device_only = types.SimpleNamespace(device=torch.device("cpu"))
+    with pytest.raises(TypeError, match="no supported Torch view"):
+        bridge(torch=torch, warp=FakeWarp, value=device_only)
+
+
 def test_teacher_replay_cli_is_n1_zero_ppo_and_reuses_live_owner():
     signature = inspect.signature(runner.main)
     assert signature.parameters["diagnostic_teacher_replay"].default is False

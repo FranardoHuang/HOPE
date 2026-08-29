@@ -533,6 +533,33 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         return self._full_a_contact_force_f32[:, 0]
 
+    @staticmethod
+    def _diagnostic_contact_field_torch_view(*, torch, warp, value):
+        """Return the field's existing Torch storage without guessing by device.
+
+        MJLab may publish live MuJoCo-Warp fields as its Torch-facing proxy:
+        that object owns a ``torch.device`` but is not itself a ``Tensor`` or a
+        Warp array.  Its explicit ``.torch`` view is already the zero-copy
+        consumer surface.  Native contiguous Warp arrays instead use Warp's
+        zero-copy Torch bridge.  No other object is accepted merely because it
+        exposes a shape, device, or DLPack-like attribute.
+        """
+
+        if torch.is_tensor(value):
+            return value
+        proxy_view = getattr(value, "torch", None)
+        if torch.is_tensor(proxy_view):
+            return proxy_view
+        warp_array_type = getattr(warp, "array", None)
+        if (
+            isinstance(warp_array_type, type)
+            and isinstance(value, warp_array_type)
+        ):
+            result = warp.to_torch(value)
+            if torch.is_tensor(result):
+                return result
+        raise TypeError("generic contact field has no supported Torch view")
+
     def enable_diagnostic_first_generic_contact_patch(self) -> None:
         """Opt into one host contact patch for the N=1 teacher replay only.
 
@@ -555,13 +582,17 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         try:
             import warp as wp
 
-            self._diagnostic_contact_patch_tensors = {
-                name: (
-                    value if self._torch.is_tensor(value) else wp.to_torch(value)
+            tensors = {
+                name: self._diagnostic_contact_field_torch_view(
+                    torch=self._torch, warp=wp, value=value
                 )
                 for name in ("pos", "frame", "dist")
                 for value in (getattr(contact, name),)
             }
+            expected_device = self._torch.device(self.device)
+            if any(value.device != expected_device for value in tensors.values()):
+                raise ValueError("generic contact patch tensor device differs")
+            self._diagnostic_contact_patch_tensors = tensors
         except Exception as exc:
             raise RuntimeError(
                 "MuJoCo-Warp generic contact patch tensor bridge differs"

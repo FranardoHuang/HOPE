@@ -2,6 +2,13 @@
 
 ## 2026-08-30 — frozen-teacher Pod targeted失败修复候选
 
+- `eff08cc4` Pod CPU的`93+154` module unions（含mesh closure）已全绿，但首个真实
+  GPU1 CUDA replay在180-step前自然RC1：MJLab的live contact field是显式Torch-facing
+  proxy，它有`torch.device`但不是`torch.Tensor`或Warp array；旧桥接把所有非Tensor
+  都传给`wp.to_torch`，因而触发`torch.device.is_cpu` AttributeError。后继候选改为
+  三分类：真Torch tensor直接用，显式`.torch` proxy取其零拷贝view，只有真
+  `warp.array`走`wp.to_torch`；仅有`.device`的鸭子类型明确拒绝。spent root
+  `fullmdp-teacher-replay-eff08cc-gpu1-20260829T224645Z-r1`保留，无summary/NPZ，不复用。
 - Pod CPU targeted在`5f1ee728`暴露两个实现问题：float32秒数先相减再`ceil`
   会把本应剩3个policy tick的frame0 bridge误拖到4个；contact patch测试把单行
   源码排版当成了合同。本候选改为“完整等待期先离散化为tick，再减已过tick”；

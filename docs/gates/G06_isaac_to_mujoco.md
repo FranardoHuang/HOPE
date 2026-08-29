@@ -4,6 +4,13 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 
 ## 2026-08-30 frozen-teacher targeted修复候选（仍`Partial`）
 
+`eff08cc4` Pod CPU `93+154` unions已全绿；首个真实CUDA N=1在启用contact patch时
+于180-step前自然RC1。根因是MJLab live field的Torch-facing proxy有`torch.device`却不是
+Tensor，旧代码仅用`torch.is_tensor`二分后误传`wp.to_torch`。后继候选只接受三个
+明确表面：Torch tensor本身、proxy的`.torch` zero-copy view、或真`warp.array`的
+Warp-to-Torch zero-copy bridge；不再根据`.device`、shape或类DLPack属性猜类型。spent root
+保留且无summary/NPZ；新候选仍需fresh Pod CPU targeted和GPU1 replay，G06不升级。
+
 `5f1ee728`的Pod CPU targeted首轮没有通过：float32等待秒数在相减后`ceil`产生
 了无意多一tick，另一项测试把Python换行当成contact patch接线合同。后继候选将
 frame0等待显式定义在policy tick边界：先将完整`pre_swing_wait_s`转为整数tick，
