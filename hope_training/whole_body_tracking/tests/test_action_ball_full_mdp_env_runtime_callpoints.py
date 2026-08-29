@@ -367,6 +367,11 @@ class _CommandTerm:
         self.trace.append((self.name + "_legacy_reset", env_ids.clone()))
         return {"count": 1}
 
+    def action_ball_full_mdp_restore_physical_birth_controller_history(
+        self, env_ids
+    ):
+        self.trace.append((self.name + "_controller_history", env_ids.clone()))
+
 
 class _Commands:
     def __init__(self, trace, terms):
@@ -628,6 +633,8 @@ def test_n2_selected_reset_changes_only_selected_native_row():
     names = _names(trace)
     assert names.index("top_reset") < names.index("curriculum_compute")
     assert names.index("top_reset") < names.index("scene_reset")
+    assert names.index("action_reset") < names.index("motion_controller_history")
+    assert names.index("motion_controller_history") < names.index("reward_reset")
     assert names.index("termination_reset") < names.index(
         "milestone_close_episodes"
     )

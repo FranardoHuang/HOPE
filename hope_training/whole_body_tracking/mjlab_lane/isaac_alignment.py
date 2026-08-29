@@ -115,14 +115,12 @@ ISAAC_SOURCE_RELPATHS = {
     "gmr_joint_order": Path("configs/a3_gmr_dof_pos_joint_order.txt"),
     "runtime_joint_order": Path("configs/a3_runtime_articulation_joint_order.txt"),
     "ready_pose": Path(
-        "configs/action_ball_n1_measured_20260803/"
-        "evidence_holdpass_robust20n_20260803/"
-        "take061.measured_teacher.yaw_aligned_full_seed."
-        "robust20n.dynamic_ready.v2.json"
+        "configs/action_ball_n1_measured_a3p0807_20260828/"
+        "take061.local_closest_robust_feasible.dynamic_ready.v2.json"
     ),
     "vendor_mjcf": Path(
         "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
-        "a3_pingpong/a3_pingpong.xml"),
+        "a3p_pingpong_0807/a3p_pingpong_0807.xml"),
 }
 
 

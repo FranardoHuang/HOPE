@@ -149,6 +149,53 @@ def test_action_install_without_rollback_skips_snapshot_and_still_installs():
     assert action.raw_action_history_valid[ids].tolist() == [False, False]
 
 
+def test_physical_birth_controller_restore_preserves_native_policy_history():
+    action, manager = _action_term()
+    ids = torch.tensor([0, 2])
+    manager._action.fill_(0.37)
+    manager._prev_action.fill_(-0.41)
+    action._raw_actions.fill_(0.23)
+    action._prev_raw_actions.fill_(-0.29)
+    action._prev_prev_raw_actions.fill_(0.31)
+    normalized = torch.stack(
+        (torch.linspace(-0.5, 0.5, _JOINTS), torch.linspace(0.5, -0.5, _JOINTS))
+    )
+    hold_qdes = normalized * 0.25
+    policy_before = (
+        manager._action.clone(),
+        manager._prev_action.clone(),
+        action.raw_actions.clone(),
+        action.prev_raw_actions.clone(),
+        action.prev_prev_raw_actions.clone(),
+    )
+
+    result = action.install_action_ball_physical_birth_controller_history(
+        ids, normalized, hold_qdes
+    )
+
+    assert result is None
+    assert all(
+        torch.equal(after, before)
+        for after, before in zip(
+            (
+                manager._action,
+                manager._prev_action,
+                action.raw_actions,
+                action.prev_raw_actions,
+                action.prev_prev_raw_actions,
+            ),
+            policy_before,
+        )
+    )
+    assert torch.equal(action.processed_actions[ids], hold_qdes)
+    assert torch.equal(action.previous_processed_qdes[ids], hold_qdes)
+    assert action._processed_qdes_valid[ids].tolist() == [True, True]
+    assert action.previous_processed_qdes_valid[ids].tolist() == [True, True]
+    assert action.processed_actions[1].abs().sum().item() == 0.0
+    assert action._raw_actions_valid[ids].tolist() == [False, False]
+    assert action.raw_action_history_valid[ids].tolist() == [False, False]
+
+
 class _FakeRobot:
     def __init__(self, num_envs: int):
         self.data = types.SimpleNamespace(
@@ -193,6 +240,15 @@ class _FakeDynamicAction:
 
     def restore_action_ball_dynamic_ready_state(self, env_ids, state):
         self.restored = (env_ids.clone(), state)
+
+    def install_action_ball_physical_birth_controller_history(
+        self, env_ids, normalized_action, hold_qdes
+    ):
+        self.installed = (
+            env_ids.clone(),
+            normalized_action.clone(),
+            hold_qdes.clone(),
+        )
 
 
 def test_motion_write_and_later_commit_rollback_include_action_state():
@@ -476,6 +532,7 @@ def _binding_harness():
     action = types.SimpleNamespace(
         processed_actions=torch.zeros(4, _JOINTS),
         install_action_ball_dynamic_ready_state=lambda *args: None,
+        install_action_ball_physical_birth_controller_history=lambda *args: None,
         restore_action_ball_dynamic_ready_state=lambda *args: None,
     )
     manager = types.SimpleNamespace(

@@ -159,11 +159,13 @@ env平均`q=.39555 rad`、`qdot=+1.87642 rad/s`、raw policy qdes约`-.325 rad`�
 同侧`+.33266 rad`，末子步仅约`-6.98 Nm`。这是旧`q-qdot*T`被target envelope clamp回风险同侧的实现错误，
 不是policy主动顶边。采用的最小候选不是加Done/reward/Gate，而是让唯一共享pure-tensor guard对单侧风险输出
 反侧maximum-inward endpoint；双侧风险、非有限state/request仍保留bounded velocity-horizon fallback。
-wire升级为`action_ball_shared_max_inward_state_guard_v2`。同一NPZ action tape反事实已把三个关节hard合计
-从`8,715`降到`194`（`-97.77%`）：`waist_pitch 5,596→188`、`waist_roll 3,076→0`、
-`left_ankle_roll 43→6`，torque clamp仍全0。done为`498→509`；为防止把hard换成别的终止，trace schema
-现直接保存生产extras里的termination bits，bit词表是显式函数输入而非读取`main`局部module名；fresh
-reason replay和有限学习未通过前仍是候选。
+wire升级为`action_ball_shared_max_inward_state_guard_v2`。最终fresh reason replay继续复用同一NPZ action
+tape，把三个关节hard从`8,715`降到`171`（`-98.04%`）：`waist_pitch 5,596→171`、
+`waist_roll 3,076→0`、`left_ankle_roll 43→0`，torque clamp仍全0。done为`498→510`；510个done全部
+被生产extras里的termination bits解释（`base_fell_tilt=390`、`base_too_low=9`、`robot_hit_table=120`，
+原因可重叠），`joint_qdes_forbidden=0`、unknown bits=0、done-without-reason=0。trace NPZ SHA-256=
+`d09b650d3d5ead48552d6154319e3478df104cf7510cf5f02f3882f7b4a9ead9`；bit词表是显式函数输入而非读取
+`main`局部module名。reason替换故障疑点已闭合，但有限学习未通过前仍是候选。
 
 组合回归同时发现一个与controller独立、但会破坏长跑闭环的真实遗漏：runner已经记当前0807 Take061 UID
 `2552478955674699`，independent consumer仍期待旧plant谱系UID `5527597793770800`，所以任何新completion

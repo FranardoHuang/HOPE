@@ -44,10 +44,12 @@ velocity-horizon target被envelope夹在风险同侧、只给约`-6.98 Nm`制动
 owner内把单侧crossing映射到反侧maximum-inward endpoint，双侧/非有限仍保留旧bounded fallback；它与Isaac
 已启用的policy-boundary选择对齐，但reason审计与Isaac substep响应尚未闭合，G06继续`Partial`。
 
-同一NPZ action tape的Mu反事实已使三关节hard总量`8,715→194`（`-97.77%`），其中waist roll归零，
-waist pitch`5,596→188`，left ankle roll`43→6`，且三项torque clamp仍为0。这支持旧弱制动是主要因果，
-但done `498→509`；trace已扩为直接保存既有termination bits，reason replay、finite学习与Isaac同字段未闭合，
-所以不能把97.77%写成parity或训练PASS，G06仍`Partial`。
+最终fresh reason replay继续复用同一NPZ action tape，使三关节hard总量`8,715→171`（`-98.04%`），
+waist pitch`5,596→171`，waist roll与left ankle roll都归零，且三项torque clamp仍为0。这支持旧弱制动
+是主要因果。done `498→510`，但510个done全部有生产termination bit解释：`base_fell_tilt=390`、
+`base_too_low=9`、`robot_hit_table=120`（可重叠），`joint_qdes_forbidden=0`、unknown bits=0、
+done-without-reason=0；NPZ SHA-256=`d09b650d…9ead9`。reason替换故障疑点已经闭合，finite学习与Isaac
+同字段尚未闭合，所以不能把98.04%写成parity或训练PASS，G06仍`Partial`。
 
 与physics parity无关但会阻断evidence closure的UID漂移也已定位：portable writer是当前0807 action UID
 `2552478955674699`，offline consumer仍钉旧UID `5527597793770800`。consumer expected值已更新，producer与

@@ -19,7 +19,7 @@ PPO_RECIPE_PATH = LANE.parent / (
 )
 PLANT_XML = LANE.parents[2] / (
     "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
-    "a3_pingpong/a3_pingpong.xml"
+    "a3p_pingpong_0807/a3p_pingpong_0807.xml"
 )
 
 
@@ -38,7 +38,7 @@ PPO_RECIPE = _load_ppo_recipe()
 NUM_ENVS = PPO_RECIPE.num_envs
 STEPS_PER_UPDATE = PPO_RECIPE.num_steps_per_env
 TRANSITIONS = NUM_ENVS * STEPS_PER_UPDATE
-UID = 5527597793770800
+UID = 2552478955674699
 COMMIT = "a" * 40
 NAMESPACE = "mujoco-fullmdp-consumer-test-0001"
 MUJOCO_WARP_RUNTIME = {

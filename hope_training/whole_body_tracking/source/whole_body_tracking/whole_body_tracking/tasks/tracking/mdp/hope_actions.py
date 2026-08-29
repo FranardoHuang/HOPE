@@ -4684,6 +4684,89 @@ class ClampedJointPositionAction(JointPositionAction):
                 ids, state["policy_action_delay"]
             )
 
+    def _action_ball_validate_physical_birth_controller_history(
+        self,
+        env_ids: Sequence[int] | torch.Tensor,
+        normalized_action: torch.Tensor,
+        hold_qdes: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Validate and select the two tensors shared by reset installers."""
+
+        ids = self._action_ball_dynamic_ready_env_ids(env_ids)
+        expected_shape = (ids.numel(), self._processed_actions.shape[1])
+        for name, value in (
+            ("normalized_action", normalized_action),
+            ("hold_qdes", hold_qdes),
+        ):
+            if (
+                not torch.is_tensor(value)
+                or tuple(value.shape) != expected_shape
+                or value.device != self._processed_actions.device
+                or value.dtype != self._processed_actions.dtype
+            ):
+                raise RuntimeError(
+                    "action-ball dynamic-ready "
+                    f"{name} must match the selected action rows"
+                )
+        target_lower, target_upper = (
+            self._action_ball_dynamic_ready_target_envelope()
+        )
+        selected_lower = target_lower[ids]
+        selected_upper = target_upper[ids]
+        selected_span = (target_upper - target_lower)[ids]
+        structurally_valid = torch.all(
+            torch.isfinite(normalized_action)
+            & torch.isfinite(hold_qdes)
+            & torch.isfinite(selected_lower)
+            & torch.isfinite(selected_upper)
+            & selected_lower.lt(selected_upper)
+            & hold_qdes.ge(selected_lower)
+            & hold_qdes.le(selected_upper)
+        )
+        if structurally_valid.device.type == "cpu":
+            if not bool(structurally_valid):
+                raise RuntimeError(
+                    "action-ball dynamic-ready contains non-finite state or "
+                    "an invalid executable q_des envelope"
+                )
+        else:
+            torch._assert_async(structurally_valid)
+        return ids, selected_span
+
+    def install_action_ball_physical_birth_controller_history(
+        self,
+        env_ids: Sequence[int] | torch.Tensor,
+        normalized_action: torch.Tensor,
+        hold_qdes: torch.Tensor,
+    ) -> None:
+        """Restore only executable controller history after ActionManager reset.
+
+        The policy action and its rate history deliberately remain at the native
+        reset value.  The hold is a physical-birth controller target, not a
+        sampled policy transition.  Delay history still receives that target so
+        a delayed first command cannot resurrect the retired episode.
+        """
+
+        ids, selected_span = (
+            self._action_ball_validate_physical_birth_controller_history(
+                env_ids, normalized_action, hold_qdes
+            )
+        )
+        self._processed_actions[ids] = hold_qdes
+        self._previous_processed_qdes[ids] = hold_qdes
+        self._pre_clamp_qdes[ids] = hold_qdes
+        self._nominal_projected_qdes[ids] = hold_qdes
+        self._nominal_projection_span[ids] = selected_span
+        self._processed_qdes_valid[ids] = True
+        self._previous_processed_qdes_valid[ids] = True
+        self._pre_clamp_qdes_valid[ids] = True
+        self._nominal_projected_qdes_valid[ids] = True
+        self._raw_actions_valid[ids] = False
+        self._prev_raw_actions_valid[ids] = False
+        self._prev_prev_raw_actions_valid[ids] = False
+        if self._policy_action_delay.enabled:
+            self._policy_action_delay.install_hold_rows(ids, normalized_action)
+
     def install_action_ball_dynamic_ready_state(
         self,
         env_ids: Sequence[int] | torch.Tensor,
@@ -4706,48 +4789,12 @@ class ClampedJointPositionAction(JointPositionAction):
 
         if type(capture_rollback) is not bool:
             raise TypeError("capture_rollback must be one exact bool")
-        ids = self._action_ball_dynamic_ready_env_ids(env_ids)
+        ids, selected_span = (
+            self._action_ball_validate_physical_birth_controller_history(
+                env_ids, normalized_action, hold_qdes
+            )
+        )
         manager = self._action_ball_dynamic_ready_manager()
-        expected_shape = (ids.numel(), self._processed_actions.shape[1])
-        for name, value in (
-            ("normalized_action", normalized_action),
-            ("hold_qdes", hold_qdes),
-        ):
-            if (
-                not torch.is_tensor(value)
-                or tuple(value.shape) != expected_shape
-                or value.device != self._processed_actions.device
-                or value.dtype != self._processed_actions.dtype
-            ):
-                raise RuntimeError(
-                    "action-ball dynamic-ready "
-                    f"{name} must match the selected action rows"
-                )
-        finite = torch.all(
-            torch.isfinite(normalized_action) & torch.isfinite(hold_qdes)
-        )
-        target_lower, target_upper = (
-            self._action_ball_dynamic_ready_target_envelope()
-        )
-        selected_lower = target_lower[ids]
-        selected_upper = target_upper[ids]
-        target_span = target_upper - target_lower
-        selected_span = target_span[ids]
-        structurally_valid = finite & torch.all(
-            torch.isfinite(selected_lower)
-            & torch.isfinite(selected_upper)
-            & selected_lower.lt(selected_upper)
-            & hold_qdes.ge(selected_lower)
-            & hold_qdes.le(selected_upper)
-        )
-        if structurally_valid.device.type == "cpu":
-            if not bool(structurally_valid):
-                raise RuntimeError(
-                    "action-ball dynamic-ready contains non-finite state or "
-                    "an invalid executable q_des envelope"
-                )
-        else:
-            torch._assert_async(structurally_valid)
 
         state = (
             self.snapshot_action_ball_dynamic_ready_state(ids)

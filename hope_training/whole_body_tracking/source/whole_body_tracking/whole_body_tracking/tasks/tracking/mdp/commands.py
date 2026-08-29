@@ -13093,6 +13093,7 @@ class MotionCommand(CommandTerm):
             ) from exc
         for method_name in (
             "install_action_ball_dynamic_ready_state",
+            "install_action_ball_physical_birth_controller_history",
             "restore_action_ball_dynamic_ready_state",
         ):
             if not callable(getattr(action_term, method_name, None)):
@@ -13122,6 +13123,43 @@ class MotionCommand(CommandTerm):
         )
         self._action_ball_dynamic_ready_action_term = action_term
         return action_term
+
+    def action_ball_full_mdp_restore_physical_birth_controller_history(
+        self, env_ids: torch.Tensor
+    ) -> None:
+        """Reinstall the birth hold erased by native ActionManager reset.
+
+        FullMDP writes the physical birth before native manager resets.  The
+        ActionManager reset must retain its zero policy action/rate semantics,
+        while the controller's previous executable q_des must still describe
+        the plant that was just born.  Keep that distinction in one narrow
+        handoff instead of replaying the broad dynamic-ready transaction.
+        """
+
+        if (
+            type(env_ids) is not torch.Tensor
+            or env_ids.ndim != 1
+            or env_ids.dtype != torch.int64
+            or env_ids.device != torch.device(self.device)
+        ):
+            raise RuntimeError(
+                "FullMDP controller-history restore requires selected int64 env_ids"
+            )
+        action_term = self._bind_action_ball_dynamic_ready_action_term()
+        if action_term is None:
+            raise RuntimeError(
+                "FullMDP controller-history restore lacks dynamic-ready action term"
+            )
+        action_slots = self.clip_id[env_ids]
+        result = action_term.install_action_ball_physical_birth_controller_history(
+            env_ids,
+            self._action_ball_dynamic_ready_normalized_actor_action[action_slots],
+            self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad[action_slots],
+        )
+        if result is not None:
+            raise RuntimeError(
+                "FullMDP controller-history restore must return None"
+            )
 
     def _canonical_ready_steps(self, env_ids: torch.Tensor | None = None) -> torch.Tensor:
         clips = self.clip_id if env_ids is None else self.clip_id[env_ids]

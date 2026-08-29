@@ -2796,6 +2796,20 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             self.extras["log"].update(info)
             info = self.action_manager.reset(env_ids)
             self.extras["log"].update(info)
+            restore_controller_history = getattr(
+                components.motion_owner,
+                "action_ball_full_mdp_restore_physical_birth_controller_history",
+                None,
+            )
+            if not callable(restore_controller_history):
+                raise FullMdpPostPhysicsProtocolError(
+                    "fresh FullMDP motion owner lacks physical-birth controller history"
+                )
+            result = restore_controller_history(env_ids)
+            if result is not None:
+                raise FullMdpPostPhysicsProtocolError(
+                    "physical-birth controller-history restore must return None"
+                )
             info = self.reward_manager.reset(env_ids)
             self.extras["log"].update(info)
             info = self.curriculum_manager.reset(env_ids)

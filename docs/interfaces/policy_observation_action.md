@@ -915,12 +915,15 @@ Fresh N=1 ActionBall runs may opt into the
 Teacher frame 0 remains the exact immutable motion bytes. The physical robot state uses that frame
 only when it satisfies the current plant's named robust constraints; otherwise it uses the closest
 state found inside the same robust-feasible set, with any historical ready serving only as an
-optimizer start. The action manager, `last_action`, processed/pre-clamp qdes buffers and fresh actor
-output-layer bias all start from the selected physical birth's live-prefix-validated hold target.
-The policy—not a scripted or zero-duration bridge—then tracks the independent teacher reference.
-Raw policy-history validity remains false across reset, so this initialization cannot masquerade as
-a sampled transition. The policy action remains the same 31-D unbounded Gaussian output followed by
-the existing affine decoder and finite qdes projection; no observation or action width changes.
+optimizer start. The physical controller's processed/previous/pre-clamp qdes buffers and action-delay
+queue start from the selected physical birth's live-prefix-validated hold target. Native
+`ActionManager.reset` keeps the current/previous policy action, `last_action`, action-rate history and
+fresh actor output at reset zero; a narrow post-reset handoff then restores only controller qdes
+history. This prevents the first guard step from falling back to a retired/default target without
+fabricating a sampled transition. The policy—not a scripted or zero-duration bridge—then tracks the
+independent teacher reference. Raw policy-history validity remains false across reset. The policy
+action remains the same 31-D unbounded Gaussian output followed by the existing affine decoder and
+finite qdes projection; no observation or action width changes.
 
 ### N=1 ActionBall frame and table-state semantics
 
@@ -1227,11 +1230,12 @@ The vendor ActionBall profile adds
 policy-action boundary: actor output is delayed **before** `JointPositionAction` performs the
 affine q_des conversion. One scalar lag is sampled per environment at true episode reset and
 selects a complete 31-D action row, so the five actuator groups cannot receive different lags in
-one episode. Reset fills every queue age with normalized zero/default q_des; dynamic-ready replaces
-that fill with the action-specific normalized hold in the same rollback transaction without
-resampling. PPO log-prob, `ActionManager.action`, and the actor-visible `last_action` remain the
-current actor output, not the delayed drive row. A zero maximum lag uses the original no-queue/no-RNG
-path. Delay is training DR and is not baked into the ONNX action decoder.
+one episode. Reset fills every queue age with normalized zero/default q_des; after native
+`ActionManager.reset`, the physical-birth controller-history handoff replaces only the delay queue
+with the action-specific normalized hold, without resampling or changing current/previous policy
+action. PPO log-prob, `ActionManager.action`, actor-visible `last_action`, and action-rate history
+remain the current actor output, not the delayed drive row. A zero maximum lag uses the original
+no-queue/no-RNG path. Delay is training DR and is not baked into the ONNX action decoder.
 
 ### Vendor evaluation profiles
 
