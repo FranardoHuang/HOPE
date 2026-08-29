@@ -1192,9 +1192,11 @@ schema-3 hard contract and ONNX/export metadata so old and corrected continuatio
   `q_raw = runtime_plant.default_joint_pos_rad + action_scale * action`.  FullMDP Isaac与portable
   MuJoCo随后调用同一无引擎纯tensor guard：先按上一次可执行target/default pose做finite fallback，再取
   soft envelope、hard 5%内缩和soft span额外5%内缩的交集；有限越界proposal投影后继续学习，非有限proposal
-  或鲜`q/qdot`在`20 ms`弹道预测中触及hard-inner envelope时先按`q-qdot*20 ms`制动，并在安全physics
-  transition后终止该row。MuJoCo只有最后actuator permutation/backend write不同。该guard不是raw-policy
-  clip；历史MuJoCo-only `[-4,+4]` clip不得恢复。alignment ledger现将
+  继续使用有限fallback，鲜`q/qdot`在`20 ms`弹道预测中单边触及hard-inner envelope时直接选择反侧可执行
+  endpoint（maximum-inward target，最大向内目标）；若同一轴同时命中双侧风险或状态非有限，才退回有界
+  `q-qdot*20 ms`目标。非有限proposal仍是Done，有限projection与可恢复crossing只留遥测。Isaac还在每个
+  physics substep对同一方向做receding readback/latch，MuJoCo显式PD按本policy step共享target执行；这不是
+  raw-policy clip，历史MuJoCo-only `[-4,+4]` clip不得恢复。alignment ledger现将
   `executable_qdes_guard`裁定为`ALIGNED`，但Observation/critic/termination/physics等其他blocking axis
   仍独立禁止未经验证的checkpoint transfer、promotion或matched causal claim。
 - The vendor ActionBall plant additionally distinguishes the runtime mechanical position ledger

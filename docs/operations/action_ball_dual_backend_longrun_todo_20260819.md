@@ -202,8 +202,10 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     training path不分配trace，只在显式diagnostic模式记录每个`.001 s`子步的raw/clamped torque包络与真实
     q极值；首跑会同时落固定action tape，后续controller反事实和Isaac都复用该tape，避免闭环policy把plant
     差异重新混进输入。首次exact调用在首个真实plant step暴露诊断Tensor归并API错误且trace误接训练ledger；
-    修正只用公开functional API并删除该非必要依赖，不改plant。fresh Pod model2000运行与反事实结果尚未
-    完成，所以本项仍为未闭合。
+    修正只用公开functional API并删除该非必要依赖，不改plant；失败root不计trajectory证据。随后fresh
+    model2000 exact trace已排除torque clamp，并钉住旧guard把向内raw qdes改写成
+    风险同侧endpoint、制动不足；v2只在共享纯tensor owner输出单边maximum-inward target。下一步必须复用
+    NPZ SHA `4b843a4a…40382`内的action tape证明hard下降且不产生新Done，再做有限学习；否则不替换长跑。
 
 <a id="fullmdp-v9-superseded"></a>
 

@@ -398,7 +398,7 @@ def test_action_contract_identity_is_one_read_only_copy():
         "full_a_reset_root_source": "dynamic_ready.physical_ready.root_pose",
         "full_a_policy_bootstrap": "a3_take061_dynamic_ready_head_v1",
         "raw_action_clip": None,
-        "executable_qdes_guard": "action_ball_shared_soft_hard_state_guard_v1",
+        "executable_qdes_guard": "action_ball_shared_max_inward_state_guard_v2",
         "transfer_authority": False,
         "matched_cross_backend_authority": False,
     }
@@ -554,7 +554,7 @@ def test_full_a_projection_predicted_brake_and_actual_edge_are_nonterminal_telem
     assert env._actual_hard_edge_latch.tolist() == [False, False, False, True]
     assert env._qdes_guard_intervention.tolist() == [False, True, True, True]
     torch.testing.assert_close(
-        env.sim.data.ctrl[:, 0], torch.tensor([0.81, -0.10, 0.0, -0.19])
+        env.sim.data.ctrl[:, 0], torch.tensor([0.81, -1.0, 0.0, -1.0])
     )
     terminated, truncated, bits, _resolved = _fullmdp_termination(env)
     assert terminated.tolist() == [False, False, True, False]

@@ -5067,14 +5067,8 @@ class ClampedJointPositionAction(JointPositionAction):
                 crossing_violation = guard.crossing_violation
                 per_joint_guard = guard.per_joint_guard
                 if self.max_inward_joint_safety_containment_enabled:
-                    lower_risk = guard.state_finite & (
-                        guard.safe_joint_pos.le(hard_inner_lower)
-                        | guard.ballistic_next.le(hard_inner_lower)
-                    )
-                    upper_risk = guard.state_finite & (
-                        guard.safe_joint_pos.ge(hard_inner_upper)
-                        | guard.ballistic_next.ge(hard_inner_upper)
-                    )
+                    lower_risk = guard.lower_crossing_risk
+                    upper_risk = guard.upper_crossing_risk
                     self._latch_max_inward_direction(
                         lower_risk=lower_risk, upper_risk=upper_risk
                     )

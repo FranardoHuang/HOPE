@@ -68,11 +68,24 @@ def test_nonfinite_request_uses_previous_target_and_remains_terminal():
     assert bool(result.hard_violation_env[0])
 
 
-def test_predicted_crossing_brakes_inward_and_terminates():
+def test_predicted_crossing_uses_maximum_inward_target_and_terminates():
     result = _guard([[0.0]], q=[[0.85]], qd=[[5.0]])
     assert bool(result.crossing_violation[0, 0])
+    assert bool(result.upper_crossing_risk[0, 0])
+    assert bool(result.unambiguous_crossing_risk[0, 0])
     assert bool(result.hard_violation_env[0])
-    assert torch.allclose(result.executable_qdes, torch.tensor([[0.75]]))
+    assert torch.allclose(result.brake_target, torch.tensor([[0.75]]))
+    assert torch.allclose(result.maximum_inward_target, torch.tensor([[-0.81]]))
+    assert torch.allclose(result.executable_qdes, torch.tensor([[-0.81]]))
+
+
+def test_dual_side_crossing_retains_bounded_velocity_horizon_target():
+    result = _guard([[0.0]], q=[[0.95]], qd=[[-100.0]])
+    assert bool(result.lower_crossing_risk[0, 0])
+    assert bool(result.upper_crossing_risk[0, 0])
+    assert not bool(result.unambiguous_crossing_risk[0, 0])
+    assert torch.allclose(result.brake_target, torch.tensor([[0.81]]))
+    assert torch.allclose(result.executable_qdes, result.brake_target)
 
 
 def test_first_step_uses_default_when_previous_target_is_invalid():

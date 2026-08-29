@@ -132,7 +132,7 @@ class ContactCensus(NamedTuple):
   robot_table_total: Any
 
 
-EXECUTABLE_QDES_GUARD = "action_ball_shared_soft_hard_state_guard_v1"
+EXECUTABLE_QDES_GUARD = "action_ball_shared_max_inward_state_guard_v2"
 _ACTION_JOINT_ORDER_CONTRACT = (
   _HERE.parents[2] / "configs/a3_joint_order_bijection_v1.json"
 )

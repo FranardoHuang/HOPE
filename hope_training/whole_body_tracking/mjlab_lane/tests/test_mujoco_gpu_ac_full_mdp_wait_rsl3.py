@@ -139,7 +139,7 @@ ACTION_CONTRACT = {
     "full_a_reset_root_source": "dynamic_ready.physical_ready.root_pose",
     "full_a_policy_bootstrap": "a3_take061_dynamic_ready_head_v1",
     "raw_action_clip": None,
-    "executable_qdes_guard": "action_ball_shared_soft_hard_state_guard_v1",
+    "executable_qdes_guard": "action_ball_shared_max_inward_state_guard_v2",
     "transfer_authority": False,
     "matched_cross_backend_authority": False,
 }

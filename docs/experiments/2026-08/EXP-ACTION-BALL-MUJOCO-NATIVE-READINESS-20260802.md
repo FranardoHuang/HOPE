@@ -151,8 +151,15 @@ action保存进no-clobber NPZ，后续plant/controller候选必须复用这份ac
 same-writer自证，也不让闭环policy因obs分叉而改变反事实输入。运行形状固定`512×240`，并禁止训练
 evidence、snapshot与completion。首次exact调用在首个真实plant step因诊断专用in-place Tensor归并API
 不存在而fail-closed，未形成trajectory；修正只换成公开functional API后`copy_`，并删除trace路径误构造的
-训练ledger，不改qdes、PD、physics或长期run。fresh exact首跑、Isaac同字段和最小修复均仍未完成，不得
-提前写成结论。
+训练ledger，不改qdes、PD、physics或长期run；该失败root不计trajectory证据。
+
+修正后首份exact trajectory已自然完成，NPZ SHA-256=`4b843a4a…40382`。三个关节hard rows分别为
+`5,596/3,076/43`，而torque-clamp rows全部为0；故effort saturation被排除。`waist_pitch`首个hard的168个
+env平均`q=.39555 rad`、`qdot=+1.87642 rad/s`、raw policy qdes约`-.325 rad`，但旧guard executable固定为
+同侧`+.33266 rad`，末子步仅约`-6.98 Nm`。这是旧`q-qdot*T`被target envelope clamp回风险同侧的实现错误，
+不是policy主动顶边。采用的最小候选不是加Done/reward/Gate，而是让唯一共享pure-tensor guard对单侧风险输出
+反侧maximum-inward endpoint；双侧风险、非有限state/request仍保留bounded velocity-horizon fallback。
+wire升级为`action_ball_shared_max_inward_state_guard_v2`；同action tape反事实未完成前仍是候选。
 
 Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝试给带`__slots__`、无instance
 `__dict__`的`PhysicalQuestionNumericCore`安装3个leaf wrapper。production/profile-off不受影响；修复是删除

@@ -61,8 +61,13 @@
   hard关节的q/dq、raw/executable qdes及clamp前后tau，固定`512×240`且首跑保存可复用action tape；默认训练
   路径不分配trace，输出root no-clobber并拒绝训练evidence/snapshot/completion。首次exact调用已进入真实
   plant step才暴露诊断专用Tensor归并API写错，并发现trace误接了无人消费的训练ledger；现已改成公开
-  `torch.minimum/maximum + copy_`且绕开ledger，不改plant算式。fresh exact结果尚未取得，本项仍是诊断实现
-  而不是controller修复或新Gate。
+  `torch.minimum/maximum + copy_`且绕开ledger，不改plant算式；该失败root不计trajectory证据。
+- 修正后同checkpoint exact trace已自然完成：三关节hard rows=`5,596/3,076/43`，但torque clamp均为0。
+  `waist_pitch`首次hard前平均`q/qdot=.39555/1.87642`，raw policy qdes约`-.325`，旧共享guard却输出靠上限的
+  `+.33266 rad`，末子步仅约`-6.98 Nm`；根因是旧`q-qdot*T`会被clamp到风险同侧endpoint，而Isaac现役配置
+  早已使用反侧maximum-inward。候选v2把单边风险的反侧endpoint选择收回唯一纯tensor guard，双侧/非有限仍
+  保留有界legacy fallback；Mu不增加新Gate或复制控制器。相同action tape反事实尚未跑完，故该候选仍不是
+  controller修复PASS，也未替换长跑。
 - old Mu launcher被证实显式使用legacy `a3_pingpong.xml`而非A3P0807；这足以否定旧sim2sim比较，但不证明
   Pod安装整体损坏。同初态/action tape仍在首20 ms产生q/dq差`.00973/.89084`，剩余根因收敛到implicit
   PhysX drive与显式clamped PD/friction语义；需要Jiayi同tape runtime receipt再裁决。

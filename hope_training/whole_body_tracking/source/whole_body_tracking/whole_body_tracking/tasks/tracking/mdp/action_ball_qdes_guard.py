@@ -36,6 +36,10 @@ class ActionBallQdesGuardResult:
     crossing_violation: torch.Tensor
     per_joint_guard: torch.Tensor
     brake_target: torch.Tensor
+    lower_crossing_risk: torch.Tensor
+    upper_crossing_risk: torch.Tensor
+    unambiguous_crossing_risk: torch.Tensor
+    maximum_inward_target: torch.Tensor
     state_finite: torch.Tensor
 
     @property
@@ -161,11 +165,28 @@ def action_ball_qdes_guard(
         min=target_lower,
         max=target_upper,
     )
+    lower_crossing_risk = state_finite & (
+        safe_joint_pos.le(hard_inner_lower)
+        | ballistic_next.le(hard_inner_lower)
+    )
+    upper_crossing_risk = state_finite & (
+        safe_joint_pos.ge(hard_inner_upper)
+        | ballistic_next.ge(hard_inner_upper)
+    )
+    lower_only = lower_crossing_risk & ~upper_crossing_risk
+    upper_only = upper_crossing_risk & ~lower_crossing_risk
+    unambiguous_crossing_risk = lower_only | upper_only
+    maximum_inward_target = torch.where(
+        lower_only, target_upper, target_lower
+    )
+    guard_target = torch.where(
+        unambiguous_crossing_risk, maximum_inward_target, brake_target
+    )
     nominal_source = torch.where(qdes_nonfinite, brake_target, sanitized)
     nominal_target = torch.clamp(
         nominal_source, min=target_lower, max=target_upper
     )
-    executable = torch.where(per_joint_guard, brake_target, nominal_target)
+    executable = torch.where(per_joint_guard, guard_target, nominal_target)
     return ActionBallQdesGuardResult(
         executable_qdes=executable,
         nominal_projected_qdes=nominal_target,
@@ -185,6 +206,10 @@ def action_ball_qdes_guard(
         crossing_violation=crossing_violation,
         per_joint_guard=per_joint_guard,
         brake_target=brake_target,
+        lower_crossing_risk=lower_crossing_risk,
+        upper_crossing_risk=upper_crossing_risk,
+        unambiguous_crossing_risk=unambiguous_crossing_risk,
+        maximum_inward_target=maximum_inward_target,
         state_finite=state_finite,
     )
 
