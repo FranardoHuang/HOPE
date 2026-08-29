@@ -61,11 +61,13 @@ def contact_capture_boundary(
     if capture_boundary == "physics_substep_poststate":
         if (
             type(physics_substep_index) is not int
-            or physics_substep_index < 0
+            or physics_substep_index < 1
             or physics_substep_index >= decimation
         ):
             raise ValueError("contact patch physics substep differs")
-        completed = physics_substep_index + 1
+        # This callback's indices are 1..decimation-1 and expose post-states
+        # 1..decimation-1; index zero has no derived-state forward yet.
+        completed = physics_substep_index
     elif capture_boundary == "post_forward_final":
         if physics_substep_index is not None:
             raise ValueError("final-forward contact patch has a substep index")

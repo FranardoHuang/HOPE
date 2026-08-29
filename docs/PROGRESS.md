@@ -9,6 +9,8 @@
   trace将构造request所消费的pre-step teacher标签与post-step标签分列；回放在首次done或首个action
   epoch结束时停止，contact patch以reset generation和question SHA拒绝跨shot误归因，并显式区分
   physics-substep poststate与final-forward capture boundary。
+  accepted question之前的done只累计为typed `pre_due_done_count`，不会提前截断；bounded step budget
+  用typed `step_budget_exhausted_no_question`收口。
   当前只有静态AST/`git diff --check`证据；Pod CPU单测、真实CUDA N=1回放与contact patch
   finite/lineage验收仍为`unverified`，不授权训练或物理结论。
 

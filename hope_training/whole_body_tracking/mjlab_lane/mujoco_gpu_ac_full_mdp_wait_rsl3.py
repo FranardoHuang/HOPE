@@ -967,6 +967,7 @@ def _run_teacher_replay(
     question = launch = None
     question_reset_generation = None
     shot_boundary_reason = None
+    pre_due_done_count = 0
     with torch_module.inference_mode():
         for _ordinal in range(steps):
             pre = helper.capture_teacher_replay_pre_step(env)
@@ -1052,25 +1053,38 @@ def _run_teacher_replay(
             ))
             previous_qdes = requested
             if bool(done[0]):
-                shot_boundary_reason = "first_done"
-                break
+                if question is None:
+                    pre_due_done_count += 1
+                else:
+                    shot_boundary_reason = "first_done"
+                    break
             if bool(extras["full_a_completed_action_epoch_event"][0]):
                 shot_boundary_reason = "first_completed_action_epoch"
                 break
-    if question is None or launch is None:
-        raise RuntimeError("teacher replay never received a live accepted question")
     contact_patch = env.diagnostic_first_generic_contact_patch()
-    helper.validate_contact_patch_shot(
-        contact_patch=contact_patch,
-        question_reset_generation=question_reset_generation,
-        question_f32_sha256=helper.tensor_f32_sha256(question),
-    )
+    no_question = question is None or launch is None
+    if no_question:
+        if contact_patch.get("present", False):
+            raise RuntimeError("contact patch exists without an accepted question")
+        shot_boundary_reason = "step_budget_exhausted_no_question"
+    else:
+        helper.validate_contact_patch_shot(
+            contact_patch=contact_patch,
+            question_reset_generation=question_reset_generation,
+            question_f32_sha256=helper.tensor_f32_sha256(question),
+        )
     arrays = {
         name: np.asarray(values) if name == "common_step" else np.stack(values)
         for name, values in rows.items()
     }
-    arrays["question_f32"] = question.detach().cpu().numpy().astype(np.float32)
-    arrays["launch_f32"] = launch.detach().cpu().numpy().astype(np.float32)
+    arrays["question_f32"] = (
+        np.empty((0,), dtype=np.float32) if no_question
+        else question.detach().cpu().numpy().astype(np.float32)
+    )
+    arrays["launch_f32"] = (
+        np.empty((0,), dtype=np.float32) if no_question
+        else launch.detach().cpu().numpy().astype(np.float32)
+    )
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **arrays)
     trace_bytes = buffer.getvalue()
@@ -1088,6 +1102,8 @@ def _run_teacher_replay(
         "policy_steps": int(steps),
         "executed_policy_steps": int(len(rows["common_step"])),
         "shot_boundary_reason": shot_boundary_reason or "step_budget_exhausted",
+        "pre_due_done_count": int(pre_due_done_count),
+        "accepted_question_present": not no_question,
         "question_reset_generation": question_reset_generation,
         "run_identity": identity,
         "manifest_file_sha256": catalog.manifest_file_sha256,
@@ -1097,8 +1113,12 @@ def _run_teacher_replay(
         "plant_mjb_sha256": plant["source_plant"]["compiled_mjb_sha256"],
         "runtime_mjb_sha256": plant["runtime_attach"]["final_augmented_mjb"]["sha256"],
         "runtime_stack_sha256": _canonical_payload_sha256(identity["runtime_stack"]),
-        "question_f32_sha256": helper.tensor_f32_sha256(question),
-        "launch_f32_sha256": helper.tensor_f32_sha256(launch),
+        "question_f32_sha256": (
+            None if no_question else helper.tensor_f32_sha256(question)
+        ),
+        "launch_f32_sha256": (
+            None if no_question else helper.tensor_f32_sha256(launch)
+        ),
         "action_delay": {"steps": 0, "source": "live MuJoCo action ABI"},
         "trace_npz": "teacher_replay.npz",
         "trace_npz_sha256": hashlib.sha256(trace_bytes).hexdigest(),

@@ -108,10 +108,17 @@ def test_contact_patch_boundary_does_not_alias_final_forward_to_substep():
         physics_substep_index=None,
         decimation=20,
     )
-    assert substep["completed_physics_substeps"] == 20
+    assert substep["completed_physics_substeps"] == 19
     assert final["completed_physics_substeps"] == 20
     assert substep["physics_substep_index"] == 19
     assert final["physics_substep_index"] is None
+    with pytest.raises(ValueError, match="physics substep"):
+        replay.contact_capture_boundary(
+            transition_start_step=17,
+            capture_boundary="physics_substep_poststate",
+            physics_substep_index=0,
+            decimation=20,
+        )
     with pytest.raises(ValueError, match="final-forward"):
         replay.contact_capture_boundary(
             transition_start_step=17,
