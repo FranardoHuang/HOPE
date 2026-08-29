@@ -66,8 +66,19 @@ def test_teacher_replay_frozen_counter_and_hash_are_content_exact():
     assert replay.tensor_f32_sha256(value) == expected
 
 
-def test_teacher_replay_frozen_counter_only_snaps_dtype_roundoff_at_tick_boundary():
-    encoded_boundary = torch.tensor([0.10], dtype=torch.float32)
+@pytest.mark.parametrize(
+    ("dtype", "encoded_seconds", "expected"),
+    (
+        (torch.float32, 0.10, [3, 3, 4]),
+        (torch.float64, 0.10, [3, 3, 4]),
+        (torch.float32, 0.06, [1, 1, 2]),
+        (torch.float64, 0.06, [1, 1, 2]),
+    ),
+)
+def test_teacher_replay_frozen_counter_only_snaps_dtype_roundoff_at_tick_boundary(
+    dtype, encoded_seconds, expected
+):
+    encoded_boundary = torch.tensor([encoded_seconds], dtype=dtype)
     below_boundary = torch.nextafter(
         encoded_boundary, torch.full_like(encoded_boundary, -torch.inf)
     )
@@ -83,10 +94,11 @@ def test_teacher_replay_frozen_counter_only_snaps_dtype_roundoff_at_tick_boundar
         ),
         step_dt=0.02,
     )
-    # The encoded 0.10 schedule and its lower neighbour both end at tick 5.
-    # One representable float above it is a real positive margin and must keep
-    # the sixth tick instead of being swallowed by boundary normalization.
-    assert frozen.tolist() == [3, 3, 4]
+    # The encoded schedule and its lower neighbour both end at the intended
+    # integer tick.  One representable float above it is a real positive margin
+    # and must keep the following tick instead of being swallowed by boundary
+    # normalization.
+    assert frozen.tolist() == expected
 
 
 def test_pre_step_snapshot_drives_request_while_post_step_is_independent():

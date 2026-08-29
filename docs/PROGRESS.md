@@ -7,7 +7,11 @@
   源码排版当成了合同。本候选改为“完整等待期先离散化为tick，再减已过tick”；
   只对落在输入dtype半个ULP内的精确tick边界做表示归一，紧邻上方的可表示反例
   仍向上取整，不减少真实安全余量。patch wiring改用AST验证，不再依赖换行。
-  本地只做`git diff --check`；Pod targeted复跑仍为`unverified`，不授权训练或物理结论。
+  `09d0eda0` Pod teacher-replay文件已`8 passed`；module union另暴露3个旧
+  `wait_transition` fixture未接收新增的substep/capture-boundary kwargs。后继候选
+  改用显式最终边界fixture，并从AST和真实consumer payload两层固定参数不丢失；
+  同时补float64与`0.06 s`边界反例。本地只做`git diff --check`；新后继
+  Pod union复跑仍为`unverified`，不授权训练或物理结论。
 
 ## 2026-08-30 — FullMDP N=1 frozen-teacher replay候选实现
 

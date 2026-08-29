@@ -220,6 +220,51 @@ def test_full_a_contact_consumers_do_not_rescan_the_contact_buffer():
         assert isinstance(call.args[0], ast.Name)
         assert call.args[0].id == "final_contact_census"
 
+    full_a_final_call = next(
+        node
+        for node in ast.walk(full_step)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_full_a_latch_ball_contacts"
+    )
+    final_keywords = {
+        keyword.arg: keyword.value for keyword in full_a_final_call.keywords
+    }
+    assert set(final_keywords) == {
+        "diagnostic_substep_index",
+        "diagnostic_capture_boundary",
+    }
+    assert isinstance(final_keywords["diagnostic_substep_index"], ast.Constant)
+    assert final_keywords["diagnostic_substep_index"].value is None
+    assert isinstance(final_keywords["diagnostic_capture_boundary"], ast.Constant)
+    assert (
+        final_keywords["diagnostic_capture_boundary"].value
+        == "post_forward_final"
+    )
+
+    after_substep = method("_after_physics_substep")
+    full_a_substep_call = next(
+        node
+        for node in ast.walk(after_substep)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_full_a_latch_ball_contacts"
+    )
+    substep_keywords = {
+        keyword.arg: keyword.value for keyword in full_a_substep_call.keywords
+    }
+    assert set(substep_keywords) == {
+        "diagnostic_substep_index",
+        "diagnostic_capture_boundary",
+    }
+    assert isinstance(substep_keywords["diagnostic_substep_index"], ast.Name)
+    assert substep_keywords["diagnostic_substep_index"].id == "substep_index"
+    assert isinstance(substep_keywords["diagnostic_capture_boundary"], ast.Constant)
+    assert (
+        substep_keywords["diagnostic_capture_boundary"].value
+        == "physics_substep_poststate"
+    )
+
 
 def _fixed_reward_env():
     num_envs = 2
@@ -1297,6 +1342,18 @@ def _prepare_and_settle(env, dones=None):
     )
     assert not terminal_overlap.any()
     return reveal, launch, due, deferred, missed
+
+
+def _assert_final_full_a_contact_latch(
+    contact_census=None,
+    diagnostic_substep_index=None,
+    diagnostic_capture_boundary=None,
+):
+    """Stand in for the real latch without discarding its diagnostic boundary."""
+
+    assert contact_census is not None
+    assert diagnostic_substep_index is None
+    assert diagnostic_capture_boundary == "post_forward_final"
 
 
 def test_full_a_racket_kinematics_materializes_one_official_site_tuple():
@@ -2509,7 +2566,7 @@ def test_host_full_a_step_reveals_after_balance_prefix_without_r07_admission():
     env.sim.forward = lambda: None
     env._latch_post_forward_resolved_table_contacts = lambda _census=None: None
     env._latch_post_forward_table_keepout = lambda: None
-    env._full_a_latch_ball_contacts = lambda _census=None: None
+    env._full_a_latch_ball_contacts = _assert_final_full_a_contact_latch
     env._cap_ok = False
     env._state = lambda: {}
     env._full_a_teacher_frame = torch.zeros(2, dtype=torch.long)
@@ -2784,7 +2841,7 @@ def test_host_full_a_step_freezes_landing_crossing_on_shot_retirement():
     env.sim.forward = lambda: None
     env._latch_post_forward_resolved_table_contacts = lambda _census=None: None
     env._latch_post_forward_table_keepout = lambda: None
-    env._full_a_latch_ball_contacts = lambda _census=None: None
+    env._full_a_latch_ball_contacts = _assert_final_full_a_contact_latch
     env._cap_ok = False
     env._state = lambda: {}
     env._full_a_update_teacher = lambda: None
@@ -4998,7 +5055,7 @@ def _completion_fault_step_result(*, compound_invalid_contact=False):
     env.sim.forward = lambda: None
     env._latch_post_forward_resolved_table_contacts = lambda _census=None: None
     env._latch_post_forward_table_keepout = lambda: None
-    env._full_a_latch_ball_contacts = lambda _census=None: None
+    env._full_a_latch_ball_contacts = _assert_final_full_a_contact_latch
     env._cap_ok = False
     env._state = lambda: {}
     env._full_a_update_teacher = lambda: None
@@ -5441,10 +5498,32 @@ def test_host_live_generic_contact_classifies_selected_and_opposite_once():
         env.sim.data.site_xpos[1, 0]
         + torch.tensor([center_x, -0.033208, center_z])
     )
+    contact_patch_payloads = []
+    env._diagnostic_contact_patch_consumer = (
+        lambda **payload: contact_patch_payloads.append(payload)
+    )
     wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
-    wait_env.FullMdpInitialWaitVecEnv._full_a_latch_ball_contacts(env)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_latch_ball_contacts(
+        env,
+        diagnostic_substep_index=7,
+        diagnostic_capture_boundary="physics_substep_poststate",
+    )
     wait_env.FullMdpInitialWaitVecEnv._full_a_publish_physical_fact(env)
 
+    assert len(contact_patch_payloads) == 1
+    contact_patch_payload = contact_patch_payloads[0]
+    assert contact_patch_payload["substep_index"] == 7
+    assert (
+        contact_patch_payload["capture_boundary"]
+        == "physics_substep_poststate"
+    )
+    assert torch.equal(
+        contact_patch_payload["first_contact"], torch.tensor([True, True])
+    )
+    assert torch.equal(
+        contact_patch_payload["classification"]["selected"],
+        torch.tensor([True, False]),
+    )
     assert torch.equal(env._full_a_generic_contact_event, torch.tensor([True, True]))
     assert torch.equal(env._full_a_selected_contact_event, torch.tensor([True, False]))
     assert torch.equal(env._full_a_opposite_contact_event, torch.tensor([False, True]))

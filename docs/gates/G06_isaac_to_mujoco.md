@@ -9,7 +9,11 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 frame0等待显式定义在policy tick边界：先将完整`pre_swing_wait_s`转为整数tick，
 只对输入dtype半ULP内的精确tick边界消除表示误差，再减已过整数tick；上方紧邻
 浮点反例仍保留额外等待。contact consumer改为AST结构验证。当前仅有静态检查，
-必须在Pod重跑targeted，再进入N=1 CUDA replay；不提升G06证据等级。
+`09d0eda0` Pod teacher-replay文件已`8 passed`；module union的3个新红项是
+`wait_transition` fixture仍使用只接一个census的lambda，没有接收生产已显式传递的
+substep index和capture boundary。后继fixture现在显式核对final-forward边界，AST固定
+substep/final两类caller，行为反例固定consumer收到的payload；另增float64和第二秒数
+边界的tick反例。新union仍须Pod复跑，再进入N=1 CUDA replay；不提升G06证据等级。
 
 ## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
 
