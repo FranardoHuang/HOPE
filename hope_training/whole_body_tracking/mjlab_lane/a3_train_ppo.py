@@ -1965,7 +1965,7 @@ class A3ReadyBallVecEnv:
         (self.jnt_hi - self.jnt_lo).unsqueeze(0).expand_as(q_des))
       self._qdes_reward_operand_valid.fill_(True)
 
-    trace_enabled = self._controller_trace_enabled
+    trace_enabled = bool(getattr(self, "_controller_trace_enabled", False))
     trace = None
     if trace_enabled:
       q_before = self._qpos_act().clone()
