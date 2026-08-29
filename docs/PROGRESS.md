@@ -1,5 +1,22 @@
 # 简短进度记录
 
+## 2026-08-29 — 当前学习复核、R06数据流减法与部署授权纠正
+
+- 现役`d8fd8423`于`2026-08-29T09:35Z`只读刷新到Mu ACK974、Isaac ACK344。Mu累计
+  due/launch/R03/selected/net-cross/legal=`163,279/127,199/98,357/386/332/0`，recent10四项mimic误差
+  均高于first10；Isaac due/admitted/physical-observed/R03/contact/R06/legal=
+  `67,372/67,328/31,473/0/0/6,479/0`，recent10四项mimic误差均低于first10。两端fault/conservation均0；
+  Mu处于稀疏hit但未landing，Isaac处于balance→mimic但未strike，不是“还太早”或“Pod整体损坏”。
+- `572a7080`融合R06 masked mutation，exact Pod累计`210 passed`、fixed tape逐字一致；matched full-active
+  R06 settle改善`9.65%`，但整轮仅`-1.43%`至`17.676 s/update`。`a43aae3e`再让hot path只发布本step
+  one-shot typed settlement delta，retained audit与current delta共用唯一fact pack/projector；三类完整journal
+  SHA逐字一致，exact Pod `322 passed`，另1项profiler观察在父版同样失败。Pod同进程12组交替微基准
+  `1045.170→771.048 us`（`-26.23%`）；保留该结构减法，但current-source整轮Kit耗时仍待操作人授权后实测，
+  不冒充约6秒闭合。
+- `e9823e90`删除launcher替人默认EULA/隐私同意与私有GL硬编码，改为操作人显式flag、caller目录及库
+  SHA/SONAME pre-root验证；37项测试和现存路径dry-run通过。历史real-Kit probe不移签current source；
+  RSL/USD/Mu meshes/GLU与Python环境尚缺完整持久恢复源，故current Pod可运行、空白机availability仍`Partial`。
+
 ## 2026-08-29 — controller修复有限学习窗与fresh热路减法
 
 - final source `d8fd8423`已在Pod1全新exact checkout恢复EPA48/RSL3/A3P0807 mesh与private runtime输入，

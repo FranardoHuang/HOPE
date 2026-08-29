@@ -182,11 +182,15 @@ split USD:  /workspace/franco/runtime_assets/a3p0807_split_rubber_diagnostic_v3/
 ```
 
 The Isaac Sim binary, private/ignored USD, exact RSL wheel and headless OpenGL/GLU bytes are not supplied by a
-Git clone. Restore them according to [setup_local_sync.md](setup_local_sync.md), obtain any required license/EULA
-acceptance from the user, and then use the launcher dry-run before a bounded diagnostic. A remote clean clone at
-`e3ef4e98…` has completed that sequence and a real `512×48×31` Kit/PhysX fixed-action probe; the tracked evidence is
+Git clone. Restore them according to [setup_local_sync.md](setup_local_sync.md). The human operator must explicitly
+pass the two [runtime-authority flags](../DEFINITIONS.md#isaac-operator-runtime-authority), and must provide the
+OpenGL/GLU directories; the launcher verifies their exact bytes and direct SONAME links before creating a run root.
+Then use the launcher dry-run before a bounded diagnostic. A remote clean clone at `e3ef4e98…` completed the earlier
+version of that sequence and a real `512×48×31` Kit/PhysX fixed-action probe; the tracked historical evidence is
 [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json).
-That is a repo-to-preprovisioned-runtime deployment check, not learning, physics-parity, deployment, or robot authority.
+Current source `e9823e90…` additionally removes implicit consent and hard-coded GL paths; its exact Pod tests/dry-run
+are current, while a current-source real Kit probe remains `未测`. Neither result is learning, physics-parity,
+deployment, or robot authority.
 
 `whole_body_tracking` now declares `cryptography>=44,<51`, because tracked ActionBall authority signing and
 verification use Ed25519. The range covers the verified Isaac 5.1 bundled `44.0.0` and the Pod operation venv

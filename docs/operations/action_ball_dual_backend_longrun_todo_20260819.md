@@ -169,16 +169,19 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    `93.139%/93.380%`；episode/return几乎完全被边界使用污染。当前不是“太早看不出”，而是已有足够分母
    判定学习异常：balance/mimic未基本成功、hit仅约`.0112%`且最近窗为0、landing为`0/48`。继续跑只保留
    诊断时间序列，不提供“再等就会自然晋级”的理由。
-8. [x] 闭合仓库可部署边界；不再把历史Jiayi本机附件当仓内前置条件。第一层环境审计确认：
+8. [ ] 闭合仓库可部署边界；不再把历史Jiayi本机附件当仓内前置条件。第一层环境审计确认：
    `origin/build_4@324e60d1`没有环境lock，其path-autodiscovery在当前Pod1默认命中Python3.10、Isaac Sim4.5、
    `/workspace/IsaacLab@21f71363…`、RSL2.3.1；当前受控run则是Python3.11、Isaac Sim5.1、
    `/opt/IsaacLab-8320e0be`、RSL3.1.2。Pod1随后从远端clean clone `e3ef4e98…`，显式绑定exact
    Isaac/Kit/IsaacLab/Python-site/USD/RSL/GL/GPU后通过dry-run、`52 passed`和真实`512×H48×31` Kit/PhysX
    fixed-action probe，0 done/time-out，退出后GPU释放。receipt见
    [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。
-   因此“repo + 已合法准备的exact外部runtime”可部署已经PASS；纯`git clone`不包含EULA二进制和private
-   assets，也不应该被伪装成自包含安装。Jiayi历史本机/Pod逐位对比仍缺输入，保留为可选溯源，不阻塞仓内
-   新机恢复。controller-response首差则仍由item 11闭合；不把二者混成新Gate。
+   因此该版本“repo + 该Pod已合法准备的exact外部runtime”有历史PASS；纯`git clone`不包含EULA二进制和
+   private assets，也不应伪装成自包含安装。当前`e9823e90…`已把两项operator consent改为显式flag，并把
+   OpenGL/GLU目录、真实库SHA与SONAME移出硬编码；37项launcher测试和真实外部路径dry-run已通过。
+   但RSL wheel、split USD、A3P0807 Mu meshes、GLU及两个Python环境仍缺持久artifact locator或完整
+   lock/wheelhouse/OCI recipe，当前source真实Kit probe也仍`未测`。所以代码身份闭合、空白机可获得性未闭合，
+   item 8保持开；Jiayi历史本机/Pod逐位对比只作可选溯源，controller-response首差仍由item 11裁决。
 9. [ ] 做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的exact-only/self-echo
    procedural branches，并用相同artifact/固定tape/receipt反例证明语义未变。当前四个主文件合计约
    `13,167`行，问题不是行数本身，而是construction事实、runtime动态量、诊断身份与durable账本仍有交叉；
@@ -243,6 +246,17 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     clone/journal、R06 settle/retire与scene write各自份额，再只融合最大块；验收必须覆盖固定tape、
     first-observed/contact、settled/retired、reason/fault/counter、scene state、journal/WAL/ACK与profiler-off
     matched active strata。禁止删除engine事实、full-key/generation、finite/joint/table或用降低solver凑速度。
+    第一轮只做同一owner内的masked mutation融合：`572a7080`用原地`masked_fill_`和显式拒绝storage alias的
+    `torch.where(..., out=destination)`替换`full_like→where→copy_`临时张量；CPU/CUDA dtype/alias反例及
+    exact Pod累计`210 passed`，`512×H48×31` fixed-action action/state SHA与父版逐字一致。matched
+    50-update full-active两轮collection=`17.9318→17.6757 s`（`-1.43%`），Physical=
+    `5.0127→4.7754 s`（`-4.73%`），R06 settle=`2.2841→2.0637 s`（`-9.65%`）；改动正确但远不足约6秒，
+    不以继续堆同类微优化关闭本项。第二轮`a43aae3e`让R06 publish只消费本物理步产生的one-shot typed
+    settlement delta，不再逐子步扫描历史mailbox；retained audit/current hot path共用唯一fact pack/projector。
+    exact Pod相关套件`322 passed`，另1项CUDA profiler观察在未改父版同样失败；三类完整CommitEntry
+    canonical SHA新旧一致。Pod1空闲GPU同进程12组交替微基准median=`1045.170→771.048 us`（`-26.23%`），
+    故采纳该结构减法。current-source真实Kit整轮profile仍需人类操作人显式EULA/隐私授权，未测前不得把
+    局部收益外推为约6秒；本项继续开放，下一步由新的整轮profile最大块决定，而不是继续堆gate。
 
 <a id="fullmdp-v9-superseded"></a>
 

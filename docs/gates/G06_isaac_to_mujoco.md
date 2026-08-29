@@ -2,6 +2,18 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
+
+现役Mu已产生`386/127,199` selected contact和332次net crossing但0 legal landing；Isaac为
+`0/31,473 physical observed`有效strike。二者处在不同学习阶段，不能把曲线差异直接当physics parity。
+fixed tape仍把shared initial state、joint order、action decoder与qdes对齐，current Pod runtime身份也通过
+独立检查；所以没有“Pod整体装坏”的证据。剩余first-divergence仍属于implicit PhysX drive与显式Mu PD、
+friction/contact/integrator响应，需同tape plant字段对签，不能用policy或额外Gate掩盖。
+
+当前repo部署合同也不等于跨机parity：`e9823e90…`已显式绑定操作人授权和GL bytes，37项测试/dry-run通过，
+但current-source真实Kit probe与空白机外部资产可获得性仍`未测/PARTIAL`。G06不从历史fresh-clone receipt
+推导跨机器逐位曲线一致。
+
 ## 2026-08-29 R8 matched first-divergence（仍`Partial`）
 
 controller修复后的Mu有限学习窗把hard-edge降到`19,816/1,499,136=1.322%`，说明旧约87%主要是实现错误；

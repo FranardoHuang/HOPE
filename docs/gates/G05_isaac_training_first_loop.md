@@ -2,6 +2,22 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-29 当前学习与iteration复核（仍`Partial`）
+
+现役long于`2026-08-29T09:35Z`只读刷新到Mu ACK974、Isaac ACK344。Mu累计
+selected-contact/net-crossing/legal-landing=`386/332/0`（launch=`127,199`），说明已到稀疏hit但未学会落台；
+recent10相对first10四项paddle误差均更差。Isaac累计physical-observed/R03-valid/contact=
+`31,473/0/0`，recent10四项paddle误差均改善，说明balance→mimic确实在学，但尚未进入有效strike。两端
+reward/fact/conservation fault均0，因此不是证据失真，也不再称“太早无法判断”：当前未达到mimic→hit和
+hit→landing交接条件，G05不晋级。
+
+`572a7080`把R06同owner masked mutation融合后，exact Pod累计`210 passed`且fixed tape逐字一致；matched
+full-active两轮R06 settle改善`9.65%`，但整轮collection只改善`1.43%`至`17.676 s/update`。随后
+`a43aae3e`以one-shot typed current-settlement delta删除hot path历史mailbox扫描，retained/current共用唯一
+fact projector；三类完整journal SHA等价、exact Pod `322 passed`，12组交替微基准median
+`1045.170→771.048 us`（`-26.23%`）。该结构减法可保留，但current-source整轮Kit profile仍`未测`，远未
+闭合约6秒目标；继续保持key/generation、reason/fault/counter、scene与durable事实，不新增success Gate。
+
 ## 2026-08-29 R8稳定出生与学习短窗（仍`Partial`）
 
 maximum-inward修复后的同源码Mu有限学习窗已经自然完成：`512×H48×61` profiler-off p50/p90=

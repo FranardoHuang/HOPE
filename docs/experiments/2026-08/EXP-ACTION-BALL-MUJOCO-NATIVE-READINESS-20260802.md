@@ -22,6 +22,41 @@
 
 ## 2026-08-29 current correction
 
+### 重新判读：学习阶段、R06热路与部署边界
+
+`observed_at=2026-08-29T09:35Z`只读刷新现役`d8fd8423`两条长期run。MuJoCo ACK0..974的first10→recent10
+episode length/return=`135.29/15.64→156.33/17.09`，四项paddle误差=
+`.17418/1.15338/.32145/.26064→.20528/1.16826/.41238/.64448`，四项均未优于起始窗。累计
+due/launch/R03-valid/selected-contact/net-crossing/legal-landing/recovery-success=
+`163,279/127,199/98,357/386/332/0/0`；已有hit和crossing分母，因此landing必须写`0/386 selected`，不能写
+“太早未测”。Isaac ACK0..344的episode length/return=`97.26/10.95→125.87/13.75`，四项paddle误差=
+`.27241/1.19456/.28930/.47549→.17022/.92142/.27929/.45098`，均有改善；累计
+due/construction-admitted/physical-observed/R03-valid/contact/R06-settled/legal-landing=
+`67,372/67,328/31,473/0/0/6,479/0`。两端reward/fact/conservation fault均0：Mu只到稀疏hit未落台，Isaac
+确实在balance→mimic学习但仍没有有效strike。return上涨不构成阶段成功，也不触发自动Stage Gate。
+
+active-flight profile后的第一轮R06执行减法采用`572a7080`：同owner的masked fill/copy不再分配
+`full_like`临时张量，跨storage alias显式拒绝。exact Pod累计`210 passed`，fixed-action的
+`512×H48×31` action tape SHA=`b633da…def8`、state SHA=`23dd2a…1c6f`与父版逐字相同。matched
+50-update full-active两轮collection=`17.9318→17.6757 s`、Physical=`5.0127→4.7754 s`、R06 settle=
+`2.2841→2.0637 s`，分别改善`1.43%/4.73%/9.65%`。这证明局部实现正确，也证明它不是约6秒级算法升级。
+
+第二轮`a43aae3e`把current hot path改为只消费本物理步的one-shot typed settlement delta，不再逐子步扫描
+retained historical mailbox；retained audit和current delta共用同一个candidate grid、fact packer与projector。
+full key/generation、newest/duplicate、finite、reason/fault、scene retire及Epoch journal/WAL/ACK路径仍保留。
+exact Pod相关套件合计`322 passed`；另1项CUDA foreach-zero profiler观察在未改父版也同样失败，登记为既有
+测试债而非本轮回归。`zero-event/early-crossing/deadline`三类完整最终`CommitEntry` canonical SHA分别为
+`9af69e…a48e`、`f7bd3e…f307a`、`2d6460…34b5c`，新旧逐字一致。Pod1空闲GPU、同进程、交替测序的12组
+`512×2`投影微基准全部改善，median=`1045.170→771.048 us`（`-26.23%`）。因此采纳这条“删历史扫描且
+合并事实真源”的结构减法；current-source真实Kit整轮profile仍需人类操作人显式授权，现阶段不得把局部
+`-26.23%`外推为iteration约6秒。
+
+部署审计另纠正了历史“fresh clone PASS”的范围。`e3ef4e98…`只证明该Pod预装runtime可被旧source接入；
+当前`e9823e90…`要求人类操作人显式给出EULA/隐私授权，并对caller传入的OpenGL/GLU真实文件SHA和direct
+SONAME在run root前验真。37项launcher测试与现存外部路径dry-run已过；current-source真实Kit probe仍`未测`。
+纯Git clone还缺RSL/USD/Mu meshes/GLU的持久取得位置以及Python环境完整重建锁，故新空白机availability为
+`PARTIAL`，不能用fail-closed代码或历史receipt代替外部资产供应。
+
 maximum-inward controller修复后的首个同源码MuJoCo有限学习窗已经自然完成。`512×H48×61`、
 profiler-off的p50/p90=`6.698/6.804 s`；全窗hard-edge=`19,816/1,499,136=1.322%`、qdes guard=
 `123,090/1,499,136=8.211%`，相较旧长期run约`87%`的hard-edge确认此前是实现错误而非课程设计必然结果。

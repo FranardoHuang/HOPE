@@ -342,7 +342,7 @@ source `a3c528f1b4c9b0a60f5cd3aeec28a11e990044b3`已clean/push，并用closed-pi
 
 Isaac Full-A的对应单次入口是`scripts/launch_isaac_full_mdp_successor.py`。它复用仓库现有Kit boot
 owner，不再建立第二套supervisor：从clean Git固定同一typed H48 argv，核exact IsaacLab、Kit Python、
-RSL wheel与A3 USD，先取得目标GPU的nonblocking lifetime lock，再核index→UUID和empty compute-app，最后
+RSL wheel、A3 USD与显式OpenGL/GLU bytes，先取得目标GPU的nonblocking lifetime lock，再核index→UUID和empty compute-app，最后
 才创建fresh run root。fd16 runtime receipt、fd18 sealed RSL archive与GPU lock由唯一child继承；训练child
 通过`/usr/bin/env -i`获得窄runtime环境，避免Kit launcher的环境清洗丢失attestation输入。
 当前exact Pod调用中，`--isaac-python`是`/workspace/isaacsim-5.1.0/python.sh`，而
@@ -376,9 +376,18 @@ contact/landing、12500 completion或physics/transfer parity，也不得把host�
 ```bash
 python3 scripts/launch_isaac_full_mdp_successor.py \
   ...既有exact Isaac/asset/GPU/fresh namespace参数... \
+  --opengl-lib-dir <exact-headless-OpenGL-directory> \
+  --glu-lib-dir <exact-GLU-directory> \
+  --accept-isaac-eula \
+  --consent-isaac-privacy \
   --cpu-affinity <live-target-GPU-local-cpu-list> \
   --profile-updates 5
 ```
+
+其中四个新增参数的人话语义见
+[操作人运行时授权与图形库身份](../DEFINITIONS.md#isaac-operator-runtime-authority)：两项同意只能由本次
+人类操作人显式给出，agent、脚本默认值或历史run不能代签；两个目录由调用者定位，launcher核真实库SHA与
+SONAME后才构造`LD_LIBRARY_PATH`。缺任一项必须在run root之前失败。
 
 这里最外层launcher owner必须由普通host Python启动（Pod1为`/usr/bin/python3`），不得用
 `/workspace/isaacsim-5.1.0/python.sh`替代命令首项；Isaac wrapper只通过`--isaac-python`传给launcher。

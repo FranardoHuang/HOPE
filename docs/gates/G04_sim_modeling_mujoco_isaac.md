@@ -2,6 +2,15 @@
 
 Status: Partial
 
+## 2026-08-29 当前环境闭环边界（仍`Partial`）
+
+当前受控Pod运行栈继续没有generic installation corruption证据，但仓内恢复结论已收窄：历史
+`e3ef4e98…`真实Kit probe只证明该Pod预装runtime可被接入。`e9823e90…`现要求人类操作人显式给出
+[EULA/隐私授权](../DEFINITIONS.md#isaac-operator-runtime-authority)，并在run root前核caller提供的
+OpenGL/GLU真实库SHA及SONAME；37项launcher测试和现存路径dry-run通过。current-source真实Kit probe仍
+`未测`，RSL/USD/Mu meshes/GLU及Python环境又缺完整持久恢复源，所以空白机availability保持`Partial`。
+这不推翻current Pod身份，也不把可启动误写成model parity。
+
 ## 2026-08-29 A3P0807对象身份与R8 physical birth（仍`Partial`）
 
 V9 MuJoCo长期run实际载入legacy root `70c4fd65…36c0a`，不是合同要求的A3P0807

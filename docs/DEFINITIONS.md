@@ -26,6 +26,15 @@
 例如`32-47,96-111`；只允许当前launcher本来就可用的CPU，并通过`taskset`让唯一训练child继承。它修正
 NUMA放置，不改变训练语义，也不是性能或安全Gate；收益必须另做同GPU profiler-off实测。
 
+<a id="isaac-operator-runtime-authority"></a>
+**Isaac FullMDP operator runtime authority / 操作人运行时授权与图形库身份**：
+[`--accept-isaac-eula`](#isaac-operator-runtime-authority)表示本次启动的**人类操作人**亲自确认已接受Isaac
+EULA；[`--consent-isaac-privacy`](#isaac-operator-runtime-authority)表示该操作人对本次运行显式选择隐私
+同意。launcher不得替人默认写入这两个决定。`--opengl-lib-dir`和`--glu-lib-dir`分别定位headless
+OpenGL/GLU目录；launcher在创建run root前核canonical目录、真实库文件SHA-256和direct SONAME symlink，
+再从这两个输入唯一构造`LD_LIBRARY_PATH`，不读取开发者私有硬编码路径。这四个flag只绑定许可与loader
+输入，不证明学习、physics parity、部署完成或真机安全。
+
 **`HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT` / fresh namespace训练产物根**：Isaac one-shot launcher内部写给
 FullMDP child的canonical目录，令checkpoint、WAL和training contract归属于当前fresh run root。它不是
 通用用户覆盖项，非FullMDP训练若携带会被拒绝。

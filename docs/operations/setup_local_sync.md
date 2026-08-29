@@ -44,9 +44,13 @@ NVIDIA EULA或生成private asset。
 - Isaac Kit Python 3.11/Torch 2.7与Mu venv分别运行其exact测试；不能用ambient Python一次合跑后把ABI或
   namespace collection污染解释成production失败。
 
-因此“repo + 已合法准备的exact Isaac/EULA/private assets + 本页内容寻址恢复步骤”可部署为`PASS`；
-“纯Git clone自包含所有运行时字节”明确为`FALSE`。新机器必须先恢复下表外部输入并逐项核SHA，再创建全新
-run root/namespace；不得让path-autodiscovery静默选择另一个IsaacLab/Python/plant。
+因此当前Pod的“repo + 已合法准备的exact Isaac/EULA/private assets”执行路径有历史`PASS`；
+“纯Git clone自包含所有运行时字节”明确为`FALSE`，而“按本页在一台空白机器取得全部外部输入”仍为
+`PARTIAL`。RSL wheel、split USD、A3P0807 Mu meshes和GLU只有现存team/Pod locator，Python site与Mu venv
+也没有完整lock/wheelhouse/OCI重建配方；这些路径是保存点，不是持久制品服务。新机器必须先由团队提供合法
+来源、逐项核SHA，再创建fresh root/namespace；不得让path-autodiscovery静默替换IsaacLab/Python/plant。
+当前launcher用显式[操作人授权和GL目录](../DEFINITIONS.md#isaac-operator-runtime-authority)在root前拒绝缺失或
+错误输入，但代码层fail-closed不能替代外部字节的可获得性。
 
 ## Current Local Assets
 

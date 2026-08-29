@@ -1,6 +1,6 @@
 # ActionBall Isaac 5.1 环境身份合同
 
-> 状态：`PASS-environment / branch-scoped`
+> 状态：`PASS-current-Pod-runtime / PARTIAL-fresh-machine-availability / branch-scoped`
 > 更新：2026-08-29
 > 来源：Jiayi 曾外部提供的 `ENVIRONMENT_REPRODUCTION.md`、Pod2 import/ABI/AppLauncher验证，以及
 > `origin/build_4@324e60d1`与Pod1实际路径/import复核。原始说明当前不在任何Git ref或Pod1文件系统中；
@@ -98,9 +98,16 @@ checkout，完成了以下闭环：
 
 完整路径与字节receipt见
 [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。
-这把“仓库能否部署到一台已经合法准备好精确外部runtime的新机器”裁决为`PASS`；它**不**宣称纯Git自包含
-安装，也不授权学习、physics parity、promotion、部署或真机。历史Jiayi本机和旧Pod曲线是否逐位可比仍未
-补证，但已不再阻塞仓内恢复合同。
+这把当时源码“能否接入该Pod已经合法准备好的精确外部runtime”裁决为历史`PASS`；它**不**宣称纯Git
+自包含安装，也不授权学习、physics parity、promotion、部署或真机。当前source `e9823e90…`进一步要求
+操作人显式传入两项[runtime authority](../DEFINITIONS.md#isaac-operator-runtime-authority)，并把OpenGL/GLU
+目录和真实库SHA、direct SONAME链接纳入pre-root身份。exact Pod launcher测试与真实外部路径dry-run已通过；
+当前source的真实Kit fixed-action probe仍为`未测`。
+
+新空白机器的**可获得性**仍为`PARTIAL`：RSL wheel、split USD、A3P0807 Mu meshes和GLU现在只有team/Pod
+保存路径，Python site与Mu venv也没有完整lock/wheelhouse/OCI配方。仓库已能拒绝错误输入，却尚不能仅凭
+Git自动取得这些合法字节；这类外部来源不能由launcher或Gate臆造。历史Jiayi本机和旧Pod曲线是否逐位可比
+仍未补证，但不阻塞当前Pod的受控运行。
 
 ## Git 与非 Git 资产
 
@@ -130,7 +137,9 @@ URDF/meshes仍是非 Git 资产；如复现 Jiayi 的 Hitter baseline，必须�
 - `PASS-historical-N2`：FullMDP RSL3真实 `N=2×2`曾闭合optimizer/WAL，只作工程证据。
 - `PASS-Pod-CUDA`：clean Git `2c8ef444…`在Jiayi Python3.11/Torch2.7-cu128完成LM info/NaN/finite-overflow三参数，CUDA context存活。
 - `PASS-environment / FAIL-first-4096-entry`：commit `5ee1ffa6…` 的first one-shot通过GPU preexec、sealed RSL和真实Kit Python身份，但身份代码在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault；Hydra解析成功，scene/PPO/WAL零调用。successor必须把class/source attestation移到AppLauncher成功后的同一Kit进程，不能用pre-App import代签。
-- `PASS-repo-to-runtime`：remote clean clone `e3ef4e98…`完成dry-run、52项focused test和真实Kit/PhysX fixed-action probe；边界只覆盖“已有精确外部runtime时仓库能启动”。
+- `PASS-repo-to-runtime-historical`：remote clean clone `e3ef4e98…`完成dry-run、52项focused test和真实Kit/PhysX fixed-action probe；边界只覆盖“该Pod已有精确外部runtime时仓库能启动”。
+- `PASS-current-source-contract / PARTIAL-current-real-probe`：`e9823e90…`的37项launcher测试与真实路径dry-run通过，显式operator authority和GL bytes已绑定；当前source真实Kit probe仍`未测`。
+- `PARTIAL-fresh-machine-availability`：上述ignored/private/runtime字节缺少全部可持久取得的位置与环境重建锁；纯clone不能完成。
 - `未测`：可信4096 A1000趋势、C、完整checkpoint/restore、跨机器逐位曲线一致性。
 
 环境 `PASS` 只回答“代码在同一软件栈上执行”，不回答 Reward 是否合理、是否可学或跨机逐位相同。
