@@ -1152,10 +1152,10 @@ def test_materializer_builds_exact_order_with_real_type_surface(monkeypatch):
     )
     assert R.MANAGER_NAMES[-4:] == R.REGULARIZATION_NAMES
     assert tuple(cfg[name].weight for name in R.PADDLE_MOTION_PRIOR_NAMES) == (
-        1.0,
-        1.0,
-        1.0,
-        0.5,
+        4.0,
+        4.0,
+        4.0,
+        2.0,
     )
     assert tuple(cfg[name].weight for name in R.REGULARIZATION_NAMES) == (
         0.1,
