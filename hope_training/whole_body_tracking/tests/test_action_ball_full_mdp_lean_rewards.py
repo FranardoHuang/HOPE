@@ -1152,10 +1152,14 @@ def test_materializer_builds_exact_order_with_real_type_surface(monkeypatch):
     )
     assert R.MANAGER_NAMES[-4:] == R.REGULARIZATION_NAMES
     assert tuple(cfg[name].weight for name in R.PADDLE_MOTION_PRIOR_NAMES) == (
-        4.0,
-        4.0,
-        4.0,
-        2.0,
+        1.0,
+        1.0,
+        1.0,
+        0.5,
+    )
+    assert all(
+        cfg[name].params["scale_during_playback"] == 4.0
+        for name in R.PADDLE_MOTION_PRIOR_NAMES
     )
     assert tuple(cfg[name].weight for name in R.REGULARIZATION_NAMES) == (
         0.1,
@@ -1394,7 +1398,7 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
     assert graph.completed_cycle_count == 1
     assert graph.poisoned is False
     assert all(torch.isfinite(value).all() for value in values)
-    expected_values = torch.stack(
+    expected_kernels = torch.stack(
         tuple(
             R.paddle_prior.coarse_precision_kernel(
                 exact_errors[:, column],
@@ -1405,6 +1409,7 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
         ),
         dim=1,
     )
+    expected_values = expected_kernels.clone()
     expected_values[0].mul_(R.reward_contract.PADDLE_MOTION_PRIOR_PLAYBACK_SCALE)
     assert torch.equal(
         torch.stack(values, dim=1).view(torch.int32),
@@ -1435,8 +1440,8 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
     assert [row["finite_count"] for row in playback_rows] == expected_playback
     assert [row["error_finite_count"] for row in playback_rows] == expected_playback
     assert [row["domain_violation_count"] for row in playback_rows] == [0] * 4
-    for row, value in zip(playback_rows, values):
-        expected_sum = float(value[0])
+    for column, row in enumerate(playback_rows):
+        expected_sum = float(expected_kernels[0, column])
         assert row["kernel_sum"] == pytest.approx(expected_sum)
     expected_error = exact_errors[0].tolist()
     for row, error in zip(playback_rows, expected_error):

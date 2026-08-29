@@ -825,9 +825,22 @@ class LeanActionEpochRewardGraph:
                 ):
                     self._milestone.add_paddle_motion_prior_unavailable(ordinal)
                 else:
+                    # Milestone telemetry measures the normalized analytic
+                    # fidelity kernel in [0, 1], while configured/actual
+                    # income above records the value really paid.  Undo only
+                    # the contract's playback multiplier here so these two
+                    # auditable quantities do not silently change meaning.
+                    spec = PADDLE_MOTION_PRIOR_SPECS[
+                        ordinal - PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+                    ]
+                    telemetry_kernel = torch.where(
+                        self._paddle_playback_cycle_mask,
+                        value / float(spec.scale_during_playback),
+                        value,
+                    )
                     self._milestone.add_paddle_motion_prior_playback(
                         ordinal,
-                        value,
+                        telemetry_kernel,
                         self._paddle_playback_cycle_mask,
                         self._paddle_error_cycle_matrix[
                             :, ordinal - PADDLE_MOTION_PRIOR_FIRST_ORDINAL
