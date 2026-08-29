@@ -69,7 +69,7 @@
   保留有界legacy fallback；Mu不增加新Gate或复制控制器。同一NPZ action tape反事实的三关节hard合计
   `8,715→194`（`-97.77%`），分别`5,596→188 / 3,076→0 / 43→6`，torque clamp仍全0；done
   `498→509`。diagnostic现直接保存既有termination bits，下一fresh replay先证明这11行不是nonfinite/unknown
-  等换故障，再做有限学习；故该候选尚未替换长跑。
+  等换故障，再做有限学习；其bit词表由`main`显式传入，不再隐式读取局部module名。故该候选尚未替换长跑。
 - 同一轮production writer→independent consumer回归又抓到旧Take061 UID `5527597793770800`残留在离线
   consumer，而当前0807 action owner/runner为`2552478955674699`；不修会让真实完成件在末端被拒绝。已只
   更新独立expected value，writer仍从自己的live row记账，测试继续能捕获任一侧单独漂移；这不是放宽验收。

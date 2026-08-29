@@ -1372,6 +1372,8 @@ def test_controller_trace_reads_the_live_pd_owner_not_a_copied_law():
     assert "trace = env.controller_trace()" in source
     assert 'bits = extras.get("termination_bits")' in source
     assert 'termination_reason_rows["done_without_reason"]' in source
+    assert "termination_bit_contract.items()" in source
+    assert "termination_bit_contract=wait.FULLMDP_TERMINATION_BITS" in main_source
     assert "if full_a_mode and not controller_trace:" in main_source
     assert "tau_raw = self.kp * (q_des - self._qpos_act()) - self.kd * self._qvel_act()" in plant
     assert 'trace["tau_raw_first"] = tau_raw.clone()' in plant

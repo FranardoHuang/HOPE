@@ -760,7 +760,8 @@ def _write_fresh_bytes(path: Path, payload: bytes) -> None:
 
 def _run_controller_trace(
     *, runner, env, root: Path, checkpoint: str, steps: int,
-    action_tape: str | None, torch_module,
+    action_tape: str | None, termination_bit_contract: dict[str, int],
+    torch_module,
 ) -> dict:
     """Trace the live MuJoCo PD owner under a frozen policy/action tape."""
 
@@ -873,11 +874,22 @@ def _run_controller_trace(
         str(int(code)): int((arrays["phase"] == code).sum())
         for code in np.unique(arrays["phase"])
     }
+    if (
+        type(termination_bit_contract) is not dict
+        or not termination_bit_contract
+        or any(
+            type(name) is not str or not name or type(bit) is not int or bit <= 0
+            for name, bit in termination_bit_contract.items()
+        )
+        or len(set(termination_bit_contract.values()))
+        != len(termination_bit_contract)
+    ):
+        raise RuntimeError("controller trace termination-bit contract differs")
     termination_reason_rows = {
         name: int(np.count_nonzero(arrays["termination_bits"] & bit))
-        for name, bit in wait.FULLMDP_TERMINATION_BITS.items()
+        for name, bit in termination_bit_contract.items()
     }
-    known_termination_mask = sum(wait.FULLMDP_TERMINATION_BITS.values())
+    known_termination_mask = sum(termination_bit_contract.values())
     termination_reason_rows["unknown_bits"] = int(np.count_nonzero(
         arrays["termination_bits"] & ~known_termination_mask
     ))
@@ -1359,6 +1371,7 @@ def main(
             checkpoint=diagnostic_controller_trace_checkpoint,
             steps=diagnostic_controller_trace_steps,
             action_tape=diagnostic_controller_trace_action_tape,
+            termination_bit_contract=wait.FULLMDP_TERMINATION_BITS,
             torch_module=torch,
         )
         _best_effort_stdout_marker(
