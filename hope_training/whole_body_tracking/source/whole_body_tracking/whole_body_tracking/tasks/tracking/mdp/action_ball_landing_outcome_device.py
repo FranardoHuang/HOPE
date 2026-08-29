@@ -4627,14 +4627,33 @@ def _masked_copy_(destination: torch.Tensor, source: torch.Tensor, mask: torch.T
     destination.copy_(torch.where(_expand(mask, destination.ndim), source, destination))
 
 
-def _masked_fill_(destination: torch.Tensor, mask: torch.Tensor, value: int | float) -> None:
-    destination.copy_(
-        torch.where(
-            _expand(mask, destination.ndim),
-            torch.full_like(destination, value),
-            destination,
+def _masked_copy_distinct_(
+    destination: torch.Tensor,
+    source: torch.Tensor,
+    mask: torch.Tensor,
+) -> None:
+    """Copy from distinct storage without materializing a ``where`` result.
+
+    ``torch.where(..., out=destination)`` is safe when the selected source does
+    not alias the destination.  Keep that ownership premise executable instead
+    of silently applying the fast path to the generic helper: callers with a
+    shared backing storage must continue to use :func:`_masked_copy_`.
+    """
+
+    if destination.untyped_storage().data_ptr() == source.untyped_storage().data_ptr():
+        raise LandingOutcomeDeviceError(
+            "distinct masked copy source must not alias destination storage"
         )
+    torch.where(
+        _expand(mask, destination.ndim),
+        source,
+        destination,
+        out=destination,
     )
+
+
+def _masked_fill_(destination: torch.Tensor, mask: torch.Tensor, value: int | float) -> None:
+    destination.masked_fill_(_expand(mask, destination.ndim), value)
 
 
 def _stamp_less_fields(
@@ -11807,6 +11826,11 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         score: object,
         action_epoch_direct: bool = False,
     ) -> None:
+        # Every source below is owned by a flight/score/constant plane while
+        # every destination is a mailbox plane.  The distinct-storage helper
+        # makes that cross-owner premise executable and fuses where+copy into
+        # one device operation without a per-substep host verdict.
+        masked_copy = _masked_copy_distinct_
         score_fields = {
             "canonical_reason_code": score.reason_code.reshape(self._flight_shape),
             "on_opponent_table": score.on_opponent_table.reshape(self._flight_shape),
@@ -11830,14 +11854,14 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                     source = self._flight_key_ints[name][
                         :, flight_index
                     ].unsqueeze(1).expand(self._mailbox_shape)
-                    _masked_copy_(self._mailbox_key_ints[name], source, target)
+                    masked_copy(self._mailbox_key_ints[name], source, target)
                 for name in _DIGEST_KEY_FIELDS:
                     source = self._flight_key_digests[name][
                         :, flight_index
                     ].unsqueeze(1).expand(
                         self._mailbox_shape + (TOKEN_BYTES,)
                     )
-                    _masked_copy_(self._mailbox_key_digests[name], source, target)
+                    masked_copy(self._mailbox_key_digests[name], source, target)
             for destination, source_grid in (
                 (self._mailbox_action_uid, self._flight_action_uid),
                 (self._mailbox_action_slot, self._flight_action_slot),
@@ -11854,7 +11878,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 source = source_grid[:, flight_index].unsqueeze(1).expand(
                     self._mailbox_shape
                 )
-                _masked_copy_(destination, source, target)
+                masked_copy(destination, source, target)
             if not action_epoch_direct:
                 for destination, source in (
                     (
@@ -11878,14 +11902,14 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                         self._flight_task_identity_token[:, flight_index],
                     ),
                 ):
-                    _masked_copy_(
+                    masked_copy(
                         destination,
                         source.unsqueeze(1).expand(
                             self._mailbox_shape + (TOKEN_BYTES,)
                         ),
                         target,
                     )
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_target_xy_m,
                 self._flight_target_xy_m[:, flight_index].unsqueeze(1).expand(
                     self._mailbox_shape + (2,)
@@ -11917,17 +11941,17 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 (self._mailbox_source_physics_substep, self._flight_contact_stamp_substep[:, flight_index]),
             )
             for destination, source in scalar_copies:
-                _masked_copy_(
+                masked_copy(
                     destination, source.unsqueeze(1).expand(self._mailbox_shape), target
                 )
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_contact_ball_center_m,
                 self._flight_contact_ball_center_m[:, flight_index].unsqueeze(1).expand(
                     self._mailbox_shape + (3,)
                 ),
                 target,
             )
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_crossing_xy_m,
                 crossing_xy[:, flight_index].unsqueeze(1).expand(
                     self._mailbox_shape + (2,)
@@ -11948,19 +11972,19 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                     (self.num_envs,), -1, dtype=torch.int32, device=self.device
                 ),
             )
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_crossing_stamp_control,
                 crossing_control.unsqueeze(1).expand(self._mailbox_shape),
                 target,
             )
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_crossing_stamp_substep,
                 crossing_substep.unsqueeze(1).expand(self._mailbox_shape),
                 target,
             )
             policy = policy_settlement[:, flight_index]
             policy_target = target & policy.unsqueeze(1)
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_policy_eligible,
                 policy.unsqueeze(1).expand(self._mailbox_shape),
                 target,
@@ -11975,7 +11999,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                     device=self.device,
                 ),
             )
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_canonical_reason_code,
                 canonical_reason.unsqueeze(1).expand(self._mailbox_shape),
                 target,
@@ -11991,7 +12015,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             ):
                 values = score_fields[name][:, flight_index]
                 values = torch.where(policy, values, torch.zeros_like(values))
-                _masked_copy_(
+                masked_copy(
                     destination,
                     values.unsqueeze(1).expand(self._mailbox_shape),
                     target,
@@ -12004,24 +12028,24 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 & self._flight_net_clear[:, flight_index]
                 & score_fields["on_opponent_table"][:, flight_index]
             )
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_common_on_table,
                 common.unsqueeze(1).expand(self._mailbox_shape),
                 target,
             )
             settlement_control = observation_stamp.control_step[:, flight_index]
             settlement_substep = observation_stamp.physics_substep[:, flight_index]
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_settlement_control_step,
                 settlement_control.unsqueeze(1).expand(self._mailbox_shape),
                 target,
             )
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_settlement_physics_substep,
                 settlement_substep.unsqueeze(1).expand(self._mailbox_shape),
                 target,
             )
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_fault_bits,
                 self._flight_fault_bits[:, flight_index].unsqueeze(1).expand(
                     self._mailbox_shape
@@ -12047,7 +12071,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 self._c10_family_code,
             )
             if not action_epoch_direct:
-                _masked_copy_(
+                masked_copy(
                     self._mailbox_c10_projection_sha256,
                     self._c10_projection_token.reshape(1, 1, TOKEN_BYTES).expand(
                         self._mailbox_shape + (TOKEN_BYTES,)
@@ -12055,7 +12079,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                     target,
                 )
             _masked_fill_(self._mailbox_consumer_blocked, target, 0)
-            _masked_copy_(
+            masked_copy(
                 self._mailbox_action_epoch,
                 self._flight_action_epoch[:, flight_index]
                 .unsqueeze(1)

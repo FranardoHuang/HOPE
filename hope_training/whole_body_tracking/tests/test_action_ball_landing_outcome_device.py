@@ -1123,6 +1123,64 @@ def _reseal_checkpoint(checkpoint: dict[str, object]) -> str:
     return checkpoint["checkpoint_content_sha256"]
 
 
+@pytest.mark.parametrize(
+    "device",
+    (
+        "cpu",
+        pytest.param(
+            "cuda",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="CUDA is not available"
+            ),
+        ),
+    ),
+)
+@pytest.mark.parametrize("dtype", (torch.bool, torch.int8, torch.int64, torch.float32))
+def test_distinct_masked_mutations_match_materialized_reference_and_reject_alias(
+    device: str,
+    dtype: torch.dtype,
+):
+    if dtype is torch.bool:
+        destination = torch.tensor(
+            [[True, False, True], [False, True, False]], device=device
+        )
+        source = torch.tensor(
+            [[False, True, False], [True, False, True]], device=device
+        )
+        fill_value: int | float = 1
+    else:
+        destination = torch.tensor(
+            [[1, 2, 3], [4, 5, 6]], dtype=dtype, device=device
+        )
+        source = torch.tensor(
+            [[7, 8, 9], [10, 11, 12]], dtype=dtype, device=device
+        )
+        fill_value = -3
+    select_first_row = torch.tensor([True, False], device=device)
+    expected_copy = torch.where(
+        select_first_row.unsqueeze(1), source, destination
+    )
+
+    D._masked_copy_distinct_(destination, source, select_first_row)
+    assert torch.equal(destination, expected_copy)
+
+    fill_second_row = torch.tensor([False, True], device=device)
+    expected_fill = torch.where(
+        fill_second_row.unsqueeze(1),
+        torch.full_like(destination, fill_value),
+        destination,
+    )
+    D._masked_fill_(destination, fill_second_row, fill_value)
+    assert torch.equal(destination, expected_fill)
+
+    aliased_source = destination.view_as(destination)
+    with pytest.raises(
+        D.LandingOutcomeDeviceError,
+        match="must not alias destination storage",
+    ):
+        D._masked_copy_distinct_(destination, aliased_source, select_first_row)
+
+
 def test_contract_has_two_explicit_capacities_and_c05_fourteen_field_order():
     signature = inspect.signature(D.ActionBallLandingOutcomeDeviceCoordinator)
     for name in (
