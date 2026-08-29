@@ -6822,14 +6822,14 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             }
         )
         return ActionEpochR06OutcomeRows(
-            valid=valid,
+            valid=valid.contiguous(),
             shot_key=key,
-            publication_ordinal=metadata[:, 0],
-            settlement_step=metadata[:, 1],
-            valid_bits=valid_bits,
-            fact_values=facts,
-            outcome_code=cause,
-            owner_fault_bits=source_fault,
+            publication_ordinal=metadata[:, 0].contiguous(),
+            settlement_step=metadata[:, 1].contiguous(),
+            valid_bits=valid_bits.contiguous(),
+            fact_values=facts.contiguous(),
+            outcome_code=cause.contiguous(),
+            owner_fault_bits=source_fault.contiguous(),
         )
 
     def _mint_action_epoch_current_settlement_delta(
