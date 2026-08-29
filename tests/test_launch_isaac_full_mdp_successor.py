@@ -133,6 +133,14 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     )
     wheel = base / "rsl.whl"
     wheel.write_bytes(b"exact-rsl-wheel")
+    opengl = base / "opengl"
+    opengl.mkdir()
+    (opengl / "libOpenGL.so.0.0.0").write_bytes(b"exact-opengl")
+    (opengl / "libOpenGL.so.0").symlink_to("libOpenGL.so.0.0.0")
+    glu = base / "glu"
+    glu.mkdir()
+    (glu / "libGLU.so.1.3.1").write_bytes(b"exact-glu")
+    (glu / "libGLU.so.1").symlink_to("libGLU.so.1.3.1")
     workspace = base / "workspace"
     workspace.mkdir()
     root = workspace / "runs" / NAMESPACE
@@ -147,6 +155,10 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     monkeypatch.setattr(module, "PINNED_KIT_PYTHON_SHA256", _sha(kit_python))
     monkeypatch.setattr(module, "PINNED_A3_USD_SHA256", _sha(asset))
     monkeypatch.setattr(module, "PINNED_RSL_WHEEL_SHA256", _sha(wheel))
+    monkeypatch.setattr(
+        module, "PINNED_OPENGL_SHA256", _sha(opengl / "libOpenGL.so.0.0.0")
+    )
+    monkeypatch.setattr(module, "PINNED_GLU_SHA256", _sha(glu / "libGLU.so.1.3.1"))
 
     def argv(*, dry: bool = False, expected: str = UUID) -> list[str]:
         values = [
@@ -156,11 +168,15 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
             "--venv-site", str(venv),
             "--asset-usd", str(asset),
             "--rsl-wheel", str(wheel),
+            "--opengl-lib-dir", str(opengl),
+            "--glu-lib-dir", str(glu),
             "--run-root", str(root),
             "--namespace", NAMESPACE,
             "--gpu-index", "0",
             "--expected-gpu-uuid", expected,
             "--lock-file", str(lock),
+            "--accept-isaac-eula",
+            "--consent-isaac-privacy",
         ]
         return values + (["--dry-run"] if dry else [])
 
@@ -173,6 +189,8 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
         venv=venv,
         asset=asset,
         wheel=wheel,
+        opengl=opengl,
+        glu=glu,
         root=root,
         lock=lock,
         record=record,
@@ -232,6 +250,9 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     assert "save_interval=" not in joined
     assert "action_ball_full_mdp_rate_probe" not in joined
     assert payload["runtime_env"]["PYTHONPATH"].startswith("/proc/self/fd/18:")
+    assert payload["runtime_env"]["LD_LIBRARY_PATH"] == (
+        f"{rig.opengl}:{rig.glu}"
+    )
     assert payload["runtime_env"]["HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT"] == str(
         rig.root / "training"
     )
@@ -257,6 +278,25 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     assert f"hydra.run.dir={rig.root / 'training' / 'hydra'}" in payload["argv"]
     assert payload["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "0"
     assert "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES" not in payload["runtime_env"]
+    assert not rig.root.exists()
+
+
+@pytest.mark.parametrize(
+    ("missing_flag", "message"),
+    (
+        ("--accept-isaac-eula", "accept-isaac-eula"),
+        ("--consent-isaac-privacy", "consent-isaac-privacy"),
+    ),
+)
+def test_operator_terms_attestation_is_explicit_and_fails_before_root(
+    rig,
+    capsys: pytest.CaptureFixture[str],
+    missing_flag: str,
+    message: str,
+) -> None:
+    argv = [value for value in rig.argv(dry=True) if value != missing_flag]
+    assert rig.module.main(argv) == 2
+    assert message in capsys.readouterr().err
     assert not rig.root.exists()
 
 
@@ -752,6 +792,8 @@ def test_real_path_uses_clean_env_wrapper_and_spends_fresh_root(
         f"XDG_CONFIG_HOME={rig.root / 'xdg_config'}",
         f"XDG_DATA_HOME={rig.root / 'xdg_data'}",
         f"XDG_STATE_HOME={rig.root / 'xdg_state'}",
+        "ACCEPT_EULA=Y",
+        "PRIVACY_CONSENT=Y",
     ):
         assert item in child
     assert record["env"]["KIT_BOOT_MARKER"] == "Learning iteration"
@@ -794,6 +836,20 @@ def test_wrong_pinned_asset_or_rsl_bytes_fail_before_root(rig, capsys) -> None:
     rig.asset.write_bytes(b"changed")
     assert rig.module.main(rig.argv(dry=True)) == 2
     assert "USD digest differs" in capsys.readouterr().err
+    assert not rig.root.exists()
+
+
+@pytest.mark.parametrize("failure", ("opengl_bytes", "glu_link"))
+def test_wrong_gl_runtime_fails_before_root(rig, failure: str, capsys) -> None:
+    if failure == "opengl_bytes":
+        (rig.opengl / "libOpenGL.so.0.0.0").write_bytes(b"changed")
+        expected = "OpenGL runtime digest differs"
+    else:
+        (rig.glu / "libGLU.so.1").unlink()
+        (rig.glu / "libGLU.so.1").symlink_to("wrong")
+        expected = "GLU SONAME link differs"
+    assert rig.module.main(rig.argv(dry=True)) == 2
+    assert expected in capsys.readouterr().err
     assert not rig.root.exists()
 
 
