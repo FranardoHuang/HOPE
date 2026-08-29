@@ -212,7 +212,7 @@ EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 10,
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
     FULL_MDP_PPO_RECIPE.max_iterations, FULL_MDP_PPO_RECIPE.num_envs,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
-    5527597793770800)
+    2552478955674699)
 TRANSITIONS_PER_UPDATE = NUM_ENVS * STEPS_PER_UPDATE
 def _names(raw): return frozenset(raw.split())
 EVENT_KEYS = _names("""scheduled_due_rows due_terminal_overlap_rows reveal_rows reveal_due_rows reveal_deferred_rows launch_rows missed_launch_rows flight_terminal_rows

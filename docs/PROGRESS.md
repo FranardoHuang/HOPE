@@ -66,8 +66,13 @@
   `waist_pitch`首次hard前平均`q/qdot=.39555/1.87642`，raw policy qdes约`-.325`，旧共享guard却输出靠上限的
   `+.33266 rad`，末子步仅约`-6.98 Nm`；根因是旧`q-qdot*T`会被clamp到风险同侧endpoint，而Isaac现役配置
   早已使用反侧maximum-inward。候选v2把单边风险的反侧endpoint选择收回唯一纯tensor guard，双侧/非有限仍
-  保留有界legacy fallback；Mu不增加新Gate或复制控制器。相同action tape反事实尚未跑完，故该候选仍不是
-  controller修复PASS，也未替换长跑。
+  保留有界legacy fallback；Mu不增加新Gate或复制控制器。同一NPZ action tape反事实的三关节hard合计
+  `8,715→194`（`-97.77%`），分别`5,596→188 / 3,076→0 / 43→6`，torque clamp仍全0；done
+  `498→509`。diagnostic现直接保存既有termination bits，下一fresh replay先证明这11行不是nonfinite/unknown
+  等换故障，再做有限学习；故该候选尚未替换长跑。
+- 同一轮production writer→independent consumer回归又抓到旧Take061 UID `5527597793770800`残留在离线
+  consumer，而当前0807 action owner/runner为`2552478955674699`；不修会让真实完成件在末端被拒绝。已只
+  更新独立expected value，writer仍从自己的live row记账，测试继续能捕获任一侧单独漂移；这不是放宽验收。
 - old Mu launcher被证实显式使用legacy `a3_pingpong.xml`而非A3P0807；这足以否定旧sim2sim比较，但不证明
   Pod安装整体损坏。同初态/action tape仍在首20 ms产生q/dq差`.00973/.89084`，剩余根因收敛到implicit
   PhysX drive与显式clamped PD/friction语义；需要Jiayi同tape runtime receipt再裁决。

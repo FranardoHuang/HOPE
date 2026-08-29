@@ -815,7 +815,7 @@ def _run_controller_trace(
         "tau_clamped_last", "tau_raw_abs_max", "tau_clamped_abs_max",
         "tau_clamp_count", "hard_lower", "hard_upper",
     )}
-    phases, dones = [], []
+    phases, dones, termination_bits = [], [], []
     selected_tensor = torch_module.tensor(selected, dtype=torch_module.long, device=env.device)
     with torch_module.inference_mode():
         for step in range(steps):
@@ -832,14 +832,21 @@ def _run_controller_trace(
                 value = trace[name].index_select(1, selected_tensor)
                 rows[name].append(value.detach().cpu().numpy().copy())
             phase = extras.get("full_a_phase_before_reset")
-            if not torch_module.is_tensor(phase):
-                raise RuntimeError("controller trace phase surface differs")
+            bits = extras.get("termination_bits")
+            if (
+                not torch_module.is_tensor(phase)
+                or not torch_module.is_tensor(bits)
+                or tuple(bits.shape) != (env.num_envs,)
+            ):
+                raise RuntimeError("controller trace lifecycle surface differs")
             phases.append(phase.detach().cpu().numpy().copy())
             dones.append(done.detach().cpu().numpy().copy())
+            termination_bits.append(bits.detach().cpu().numpy().copy())
 
     arrays = {name: np.stack(values) for name, values in rows.items()}
     arrays["phase"] = np.stack(phases)
     arrays["done"] = np.stack(dones)
+    arrays["termination_bits"] = np.stack(termination_bits)
     arrays["selected_joint_indices"] = np.asarray(selected, dtype=np.int64)
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **arrays)
@@ -866,6 +873,17 @@ def _run_controller_trace(
         str(int(code)): int((arrays["phase"] == code).sum())
         for code in np.unique(arrays["phase"])
     }
+    termination_reason_rows = {
+        name: int(np.count_nonzero(arrays["termination_bits"] & bit))
+        for name, bit in wait.FULLMDP_TERMINATION_BITS.items()
+    }
+    known_termination_mask = sum(wait.FULLMDP_TERMINATION_BITS.values())
+    termination_reason_rows["unknown_bits"] = int(np.count_nonzero(
+        arrays["termination_bits"] & ~known_termination_mask
+    ))
+    termination_reason_rows["done_without_reason"] = int(np.count_nonzero(
+        arrays["done"] & (arrays["termination_bits"] == 0)
+    ))
     summary = {
         "schema_version": 1,
         "kind": "action_ball_mujoco_full_mdp_controller_trace_v1",
@@ -883,6 +901,7 @@ def _run_controller_trace(
         "trace_npz_sha256": trace_sha256,
         "sample_rows": int(steps * env.num_envs),
         "done_rows": int(np.count_nonzero(arrays["done"])),
+        "termination_reason_rows": termination_reason_rows,
         "phase_counts": phase_counts,
         "per_joint": per_joint,
     }

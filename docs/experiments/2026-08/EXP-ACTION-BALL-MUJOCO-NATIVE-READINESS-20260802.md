@@ -159,7 +159,15 @@ env平均`q=.39555 rad`、`qdot=+1.87642 rad/s`、raw policy qdes约`-.325 rad`�
 同侧`+.33266 rad`，末子步仅约`-6.98 Nm`。这是旧`q-qdot*T`被target envelope clamp回风险同侧的实现错误，
 不是policy主动顶边。采用的最小候选不是加Done/reward/Gate，而是让唯一共享pure-tensor guard对单侧风险输出
 反侧maximum-inward endpoint；双侧风险、非有限state/request仍保留bounded velocity-horizon fallback。
-wire升级为`action_ball_shared_max_inward_state_guard_v2`；同action tape反事实未完成前仍是候选。
+wire升级为`action_ball_shared_max_inward_state_guard_v2`。同一NPZ action tape反事实已把三个关节hard合计
+从`8,715`降到`194`（`-97.77%`）：`waist_pitch 5,596→188`、`waist_roll 3,076→0`、
+`left_ankle_roll 43→6`，torque clamp仍全0。done为`498→509`；为防止把hard换成别的终止，trace schema
+现直接保存生产extras里的termination bits，fresh reason replay和有限学习未通过前仍是候选。
+
+组合回归同时发现一个与controller独立、但会破坏长跑闭环的真实遗漏：runner已经记当前0807 Take061 UID
+`2552478955674699`，independent consumer仍期待旧plant谱系UID `5527597793770800`，所以任何新completion
+都会在`action identity`处被拒绝。采用修复只更新consumer的独立expected value；producer不读取consumer，
+现有writer→consumer测试仍会对任一单边漂移变红，未形成same-writer自证。
 
 Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝试给带`__slots__`、无instance
 `__dict__`的`PhysicalQuestionNumericCore`安装3个leaf wrapper。production/profile-off不受影响；修复是删除

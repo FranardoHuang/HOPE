@@ -42,7 +42,16 @@ trajectory证据。
 `waist_pitch`首hard时raw qdes向内约`-.325 rad`，旧shared executable却为同侧`+.33266 rad`；这是
 velocity-horizon target被envelope夹在风险同侧、只给约`-6.98 Nm`制动的实现错误。候选v2只在共享纯tensor
 owner内把单侧crossing映射到反侧maximum-inward endpoint，双侧/非有限仍保留旧bounded fallback；它与Isaac
-已启用的policy-boundary选择对齐，但同tape Mu反事实和Isaac substep响应尚未闭合，G06继续`Partial`。
+已启用的policy-boundary选择对齐，但reason审计与Isaac substep响应尚未闭合，G06继续`Partial`。
+
+同一NPZ action tape的Mu反事实已使三关节hard总量`8,715→194`（`-97.77%`），其中waist roll归零，
+waist pitch`5,596→188`，left ankle roll`43→6`，且三项torque clamp仍为0。这支持旧弱制动是主要因果，
+但done `498→509`；trace已扩为直接保存既有termination bits，reason replay、finite学习与Isaac同字段未闭合，
+所以不能把97.77%写成parity或训练PASS，G06仍`Partial`。
+
+与physics parity无关但会阻断evidence closure的UID漂移也已定位：portable writer是当前0807 action UID
+`2552478955674699`，offline consumer仍钉旧UID `5527597793770800`。consumer expected值已更新，producer与
+consumer仍是两个独立实现，组合测试保留单侧漂移反例；这只修证据可消费性，不提升G06状态。
 
 当前Isaac run的live identity又直接记录Python `3.11.13`、Torch `2.7.0+cu128`、RSL-RL `3.1.2`、
 TensorDict `0.10.0`，AppLauncher来自`IsaacLab-8320e0be`、Isaac Sim路径为`5.1.0`；这些与Jiayi的

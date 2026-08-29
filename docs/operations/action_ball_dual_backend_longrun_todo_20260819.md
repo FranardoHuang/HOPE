@@ -205,7 +205,12 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     修正只用公开functional API并删除该非必要依赖，不改plant；失败root不计trajectory证据。随后fresh
     model2000 exact trace已排除torque clamp，并钉住旧guard把向内raw qdes改写成
     风险同侧endpoint、制动不足；v2只在共享纯tensor owner输出单边maximum-inward target。下一步必须复用
-    NPZ SHA `4b843a4a…40382`内的action tape证明hard下降且不产生新Done，再做有限学习；否则不替换长跑。
+    NPZ SHA `4b843a4a…40382`内的action tape证明hard下降且不产生新故障，再做有限学习；否则不替换长跑。
+    首次同带反事实已使三关节hard `8,715→194`（`-97.77%`）、torque clamp仍0，但done `498→509`；trace
+    现直接保存生产termination bits，须先把这11行解释为具名正常终止而非nonfinite/unknown后才进入有限学习。
+12. [x] 修正portable completion consumer仍期待旧Take061 UID的漂移：producer/live owner为当前0807
+    `2552478955674699`，consumer旧值`5527597793770800`会让任何正确完成件末端失败。只更新独立consumer
+    expected value，保留writer→consumer单侧漂移会红的测试，不用producer输出反写expected。
 
 <a id="fullmdp-v9-superseded"></a>
 
