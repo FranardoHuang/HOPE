@@ -62,13 +62,14 @@ root/31q/racket到teacher的距离。fresh backend cache-miss重验和真实Phys
 `selected contact / launch`及target误差，landing按`opponent landing / selected contact`。缺eligible写
 `未测`，已有分母的零结果写`0/denominator`；return和安全计数都不能代替这些行为证据。
 
-`observed_at=2026-08-29T10:34:32Z`的只读刷新已不是“太早看不出”。Mu ACK0..1493的first10→recent10
-episode length/return=`135.289/15.644→162.083/18.486`，但mimic四误差只有position改善，velocity/face/
-long-axis恶化；累计launch/R03-valid/raw/selected/crossing/legal/recovery-success=
-`200,827/162,875/7,523/657/591/0/0`，所以hit极稀疏，landing是明确`0/657 selected`而非未测。
-Isaac ACK0..523的episode length/return=`97.255/10.946→152.414/15.776`，mimic位置/速度/长轴改善但face
-恶化；`45,813 physical-observed`后R03-valid/selected=`0/0`，故mimic→hit交接已失败，landing因selected
-分母0仍为`未测`。两端fault/nonfinite/conservation均0：工程运行健康不等于课程成功，自然重叠预期尚未满足。
+`observed_at=2026-08-29T10:47:30Z`的只读刷新已不是“太早看不出”。Mu ACK0..1610的first10→recent10
+episode length/return=`135.289/15.644→165.950/18.878`，长期position/velocity改善但face/long-axis恶化，
+且最近相邻10窗四项mimic都轻微变坏；累计launch/R03-valid/raw/selected/crossing/legal/recovery-success=
+`217,463/178,009/7,637/662/596/0/0`，所以hit极稀疏，landing=`0/662 selected`、recovery=
+`0/132,376 eligible`。Isaac ACK0..560的episode length/return=`97.255/10.946→151.409/15.860`，mimic
+位置/速度/长轴长期改善但face仍坏于起始；`51,300 physical launch`后R03-valid/selected=`0/0`，故
+mimic→hit交接已失败，landing因selected分母0仍为`未测`。两端fault/nonfinite/conservation均0：工程运行
+健康不等于课程成功，自然重叠预期尚未满足。
 
 R7弱裕量工件的MuJoCo 61-update profiler-off canary只达到rate/health证据：p50/p90=
 `6.963/7.021 s/H48`，first10→recent10 episode mean=`131.66→129.20`，hard-edge=
@@ -272,8 +273,21 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    故采纳该结构减法。current-source真实Kit整轮profile在已建立Pod runtime authority下继续，未测前不得把
    局部收益外推为约6秒。其同源profiler-off `512×H48×61`现已自然完成，50个measured update的
    p50/p90=`14.720/19.377 s`（receipt SHA=`1d7508bc…415c`）；它复现上一版约14.74秒平台，证明仍远离约6秒。
-   当前50-update full-active profile继续自然运行；本项继续开放，下一步只融合profile确认的最大块，而不是
-   继续堆gate或用局部微基准代签整轮。
+   50-update full-active profile已自然完成，receipt/log SHA=`1070902b…d672` / `06fd6e72…41e3`；全窗
+   collection p50/p90=`11.139/16.747 s`，recent10=`16.755/17.551 s`。recent10 inclusive
+   `post_physics_publish=4.694/5.296 s`、`physical_epoch_postphysics=4.295/4.673 s`，其中
+   `r06_postphysics_settle=1.939/2.108 s`、active capture=`.545/.596 s`、R06 facts publish=
+   `.483/.526 s`、retire=`.362/.393 s`、Epoch refresh=`.309/.337 s`。本项继续开放：下一刀将四个子步的
+   narrow PlantFacts保留在device并由一次有序typed scan结算，不能漏掉瞬时contact/crossing，也不能继续堆
+   gate或用profile-on秒数代签整轮。
+15. [ ] 用单一direct-paddle经济轴修复已证学习交接失败。旧Reward28四项measured-paddle权重
+   `1/1/1/.5`的最高收入`3.5`低于anchor+body mimic的`6`；现役fixed-LR大分母下Mu约`.16 m`、Isaac约
+   `.20 m`拍心误差仍远离接触尺度。下一fresh contract只同比例改为`4/4/4/2`（最高`14`）：kernel宽度、
+   PPO V6、Observation V3 `215/231`、H48、due cadence、plant、regularization、事件与安全事实均不变。
+   先过host/Pod exact Reward与fixed-action，再以fresh namespace跑matched未来窗；按first10、相邻recent10和
+   matched update报告四项真实误差、episode/terminal、`selected/launch`、landing/contact与fault。旧两条
+   `d8fd8423`保持只读作为baseline；不resume、不复用namespace，不混入Build4 warm-start/replay/双LR/
+   sigma`.19`或新增obs。只有真实误差与contact入口相对baseline改善且balance不倒退，才采用该数值轴。
 
 <a id="fullmdp-v9-superseded"></a>
 

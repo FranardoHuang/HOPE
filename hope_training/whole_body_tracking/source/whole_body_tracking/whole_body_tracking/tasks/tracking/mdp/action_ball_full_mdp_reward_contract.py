@@ -150,22 +150,27 @@ COMMON_DENSE_SPECS = (
     ),
 )
 
-# The four-channel cap is 70% of the six body-imitation cap (3.5 vs 5.0).
-# This preserves a material official-paddle gradient after the held wrist is
-# removed from the body average.  The older 0.20/0.20/0.20/0.10 values only
-# had this role when all six body terms were separately multiplied by 0.15;
-# copying them beside unscaled body terms diluted the bridge by about 6.7x.
+# The first Reward28 lineage capped the four direct paddle channels at 3.5,
+# below the 6.0 cap of the anchor/body imitation terms.  Matched fresh runs
+# then reached large playback/launch denominators while remaining about
+# 0.16--0.20 m from the teacher paddle and almost never contacting the ball.
+# This successor changes one learning axis only: multiply all four direct
+# paddle channels by four.  Their relative 1/1/1/.5 economy, kernels, clocks,
+# observations, curriculum, and regularization stay unchanged.  The resulting
+# 14.0 cap makes paddle accuracy the primary imitation objective while staying
+# well below Build4's confounded 14/14/5 total of 33.
 # The contact target is constructed from the same measured motion row, so the
 # prior remains full strength through the strike window instead of creating a
 # timing hole before the one-tick lifecycle target is paid.  ``std`` is the
 # physically anchored precision width and ``coarse_std`` is exactly four times
 # wider.  The evaluator mixes their exponential/Cauchy kernels 50/50, so every
-# term still peaks at one and the four-channel cap remains 3.5.
+# term still peaks at one and the four-channel cap is exactly 14.0.
+PADDLE_MOTION_PRIOR_WEIGHT_SCALE = 4.0
 PADDLE_MOTION_PRIOR_SPECS = (
     DenseRewardSpec(
         "motion_racket_position",
         "motion_racket_position_tracking_cauchy",
-        1.0,
+        1.0 * PADDLE_MOTION_PRIOR_WEIGHT_SCALE,
         "racket_target",
         0.075,
         coarse_std=0.30,
@@ -174,7 +179,7 @@ PADDLE_MOTION_PRIOR_SPECS = (
     DenseRewardSpec(
         "motion_racket_velocity",
         "motion_racket_velocity_tracking_cauchy",
-        1.0,
+        1.0 * PADDLE_MOTION_PRIOR_WEIGHT_SCALE,
         "racket_target",
         0.50,
         coarse_std=2.0,
@@ -183,7 +188,7 @@ PADDLE_MOTION_PRIOR_SPECS = (
     DenseRewardSpec(
         "motion_racket_normal",
         "motion_racket_normal_tracking_cauchy",
-        1.0,
+        1.0 * PADDLE_MOTION_PRIOR_WEIGHT_SCALE,
         "racket_target",
         0.2617993877991494,
         coarse_std=1.0471975511965976,
@@ -192,7 +197,7 @@ PADDLE_MOTION_PRIOR_SPECS = (
     DenseRewardSpec(
         "motion_racket_long_axis",
         "motion_racket_long_axis_tracking_cauchy",
-        0.5,
+        0.5 * PADDLE_MOTION_PRIOR_WEIGHT_SCALE,
         "racket_target",
         0.17453292519943295,
         coarse_std=0.6981317007977318,
@@ -231,6 +236,7 @@ __all__ = [
     "REGULARIZATION_MARGIN_FLOOR_FRAC",
     "LIFECYCLE_MANAGER_NAMES",
     "COMMON_DENSE_SPECS",
+    "PADDLE_MOTION_PRIOR_WEIGHT_SCALE",
     "PADDLE_MOTION_PRIOR_SPECS",
     "COMMON_DENSE_NAMES",
     "PADDLE_MOTION_PRIOR_NAMES",

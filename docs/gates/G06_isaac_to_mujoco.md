@@ -4,15 +4,16 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 
 ## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
 
-现役Mu已产生`657/200,827` selected contact和591次net crossing但0 legal landing；Isaac为
-`0/45,813 physical observed`有效strike。二者处在不同学习阶段，不能把曲线差异直接当physics parity。
+现役Mu已产生`662/217,463` selected contact和596次net crossing但0 legal landing；Isaac为
+`0/51,300 physical launch`有效strike。二者处在不同学习阶段，不能把曲线差异直接当physics parity。
 fixed tape仍把shared initial state、joint order、action decoder与qdes对齐，current Pod runtime身份也通过
 独立检查；所以没有“Pod整体装坏”的证据。剩余first-divergence仍属于implicit PhysX drive与显式Mu PD、
 friction/contact/integrator响应，需同tape plant字段对签，不能用policy或额外Gate掩盖。
 
 当前repo部署合同也不等于跨机parity：一次性EULA/隐私setup事实不再被错做成per-run Gate；setup已删除
-环境path discovery，GL由caller显式绑定、核SONAME并记录观察SHA。current-source真实Kit fixed-action已
-通过，但空白机private资产可获得性仍`PARTIAL`。G06不从历史fresh-clone receipt推导跨机器逐位曲线一致。
+环境path discovery，GL由caller显式绑定、核SONAME并记录观察SHA。最新`bb0be1a2`从全新exact checkout完成
+真实Kit fixed-action：0 done/timeout，action/state SHA与既有基线逐字一致，checkout clean且GPU/lock释放；
+但空白机private资产可获得性仍`PARTIAL`。G06不从历史fresh-clone receipt推导跨机器逐位曲线一致。
 
 ## 2026-08-29 R8 matched first-divergence（仍`Partial`）
 

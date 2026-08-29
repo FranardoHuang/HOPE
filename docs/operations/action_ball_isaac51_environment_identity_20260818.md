@@ -140,9 +140,11 @@ checkout，完成了以下闭环：
 这把当时源码“能否接入该Pod已经合法准备好的精确外部runtime”裁决为历史`PASS`；它**不**宣称纯Git
 自包含安装，也不授权学习、physics parity、promotion、部署或真机。后续复核确认G05已记录EULA接受、
 当前Pod长期运行同一隐私配置，故删除`e9823e90…`错误新增的两个per-run确认Gate；OpenGL/GLU目录和真实库
-路径、观察SHA与direct SONAME链接仍纳入pre-root身份。本地36项launcher测试通过。当前source
-`4cd30d63…`真实Kit fixed-action probe已在GPU0自然完成：`512×48×31`、`done/time-out=0/0`，action/state
-SHA与历史受控probe逐字相同，退出后GPU释放；这仍只是工程/运行身份证据。
+路径、观察SHA与direct SONAME链接仍纳入pre-root身份。本地launcher/setup=`36/3 passed`。最新
+`bb0be1a2…`从全新exact Pod checkout通过launcher/setup=`39 passed`和Python3.11/Torch2.7核心=
+`253 passed`；其真实Kit fixed-action在GPU0自然完成：`512×48×31`、`done/time-out=0/0`，action/state
+SHA=`b633da…def8` / `23dd2a…1c6f`与历史受控probe逐字相同，checkout clean且退出后GPU/lock释放。这仍
+只是工程/运行身份证据，不授权学习、physics parity或真机安全。
 
 新空白机器的**可获得性**仍为`PARTIAL`，但范围已缩小：split USD、A3P0807 Mu meshes、合法Isaac下载和
 private repo/artifact凭据仍需团队持久locator；RSL wheel有公共安装来源与现存exact SHA，Python环境已有

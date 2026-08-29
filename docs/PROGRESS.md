@@ -6,16 +6,24 @@
   下载件身份、分阶段安装和83项非editable constraints纳入仓库；`setup_train_env.sh`删除会静默选中
   Isaac4.5/RSL2的path discovery，只接受显式runtime路径，并提供tracked本地模板。
 - launcher不再把Ubuntu Noble系统OpenGL/GLU的固定字节当跨机学习Gate；现在核canonical regular file、
-  direct SONAME，并在dry-run/完成JSON记录观察路径与SHA。`4cd30d63`真实Kit fixed-action自然完成
-  `512×48×31`、0 done/timeout且action/state SHA保持；本地launcher/setup=`36/3 passed`。
+  direct SONAME，并在dry-run/完成JSON记录观察路径与SHA。最新`bb0be1a2`从全新exact checkout完成真实Kit
+  fixed-action：`512×48×31`、0 done/timeout，action/state SHA=`b633da…def8` / `23dd2a…1c6f`与既有基线
+  逐字一致；checkout clean且GPU/lock释放。本地launcher/setup=`36/3 passed`，Pod launcher/setup=`39 passed`，
+  Python3.11/Torch2.7核心套件=`253 passed`。这些是runtime/固定输入证据，不是学习、physics parity或安全授权。
 - 同源profiler-off `512×H48×61`自然完成，50-update p50/p90=`14.720/19.377 s`，receipt/log SHA=
-  `1d7508bc…415c` / `94c321b1…481a`。它复现上一版约14.74秒平台，明确仍未达到约6秒；50-update
-  full-active profile已启动归因，profiler-on不作速度证据。
+  `1d7508bc…415c` / `94c321b1…481a`。随后50-update full-active profile自然完成，receipt/log SHA=
+  `1070902b…d672` / `06fd6e72…41e3`；全窗collection p50/p90=`11.139/16.747 s`，recent10=
+  `16.755/17.551 s`。recent10的`post_physics_publish=4.694/5.296 s`、其中
+  `physical_epoch_postphysics=4.295/4.673 s`与`r06_postphysics_settle=1.939/2.108 s`，把下一主墙钉在
+  active-flight逐物理子步事务。profile-on只作归因，正式速度仍只认前述profiler-off结果，约6秒尚未闭合。
 - 结构审计删除Physical/R06/Epoch中三个无任何生产callsite的兼容decoder/view及两个孤立facts类型，净减约
   214行；它不在active调用图，不冒充速度提升。Pod exact相关套件与current-source real Kit probe继续补齐。
-- `10:34:32Z`长期run刷新：Mu ACK1493累计`200,827 launch / 657 selected / 591 crossing / 0 legal`；
-  Isaac ACK523在`45,813 physical observed`后仍`0 R03-valid / 0 selected`。两端安全/数值事实clean，但Mu
-  landing和Isaac mimic→hit交接已有足够分母判失败，不再写“太早”。
+- `10:47:30Z`长期run刷新：Mu ACK1610累计`217,463 launch / 662 selected / 596 crossing / 0 legal`，
+  recovery=`0/132,376`，最近相邻10窗四项mimic都轻微恶化；Isaac ACK560在`51,300 physical launch`后
+  仍`0 R03-valid / 0 selected`。两端安全/数值事实clean，但Mu landing/recovery和Isaac mimic→hit交接已有
+  足够分母判失败，不再写“太早”。按既有预注册顺序，下一fresh学习轴只把measured-paddle四项weight从
+  `1/1/1/.5`同比例提高到`4/4/4/2`；kernel、PPO、Observation、课程、plant与Gate不变，不混入Build4
+  warm-start/replay/sigma或新obs。
 
 ## 2026-08-29 — 当前学习复核、R06数据流减法与部署授权纠正
 

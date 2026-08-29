@@ -1275,3 +1275,27 @@ wall mean=`6.57 s/H48`，Isaac=`16.76 s/H48`，后者仍不满足可迭代速度
 阶段解释保持预注册顺序而不设硬Stage：Mu已有早期hit分母但`0/launch`，Isaac还主要在balance，因未活到
 physical launch而hit/landing为`未测`；两端mimic真实误差方向尚混合，均不能称基本成功。该前缀不能被用来
 事后发明阈值，也不授权physics parity、promotion、部署或真机安全。
+
+### 11.4 `d8fd8423`长期反例触发direct-paddle单轴后继
+
+R8出生、Take061同源bootstrap、tick48课程、Reward28、Observation V3和fixed-LR PPO V6均已进入现役
+`d8fd8423`双fresh。`observed_at=2026-08-29T10:47:30Z`只读前缀中，Mu ACK0..1610的
+episode length/return=`135.289/15.644→165.950/18.878`，但最近相邻10窗四项paddle误差都轻微变坏；累计
+launch/selected/crossing/legal/recovery=`217,463/662/596/0/0`，其中recovery分母=`132,376`。Isaac
+ACK0..560的episode length/return=`97.255/10.946→151.409/15.860`，position/velocity/long-axis长期改善但
+face仍坏于起始；累计physical launch=`51,300`，R03-valid/selected=`0/0`。两端fault、nonfinite和
+conservation均0。因此当前不是课程入口、LR decay、数值ledger或“还没训练到”的问题：Mu hit极稀疏且
+hit→landing/recovery失败，Isaac mimic→hit失败。
+
+按§10.9已经写在结果之前的顺序，下一fresh只采用
+[`Reward28 direct-paddle 4x`](../../DEFINITIONS.md#fullmdp-reward28-direct-paddle-4x)：四项manager weight
+从`1/1/1/.5`同比例改为`4/4/4/2`。四个coarse+precision核、PPO V6 fixed LR、H48、Observation V3
+`215/231`、六次due、physical birth、plant、regularization和全部事件定义逐项不变；不混入Build4的
+warm-start、replay、双LR、sigma`.19`或新Observation。4倍使direct-paddle最高收入`14`高于普通
+anchor+body mimic的`6`，但仍低于Build4混杂的`33`，用一个轴回答“策略是否因当前经济仍可用粗略身体模仿
+替代接触精度”。
+
+验收先做host/Pod exact Reward与真实Isaac fixed-action；学习只用fresh namespace，不resume或复用旧root。
+matched未来窗逐项报告episode/terminal、四项teacher-achieved误差、`selected contact / launch`、landing、
+recovery和fault。只有相对旧`d8fd8423`同update前缀真实误差/contact改善且balance没有倒退才采用；否则撤回
+该数值轴，再分别考察warm-start或replay，不能把多个Build4差异混成一个不可归因版本。

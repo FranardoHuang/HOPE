@@ -72,21 +72,27 @@ due/launch/R03-valid/raw/selected/legal-landing=`11,105/6,594/4,348/0/0/0`。因
 当前Observation V3继续保持actor/critic `215/231`：只有发现policy需要、运行时真实可观测且现有字段不能
 推导的状态，才讨论新增；本次controller故障不满足该条件。
 
-`observed_at=2026-08-29T10:34:32Z`再次只读刷新长期run。Mu到ACK1493，episode length/return继续上升，
-但recent10 mimic仅position改善；累计`200,827 launch / 657 selected / 591 crossing / 0 legal landing`，
-recovery success=`0/119,593 eligible`。Isaac到ACK523，mimic三好一坏，但`45,813 physical observed`后仍
+`observed_at=2026-08-29T10:47:30Z`再次只读刷新长期run。Mu到ACK1610，episode length/return继续上升，
+但最近相邻10窗四项mimic都轻微变坏；累计`217,463 launch / 662 selected / 596 crossing / 0 legal landing`，
+recovery success=`0/132,376 eligible`。Isaac到ACK560，长期mimic三好一坏，但`51,300 physical launch`后仍
 `0 R03-valid / 0 selected contact`。两端fault/nonfinite/conservation继续为0。故现在已有充分分母判定Mu
-landing交接和Isaac mimic→hit交接失败，不再写“太早”；这不是自动Stage Gate，也不支持新增Observation。
+landing/recovery和Isaac mimic→hit交接失败，不再写“太早”；这不是自动Stage Gate，也不支持新增Observation。
+按已记录的因果顺序，下一fresh学习轴只将四项direct-paddle weight从`1/1/1/.5`同比例提高为`4/4/4/2`；
+coarse/precision核、fixed LR、Observation、课程和plant全不变。该数值只有matched未来窗改善才会被采用。
 
 同源`4cd30d63`的profiler-off `512×H48×61`自然完成，50 measured updates p50/p90=
 `14.720/19.377 s`，receipt/log SHA=`1d7508bc…415c` / `94c321b1…481a`。该值与上一版
-`14.740/19.150 s`平台相符，R06 current-delta结构正确但整轮仍远离约6秒。随后启动50-update full-active
-profile作下一最大块归因；profiler-on不作速度证据。并行结构审计删除Physical/R06/Epoch中三个全仓无调用的
-兼容view/decoder及两个孤立facts类型，净减约214行；它不在active调用图，目的仅是缩小owner/API审计面，
-不会拿这项减法冒充加速。
+`14.740/19.150 s`平台相符，R06 current-delta结构正确但整轮仍远离约6秒。随后50-update full-active profile
+自然完成，receipt/log SHA=`1070902b…d672` / `06fd6e72…41e3`；全窗collection p50/p90=
+`11.139/16.747 s`，recent10=`16.755/17.551 s`。recent10 inclusive的
+`post_physics_publish=4.694/5.296 s`、`physical_epoch_postphysics=4.295/4.673 s`、
+`r06_postphysics_settle=1.939/2.108 s`，故下一刀只做narrow PlantFacts的有序device scan，不重复优化已融合
+virtual ball。profiler-on不作速度证据。并行结构审计删除Physical/R06/Epoch中三个全仓无调用的兼容
+view/decoder及两个孤立facts类型，净减约214行；它不在active调用图，只缩小owner/API审计面，不冒充加速。
 
-同一源码Isaac固定动作probe在真实Kit/PhysX自然完成，`512×H48×31`为0 done/timeout，action tape与state
-摘要和既有exact probe一致。另一个5-update profile尚未进入active flight，collection约
+最新环境/结构源码`bb0be1a2`从全新exact checkout完成Isaac固定动作probe，`512×H48×31`为0 done/timeout，
+action tape/state SHA=`b633da…def8` / `23dd2a…1c6f`与既有exact probe逐字一致，checkout clean且GPU/lock
+释放。另一个5-update profile尚未进入active flight，collection约
 `5.93--8.34 s/update`；D05 prepare/question与reset是冷启动主墙，virtual-ball/post-physics不是。该profile
 既不能解释成熟期约19秒，也不是profiler-off速度证据。课程仍按自然重叠的balance→mimic→hit→landing
 分母观察：上阶段基本形成时，下阶段应已有非零且增长的入口；不设置“成功后才允许学习”的离散自动门。

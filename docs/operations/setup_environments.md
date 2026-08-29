@@ -73,10 +73,12 @@ Typical entry:
 ```bash
 distrobox enter grasping
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
+cp -n setup_train_env.local.example.sh setup_train_env.local.sh
+# Edit only setup_train_env.local.sh for this machine.
 source setup_train_env.sh
 ```
 
-`setup_train_env.sh` is the source of truth for the `hope_isaac_py` launcher and the WandB exports, and must be sourced in every new terminal. The script reads overridable env vars with placeholder defaults, auto-sources an optional git-ignored local override, and auto-detects the current `/workspace/...` Isaac/IsaacLab layout when present:
+`setup_train_env.sh` is the source of truth for the `hope_isaac_py` launcher and the WandB exports, and must be sourced in every new terminal. It does **not** discover a runtime from whichever legacy path happens to exist. The caller or git-ignored local file must name one explicit runtime; missing or invalid paths fail before training:
 
 - `HOPE_ISAAC_PYTHON` — path to the Isaac Lab Python interpreter (`hope_isaac_py` wraps it)
 - `HOPE_ISAACLAB_ROOT` — Isaac Lab install root
@@ -84,27 +86,39 @@ source setup_train_env.sh
 - `WANDB_ENTITY` — your run-logging team (`your-wandb-team`)
 - `WANDB_REGISTRY_ORG` — your motion-registry org (`your-wandb-org`); it must differ from `WANDB_ENTITY` or registry reads fail with "Unable to find organization for entity ..."
 - `WANDB_PROJECT`
-- `setup_train_env.local.sh` — git-ignored local override, auto-sourced if present; put your real machine paths and WandB identities here instead of editing the tracked script
+- `setup_train_env.local.sh` — git-ignored local override, auto-sourced if present; create it from tracked
+  `setup_train_env.local.example.sh` and put real machine paths and WandB identities there
 
-Replace the placeholders with your own values (never commit a private WandB identity to this public branch).
+Never commit a private WandB identity. The tracked example intentionally contains only public path placeholders.
 
-On the current shared RunPod (paths verified 2026-07-02) the sourced environment resolves to:
+On current Pod1 the controlled FullMDP Isaac runtime resolves explicitly to:
 
-- Isaac venv `/workspace/hope_isaac_venv` with the Isaac Lab checkout at `/workspace/IsaacLab`
+- Isaac Sim `/workspace/isaacsim-5.1.0` (`python.sh` launches Python 3.11)
+- IsaacLab `/opt/IsaacLab-8320e0be` at commit `8320e0be5c0f2def58d5b19d308c6d2539d47cb2`
+- additional site packages `/opt/hope_drone_venv/lib/python3.11/site-packages`
 - `HOPE_WBT_PYTHONPATH=<repo>/hope_training/whole_body_tracking/source/whole_body_tracking` (working-tree source first)
-- `WANDB_ENTITY=BerkeleyPingPong`
-- `WANDB_REGISTRY_ORG=dongc_1-university-of-california-berkeley-org`
-- `WANDB_PROJECT=hope_wbc`
-- `WANDB_MOTION_PROJECT=csv_to_npz`
-- `WANDB_DIR=/workspace/yikang/nohope/hope_training/wandb`
 
-The legacy `/workspace/isaacsim/python.sh`, `/opt/drone_venv`, and `hope-motion-py310` paths are not used for Isaac training on this machine. If another machine differs, set the machine-specific values in the git-ignored `setup_train_env.local.sh`, and update this operation doc if the shared layout changes.
+The legacy `/workspace/hope_isaac_venv`, mutable `/workspace/IsaacLab`, `/workspace/isaacsim/python.sh`,
+`/opt/drone_venv`, and `hope-motion-py310` paths are not runtime authorities for this FullMDP lane. Another machine may use different absolute paths, but the versions/commits and PPO ABI must match the
+[Isaac 5.1 environment identity contract](action_ball_isaac51_environment_identity_20260818.md); set only those
+paths in `setup_train_env.local.sh`.
 
 Quick check:
 
 ```bash
-hope_isaac_py -c "import hydra, omegaconf; print(hydra.__version__)"
+hope_isaac_py - <<'PY'
+import inspect, sys, torch, tensordict, torchrl
+from rsl_rl.algorithms import PPO
+print(sys.version)
+print(torch.__version__, tensordict.__version__, torchrl.__version__)
+print(inspect.signature(PPO.act))
+print(inspect.signature(PPO.process_env_step))
+PY
 ```
+
+The expected family is Python `3.11`, Torch `2.7.0+cu128`, TensorDict/TorchRL `0.10.x`, RSL-RL `3.1.2`,
+`PPO.act(self, obs: TensorDict)`. Seeing `act(obs, critic_obs)` means the old RSL2/Isaac4.5 stack was selected; stop
+instead of treating compatibility as equivalent training evidence.
 
 ## Local Assets
 

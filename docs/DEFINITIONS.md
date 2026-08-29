@@ -153,7 +153,7 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   lifecycle事实判定。V6大分母训练证明它缺少action/joint连续成本且宽prior不能保证接触精度，已由
   [`Reward28`](#fullmdp-reward28)取代；只用于解释V6只读证据，不能作为fresh fallback。
 
-- <a id="fullmdp-reward28"></a>**`Reward28` / FullMDP二十八项当前候选奖励合同**：保留Reward24的
+- <a id="fullmdp-reward28"></a>**`Reward28` / FullMDP二十八项fixed-LR基线奖励合同**：保留Reward24的
   14项shot lifecycle和6项common mimic；四项measured-paddle prior改成固定50/50
   `exp(-(e/precision)^2) + 1/(1+(e/coarse)^2)`的平均，position/velocity/signed-face/long-axis的
   `precision/coarse`分别为`.075/.30 m`、`.50/2.0 mps`、`15/60 deg`、`10/40 deg`，weight仍为
@@ -161,6 +161,14 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   soft-limit barrier `-10`、pre-clamp到nominal-projected qdes距离`-1`、actual joint soft-limit barrier
   `-10`。Isaac与MuJoCo共用纯tensor kernel；paddle reward和telemetry共用同一teacher-achieved误差producer。
   它不增加actor observation、termination、Stage、owner、receipt或安全Gate。
+
+- <a id="fullmdp-reward28-direct-paddle-4x"></a>**`Reward28 direct-paddle 4x` / 二十八项直接球拍四倍经济后继合同**：
+  保持Reward28的28个term、四个coarse+precision核、PPO V6、Observation V3、自然重叠课程、plant、
+  regularization与全部事件定义，只把四项measured-paddle manager weight从`1/1/1/.5`同比例改为
+  `4/4/4/2`。四通道最高收入由`3.5`变为`14`，高于anchor+body mimic的`6`，但低于Build4混杂配方的
+  `14/14/5`总量`33`。这是由现役fixed-LR长期窗中Mu约`.16 m`、Isaac约`.20 m`拍心误差和极低/零接触
+  触发的单一学习轴，不是安全Gate、Stage、warm-start、replay、sigma、Observation或kernel-width改动；
+  是否采用只由fresh matched未来窗的真实paddle误差、`selected contact / launch`、balance和fault分母裁决。
 
 - <a id="fullmdp-v6-candidate"></a>**`fullmdp-a-h48-v6-*` / FullMDP第六批最小学习闭环lineage**：
   2026-08-25以PPO V5、Reward24、Observation V3、四次真实cadence、terminal-overlap跨writer合成、
