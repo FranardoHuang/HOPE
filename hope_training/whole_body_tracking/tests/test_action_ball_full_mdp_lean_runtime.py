@@ -862,8 +862,10 @@ def test_post_physics_reads_r07_plant_only_for_actual_recovery_epoch(
     assert racket.publish_count == expected_racket
     assert len(r07.full_source_steps) == expected_full_r07
     assert r07.idle_source_steps == [0] * expected_idle_r07
-    assert r07.projection_count == expected_full_r07
-    assert motion.installed == [r07.returned_facts] * expected_full_r07
+    # Fresh Motion never consumes R07 readiness; R07 remains the independent
+    # keyed recovery/critic producer above.
+    assert r07.projection_count == 0
+    assert motion.installed == []
     if expected_full_r07:
         assert torch.equal(
             r07.full_source_steps[0], torch.zeros(2, dtype=torch.int64)

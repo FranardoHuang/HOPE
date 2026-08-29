@@ -4,6 +4,16 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 
 ## 2026-08-29 R8 matched first-divergence（仍`Partial`）
 
+controller修复后的Mu有限学习窗把hard-edge降到`19,816/1,499,136=1.322%`，说明旧约87%主要是实现错误；
+但该窗仍为`0/6,594 launch` raw/selected contact、0 legal landing，且后段hard-edge回升，不能称parity或学习
+成功。同源码Isaac fixed tape继续0 done/timeout且摘要一致，只闭合共享输入与有限执行。实际Mu
+`runtime.mjb`独立读取为`.001 s`、Euler/Newton/iterations100/noslip0，policy clock为`.001×20=.020 s`；
+attach阶段的`.002/.001`warning不是最终compiled clock。两端controller/integrator/contact response仍未对签，
+G06保持`Partial / diagnostic_unauthorized=true`。
+
+fresh R07→Motion ready传递经消费者审计为无下游读取的self-echo，已删除而保留R07事实/critic与legacy API；
+这减少同写者自证，不删除跨backend独立plant事实。exact Pod复核和新source双端replacement仍是下一验收项。
+
 旧V9不是matched 0807实验：Mu实际载入legacy root。R8固定带现从同一clean commit、同一0807 plant身份、
 同一artifact actor center、同一joint order与`512×H48×31` tape运行；两端initial q/dq exact、0 done/timeout，
 逐tick qdes最大差`5.96e-8 rad`。Isaac clock=`.005 s×4`，Mu clock=`.001 s×20`，共同policy step为`.020 s`。

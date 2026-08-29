@@ -1465,38 +1465,13 @@ class ActionBallFullMdpLeanRuntimeOwner:
                                 recovery_publish,
                                 current_source_step=source_step,
                             )
-                        if full_r07:
-                            project_ready = self._bound_plain_method(
-                                self._r07_recovery, "motion_ready_projection"
-                            )
-                            ready_projection = (
-                                project_ready()
-                                if profile_call is None
-                                else profile_call(
-                                    "r07_motion_projection", project_ready
-                                )
-                            )
-                            if ready_projection is None:
-                                raise ActionBallFullMdpLeanRuntimeError(
-                                    "R07 Motion-ready projection is absent"
-                                )
-                            install_ready = self._bound_plain_method(
-                                self._motion,
-                                "install_action_ball_continuous_r07_ready_projection",
-                            )
-                            install_result = (
-                                install_ready(ready_projection)
-                                if profile_call is None
-                                else profile_call(
-                                    "motion_ready_install",
-                                    install_ready,
-                                    ready_projection,
-                                )
-                            )
-                            if install_result is not None:
-                                raise ActionBallFullMdpLeanRuntimeError(
-                                    "Motion R07-ready installer must return None"
-                                )
+                        # Fresh FullMDP Motion advances from its own observable
+                        # task/teacher events and deliberately does not consume
+                        # R07 readiness.  Keep R07 as the independent recovery
+                        # fact/critic source above; do not clone, validate and
+                        # install an opaque capability with no fresh-lane
+                        # consumer.  The shared legacy Motion API remains for
+                        # lanes whose READY transition is R07-qualified.
                 except BaseException:
                     if publication_started:
                         self._poison_locked(

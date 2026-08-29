@@ -659,7 +659,11 @@ class DeviceExactTableKeepout:
         dtype = env_origins.dtype
 
         def tensor(value, tensor_dtype=dtype):
-            return torch.as_tensor(value, dtype=tensor_dtype, device=device)
+            # The exact geometry authority intentionally exposes immutable
+            # NumPy views.  These tensors are construction-static, so take one
+            # explicit owned copy instead of asking ``as_tensor`` to alias a
+            # non-writable buffer and emitting an undefined-write warning.
+            return torch.tensor(value, dtype=tensor_dtype, device=device)
 
         self.body_ids = tensor(authority.body_ids, torch.long)
         self.env_origins = env_origins

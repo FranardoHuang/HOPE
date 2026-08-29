@@ -4,6 +4,17 @@ Status: Partial (the base training-loop mechanics are proven; the current-fresh 
 
 ## 2026-08-29 R8稳定出生与学习短窗（仍`Partial`）
 
+maximum-inward修复后的同源码Mu有限学习窗已经自然完成：`512×H48×61` profiler-off p50/p90=
+`6.698/6.804 s`，hard-edge=`19,816/1,499,136=1.322%`，相对旧长期run约`87%`确认controller实现错误已被
+显著修复；但recent10 hard-edge回升、launch/raw/selected/legal-landing=`6,594/0/0/0`，不构成学习PASS。
+同源码Isaac fixed-action为0 done/timeout且tape/state摘要一致；5-update profile仍在冷启动、无active flight，
+只把早期墙钟指向D05 prepare/question与reset，不能代签成熟期速度。Observation V3保持`215/231`；课程按
+自然重叠的balance→mimic→hit→landing分母观察，不增加success Gate。G05继续`Partial`。
+
+结构自查删除了fresh路径中无消费者的R07→Motion ready self-echo；R07事实、critic、legacy消费者和durable
+边界不变。该变更只有本地分进程聚焦测试，exact Pod重跑与新source长期replacement尚未完成，不能用于Gate
+晋级或formal训练结论。
+
 R7被审出并非robust：右脚/support/torque slack低于自身reserve；其Isaac 61-update窗hard-edge
 `6.13%→6.79%`、contact=`0/1,242 launch`，只作weak-margin反例。R8已在真实PhysX完成
 `60 policy/240 physics/1.2 s` nonterminal prefix，最终最小hard gap=`.21966 rad`，但frame0拍心teacher

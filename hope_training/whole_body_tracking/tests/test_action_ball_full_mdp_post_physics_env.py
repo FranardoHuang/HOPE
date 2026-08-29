@@ -1032,7 +1032,21 @@ def test_global_idle_without_key_skips_r03_and_all_motion_ready_work(
     assert names.count("physical_publish") == 2
 
 
-def test_transport_idle_recovery_epoch_keeps_full_r07_publication():
+def test_transport_idle_recovery_epoch_keeps_r07_but_not_dead_motion_install(
+    monkeypatch,
+):
+    def reject_projection(_self):
+        raise AssertionError("fresh runtime projected unused R07 readiness")
+
+    def reject_install(_self, _projection):
+        raise AssertionError("fresh runtime installed unused R07 readiness")
+
+    monkeypatch.setattr(_R07, "motion_ready_projection", reject_projection)
+    monkeypatch.setattr(
+        _Motion,
+        "install_action_ball_continuous_r07_ready_projection",
+        reject_install,
+    )
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=False,
@@ -1044,8 +1058,8 @@ def test_transport_idle_recovery_epoch_keeps_full_r07_publication():
     assert "racket_publish" not in names
     assert names.count("r07_publish") == 1
     assert "r07_idle_stamp" not in names
-    assert names.count("r07_ready") == 1
-    assert names.count("motion_ready") == 1
+    assert "r07_ready" not in names
+    assert "motion_ready" not in names
 
 
 def test_transport_idle_outside_recovery_window_uses_neutral_chronology_only(

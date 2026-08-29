@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`correct-0807-dual-fresh-running / performance-optimizing / no-authorized-formal-run`
+- 状态：`controller-fix-finite-canary-complete / exact-structure-cut-validating / no-authorized-formal-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -21,6 +21,34 @@
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
 
 ## 2026-08-29 current correction
+
+maximum-inward controller修复后的首个同源码MuJoCo有限学习窗已经自然完成。`512×H48×61`、
+profiler-off的p50/p90=`6.698/6.804 s`；全窗hard-edge=`19,816/1,499,136=1.322%`、qdes guard=
+`123,090/1,499,136=8.211%`，相较旧长期run约`87%`的hard-edge确认此前是实现错误而非课程设计必然结果。
+但first10→recent10 hard-edge仍`.739%→1.312%`，四项mimic误差两好两坏，全窗
+due/launch/R03-valid/raw/selected/legal-landing=`11,105/6,594/4,348/0/0/0`。因此这只授权进入更长训练，
+不授权称balance/mimic基本成功；hit与landing仍为0，不以短窗失败盲改reward或新增Observation。
+当前Observation V3继续保持actor/critic `215/231`：只有发现policy需要、运行时真实可观测且现有字段不能
+推导的状态，才讨论新增；本次controller故障不满足该条件。
+
+同一源码Isaac固定动作probe在真实Kit/PhysX自然完成，`512×H48×31`为0 done/timeout，action tape与state
+摘要和既有exact probe一致。另一个5-update profile尚未进入active flight，collection约
+`5.93--8.34 s/update`；D05 prepare/question与reset是冷启动主墙，virtual-ball/post-physics不是。该profile
+既不能解释成熟期约19秒，也不是profiler-off速度证据。课程仍按自然重叠的balance→mimic→hit→landing
+分母观察：上阶段基本形成时，下阶段应已有非零且增长的入口；不设置“成功后才允许学习”的离散自动门。
+
+结构自查先做一刀有消费者证据的减法：fresh FullMDP的Motion不读取R07 ready，原路径却在R07发布后再次
+projection、clone并install opaque capability。现删除该self-echo，只保留R07独立事实、critic和仍有消费者
+的legacy API；不把task success变成安全Gate。MuJoCo immutable geometry authority则显式复制为owned
+tensor，消除别名不可写NumPy内存的undefined-write警告。更大的R06 settlement与Epoch窄化暂不并入本修复，
+必须先在active-flight matched profile下证明它们是主墙并保持journal/reason/carry语义，避免为“简洁”做
+跨owner大重写。
+
+MuJoCo attach日志一度显示parent `.002 s`、child `.001 s`，但独立加载该run最终`runtime.mjb`实测为
+`.001 s`、Euler、Newton、iterations100、noslip0；故实际policy clock仍`.001×20=.020 s`，warning来自
+中间attach状态，不能据日志字符串声称运行时钟错误。Isaac launcher的outer owner必须使用host
+`/usr/bin/python3`，Isaac wrapper只作为`--isaac-python`传入；反用wrapper会继承其reserved fd16/fd18并在
+Kit启动前fail-closed，失败namespace不得复用。
 
 当前差异不是一个单因果“sim坏了”。V9 MuJoCo长期run实际选择legacy A3 root MJCF
 `70c4fd65…36c0a`，而teacher/runtime合同要求A3P0807 `7bbda723…bcae1`；这是确定的wrong-object实现错误，

@@ -1,5 +1,21 @@
 # 简短进度记录
 
+## 2026-08-29 — controller修复有限学习窗与fresh热路减法
+
+- 同一`92b56a43`源码的MuJoCo `512×H48×61` profiler-off有限窗已自然完成：p50/p90=
+  `6.698/6.804 s`，hard-edge=`19,816/1,499,136=1.322%`、qdes guard=
+  `123,090/1,499,136=8.211%`，相较旧长期run约`87%`的hard-edge确认maximum-inward修复有效；但
+  first10→recent10 hard-edge仍`.739%→1.312%`，全窗launch/raw/selected/legal-landing=
+  `6,594/0/0/0`，故只闭合实现修复与有限可迭代性，不宣称balance、mimic、hit或landing成功。
+- 同源码Isaac固定动作probe在Pod1真实Kit/PhysX自然完成，`512×H48×31`为0 done/timeout，action tape与
+  state摘要保持既有exact值。5-update profile仍属冷启动、无active flight：collection约
+  `5.93--8.34 s/update`，主要墙钟是D05 prepare/question与reset，而非virtual-ball或post-physics；它不能
+  解释成熟期约19秒，也不能作为约6秒目标的profiler-off PASS。
+- 按交接文档“门只守独立事实”的判断，删除fresh路径中已发布R07事实后再复制到Motion、但下游从不读取的
+  self-echo；保留R07事实、critic和legacy消费者。MuJoCo immutable geometry改为显式owned tensor copy，
+  不再让Torch别名不可写NumPy内存。三组聚焦测试分进程为`35/24/12 passed`（后者另`1 skipped`）；组合
+  collection的canonical namespace污染不冒充production失败。exact Pod复核与新source双端replacement仍待完成。
+
 ## 2026-08-29 — 0807 wrong-object根因、R8 robust birth与matched first-divergence
 
 - V9 Mu长期run虽名为`0807/genesisfix`，实际载入legacy MJCF `70c4fd65…36c0a`；新probe在import前绑定显式

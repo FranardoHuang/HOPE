@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
+import warnings
 
 import numpy as np
 import pytest
@@ -143,20 +144,26 @@ def test_construction_exposes_only_path_free_plant_receipt(monkeypatch):
         "verification_receipt_sha256": "d" * 64,
         "owner_local_frame_sha256": "e" * 64,
     }
+    def immutable(value):
+        value.setflags(write=False)
+        return value
+
     authority = SimpleNamespace(
         identity_receipt={
             **digests,
             "root_mjcf_path": "/must/not/leak/a3_pingpong.xml",
             "identity_manifest_path": "/must/not/leak/manifest.json",
         },
-        body_ids=np.arange(32, dtype=np.int64),
+        body_ids=immutable(np.arange(32, dtype=np.int64)),
         components=SimpleNamespace(
-            owner_indices=np.zeros(1, dtype=np.int64),
-            local_centers_m=np.zeros((1, 3), dtype=np.float64),
-            local_half_axes_m=np.zeros((1, 3, 3), dtype=np.float64),
+            owner_indices=immutable(np.zeros(1, dtype=np.int64)),
+            local_centers_m=immutable(np.zeros((1, 3), dtype=np.float64)),
+            local_half_axes_m=immutable(
+                np.zeros((1, 3, 3), dtype=np.float64)
+            ),
         ),
-        aabb_lo=np.zeros((1, 3), dtype=np.float64),
-        aabb_hi=np.ones((1, 3), dtype=np.float64),
+        aabb_lo=immutable(np.zeros((1, 3), dtype=np.float64)),
+        aabb_hi=immutable(np.ones((1, 3), dtype=np.float64)),
         racket_body_index=31,
     )
     captured = {}
@@ -174,10 +181,17 @@ def test_construction_exposes_only_path_free_plant_receipt(monkeypatch):
             action_ball_policy_geometry_contract=lambda _rows: {},
         ),
     )
-    bound = keepout.DeviceExactTableKeepout(
-        mujoco=object(), model=object(), mjcf_path=Path("/tmp/a3_pingpong.xml"),
-        env_origins=torch.zeros((2, 3)), device=torch.device("cpu"),
-    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error", message="The given NumPy array is not writable.*"
+        )
+        bound = keepout.DeviceExactTableKeepout(
+            mujoco=object(),
+            model=object(),
+            mjcf_path=Path("/tmp/a3_pingpong.xml"),
+            env_origins=torch.zeros((2, 3)),
+            device=torch.device("cpu"),
+        )
     assert dict(bound.plant_identity_receipt) == digests
     assert all("path" not in key for key in bound.plant_identity_receipt)
     registered = captured["registered_plant"]

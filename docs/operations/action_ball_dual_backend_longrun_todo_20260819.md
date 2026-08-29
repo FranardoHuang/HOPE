@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`correct-0807-dual-fresh-running / performance-optimizing / branch-scoped / diagnostic_unauthorized`
+> 状态：`controller-fix-finite-canary-complete / exact-structure-cut-validating / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-29
@@ -187,6 +187,10 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    Build4的环境path-autodiscovery是同类结构债：procedural fallback同时决定Python、IsaacLab与ABI，却没有
    唯一运行身份。后续替换为显式typed runtime identity和一次进程内receipt，删除fallback authority；这会
    减少分支与误比较，不是再加一圈启动后Gate。
+   第一刀已删除fresh FullMDP的R07→Motion ready self-echo：fresh Motion从自身可观测task/teacher event推进，
+   没有读取该opaque capability；R07 publish/critic和legacy消费者保持。较大的R06 settle/retire融合与Epoch
+   snapshot窄化暂不采纳，先等active-flight matched profile证明其收益并逐项保持journal/reason/carry。
+   当前本地分进程聚焦测试为`35/24/12 passed`（另`1 skipped`）；exact Pod复核尚未完成，所以item 9仍开。
 10. [x] 已在GPU1隔离、严格加载Mu `model_2000.pt`做`512×240`随机policy轨迹诊断；optimizer未加载，当前
     GPU0/2长期run未改。`8,081/122,880=6.58%` policy rows有actual hard edge，`8,373/122,880=6.81%`
     有qdes guard，非零hard joint只有`waist_pitch/waist_roll/left_ankle_roll`三项；其中`77.47%` hard rows在
@@ -195,7 +199,7 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     recovery目标或actuator response。receipt见
     [`action_ball_fullmdp_mu_model2000_jointdiag_20260829.json`](../../configs/action_ball_fullmdp_mu_model2000_jointdiag_20260829.json)。
     `qdes_limit_barrier=0`不是dead term：processed qdes已被soft inset投影，actual `joint_limit`仍有付款。
-11. [ ] 用同checkpoint与固定随机action tape只追三项关节的`q/dq/qdes/tau-before-clamp/tau-after-clamp`，覆盖
+11. [x] 用同checkpoint与固定随机action tape只追三项关节的`q/dq/qdes/tau-before-clamp/tau-after-clamp`，覆盖
     launch→outcome→recovery边界，并与Isaac implicit-drive同字段对照。先判断是actuator mapping/符号、扭矩
     clamp/积分还是recovery reference过激，再选择controller、action scale或连续reward的最小修复；未闭合前
     不盲加权、不把hard edge改成Done，也不停止当前长期run。仓内probe现已接到**真实plant owner**：默认
@@ -210,9 +214,18 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     clamp仍0；done `498→510`全部有生产reason解释（`base_fell_tilt=390`、`base_too_low=9`、
     `robot_hit_table=120`，可重叠），`joint_qdes_forbidden=0`、unknown bits=0、done-without-reason=0，
     NPZ SHA=`d09b650d…9ead9`。reason替换故障疑点已闭合，进入finite学习与Isaac同字段响应验证。
+    修复后同源码Mu `512×H48×61`有限学习窗已自然完成：hard-edge=
+    `19,816/1,499,136=1.322%`、qdes guard=`8.211%`，确认实现修复进入真实训练；但recent10 hard-edge
+    `.739%→1.312%`的趋势回升，launch/raw/selected/legal-landing=`6,594/0/0/0`。所以controller首因item
+    闭合，不把有限窗写成学习成功，也不据此盲调reward。
 12. [x] 修正portable completion consumer仍期待旧Take061 UID的漂移：producer/live owner为当前0807
     `2552478955674699`，consumer旧值`5527597793770800`会让任何正确完成件末端失败。只更新独立consumer
     expected value，保留writer→consumer单侧漂移会红的测试，不用producer输出反写expected。
+13. [ ] 将本轮结构减法提交并在Pod1全新exact checkout分进程复跑lean-runtime、post-physics与Mu keepout；
+    随后重跑同源码Isaac fixed tape和Mu profiler-off rate，只有source、receipt、测试与有限run一致后，才启动
+    fresh双端长期replacement。长期判读按自然重叠课程分别报告episode/mimic、due/playback/launch、
+    raw/selected contact与legal landing分母；上阶段基本形成时，下阶段必须已经出现入口增长，但不新增
+    “成功后才允许开始学”的自动Gate。Observation V3保持`215/231`，除非证明有新的可观测、非冗余状态。
 
 <a id="fullmdp-v9-superseded"></a>
 

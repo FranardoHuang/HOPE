@@ -380,6 +380,11 @@ python3 scripts/launch_isaac_full_mdp_successor.py \
   --profile-updates 5
 ```
 
+这里最外层launcher owner必须由普通host Python启动（Pod1为`/usr/bin/python3`），不得用
+`/workspace/isaacsim-5.1.0/python.sh`替代命令首项；Isaac wrapper只通过`--isaac-python`传给launcher。
+wrapper自身占用reserved fd16/fd18，拿它启动outer owner会在Kit前被exact sealed runtime descriptor检查
+fail-closed。该失败namespace只保留诊断，不得修补或复用；改正调用后创建fresh namespace。
+
 ready marker后还必须由launcher直接检查该exact leader的`/proc/<pid>/fd/<gpu-lock-fd>`与canonical lock file
 具有相同device/inode，且`fdinfo`唯一lock行包含`FLOCK ADVISORY WRITE`。`lslocks`或`/proc/locks`可能把parent
 已经退出、但child仍继承open-file-description flock的owner显示为PID 0或直接漏掉，不能据此误判lifetime lock
