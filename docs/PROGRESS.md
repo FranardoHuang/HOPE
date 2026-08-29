@@ -1,5 +1,14 @@
 # 简短进度记录
 
+## 2026-08-30 — exact FullMDP metric-row合批候选待Pod验收
+
+- 基于`8200c4a2`的独立候选只把H/H+1 exact FullMDP quality metric rows从逐command D2H改为owner
+  optimizer transaction内一次materialize，并按原顺序复演Python EMA；Reward28与其他command D2H不在
+  本切口。
+- 失败边界补齐：materialize/assert在optimizer前对有效active boundary sticky poison且不可重试；snapshot
+  对active/poisoned、joint-safety pending和exact metric tape pending fail-closed。当前仅静态检查；Pod
+  聚焦测试、CUDA fixed-tape/payment/safety parity、finite snapshot与profiler-off wall-time均未测。
+
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 
 - fresh 4× Mu到ACK623后，matched旧Mu的raw/selected/crossing=`56/5/2` vs `1,665/334/281`，最近10轮

@@ -959,6 +959,65 @@ class ActionBallFullMdpRsl3Adapter:
         self._ack = _bound(owner, "acknowledge_post_update")
         self._latch = _bound(owner, "_record_durable_epoch_ack_span")
         self._poison = _bound(owner, "poison_optimizer_boundary")
+        command_manager = getattr(runtime_env, "command_manager", None)
+        get_command_term = getattr(command_manager, "get_term", None)
+        command_term = (
+            get_command_term("racket_target")
+            if callable(get_command_term)
+            else None
+        )
+        command_module = importlib.import_module(
+            "whole_body_tracking.tasks.tracking.mdp.hope_commands"
+        )
+        command_type = vars(command_module).get("RacketTargetCommand")
+        command_mismatches = []
+        if not isinstance(command_type, type):
+            command_mismatches.append("export_type")
+        elif (
+            command_type.__name__ != "RacketTargetCommand"
+            or command_type.__module__ != command_module.__name__
+        ):
+            command_mismatches.append("export_identity")
+        if command_manager is None:
+            command_mismatches.append("command_manager")
+        elif not callable(get_command_term):
+            command_mismatches.append("get_term")
+        if command_term is None:
+            command_mismatches.append("racket_target")
+        elif isinstance(command_type, type) and type(command_term) is not command_type:
+            command_mismatches.append(
+                "racket_target_type="
+                + type(command_term).__module__
+                + "."
+                + type(command_term).__qualname__
+            )
+        if command_term is not getattr(owner, "_racket", None):
+            command_mismatches.append("runtime_owner_racket_identity")
+        deferred_predicate = None
+        if command_term is not None:
+            try:
+                deferred_predicate = _bound(
+                    command_term,
+                    "_action_ball_full_mdp_deferred_exact_metrics_enabled",
+                )
+            except RuntimeError:
+                command_mismatches.append("deferred_exact_metrics")
+        if deferred_predicate is not None and deferred_predicate() is not True:
+            command_mismatches.append("deferred_exact_metrics_disabled")
+        if command_mismatches:
+            raise RuntimeError(
+                "single_action_lean requires the exact deferred-metric command "
+                "producer: " + ",".join(command_mismatches)
+            )
+        self._command_term = command_term
+        self._command_materialize = _bound(
+            command_term,
+            "materialize_action_ball_diagnostic_metrics_for_report",
+        )
+        self._command_assert_materialized = _bound(
+            command_term,
+            "assert_action_ball_diagnostic_metrics_materialized_for_report",
+        )
         action_manager = getattr(runtime_env, "action_manager", None)
         get_action_term = getattr(action_manager, "get_term", None)
         action_term = get_action_term("joint_pos") if callable(get_action_term) else None
@@ -1018,6 +1077,7 @@ class ActionBallFullMdpRsl3Adapter:
         self._path, self._identity, self._segment = self._create_wal(log_dir)
         self._size = 0
         self._last_update = -1
+        self._update_in_progress = False
         self._safety_pending = None
         self._safety_last_completed_environment_steps = 0
         self._safety_last_consume_sequence = None
@@ -1115,17 +1175,14 @@ class ActionBallFullMdpRsl3Adapter:
             or completed_environment_steps <= 0
         ):
             raise RuntimeError("single_action_lean optimizer chronology differs")
+        if self._update_in_progress:
+            raise RuntimeError(
+                "single_action_lean optimizer boundary is already active"
+            )
+        self._update_in_progress = True
         boundary = None
         try:
             self._require_healthy()
-            boundary = self._prepare(
-                update_index=update_index,
-                completed_environment_steps=completed_environment_steps,
-            )
-            if self._safety_pending is not None:
-                raise RuntimeError(
-                    "single_action_lean joint-safety evidence is already frozen"
-                )
             delta_steps = (
                 completed_environment_steps
                 - self._safety_last_completed_environment_steps
@@ -1133,6 +1190,31 @@ class ActionBallFullMdpRsl3Adapter:
             if delta_steps <= 0 or delta_steps % self._num_envs != 0:
                 raise RuntimeError(
                     "single_action_lean joint-safety rollout span differs"
+                )
+            rollout_steps = delta_steps // self._num_envs
+            expected_metric_rows = (
+                (rollout_steps + 1,)
+                if self._last_update == -1
+                else (rollout_steps,)
+            )
+            boundary = self._prepare(
+                update_index=update_index,
+                completed_environment_steps=completed_environment_steps,
+            )
+            # Only the exact FullMDP metric rows are deferred from H/H+1
+            # command computes.  Drain that chronological device tape once,
+            # after the owner has opened its valid optimizer transaction and
+            # before any optimizer or destructive ledger operation.  A
+            # materialize/assert failure therefore poisons this exact active
+            # boundary and can never be retried against partially replayed
+            # Python EMA state.
+            self._command_materialize(
+                expected_full_mdp_exact_row_counts=expected_metric_rows
+            )
+            self._command_assert_materialized()
+            if self._safety_pending is not None:
+                raise RuntimeError(
+                    "single_action_lean joint-safety evidence is already frozen"
                 )
             safety_token, safety_snapshot = self._safety_prepare()
             if type(safety_token) is not tuple:
@@ -1258,7 +1340,9 @@ class ActionBallFullMdpRsl3Adapter:
                 self._poison(boundary, update_index=update_index, reason=reason)
             except BaseException:
                 pass
+            self._update_in_progress = False
             raise RuntimeError(reason) from exc
+        self._update_in_progress = False
         _emit_non_authoritative_stdout_marker(
             safety_marker,
             marker_name="HOPE_JOINT_SAFETY_UPDATE_JSON",
@@ -1270,6 +1354,22 @@ class ActionBallFullMdpRsl3Adapter:
             durable_wal_authoritative=True,
         )
         return result
+
+    def assert_snapshot_boundary_clean(self) -> None:
+        """Reject a snapshot with active/poisoned or pending update state."""
+
+        if self._update_in_progress:
+            raise RuntimeError(
+                "single_action_lean snapshot crossed an active optimizer boundary"
+            )
+        self._require_healthy()
+        if self._safety_pending is not None:
+            raise RuntimeError(
+                "single_action_lean snapshot crossed an active optimizer boundary"
+            )
+        # This assertion covers the exact FullMDP metric-row tape only.  It
+        # does not claim that every command-side D2H in the process is batched.
+        self._command_assert_materialized()
 
 
 class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
@@ -1395,6 +1495,7 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
             raise RuntimeError(
                 "single_action_lean diagnostic snapshot forbids caller infos"
             )
+        self._full_mdp_adapter.assert_snapshot_boundary_clean()
         requested = Path(path)
         requested_stem = requested.stem
         if (

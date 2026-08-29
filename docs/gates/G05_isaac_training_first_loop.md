@@ -2,6 +2,15 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-30 exact FullMDP metric-row合批候选（仍`Partial`）
+
+基于`8200c4a2`的独立候选只收敛exact FullMDP quality metric rows：H/H+1逐command compute的device
+reduction按原顺序保留，到既有owner optimizer transaction内一次D2H并逐行复演原Python EMA。它不改
+Reward28、H48、PPO、task/physics/safety，也不声称command侧所有D2H都已合并。候选同时把
+materialize/assert失败纳入有效active boundary并在optimizer前sticky poison，snapshot在active/poisoned、
+joint-safety pending或exact metric tape pending时fail-closed。当前只有静态检查，Pod聚焦测试、真实CUDA
+fixed-tape/finite与profiler-off wall-time均`未测`，所以不改变本Gate状态。
+
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
 validated code source=`b0d7d562`保留`255df4a1`的每control一次R06 finalize与每substep Scene capture、terminal

@@ -20,6 +20,15 @@
 > 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
 
+## 2026-08-30 exact FullMDP metric-row边界候选
+
+为隔离Isaac H48 command metric的逐step host同步，临时候选在`8200c4a2`代码基线上仅延迟exact FullMDP
+质量指标rows；保持H/H+1行数、逐行decay与Python float EMA顺序。drain先进入有效owner optimizer
+transaction，再materialize/assert；任一失败都必须在optimizer前poison且不可重试。save必须拒绝active、
+poisoned、joint-safety pending和exact metric tape pending。该切口不包含Reward28，也不代表其他command
+D2H已收敛。现在只完成实现与静态检查，Pod test/CUDA parity、finite snapshot及matched profiler-off
+wall-time仍`未测`，不得写成性能或学习结论。
+
 ## 2026-08-29 current correction
 
 ### 重新判读：学习阶段、R06热路与部署边界

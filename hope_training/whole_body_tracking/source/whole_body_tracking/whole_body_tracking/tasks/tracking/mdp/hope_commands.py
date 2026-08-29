@@ -37,7 +37,7 @@ import torch
 from collections.abc import Sequence
 from dataclasses import MISSING, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 
 from isaaclab.assets import Articulation
@@ -694,6 +694,37 @@ def _batched_host_scalar_values(values: Sequence[torch.Tensor]) -> tuple[float, 
             )
         scalars.append(value.detach().reshape(()))
     return tuple(float(value) for value in torch.stack(scalars).cpu().tolist())
+
+
+def _batched_host_scalar_rows(
+    rows: Sequence[torch.Tensor],
+) -> tuple[tuple[float, ...], ...]:
+    """Read chronological, fixed-width device rows through one host transfer."""
+
+    if not rows:
+        return ()
+    first = rows[0]
+    if not torch.is_tensor(first) or first.ndim != 1 or first.numel() == 0:
+        raise ValueError("batched host row read requires non-empty rank-1 tensors")
+    width = int(first.numel())
+    dtype = first.dtype
+    device = first.device
+    packed = []
+    for row in rows:
+        if not torch.is_tensor(row) or row.ndim != 1 or int(row.numel()) != width:
+            raise ValueError("batched host row read requires one fixed row width")
+        if row.dtype != dtype or row.device != device:
+            raise ValueError(
+                "batched host row read requires one common dtype and device"
+            )
+        packed.append(row.detach())
+    host_rows = torch.stack(packed).cpu().tolist()
+    converted = tuple(
+        tuple(float(value) for value in row) for row in host_rows
+    )
+    if any(not math.isfinite(value) for row in converted for value in row):
+        raise RuntimeError("batched host row read produced a non-finite scalar")
+    return converted
 
 
 def _action_ball_validate_tensor_predicate(
@@ -27413,6 +27444,224 @@ class RacketTargetCommand(CommandTerm):
             )
         )
 
+    def _action_ball_full_mdp_deferred_exact_metrics_enabled(self) -> bool:
+        """Whether exact-quality EMAs have no control-step host consumer."""
+
+        return (
+            getattr(self, "_action_ball_full_mdp_enabled", None) is True
+            and str(getattr(self.cfg, "target_mode", ""))
+            == "action_ball_full_mdp"
+            and getattr(self, "_action_ball_enabled", None) is False
+            and getattr(self, "_task_first_enabled", None) is False
+            and getattr(
+                self, "_action_ball_diagnostic_unauthorized", None
+            ) is True
+            and getattr(self, "_action_ball_full_mdp_device_r05_owner", None)
+            is not None
+            and getattr(self, "_action_ball_full_mdp_racket_epoch_owner", None)
+            is not None
+            and getattr(self.cfg, "adaptive_sigma", None) is False
+            and getattr(self.cfg, "adaptive_sigma_monotonic", None) is False
+            and getattr(self.cfg, "adaptive_sigma_normal", None) is False
+            and getattr(self.cfg, "virtual_ball", None) is False
+            and getattr(self.cfg, "vb_metrics_only", None) is False
+            and getattr(self.cfg, "shadow_ball", None) is False
+            and getattr(self.cfg, "physical_ball", None) is False
+            and getattr(self, "_shadow", None) is None
+            and getattr(self, "_physical", None) is None
+        )
+
+    def _stage_action_ball_full_mdp_exact_metric_row(
+        self,
+        values: Sequence[torch.Tensor],
+        *,
+        decay: float,
+        bucket_order: Sequence[int],
+    ) -> None:
+        """Keep one ordered reduction row on device until the PPO drain."""
+
+        if not math.isfinite(float(decay)) or not 0.0 <= float(decay) <= 1.0:
+            raise RuntimeError("full-MDP exact metric decay differs")
+        scalars = tuple(values)
+        expected_width = 10 + 8 * len(tuple(bucket_order))
+        if len(scalars) != expected_width:
+            raise RuntimeError("full-MDP exact metric row width drifted")
+        if not scalars:
+            raise RuntimeError("full-MDP exact metric row is empty")
+        first = scalars[0]
+        if not torch.is_tensor(first) or first.numel() != 1:
+            raise RuntimeError("full-MDP exact metric row requires scalars")
+        for value in scalars:
+            if (
+                not torch.is_tensor(value)
+                or value.numel() != 1
+                or value.dtype != first.dtype
+                or value.device != first.device
+            ):
+                raise RuntimeError(
+                    "full-MDP exact metric row dtype/device/shape drifted"
+                )
+        order = tuple(int(value) for value in bucket_order)
+        existing_order = getattr(
+            self, "_action_ball_full_mdp_exact_metric_bucket_order", None
+        )
+        if existing_order is None:
+            self._action_ball_full_mdp_exact_metric_bucket_order = order
+        elif existing_order != order:
+            raise RuntimeError("full-MDP exact metric bucket order drifted")
+        pending = getattr(
+            self, "_action_ball_full_mdp_pending_exact_metric_rows", None
+        )
+        if pending is None:
+            pending = []
+            self._action_ball_full_mdp_pending_exact_metric_rows = pending
+        pending.append((float(decay), torch.stack(scalars).detach()))
+
+    def _apply_action_ball_full_mdp_exact_metric_host_row(
+        self,
+        values: Sequence[float],
+        *,
+        decay: float,
+        bucket_order: Sequence[int],
+    ) -> None:
+        """Replay one historical Python-float EMA transition."""
+
+        row = tuple(float(value) for value in values)
+        order = tuple(int(value) for value in bucket_order)
+        if not math.isfinite(float(decay)) or not 0.0 <= float(decay) <= 1.0:
+            raise RuntimeError("full-MDP exact metric replay decay differs")
+        if any(not math.isfinite(value) for value in row):
+            raise RuntimeError("full-MDP exact metric host row is non-finite")
+        if len(row) != 10 + 8 * len(order):
+            raise RuntimeError("full-MDP exact metric host row width drifted")
+        it = iter(row)
+        for attribute in (
+            "_exact_n_acc",
+            "_exact_pass_comp_acc",
+            "_exact_pass_pos_acc",
+            "_exact_pass_vel_acc",
+            "_exact_pass_5cm_acc",
+            "_exact_pass_10cm_acc",
+            "_exact_pass_normal_acc",
+            "_exact_pos_err_sum",
+            "_exact_vel_err_sum",
+            "_exact_nrm_err_sum",
+        ):
+            setattr(self, attribute, decay * getattr(self, attribute) + next(it))
+        bucket_attributes = (
+            "_exact_n_acc_c",
+            "_exact_pass_pos_acc_c",
+            "_exact_pass_vel_acc_c",
+            "_exact_pass_normal_acc_c",
+            "_exact_pass_comp_acc_c",
+            "_exact_pos_err_sum_c",
+            "_exact_vel_err_sum_c",
+            "_exact_nrm_err_sum_c",
+        )
+        for bucket in order:
+            for attribute in bucket_attributes:
+                accumulators = getattr(self, attribute)
+                accumulators[bucket] = (
+                    decay * accumulators[bucket] + next(it)
+                )
+
+    def _flush_action_ball_full_mdp_exact_metric_rows(self) -> bool:
+        """Transfer all rollout rows once and replay them chronologically."""
+
+        pending = tuple(
+            getattr(self, "_action_ball_full_mdp_pending_exact_metric_rows", ())
+        )
+        if not pending:
+            return False
+        order = tuple(
+            getattr(self, "_action_ball_full_mdp_exact_metric_bucket_order", ())
+        )
+        host_rows = _batched_host_scalar_rows(tuple(row for _, row in pending))
+        if len(host_rows) != len(pending):
+            raise RuntimeError("full-MDP exact metric row count drifted")
+        for (decay, _), row in zip(pending, host_rows):
+            self._apply_action_ball_full_mdp_exact_metric_host_row(
+                row, decay=decay, bucket_order=order
+            )
+        self._action_ball_full_mdp_pending_exact_metric_rows = []
+        return True
+
+    def _refresh_action_ball_exact_public_metrics(self) -> None:
+        """Publish the final exact-quality EMA state after a deferred drain."""
+
+        metrics = getattr(self, "metrics", None)
+        if not isinstance(metrics, dict):
+            return
+
+        def publish(name: str, value: float) -> None:
+            metric = metrics.get(name)
+            if metric is not None:
+                with torch.inference_mode():
+                    metric.fill_(float(value))
+
+        minimum = float(self.cfg.exact_success_min_count)
+        # Fresh FullMDP has no legacy ActionBall target-mask authority.  Its
+        # three R05 task components are constructed together and the original
+        # immediate path therefore grades all three unconditionally.
+        validity = (
+            (True, True, True)
+            if getattr(self, "_action_ball_enabled", None) is False
+            else self._action_ball_target_validity_mask
+        )
+        pos_n, vel_n, face_n, comp_n = _action_ball_target_metric_eligible_counts(
+            self._exact_n_acc, validity
+        )
+        scales = tuple(
+            1.0 / max(count, 1.0e-6) if count >= minimum else 0.0
+            for count in (pos_n, vel_n, face_n, comp_n)
+        )
+        self._exact_composite_rate = self._exact_pass_comp_acc * scales[3]
+        for name, value in (
+            ("strike_composite_success_exact", self._exact_composite_rate),
+            ("strike_pos_pass_exact", self._exact_pass_pos_acc * scales[0]),
+            ("strike_vel_pass_exact", self._exact_pass_vel_acc * scales[1]),
+            ("strike_normal_pass_exact", self._exact_pass_normal_acc * scales[2]),
+            ("exact_strike_pos_success_5cm", self._exact_pass_5cm_acc * scales[0]),
+            ("exact_strike_pos_success_10cm", self._exact_pass_10cm_acc * scales[0]),
+            ("exact_strike_sample_count_decayed", self._exact_n_acc),
+        ):
+            publish(name, value)
+        for channel, count in zip(
+            ("pos", "vel", "normal", "composite"),
+            (pos_n, vel_n, face_n, comp_n),
+        ):
+            publish(f"strike_{channel}_target_eligible_sample_count_decayed", count)
+        order = tuple(
+            getattr(self, "_action_ball_full_mdp_exact_metric_bucket_order", ())
+        )
+        for bucket in order:
+            name = self._clip_names[bucket]
+            bucket_n = self._exact_n_acc_c[bucket]
+            bucket_counts = _action_ball_target_metric_eligible_counts(
+                bucket_n, validity
+            )
+            bucket_scales = tuple(
+                1.0 / max(count, 1.0e-6) if count >= minimum else 0.0
+                for count in bucket_counts
+            )
+            for metric_name, value in (
+                (f"strike_pos_pass_exact_{name}", self._exact_pass_pos_acc_c[bucket] * bucket_scales[0]),
+                (f"strike_vel_pass_exact_{name}", self._exact_pass_vel_acc_c[bucket] * bucket_scales[1]),
+                (f"strike_normal_pass_exact_{name}", self._exact_pass_normal_acc_c[bucket] * bucket_scales[2]),
+                (f"strike_composite_success_exact_{name}", self._exact_pass_comp_acc_c[bucket] * bucket_scales[3]),
+                (f"racket_pos_error_exact_strike_{name}", self._exact_pos_err_sum_c[bucket] * bucket_scales[0]),
+                (f"racket_vel_error_exact_strike_{name}", self._exact_vel_err_sum_c[bucket] * bucket_scales[1]),
+                (f"racket_normal_error_deg_exact_strike_{name}", self._exact_nrm_err_sum_c[bucket] * bucket_scales[2]),
+            ):
+                publish(metric_name, value)
+            for channel, count in zip(
+                ("pos", "vel", "normal", "composite"), bucket_counts
+            ):
+                publish(
+                    f"strike_{channel}_target_eligible_sample_count_decayed_{name}",
+                    count,
+                )
+
     def _action_ball_diagnostic_device_telemetry_slot(
         self,
         group: str,
@@ -27762,19 +28011,56 @@ class RacketTargetCommand(CommandTerm):
                     else 0.0,
                 )
 
-    def materialize_action_ball_diagnostic_metrics_for_report(self) -> None:
-        """One explicit boundary for training logs and consumer-less evaluation."""
+    def materialize_action_ball_diagnostic_metrics_for_report(
+        self,
+        *,
+        expected_full_mdp_exact_row_counts: Optional[tuple[int, ...]] = None,
+    ) -> None:
+        """One explicit boundary for deferred command metrics and reporting."""
 
+        if expected_full_mdp_exact_row_counts is not None:
+            expected = expected_full_mdp_exact_row_counts
+            if (
+                type(expected) is not tuple
+                or not expected
+                or any(type(count) is not int or count < 1 for count in expected)
+                or len(set(expected)) != len(expected)
+            ):
+                raise RuntimeError(
+                    "full-MDP exact metric expected-row contract differs"
+                )
+            actual = len(
+                getattr(
+                    self,
+                    "_action_ball_full_mdp_pending_exact_metric_rows",
+                    (),
+                )
+            )
+            if actual not in expected:
+                raise RuntimeError(
+                    "full-MDP exact metric rollout row count differs: "
+                    f"actual={actual}, expected={expected}"
+                )
+        full_mdp_exact = self._flush_action_ball_full_mdp_exact_metric_rows()
         self._flush_diagnostic_hold_recovery_metric_scalars()
-        if not self._action_ball_diagnostic_device_telemetry_enabled():
-            return
-        self._flush_action_ball_diagnostic_device_telemetry()
-        self._refresh_action_ball_diagnostic_public_metrics()
+        diagnostic = self._action_ball_diagnostic_device_telemetry_enabled()
+        if diagnostic:
+            self._flush_action_ball_diagnostic_device_telemetry()
+        if full_mdp_exact or diagnostic:
+            self._refresh_action_ball_diagnostic_public_metrics()
+        if full_mdp_exact:
+            self._refresh_action_ball_exact_public_metrics()
 
     def assert_action_ball_diagnostic_metrics_materialized_for_report(
         self,
     ) -> None:
         """Reject a diagnostic report that skipped the explicit boundary."""
+
+        if getattr(self, "_action_ball_full_mdp_pending_exact_metric_rows", ()):
+            raise RuntimeError(
+                "full-MDP exact metrics are pending on device; call "
+                "materialize_action_ball_diagnostic_metrics_for_report() before reporting"
+            )
 
         if bool(
             getattr(
@@ -31225,13 +31511,23 @@ class RacketTargetCommand(CommandTerm):
         # serve scheduling, exact-strike serve-accuracy measurement, park drive. Off = no-op branch.
         if self._physical is not None:
             self._physical.update(exact_strike)
-        # Keep every reduction and the Python-float EMA recurrence unchanged.  Formal/default and
-        # non-VirtualBall variants retain their one ordered D2H here; diagnostic ActionBall reuses
-        # the exact-any packet above and therefore performs no second per-step host transfer.  The
-        # Pure reporting-only hold/recovery and swing ledgers stay device-resident until the PPO
-        # boundary; the exact metrics here remain immediate because adaptive sigma and the legacy
-        # perturbation curriculum consume them during training.
-        if _prefetched_diagnostic_host_values:
+        # FullMDP has neither adaptive sigma nor a reference-perturb success-gate consumer.  Keep
+        # its already-reduced rows on device and replay the exact Python-float recurrence at the
+        # existing PPO drain; all other configurations retain the immediate path.
+        _defer_exact_metrics = (
+            self._action_ball_full_mdp_deferred_exact_metrics_enabled()
+        )
+        if _defer_exact_metrics:
+            if _prefetched_diagnostic_host_values:
+                raise RuntimeError("full-MDP exact metrics unexpectedly used a host packet")
+            self._stage_action_ball_full_mdp_exact_metric_row(
+                _exact_metric_tensors,
+                decay=decay,
+                bucket_order=_exact_metric_bucket_order,
+            )
+            _exact_metric_values = iter((0.0,) * len(_exact_metric_tensors))
+            _exact_metric_recurrence_decay = 1.0
+        elif _prefetched_diagnostic_host_values:
             _exact_metric_width = len(_exact_metric_tensors)
             if len(_prefetched_diagnostic_host_values) != _exact_metric_width:
                 raise RuntimeError(
@@ -31240,40 +31536,42 @@ class RacketTargetCommand(CommandTerm):
             _exact_metric_values = iter(
                 _prefetched_diagnostic_host_values
             )
+            _exact_metric_recurrence_decay = decay
         else:
             _exact_metric_values = iter(
                 _batched_host_scalar_values(_exact_metric_tensors)
             )
-        self._exact_n_acc = decay * self._exact_n_acc + next(_exact_metric_values)
+            _exact_metric_recurrence_decay = decay
+        self._exact_n_acc = _exact_metric_recurrence_decay * self._exact_n_acc + next(_exact_metric_values)
         self._exact_pass_comp_acc = (
-            decay * self._exact_pass_comp_acc + next(_exact_metric_values)
+            _exact_metric_recurrence_decay * self._exact_pass_comp_acc + next(_exact_metric_values)
         )
         self._exact_pass_pos_acc = (
-            decay * self._exact_pass_pos_acc + next(_exact_metric_values)
+            _exact_metric_recurrence_decay * self._exact_pass_pos_acc + next(_exact_metric_values)
         )
         self._exact_pass_vel_acc = (
-            decay * self._exact_pass_vel_acc + next(_exact_metric_values)
+            _exact_metric_recurrence_decay * self._exact_pass_vel_acc + next(_exact_metric_values)
         )
         self._exact_pass_5cm_acc = (
-            decay * self._exact_pass_5cm_acc + next(_exact_metric_values)
+            _exact_metric_recurrence_decay * self._exact_pass_5cm_acc + next(_exact_metric_values)
         )
         self._exact_pass_10cm_acc = (
-            decay * self._exact_pass_10cm_acc + next(_exact_metric_values)
+            _exact_metric_recurrence_decay * self._exact_pass_10cm_acc + next(_exact_metric_values)
         )
         self._exact_pass_normal_acc = (
-            decay * self._exact_pass_normal_acc + next(_exact_metric_values)
+            _exact_metric_recurrence_decay * self._exact_pass_normal_acc + next(_exact_metric_values)
         )
         # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
         # counters above; per-clip variants exist further down but sigma needs one global signal.
         self._exact_pos_err_sum = (
-            decay * self._exact_pos_err_sum + next(_exact_metric_values)
+            _exact_metric_recurrence_decay * self._exact_pos_err_sum + next(_exact_metric_values)
         )
         self._exact_vel_err_sum = (
-            decay * self._exact_vel_err_sum + next(_exact_metric_values)
+            _exact_metric_recurrence_decay * self._exact_vel_err_sum + next(_exact_metric_values)
         )
         # 拍面通道:同一 decay/掩码,累加 exact-strike 面角误差(弧度)。见 adaptive_sigma_normal。
         self._exact_nrm_err_sum = (
-            decay * self._exact_nrm_err_sum + next(_exact_metric_values)
+            _exact_metric_recurrence_decay * self._exact_nrm_err_sum + next(_exact_metric_values)
         )
         if _stage1_sigma_metric_tensors:
             self._accumulate_stage1_adaptive_sigma_ledger(
@@ -31517,29 +31815,29 @@ class RacketTargetCommand(CommandTerm):
                     _bucket_nrm_err,
                 ) = _exact_metric_bucket_values[_c]
                 self._exact_n_acc_c[_c] = (
-                    decay * self._exact_n_acc_c[_c] + _bucket_n
+                    _exact_metric_recurrence_decay * self._exact_n_acc_c[_c] + _bucket_n
                 )
                 self._exact_pass_pos_acc_c[_c] = (
-                    decay * self._exact_pass_pos_acc_c[_c] + _bucket_pass_pos
+                    _exact_metric_recurrence_decay * self._exact_pass_pos_acc_c[_c] + _bucket_pass_pos
                 )
                 self._exact_pass_vel_acc_c[_c] = (
-                    decay * self._exact_pass_vel_acc_c[_c] + _bucket_pass_vel
+                    _exact_metric_recurrence_decay * self._exact_pass_vel_acc_c[_c] + _bucket_pass_vel
                 )
                 self._exact_pass_normal_acc_c[_c] = (
-                    decay * self._exact_pass_normal_acc_c[_c]
+                    _exact_metric_recurrence_decay * self._exact_pass_normal_acc_c[_c]
                     + _bucket_pass_normal
                 )
                 self._exact_pass_comp_acc_c[_c] = (
-                    decay * self._exact_pass_comp_acc_c[_c] + _bucket_pass_comp
+                    _exact_metric_recurrence_decay * self._exact_pass_comp_acc_c[_c] + _bucket_pass_comp
                 )
                 self._exact_pos_err_sum_c[_c] = (
-                    decay * self._exact_pos_err_sum_c[_c] + _bucket_pos_err
+                    _exact_metric_recurrence_decay * self._exact_pos_err_sum_c[_c] + _bucket_pos_err
                 )
                 self._exact_vel_err_sum_c[_c] = (
-                    decay * self._exact_vel_err_sum_c[_c] + _bucket_vel_err
+                    _exact_metric_recurrence_decay * self._exact_vel_err_sum_c[_c] + _bucket_vel_err
                 )
                 self._exact_nrm_err_sum_c[_c] = (
-                    decay * self._exact_nrm_err_sum_c[_c] + _bucket_nrm_err
+                    _exact_metric_recurrence_decay * self._exact_nrm_err_sum_c[_c] + _bucket_nrm_err
                 )
                 _n = self._exact_n_acc_c[_c]
                 (
