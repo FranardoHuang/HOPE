@@ -308,8 +308,8 @@ def test_affine_offset_is_runtime_default_not_physical_reset_pose():
     physical = np.asarray(ready["physical_ready"]["joint_pos_rad"])
     scale = np.asarray(plant["action_scale_rad"])
     expected_raw = (np.asarray(hold["hold_qdes_joint_pos_rad"]) - offset) / scale
-    assert np.count_nonzero(offset != physical) == 14
-    assert np.max(np.abs(offset - physical)) == pytest.approx(1.5199244618415833)
+    assert np.count_nonzero(offset != physical) == 29
+    assert np.max(np.abs(offset - physical)) == pytest.approx(1.1766382336094934)
     np.testing.assert_array_equal(
         np.asarray(hold["normalized_actor_action"]), expected_raw)
 

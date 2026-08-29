@@ -685,6 +685,25 @@ def test_schema2_binding_preserves_and_validates_runtime_plant_identity():
     binding["kind"] = "action_ball_dynamic_ready_runtime_binding_v2"
     for row in binding["rows"]:
         row["runtime_plant_identity"] = _schema2_runtime_plant_identity()
+        row["nonterminal_prefix_evidence"] = {
+            "completed_policy_steps": 60,
+            "completed_physics_steps": 240,
+            "completed_duration_s": 1.2,
+            "active_terminations": [
+                "time_out",
+                "base_fell_tilt",
+                "base_too_low",
+                "robot_hit_table",
+                "joint_qdes_forbidden",
+                "joint_actual_forbidden",
+            ],
+            "joint_safety_complete": True,
+            "current_actual_hard_edge_joint_count": 0,
+            "substep_actual_hard_edge_joint_count": 0,
+            "frame0_fidelity_telemetry": {
+                "formal_thresholds_adopted": False,
+            },
+        }
     unsigned = dict(binding)
     del unsigned["binding_sha256"]
     binding["binding_sha256"] = (

@@ -1742,7 +1742,7 @@ def test_consumer_locator_path_is_not_part_of_wire_identity(tmp_path):
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False
     )
-    relocated = tmp_path / "relocated" / "a3_pingpong.xml"
+    relocated = tmp_path / "relocated" / PLANT_XML.name
     relocated.parent.mkdir()
     relocated.write_bytes(PLANT_XML.read_bytes())
     summary = _consume(
