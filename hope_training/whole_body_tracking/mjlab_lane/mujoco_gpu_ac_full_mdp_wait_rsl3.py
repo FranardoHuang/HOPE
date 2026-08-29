@@ -606,6 +606,16 @@ def _wait_module():
     return module
 
 
+def _teacher_replay_module():
+    module = importlib.import_module("mujoco_full_mdp_teacher_replay")
+    expected = Path(__file__).with_name(
+        "mujoco_full_mdp_teacher_replay.py"
+    ).resolve()
+    if Path(getattr(module, "__file__", "")).resolve() != expected:
+        raise RuntimeError("MuJoCo teacher replay helper origin differs")
+    return module
+
+
 def _update_ledger_module():
     module = importlib.import_module("mujoco_full_mdp_update_ledger")
     expected = Path(__file__).with_name("mujoco_full_mdp_update_ledger.py").resolve()
@@ -922,6 +932,168 @@ def _run_controller_trace(
     return summary
 
 
+def _run_teacher_replay(
+    *, env, root: Path, identity: dict, ready_pose_payload: bytes,
+    steps: int, torch_module,
+) -> dict:
+    """Drive the live FullMDP owner with its own frozen measured teacher."""
+
+    import io
+    import numpy as np
+
+    helper = _teacher_replay_module()
+    if (
+        env.num_envs != helper.TEACHER_REPLAY_NUM_ENVS
+        or steps <= 0
+        or helper.TEACHER_REPLAY_ACTION_DELAY_STEPS != 0
+    ):
+        raise ValueError("teacher replay dimensions/delay differ")
+    env.enable_controller_trace()
+    env.enable_diagnostic_first_generic_contact_patch()
+    previous_qdes = env._full_a_policy_bootstrap_qdes.unsqueeze(0).clone()
+    hold_qdes = previous_qdes.clone()
+    rows = {name: [] for name in (
+        "common_step", "phase", "task_valid", "teacher_frame",
+        "motion_phase", "frozen_steps", "requested_qdes", "raw_action",
+        "executable_qdes", "actual_joint_pos", "actual_joint_vel",
+        "ball_center_w", "ball_lin_vel_w", "racket_site_w",
+        "racket_velocity_w", "racket_normal_w", "scheduled_due", "reveal",
+        "launch", "r03", "generic_contact", "selected_contact",
+        "opposite_contact", "edge_contact", "between_contact",
+        "invalid_contact", "crossing", "legal_landing", "done",
+        "termination_bits", "qdes_guard_intervention",
+    )}
+    question = launch = None
+    with torch_module.inference_mode():
+        for _ordinal in range(steps):
+            frozen = helper.remaining_teacher_frozen_steps(
+                torch=torch_module,
+                common_step=int(env.common_step_counter),
+                reveal_tick=env._epoch_clock_ticks[:, 0],
+                pre_swing_wait_s=env._full_a_pre_swing_wait_s,
+                step_dt=float(env.step_dt),
+            )
+            requested = helper.frozen_teacher_qdes(
+                torch=torch_module,
+                task_valid=env._epoch_task_valid,
+                hold_qdes=hold_qdes,
+                previous_qdes=previous_qdes,
+                teacher_qdes=env._full_a_teacher_joint_pos,
+                frozen_steps=frozen,
+                bridge=(
+                    _wait_module().portable_question
+                    .step_diagnostic_split_ready_qdes_bridge
+                ),
+            )
+            action = helper.decode_teacher_qdes_to_action(
+                torch=torch_module,
+                qdes=requested,
+                action_offset=env.action_offset,
+                action_scale=env.act_scale,
+            )
+            _obs, _reward, done, extras = env.step(action)
+            trace = env.controller_trace()
+            racket = env._full_a_racket_kinematics()
+            if bool(extras["full_a_reveal_event"][0]) and question is None:
+                question = env._epoch_task_f32[0].detach().clone()
+                launch = env._full_a_launch_state_f32[0].detach().clone()
+
+            def host(value):
+                return value.detach().cpu().numpy().copy()
+
+            rows["common_step"].append(int(env.common_step_counter))
+            rows["phase"].append(host(extras["full_a_phase_before_reset"]))
+            rows["task_valid"].append(host(env._epoch_task_valid))
+            rows["teacher_frame"].append(host(env._full_a_teacher_frame))
+            rows["motion_phase"].append(host(env._full_a_motion_phase_code))
+            rows["frozen_steps"].append(host(frozen))
+            rows["requested_qdes"].append(host(requested))
+            rows["raw_action"].append(host(action))
+            rows["executable_qdes"].append(host(trace["executable_qdes"]))
+            rows["actual_joint_pos"].append(host(env._qpos_act()))
+            rows["actual_joint_vel"].append(host(env._qvel_act()))
+            rows["ball_center_w"].append(host(env.sim.data.qpos[:, env.b_q:env.b_q + 3]))
+            rows["ball_lin_vel_w"].append(host(env.sim.data.qvel[:, env.b_v:env.b_v + 3]))
+            rows["racket_site_w"].append(host(racket[0] + env.env.scene.env_origins))
+            rows["racket_velocity_w"].append(host(racket[1]))
+            rows["racket_normal_w"].append(host(racket[2]))
+            event_names = {
+                "scheduled_due": "full_a_scheduled_due_event",
+                "reveal": "full_a_reveal_event", "launch": "full_a_launch_event",
+                "r03": "full_a_r03_present_event",
+                "generic_contact": "full_a_racket_contact_event",
+                "selected_contact": "full_a_selected_contact_event",
+                "opposite_contact": "full_a_opposite_contact_event",
+                "edge_contact": "full_a_edge_contact_event",
+                "between_contact": "full_a_between_contact_event",
+                "invalid_contact": "full_a_invalid_contact_event",
+                "crossing": "full_a_landing_crossing_event",
+            }
+            for name, key in event_names.items():
+                rows[name].append(host(extras[key]))
+            rows["legal_landing"].append(host(
+                extras["full_a_landing_on_opponent"]
+                & extras["full_a_landing_opponent_bound"]
+            ))
+            rows["done"].append(host(done))
+            rows["termination_bits"].append(host(extras["termination_bits"]))
+            rows["qdes_guard_intervention"].append(host(
+                extras["full_a_qdes_guard_intervention_event"]
+            ))
+            previous_qdes = requested
+    if question is None or launch is None:
+        raise RuntimeError("teacher replay never received a live accepted question")
+    arrays = {
+        name: np.asarray(values) if name == "common_step" else np.stack(values)
+        for name, values in rows.items()
+    }
+    arrays["question_f32"] = question.detach().cpu().numpy().astype(np.float32)
+    arrays["launch_f32"] = launch.detach().cpu().numpy().astype(np.float32)
+    buffer = io.BytesIO()
+    np.savez_compressed(buffer, **arrays)
+    trace_bytes = buffer.getvalue()
+    _write_fresh_bytes(root / "teacher_replay.npz", trace_bytes)
+    catalog = env._full_a_catalog
+    plant = identity["plant_model"]
+    summary = {
+        "schema_version": helper.TEACHER_REPLAY_SCHEMA_VERSION,
+        "kind": "action_ball_mujoco_full_mdp_frozen_teacher_replay_v1",
+        "diagnostic_unauthorized": True,
+        "training_authorized": False,
+        "checkpoint_authority": False,
+        "ppo_update_calls": 0,
+        "num_envs": int(env.num_envs),
+        "policy_steps": int(steps),
+        "run_identity": identity,
+        "manifest_file_sha256": catalog.manifest_file_sha256,
+        "manifest_canonical_sha256": catalog.manifest_canonical_sha256,
+        "motion_sha256": catalog.fresh_action.motion_sha256,
+        "ready_sha256": hashlib.sha256(ready_pose_payload).hexdigest(),
+        "plant_mjb_sha256": plant["source_plant"]["compiled_mjb_sha256"],
+        "runtime_mjb_sha256": plant["runtime_attach"]["final_augmented_mjb"]["sha256"],
+        "runtime_stack_sha256": _canonical_payload_sha256(identity["runtime_stack"]),
+        "question_f32_sha256": helper.tensor_f32_sha256(question),
+        "launch_f32_sha256": helper.tensor_f32_sha256(launch),
+        "action_delay": {"steps": 0, "source": "live MuJoCo action ABI"},
+        "trace_npz": "teacher_replay.npz",
+        "trace_npz_sha256": hashlib.sha256(trace_bytes).hexdigest(),
+        "generic_contact_patch": env.diagnostic_first_generic_contact_patch(),
+        "event_counts": {
+            name: int(np.count_nonzero(arrays[name]))
+            for name in (
+                "scheduled_due", "reveal", "launch", "r03",
+                "generic_contact", "selected_contact", "opposite_contact",
+                "edge_contact", "between_contact", "invalid_contact",
+                "crossing", "legal_landing", "done",
+                "qdes_guard_intervention",
+            )
+        },
+    }
+    payload = json.dumps(summary, sort_keys=True, separators=(",", ":")).encode()
+    _write_fresh_bytes(root / "summary.json", payload + b"\n")
+    return summary
+
+
 def _snapshot_root(raw: str | None) -> Path | None:
     if raw is None:
         return None
@@ -1159,6 +1331,9 @@ def main(
     diagnostic_controller_trace_output: str | None = None,
     diagnostic_controller_trace_action_tape: str | None = None,
     diagnostic_controller_trace_steps: int = 240,
+    diagnostic_teacher_replay: bool = False,
+    diagnostic_teacher_replay_output: str | None = None,
+    diagnostic_teacher_replay_steps: int = 180,
     _test_allow_small_full_a: bool = False,
 ) -> int:
     num_steps_per_env = NUM_STEPS_PER_ENV
@@ -1167,6 +1342,9 @@ def main(
         diagnostic_controller_trace_output,
         diagnostic_controller_trace_action_tape,
     ))
+    teacher_replay = diagnostic_teacher_replay or (
+        diagnostic_teacher_replay_output is not None
+    )
     if (
         type(num_envs) is not int
         or num_envs <= 0
@@ -1175,10 +1353,26 @@ def main(
         or type(full_a_mode) is not bool
         or type(diagnostic_rate_probe) is not bool
         or type(diagnostic_controller_trace_steps) is not int
+        or type(diagnostic_teacher_replay) is not bool
+        or type(diagnostic_teacher_replay_steps) is not int
         or type(_test_allow_small_full_a) is not bool
         or type(save_interval) is not int or save_interval != FULL_A_SAVE_INTERVAL
     ):
         raise ValueError("runner dimensions/mode differ")
+    if teacher_replay and (
+        not diagnostic_teacher_replay
+        or not full_a_mode
+        or controller_trace
+        or diagnostic_rate_probe
+        or diagnostic_teacher_replay_output is None
+        or diagnostic_teacher_replay_steps <= 0
+        or num_envs != 1
+        or num_updates != 1
+    ):
+        raise ValueError(
+            "teacher replay requires --full-a, N=1, one unused update, one output, "
+            "and no other diagnostic mode"
+        )
     if diagnostic_rate_probe and not full_a_mode:
         raise ValueError("diagnostic rate probe requires --full-a")
     if controller_trace and (
@@ -1192,7 +1386,10 @@ def main(
             "controller trace requires --full-a, checkpoint/output, exactly 240 steps, "
             "and no rate probe"
         )
-    production_full_a = full_a_mode and not diagnostic_rate_probe and not controller_trace
+    production_full_a = (
+        full_a_mode and not diagnostic_rate_probe and not controller_trace
+        and not teacher_replay
+    )
     if production_full_a and (
         evidence_jsonl is None or snapshot_dir is None or completion_json is None
     ):
@@ -1207,6 +1404,10 @@ def main(
         evidence_jsonl, snapshot_dir, completion_json,
     )):
         raise ValueError("controller trace forbids training evidence/snapshot/completion paths")
+    if teacher_replay and any(value is not None for value in (
+        evidence_jsonl, snapshot_dir, completion_json,
+    )):
+        raise ValueError("teacher replay forbids training evidence/snapshot/completion paths")
     if not full_a_mode and any(value is not None for value in (
         evidence_jsonl, snapshot_dir, completion_json, source_commit, run_namespace,
         mujoco_warp_runtime_site,
@@ -1215,11 +1416,12 @@ def main(
     expected_updates = (
         RATE_PROBE_NUM_UPDATES if diagnostic_rate_probe else FULL_A_NUM_UPDATES
     )
-    if full_a_mode and not _test_allow_small_full_a and (
+    if full_a_mode and not _test_allow_small_full_a and not teacher_replay and (
         num_envs != FULL_A_NUM_ENVS
-        or (not controller_trace and num_updates != expected_updates)
+        or (not controller_trace and not teacher_replay and num_updates != expected_updates)
     ):
         label = (
+            "teacher replay" if teacher_replay else
             "controller trace" if controller_trace else
             "diagnostic rate probe" if diagnostic_rate_probe else
             "production MuJoCo Full-A"
@@ -1255,6 +1457,10 @@ def main(
     if controller_trace:
         artifact_root = _fresh_controller_trace_root(
             diagnostic_controller_trace_output
+        )
+    elif teacher_replay:
+        artifact_root = _fresh_controller_trace_root(
+            diagnostic_teacher_replay_output
         )
     elif full_a_mode:
         artifact_root = _full_a_artifact_root(
@@ -1328,6 +1534,21 @@ def main(
         or not bool(torch.isfinite(initial["critic"]).all())
     ):
         raise RuntimeError("MuJoCo WAIT initial RSL3 surface differs")
+
+    if teacher_replay:
+        summary = _run_teacher_replay(
+            env=env,
+            root=artifact_root,
+            identity=identity,
+            ready_pose_payload=ready_pose_payload,
+            steps=diagnostic_teacher_replay_steps,
+            torch_module=torch,
+        )
+        _best_effort_stdout_marker(
+            "ACTION_BALL_MUJOCO_TEACHER_REPLAY_JSON="
+            + json.dumps(summary, sort_keys=True)
+        )
+        return 0
 
     ledger = None
     if full_a_mode and not controller_trace:
@@ -1624,6 +1845,11 @@ if __name__ == "__main__":
     parser.add_argument("--diagnostic-controller-trace-action-tape")
     parser.add_argument(
         "--diagnostic-controller-trace-steps", type=int, default=240
+    )
+    parser.add_argument("--diagnostic-teacher-replay", action="store_true")
+    parser.add_argument("--diagnostic-teacher-replay-output")
+    parser.add_argument(
+        "--diagnostic-teacher-replay-steps", type=int, default=180
     )
     parser.add_argument("--evidence-jsonl")
     parser.add_argument("--snapshot-dir")

@@ -1,5 +1,14 @@
 # 简短进度记录
 
+## 2026-08-30 — FullMDP N=1 frozen-teacher replay候选实现
+
+- 基于`8200c4a2`增加opt-in MuJoCo frozen-teacher诊断候选：仍由现役owner生成
+  due/task/launch，请求qdes走dynamic-ready hold、frame0 bridge、vendor affine decoder、shared guard和
+  真实PD plant；不跑PPO、不保存checkpoint。另增首个backend generic ball/racket contact
+  patch的显式opt-in取证，默认训练热路不分配patch tensor、不D2H、不调force kernel。
+  当前只有静态AST/`git diff --check`证据；Pod CPU单测、真实CUDA N=1回放与contact patch
+  finite/lineage验收仍为`unverified`，不授权训练或物理结论。
+
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 
 - fresh 4× Mu到ACK623后，matched旧Mu的raw/selected/crossing=`56/5/2` vs `1,665/334/281`，最近10轮

@@ -531,6 +531,126 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         return self._full_a_contact_force_f32[:, 0]
 
+    def enable_diagnostic_first_generic_contact_patch(self) -> None:
+        """Opt into one host contact patch for the N=1 teacher replay only.
+
+        The training path never calls this method.  Consequently its hot loop
+        owns no patch buffers, contact-row selection, host transfer, or device
+        synchronization.  The diagnostic deliberately pays those costs once,
+        at the first backend-observed generic ball/racket contact.
+        """
+
+        if not getattr(self, "full_a_mode", False) or self.num_envs != 1:
+            raise RuntimeError(
+                "generic contact patch requires one FullMDP diagnostic world"
+            )
+        if hasattr(self, "_diagnostic_first_generic_contact_patch"):
+            raise RuntimeError("generic contact patch diagnostic already enabled")
+        contact = self.sim.data.contact
+        required = ("geom", "worldid", "pos", "frame", "dist")
+        if any(not hasattr(contact, name) for name in required):
+            raise RuntimeError("MuJoCo-Warp generic contact patch surface differs")
+        try:
+            import warp as wp
+
+            self._diagnostic_contact_patch_tensors = {
+                name: (
+                    value if self._torch.is_tensor(value) else wp.to_torch(value)
+                )
+                for name in ("pos", "frame", "dist")
+                for value in (getattr(contact, name),)
+            }
+        except Exception as exc:
+            raise RuntimeError(
+                "MuJoCo-Warp generic contact patch tensor bridge differs"
+            ) from exc
+        self._diagnostic_first_generic_contact_patch = None
+        self._diagnostic_contact_patch_consumer = (
+            self._capture_diagnostic_first_generic_contact_patch
+        )
+
+    def _capture_diagnostic_first_generic_contact_patch(
+        self, *, first_contact, classification, substep_index
+    ) -> None:
+        """Capture the first live generic ball/racket row without reclassifying."""
+
+        if self._diagnostic_first_generic_contact_patch is not None:
+            return
+        if tuple(first_contact.shape) != (1,) or not bool(first_contact[0]):
+            return
+        torch = self._torch
+        geom = self._con_geom[:]
+        valid = self._con_idx < self._nacon[0]
+        g0, g1 = geom[:, 0], geom[:, 1]
+        ball0, ball1 = g0.eq(self._ball_gid), g1.eq(self._ball_gid)
+        partner = torch.where(ball0, g1, g0).long()
+        rows = (
+            valid
+            & (ball0 | ball1)
+            & self._geom_class[partner].eq(1)
+            & self._con_world[:].long().eq(0)
+        )
+        selected = rows.nonzero(as_tuple=False).squeeze(-1)
+        if selected.numel() == 0:
+            raise RuntimeError(
+                "generic contact event has no matching backend contact row"
+            )
+        index = int(selected[0].item())
+        force = self._full_a_contact_normal_force()
+        raw_force = self._full_a_contact_force_f32[index].detach().cpu()
+        normal_force = float(force[index].detach().cpu().item())
+        timestep = float(self.mj_model.opt.timestep)
+        def host_values(name):
+            value = self._diagnostic_contact_patch_tensors[name][index]
+            return value.detach().cpu().reshape(-1).tolist()
+
+        geom_ids = [int(value) for value in geom[index].detach().cpu().tolist()]
+        raw_frame = [float(value) for value in host_values("frame")]
+        raw_normal = raw_frame[:3]
+        normal_sign = 1.0 if geom_ids[0] == self._ball_gid else -1.0
+        self._diagnostic_first_generic_contact_patch = {
+            "present": True,
+            "control_step_before_advance": int(self.common_step_counter),
+            "physics_substep_index": (
+                None if substep_index is None else int(substep_index)
+            ),
+            "contact_row_index": index,
+            "geom_ids": geom_ids,
+            "position_w_m": [float(value) for value in host_values("pos")],
+            "frame_w_from_contact": raw_frame,
+            "normal_ball_to_racket_w": [
+                normal_sign * value for value in raw_normal
+            ],
+            "distance_m": float(host_values("dist")[0]),
+            "contact_force_6d_backend": [
+                float(value) for value in raw_force.reshape(-1).tolist()
+            ],
+            "normal_force_n_backend": normal_force,
+            "normal_impulse_ns_derived": normal_force * timestep,
+            "physics_timestep_s": timestep,
+            "classification_status": int(
+                classification["status"][0].detach().cpu().item()
+            ),
+            "selected": bool(classification["selected"][0].detach().cpu().item()),
+            "opposite": bool(classification["opposite"][0].detach().cpu().item()),
+            "edge_or_rim_ambiguous": bool(
+                classification["edge_or_rim_ambiguous"][0].detach().cpu().item()
+            ),
+            "between_planes_ambiguous": bool(
+                classification["between_planes_ambiguous"][0]
+                .detach().cpu().item()
+            ),
+            "invalid": bool(classification["invalid"][0].detach().cpu().item()),
+        }
+
+    def diagnostic_first_generic_contact_patch(self) -> dict:
+        """Return a detached diagnostic patch or an explicit no-contact row."""
+
+        if not hasattr(self, "_diagnostic_first_generic_contact_patch"):
+            raise RuntimeError("generic contact patch diagnostic is not enabled")
+        patch = self._diagnostic_first_generic_contact_patch
+        return {"present": False} if patch is None else dict(patch)
+
     def _initialize_full_a_state(self) -> None:
         """Allocate the one row-wise state used by the optional A slice."""
 
@@ -981,7 +1101,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_reveal_rows(reveal_ids)
         return reveal, due, deferred, due_terminal_overlap
 
-    def _full_a_latch_ball_contacts(self, contact_census=None) -> None:
+    def _full_a_latch_ball_contacts(
+        self, contact_census=None, diagnostic_substep_index=None
+    ) -> None:
         """Consume one shared census, then latch net/landing-plane crossings."""
 
         torch = self._torch
@@ -1008,6 +1130,15 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 mount_normal_sign=self._full_a_mount_normal_sign,
             )
         )
+        patch_consumer = getattr(
+            self, "_diagnostic_contact_patch_consumer", None
+        )
+        if patch_consumer is not None:
+            patch_consumer(
+                first_contact=first_contact,
+                classification=classification,
+                substep_index=diagnostic_substep_index,
+            )
         self._full_a_contact_center.copy_(
             torch.where(first_contact[:, None], center, self._full_a_contact_center)
         )
@@ -2067,7 +2198,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                     raise RuntimeError(
                         "FullMDP physics substep contact census is absent"
                     )
-                self._full_a_latch_ball_contacts(contact_census)
+                self._full_a_latch_ball_contacts(
+                    contact_census,
+                    diagnostic_substep_index=substep_index,
+                )
 
     def _latch_post_forward_table_keepout(self) -> None:
         self._cur_table_keepout |= self._table_keepout.sample(self.sim.data)
@@ -3029,7 +3163,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         final_contact_census = A3ReadyBallVecEnv._contact_census(self)
         self._latch_post_forward_resolved_table_contacts(final_contact_census)
         self._latch_post_forward_table_keepout()
-        self._full_a_latch_ball_contacts(final_contact_census)
+        self._full_a_latch_ball_contacts(
+            final_contact_census,
+            diagnostic_substep_index=self.decimation,
+        )
         if self._cap_ok:
             self._probe_capacity("forward")
         st = self._state()
