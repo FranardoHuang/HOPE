@@ -14,6 +14,24 @@ plant/controller/integrator/contact response；若继续归因，下一最小实
 下的substep effort/clamp、constraint impulse及同torque tape，而不是增加task Gate。fixed tape没有physics
 PASS阈值，行为接近也不等于数值parity；G06仍`Partial / diagnostic_unauthorized=true`。
 
+旧V9 launcher的wrong-object根因已经闭合：它显式传入legacy `a3_pingpong.xml`，不是Jiayi讨论的A3P0807。
+这使旧run的sim2sim差异不可比，但不推出整个Pod安装损坏。correct-0807、同clean source `954200d5`的fresh
+双端现持续训练；首个Mu root因fresh checkout缺ignored 0807 `meshes/`在首ACK前fail-closed，恢复
+[setup记录](../operations/setup_local_sync.md#restore-the-ignored-a3p0807-mujoco-mesh-closure)后以新root启动，
+没有复用失败namespace。`observed_at=2026-08-28T23:53:00Z`时Isaac/Mu到ACK196/492；Isaac累计
+contact=`0/12,847 launch`，Mu recent50 launch/selected/raw/landing=`6,788/1/30/0`、累计selected=
+`1/63,605 launch`。这是真实学习证据，不是physics parity分母；唯一selected contact远未达到hit基本成功。
+Mu recent50 p50/p90=`6.638/6.728 s/H48`，两端finite与durable边界clean。
+
+当前Isaac run的live identity又直接记录Python `3.11.13`、Torch `2.7.0+cu128`、RSL-RL `3.1.2`、
+TensorDict `0.10.0`，AppLauncher来自`IsaacLab-8320e0be`、Isaac Sim路径为`5.1.0`；这些与Jiayi的
+environment reproduction合同一致。因此已证wrong-object是Mu plant选择，不是通用软件栈装错。若Jiayi
+本机动作仍不同，差异必须由其actual runtime/asset/controller receipt来定位，不能把文档版本名代替行为对照。
+
+当前sim2sim裁决缺的不是另一个“响应差异必须小”的安全Gate，而是匹配对象：Jiayi本机exact asset SHA、
+implicit/explicit actuator backend、clamp/effort、friction/contact参数、substep clock以及同一31-D tape。
+在该receipt缺失前，G06只保留“首差已定位到controller/plant response”的事实，不调policy来补偿未知sim差异。
+
 ## 2026-08-28 V9同源课程双端复核（仍`Partial`）
 
 clean exact source=`eb57233b4522d527455a0cbd7c547eb2ec49a68c`的双fresh长期replacement已在Pod1运行。

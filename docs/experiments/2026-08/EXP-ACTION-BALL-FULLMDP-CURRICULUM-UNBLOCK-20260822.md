@@ -1074,11 +1074,59 @@ reward/sim=`16.144/14.866 s`。profile含首个`A=512`冷capture，且inclusive 
 target/gather/kernel与same-writer identity回声，再评估D05 one-shot candidate transport；保持28个ordinal、
 付款chronology、H48、solver12轮、物理步和观测合同，不新增owner、receipt或“成功即安全”Gate。
 
-2026-08-29的active V9只读窗已经不是“阶段未开”：Mu updates `5143..5192`的
-due/reveal/launch/selected contact=`6,198/6,185/6,072/0`、episode mean=`202.53 tick`、wall median=
-`6.475 s/H48`；Isaac updates `1543..1592`的due/accept/playback/launch/selected contact=
-`8,441/8,437/8,420/7,477/0`、episode mean=`146.10 tick`、wall median=`22.10 s/H48`。两端都有高eligible分母而selected hit仍为0，应在R8精确候选通过后替换；V9 Mu使用
-legacy plant，故这项negative不能移签R8。
+Reward28 cycle-local执行减法随后由`954200d5beb770d9622e922aabff508b6181409a`闭合。construction只绑定
+unbound dispatcher/evaluator一次；R06缓存frozen source并保留逐ordinal原算术；paddle四项只读一次同clock
+teacher-achieved误差，但继续保存四个原生contiguous scalar kernel列，避免一次向量广播造成最多3 ULP变化。
+optional telemetry malformed/absent只记unavailable，不污染训练；regularization unbound调用漏传env也由反例
+修复。没有新增owner、receipt、per-call parity或跨cycle cache。Pod分进程CPU=`278 passed`，exact CUDA完整
+lean reward=`50 passed`，production净增约128行。GPU1自然退出的12轮profile receipt/log SHA-256=
+`890441e2…4013`/`76abb8b8…1922`：reward累计`14.328 s/576=24.87 ms/call`，相对上一版
+`28.03 ms/call`降`11.3%`；inclusive D05/sim/observation分别=`23.251/15.080/6.094 s`，profile-on不作速度
+结论。同GPU profiler-off 61轮receipt/log SHA-256=`541e9516…b929`/`a91a46bf…e9e8`，warmup10、measure50、
+tail1的p50/p90=`15.280/19.654 s/H48`，与上一版`15.135/19.779`基本持平。因此本刀只授权结构减法与局部
+reward wall改善，明确未达到约6秒方向目标；下一纯执行候选是construction-static regularization geometry，
+不先改逐entry Epoch journal或durable边界。
+
+regularization候选随后由`7ce9f120155c4e0f280bd00af07677a6880e0c86`闭合：construction冻结一份一致
+joint geometry，重复bind、未bind消费和source in-place mutation均fail-loud；热路仍逐row检查动态有限性与
+projection，不把静态自证变成新Gate。Pod组合=`123 passed,5 skipped`，exact CUDA lean Reward=
+`52 passed`。12-update profile receipt/log SHA-256=`779fbae8…e90d0`/`72658fab…e282`，reward累计
+`13.013 s/576=22.59 ms/call`，相对`954200d5`的`24.87 ms/call`改善`9.2%`。同GPU profiler-off
+61-update receipt/log SHA-256=`903834a2…510a2`/`092c3b2e…8ecd`，warmup10、measure50、tail1的
+p50/p90=`14.880/19.364 s/H48`，相对`15.280/19.654`仅改善约`2.6%/1.5%`。因此采用该结构减法，但
+iteration主墙仍未解决；下一候选只收窄Reward实际消费的Epoch before-image，保留public完整record、journal
+bytes、ordinal chronology、carry与durable事实，不把账本本身当冗余安全壳删除。
+
+该窄before-image由`c53d3b319a7e4020b3d8802300b5fcc8901634bc`实现。public
+`open_reward_cycle()`继续返回完整隔离`ActionEpochRecord`；只有sealed Lean Reward在同一OPEN operation后
+取得19-tensor immutable snapshot，14份payment image、journal names/bytes、commit/version、carry/schema
+均不变。理论`N=4096,K=1`每control step复制/聚合输出从约64个、`8.453 MiB`降到19个、`2.000 MiB`。
+Pod exact Epoch+Reward=`160 passed`、CUDA Reward=`52 passed`，regularization/runtime/install分进程=
+`8/36/24 passed`。四模块同进程命令的75个canonical identity失败在未改`7ce9f120`逐项复现，故记录为
+既有test-harness module pollution，不把它吞成PASS，也不误归因production。12-update profile receipt/log
+SHA-256=`f3d4f8cb…f065`/`9dff3d8f…cbbd`；reward=`21.22 ms/call`，相对`22.59`改善`6.1%`，但collection
+中位只从`8.967`到`8.897 s/update`。同GPU profiler-off 61-update receipt/log SHA-256=
+`048b819b…5524`/`98d04235…e540`，warmup10、measure50、tail1的p50/p90=`14.740/19.150 s/H48`，
+相对`7ce9f120`仅改善约`.9%/1.1%`。局部执行收益不代签iteration目标，也不足以支持继续堆同类微补丁。
+
+V9最终只读冻结窗已不是“阶段未开”。Mu updates `7053..7102`的due/reveal=`11,384/11,384`、每项playback
+误差样本=`182,295`，但launch/raw/selected=`0/0/0`，episode length/return=`108.07/9.99`且
+`11,380/11,380`个episode含tilt；累计launch/raw/selected=`809,422/7,153/188`，opponent landing=0。
+Isaac updates `2119..2168`的due/accept/playback/launch/raw contact=`8,046/8,039/8,018/7,632/0`，episode
+length/return=`153.05/15.07`；四误差只有相邻窗弱改善，累计raw contact仍`0/262,249 launch`。两端旧run
+随后按exact PID/startticks/PGID/source/namespace停止并保留root；该negative不移签正确0807。
+
+fresh正确0807双端现绑定同一clean source `954200d5`与R8 physical birth：Isaac namespace=
+`fullmdp-r12-0807-isaac-rewardpack-954200d5-20260828T2245Z`，Mu namespace=
+`fullmdp-r12-0807-mujoco-rewardpack-954200d5-20260828T2254Z-r2`。首个Mu root因ignored `meshes/`未同步而在
+plant closure scan、首ACK前fail-closed；按现有asset恢复路径补齐后使用fresh `-r2`，没有复用失败root。
+`observed_at=2026-08-28T23:53:00Z`时Isaac ACK0..196、Mu ACK0..492均为Reward28、finite、conservation
+fault0与attributed fault0；Mu每条ACK明确绑定A3P0807 root SHA `7bbda723…bcae1`。Isaac recent50
+episode length/return=`126.54/13.06`，due/accept/playback/launch/contact=
+`9,725/9,716/9,683/4,337/0`，wall p50/p90=`20.940/21.215 s/H48`，累计contact=`0/12,847 launch`；Mu recent50 episode length/return=
+`150.67/16.90`，due/launch/R03-valid/selected/raw/landing=`8,183/6,788/5,425/1/30/0`，wall p50/p90=
+`6.638/6.728 s/H48`。这证明balance生存改善与task入口重叠，但mimic四误差仍方向混合；Mu单次selected
+contact只证明hit可达，远未达到基本成功，landing仍为0。
 
 source链为`651c305e`（原子action identity）→`cbf0aae3`（tick48）→`e3cbe9fc`（保持generic future-tick
 fixture中性）。本地/Pod active-schedule聚焦矩阵为`53 passed`；更广矩阵的4个失败是旧Reward ordinal与fake

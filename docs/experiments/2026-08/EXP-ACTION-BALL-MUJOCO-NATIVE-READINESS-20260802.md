@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`V9-dual-fresh-running-read-only / R8-replacement-validating / no-authorized-formal-run`
+- 状态：`correct-0807-dual-fresh-running / performance-optimizing / no-authorized-formal-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -65,17 +65,19 @@ R8 Mu 61-update profiler-off窗已自然完成：p50/p90=`6.962/7.018 s/H48`，e
 `135.31→138.44`，actual-hard-edge rows=`4.96%→8.73%`；四项paddle误差两坏两好，contact=
 `0/6,523 launch`。该窗只证明finite与启动分布可迭代。旧V9长窗的口径已复核：先前
 `7,139/517,214`是generic `racket_contact_rows`，不是课程合同要求的selected contact。冻结前缀中首次
-selected contact是update473；最佳selected-rate 50窗也只有`36/6,926=.520%`。当前正确累计为
-`188/538,008 launch=.0349%`，landing=`0/188 selected contact`；raw contact的`96.15%`是edge，recent50
-episode mean已塌到`105.59 tick`且launch=0。所以旧错误plant谱系只证明极稀疏hit曾可达后被遗忘，不能
-移签R8；也不能把generic接触均值冒充当前击球能力。
+selected contact是update473；最佳selected-rate 50窗也只有`36/6,926=.520%`，且raw contact的`96.15%`
+是edge。下面更新的稳定前缀继续证明极稀疏hit曾可达后被遗忘；旧错误plant谱系不能移签R8，也不能把
+generic接触均值冒充当前击球能力。
 
-active V9的最新只读窗（2026-08-29）已有真实课程分母：Mu updates `4926..4975`的
-due/reveal/launch/selected contact=`7,818/7,648/5,267/0`，episode mean=`233.25 tick`，四项mimic误差=
-`.364 m/1.067 mps/1.240 rad/1.228 rad`；Isaac updates `1481..1530`的
-due/accept/playback/launch/selected contact=`8,454/8,451/8,431/7,392/0`，episode mean=`145.80 tick`，
-四项误差=`.286 m/.951 mps/1.350 rad/1.097 rad`。因此V9是应替换的高eligible分母negative，不是
-“课程未开”或继续等待对象；错误Mu plant又使它不能裁决R8/A3P0807。
+V9的`2026-08-28T22:43:14Z`最终只读前缀已有真实课程分母。Mu recent50 updates `7053..7102`的
+due/reveal=`11,384/11,384`、每项playback误差样本=`182,295`，但launch/raw/selected=`0/0/0`；episode
+length/return=`108.07/9.99`且`11,380/11,380`个episode含tilt，四误差=
+`.3677 m/1.5798 mps/.9754 rad/.9556 rad`。累计launch/raw/selected=`809,422/7,153/188`，landing=
+`0/188 selected`。Isaac recent50 updates `2119..2168`的scheduled/due/admitted/playback=
+`8,048/8,046/8,039/8,018`，launch/raw actor-pair contact=`7,632/0`；episode length/return=
+`153.05/15.07`，每项误差分母=`535,048`，四误差=`.3010 m/.9259 mps/1.2981 rad/1.0928 rad`。
+Isaac相邻窗只是弱改善，累计raw contact仍`0/262,249 launch`；selected-rubber写`not_produced`、landing
+写`未测`。V9最终停止并保留root，不再继续等待；其错误Mu plant仍使negative不能移签R8/A3P0807。
 
 R8 Isaac 61-update profiler-off窗为p50/p90=`21.455/27.455 s/H48`，episode mean
 `97.26→107.96`；paddle position/velocity/long-axis三项改善、face变差。全窗
@@ -86,6 +88,30 @@ reason/counter/safety与100-step RK4，且mixed fixed tape的完整projection及
 相等；但Pod真实profile否决了它：12 updates的D05 question累计从旧dense的`18.16 s`回归到`98.72 s`，
 collection中位从`8.05 s`回归到`16.17 s`。减少numeric rows不等于GPU加速；小batch、最多3次动态
 `nonzero`与额外kernel launch破坏并行。该实现已撤回，恢复单一mask-first seam与三轮一次性dense compose。
+
+solver单图与Reward28 cycle-local减法后的最终clean source为`954200d5beb770d9622e922aabff508b6181409a`。
+Reward dispatcher只在construction绑定一次，paddle/R06只缓存同cycle不可变输入；optional telemetry不参与
+训练权威，未新增Gate或owner。Pod CPU/CUDA聚焦=`278/50 passed`；reward span约降`11.3%`，但同GPU
+profiler-off p50/p90=`15.280/19.654 s/H48`，与上一版`15.135/19.779`基本持平，故没有达到约6秒方向目标。
+`7ce9f120`把regularization静态几何绑定一次后，reward span=`24.87→22.59 ms/call`，但同口径整轮仅到
+`14.880/19.364 s/H48`，相对上一版改善约`2.6%/1.5%`，仍不是iteration目标闭合。详细receipt/hash与
+下一窄Epoch Reward before-image候选只认
+[课程实验](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#single-a512-cuda-graph)。
+该候选`c53d3b31`的profile reward=`21.22 ms/call`，profiler-off整轮=
+`14.740/19.150 s/H48`，相对`7ce9f120`仅改善约`.9%/1.1%`。它是结构清债，不改变本实验的Mu plant、
+controller或学习结论，也不支持为追求速度删除跨writer/journal事实。
+
+旧V9按精确进程身份收口后，正确0807的双fresh长期run已启动。Isaac namespace=
+`fullmdp-r12-0807-isaac-rewardpack-954200d5-20260828T2245Z`；Mu namespace=
+`fullmdp-r12-0807-mujoco-rewardpack-954200d5-20260828T2254Z-r2`。首个Mu root因ignored `meshes/`未同步而在
+source-closure scan、首ACK前fail-closed；补齐现有受控资产后使用fresh `-r2`，失败root未复用。
+`observed_at=2026-08-28T23:53:00Z`时Isaac已到ACK196：recent50 episode length/return=`126.54/13.06`，wall p50/p90=`20.940/21.215 s/H48`，
+due/accept/playback/launch/contact=`9,725/9,716/9,683/4,337/0`，累计contact=`0/12,847 launch`。
+Mu已到ACK492：recent50 episode length/return=`150.67/16.90`，due/launch/R03-valid/selected/raw/landing=
+`8,183/6,788/5,425/1/30/0`，wall p50/p90=`6.638/6.728 s/H48`；累计selected=`1/63,605 launch`。
+两端均Reward28、finite、conservation/attributed fault0；Mu每条ACK绑定正确A3P0807 SHA
+`7bbda723…bcae1`。balance生存已改善，mimic仍方向混合；单次selected contact只证明hit可达，不证明
+sim2sim parity、mimic成功、hit基本成功或landing。
 
 Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝试给带`__slots__`、无instance
 `__dict__`的`PhysicalQuestionNumericCore`安装3个leaf wrapper。production/profile-off不受影响；修复是删除

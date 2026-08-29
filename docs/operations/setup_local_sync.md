@@ -69,6 +69,7 @@ git check-ignore -q vendor_assets
 | Venue `$BALLFIT_DATA_ROOT/analysis/segments/strikes.json` (current Pod copy: `/workspace/yikang/latest_data/analysis/segments/strikes.json`) | Detected real racket contacts used for the conservative A-B-A next-task timing audit | Generated from the 2026-07-03 venue mocap pipeline; current file SHA-256 `6ad3c45959c94b6fdd4033130403c32e0f1b612a138738c12afa43a58f752841` | G05 continuous-timing design; G03 ball fit |
 | ChingMu same-clock source: local `/Users/Franco/Downloads/ChingMu_Selected`; Pod `/workspace/yikang/a3_vendor_194d_physical_83b5ba8e/ChingMu_Selected`; retarget PKL `/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2` | Raw delivery has 41 human BVH, 41 racket BVH, 41 table BVH and 26 ball BVH at 120 Hz. The canonical source manifest contains 74 units with 74/74 unit NPZ+JSON and 74/74 PKL on Pod; the 73-action catalog explicitly excludes `Take_085_unit00_FH`. Unit NPZ carries blade/butt/signed-normal in one clock | **LOCATED; preserve source and every historical bank.** The v3 bank is revoked because its long axis was 45 degrees wrong. Corrected kinematic root: `/workspace/codexschema/chingmu_racket_v4d_exact_20260803.kRiC8j`; repo sibling `assets/motions/chingmu73_measured_v4_20260803`; completion/import receipt SHA `c45768b0...ab9a1` / `e6f0283f...727a82`; solver/materializer/auditor/resigner SHA `d6d6bfdd...57af5` / `34cf0f4c...99fe4` / `ddcb90b3...cddfa` / `32ee85be...bac9`. Kinematic admission is 73/73, but mechanical admission fails: 37/73 velocity and 58/73 limit-margin counterexamples. It is diagnostic-only, not training/promotion authority | G03 measured-racket calibration; G05 canonical N1; MuJoCo successor |
 | Tracked `assets/motions/chingmu73_measured_a3p0807_20260808/` plus `configs/action_ball_chingmu73_measured_a3p0807_f10_20260819.json` | FullMDP successor's 73 ordered teachers re-solved on the runtime 0807 A3P plant; frame-0 `pelvis_link` yaw is exact-grounded and action UIDs are rebound to the new motion bytes | Restore from the exact Git commit, never substitute the old v4 plant bank. Global audit remains `mechanical_admission=false` with 0/73 admitted (joint position/velocity plus missing vendor acceleration/torque-speed/ID evidence), so this is diagnostic lineage only | G05 FullMDP A/C diagnostic longrun |
+| `agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3p_pingpong_0807/meshes/` | Ignored A3P0807 MuJoCo mesh closure required by the tracked `a3p_pingpong_0807.xml`; a detached checkout contains the XML but not these bytes | On Pod1 restore only from `/workspace/franco/a3p_0807_verify_20260807/a3p_pingpong_0807/meshes/` into the same checkout-relative path, excluding Apple `._*` metadata. The canonical payload is 92 files / 25,331,878 bytes; sorted relative-path `sha256sum` manifest digest is `8c0ab325c4e1c912303e09742f534603f1600cfe3888e879f20d6da4907eb2b0`. Require the tracked root XML SHA-256 `7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1`; never substitute legacy `a3_pingpong/meshes` | G06 portable MuJoCo Full-A construction and longrun |
 | `vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl` | portable MuJoCo Full-A binder使用的exact upstream RSL-RL 3.1.2 wheel；只供fresh run-local隔离site，不替换ambient Pod环境 | Pod1 preserved source `/workspace/franco/mktemp/mujoco-fullmdp-wait-rsl3-host.20260818T112000CST/wheelhouse/rsl_rl_lib-3.1.2-py3-none-any.whl`；SHA-256 `406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d` | G06 portable MuJoCo focused gate及successor长跑 |
 | `vendor_assets/mujoco_warp_3_10_0_3_source/mujoco_warp-3.10.0.3.tar.gz` | project-owned EPA48 fork的exact upstream源码输入；不是可执行wheel | PyPI `mujoco-warp==3.10.0.3` sdist，tag `v3.10.0.3` / commit `710c34ca…5728`，SHA-256 `f22196465cb1350677f66d8b65aa23bf37d95e150ce3ba3c68ea934ba35e3070`；按下文显式恢复 | G06 EPA horizon build chain |
 | `vendor_assets/mujoco_warp_epa48_1/` | ignored、no-clobber的`mujoco-warp==3.10.0.3+hope.epa48.1` wheel与build receipt，也是Full-A runtime binder的固定输入 | 只由tracked provenance/patch和`build_mujoco_warp_epa48.py`离线构建；patched source在临时目录exact重建，不从PyPI找同名wheel，不安装进ambient环境 | G06 runtime import与EPA48 GPU fixture候选输入；当前不授权训练 |
@@ -76,6 +77,33 @@ git check-ignore -q vendor_assets
 | RunPod historical M3c/M2f `model_16999.pt` checkpoints | Warm starts for the four-arm face-pairing comparison; never fresh-formal inputs | Existing ignored run trees under `/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/` | G05/G06 legacy causal diagnosis |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated Isaac A3 ping-pong URDF asset | Rebuilt from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` using `scripts/prepare_a3_isaac_asset.py` | G04/G05 |
 | Generated policy artifacts such as `hope_training/policies/*.onnx` | Exported policies for local eval/deploy handoff | Produced by `scripts/play.py` or training/eval export; store metadata in G05/G07 | G05/G07 when a specific policy is accepted |
+
+### Restore the ignored A3P0807 MuJoCo mesh closure
+
+Do this on every fresh detached checkout before creating a Full-A MuJoCo run namespace. A missing
+closure must fail before the first update; it is an asset-sync error, not a physics or learning
+result. The source below is the preserved Pod1 verification payload, not another training
+worktree and not the legacy `a3_pingpong` plant.
+
+```bash
+A3P0807_MESH_SOURCE=/workspace/franco/a3p_0807_verify_20260807/a3p_pingpong_0807/meshes
+A3P0807_MESH_DEST=agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3p_pingpong_0807/meshes
+test -d "$A3P0807_MESH_SOURCE"
+test ! -e "$A3P0807_MESH_DEST"
+mkdir -p "$A3P0807_MESH_DEST"
+rsync -a --exclude='._*' "$A3P0807_MESH_SOURCE/" "$A3P0807_MESH_DEST/"
+
+test "$(find "$A3P0807_MESH_DEST" -type f | wc -l)" -eq 92
+test "$(find "$A3P0807_MESH_DEST" -type f -printf '%s\n' | awk '{sum += $1} END {print sum + 0}')" \
+  -eq 25331878
+test "$(cd "$A3P0807_MESH_DEST" && find . -type f -print0 | LC_ALL=C sort -z | \
+  xargs -0 sha256sum | sha256sum | awk '{print $1}')" = \
+  8c0ab325c4e1c912303e09742f534603f1600cfe3888e879f20d6da4907eb2b0
+printf '%s  %s\n' \
+  7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1 \
+  agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3p_pingpong_0807/a3p_pingpong_0807.xml | \
+  sha256sum -c -
+```
 
 ### Restore exact RSL-RL 3.1.2 wheel for portable MuJoCo
 

@@ -14,8 +14,7 @@
 - R8双端61-update profiler-off canary已在GPU1串行自然完成。Mu p50/p90=`6.962/7.018 s`、episode=
   `135.31→138.44`、hard-edge rows=`4.96%→8.73%`、contact=`0/6,523 launch`，mimic四误差两好两坏；
   Isaac p50/p90=`21.455/27.455 s`、episode=`97.26→107.96`、launch/contact=`461/0`，position/velocity/
-  long-axis改善而face变差。旧V9 GPU0/2、source、namespace和证据root继续只读，尚未signal/kill/hotpatch。
-  Gate G04/G05/G06保持`Partial`，短prefix与rate不授权学习、parity或部署。
+  long-axis改善而face变差。Gate G04/G05/G06保持`Partial`，短prefix与rate不授权学习、parity或部署。
 - Isaac墙钟因此明确不合格。逐轮未决row candidate虽通过incremental/dense完整projection与prepared-record
   bitwise parity，却在Pod profile2使D05 question累计`18.16→98.72 s/12 updates`、collection中位
   `8.05→16.17 s`，已撤回；恢复单一mask-first seam与三轮dense compose。下一刀只在dense kernel内部找
@@ -39,17 +38,34 @@
   [课程实验](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#single-a512-cuda-graph)。
 - 新profile首试在step0前因诊断器shadow slotted Physical leaf而fail-closed；production未执行。已删除3个非法
   leaf wrapper、保留D05总段与其他合法分段，失败root只读且不计速度/学习证据。
-- V9 Mu长期证据口径自查纠正：先前`7,139/517,214`是generic `racket_contact_rows`，不是课程合同的
-  selected contact。首次selected在update473，最佳rate 50窗仅`36/6,926=.520%`；当前累计=
-  `188/538,008 launch=.0349%`，landing=`0/188 selected contact`，raw contact中`96.15%`是edge；
-  recent50 episode mean已塌到`105.59 tick`且launch=0。旧错误plant谱系只证明极稀疏hit曾可达后遗忘，
-  不能移签R8，也不能用generic contact冒充课程交接。
-- active V9的2026-08-29只读窗已经有真实任务分母：Mu updates `5143..5192`为
-  due/reveal/launch/selected contact=`6,198/6,185/6,072/0`、episode mean=`202.53 tick`、wall median=
-  `6.475 s/H48`；Isaac updates `1543..1592`为due/accept/playback/launch/selected contact=
-  `8,441/8,437/8,420/7,477/0`、episode mean=`146.10 tick`、wall median=`22.10 s/H48`。因此两端都不是
-  “仍在balance所以hit未测”，而是selected hit的高分母负结果；错误Mu plant
-  使它不能移签R8，但已足以拒绝继续等待V9自然恢复。
+- V9 Mu长期证据口径自查纠正：先前generic `racket_contact_rows`不是课程合同的selected contact。最终
+  累计launch/raw/selected=`809,422/7,153/188`，landing=`0/188 selected`；recent50又出现
+  `11,380/11,380` tilt episode且launch归零。旧错误plant谱系只证明极稀疏hit曾可达后遗忘，不能移签R8，
+  也不能用generic contact冒充课程交接。
+- V9最终冻结后已按精确进程身份停止；正确A3P0807、同clean source `954200d5`的fresh Isaac/Mu长期run
+  已在GPU0/2持续训练。`observed_at=2026-08-28T23:53:00Z`时分别到ACK196/492；两端Reward28全finite、
+  conservation/attributed fault0。Isaac recent50 launch/contact=`4,337/0`，累计=`12,847/0`；Mu recent50
+  launch/selected/raw/landing=`6,788/1/30/0`，累计=`63,605/1/31/0`。两端episode length/return分别从
+  首10轮`97.26/10.95→126.54/13.06`与`135.79/15.59→150.67/16.90`，说明balance在进步；mimic误差仍
+  方向混合，Mu的单次selected contact远未达到hit基本成功，landing仍未形成。
+- old Mu launcher被证实显式使用legacy `a3_pingpong.xml`而非A3P0807；这足以否定旧sim2sim比较，但不证明
+  Pod安装整体损坏。同初态/action tape仍在首20 ms产生q/dq差`.00973/.89084`，剩余根因收敛到implicit
+  PhysX drive与显式clamped PD/friction语义；需要Jiayi同tape runtime receipt再裁决。
+- `7ce9f120`把regularization静态关节几何从每个Reward热调用移到construction一次验证，并补one-shot、
+  unbound fail-loud与静态source mutation反例。Pod组合=`123 passed,5 skipped`，exact CUDA lean Reward=
+  `52 passed`；12-update profile的reward span `24.87→22.59 ms/call`。同GPU profiler-off 50个measured
+  update的p50/p90=`15.280/19.654→14.880/19.364 s/H48`，仅改善约`2.6%/1.5%`，证明纯执行减法有效但
+  远未解决iteration墙。下一刀只收敛Reward热路已经证明的完整Epoch record复制，不删journal、chronology、
+  carry或独立fault事实，也不把局部profile改善冒充学习/安全PASS。
+- `c53d3b31`把Lean Reward实际消费的Epoch before-image从完整44-tensor record clone收成19个独立tensor；
+  public full record、OPEN/PAID journal、14份payment image、carry/schema均未变。Pod exact Epoch+Reward=
+  `160 passed`、CUDA Reward=`52 passed`，regularization/runtime/install分进程=`8/36/24 passed`。12-update
+  profile的reward span=`22.59→21.22 ms/call`，但collection中位仅`8.967→8.897 s/update`；profiler-off
+  p50/p90仅`14.880/19.364→14.740/19.150 s/H48`（约`.9%/1.1%`）。四模块同进程命令的75个
+  canonical-class identity失败在未改`7ce9f120`完全复现，
+  归为测试harness污染债，不冒充production回归或PASS。
+- fresh detached Mu checkout漏掉ignored A3P0807 `meshes/`会在首ACK前失败。setup现记录Pod preserved source、
+  92文件/25,331,878字节/manifest digest与no-clobber恢复命令；该错误归类为asset sync，不归类为physics。
 
 ## 2026-08-28 — FullMDP V9同源初态与tick48重叠课程（branch diagnostic）
 

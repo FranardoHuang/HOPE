@@ -41,15 +41,40 @@ launch；actual `4,608`行、边界probe与production record均逐bit相等，re
 [课程实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#single-a512-cuda-graph)。
 fresh profile已把D05 question从`61.18`降到`21.72 ms/call`，但同GPU profiler-off
 p50/p90仅从`17.175/21.913`降到`15.135/19.779 s/H48`。执行优化成立、约6秒方向目标未达；G05继续
-`Partial`，不单独授权replacement。下一候选是Reward28 cycle-local pack，必须保持28项、付款chronology、
-milestone/Epoch账本与fault语义逐bit/逐字段一致，不增加同写者Gate。
+`Partial`，不单独授权replacement。Reward28 cycle-local pack随后把整轮做到`15.280/19.654 s/H48`；
+`7ce9f120`再一次绑定regularization静态几何，Pod组合=`123 passed,5 skipped`、exact CUDA lean Reward=
+`52 passed`，reward span=`24.87→22.59 ms/call`，但profiler-off整轮仅到`14.880/19.364 s/H48`。这只授权
+纯执行减法；下一候选必须保持28项、付款chronology、milestone/Epoch journal、carry与fault语义逐bit/
+逐字段一致，不增加同写者Gate，也不把局部reward wall当作本Gate完成。
 
-active V9最新只读负窗（2026-08-29）中，Isaac updates `1543..1592`的
-due/accept/playback/launch/selected contact=`8,441/8,437/8,420/7,477/0`，recent50 episode mean=
-`146.10 tick`、wall median=`22.10 s/H48`；Mu updates `5143..5192`的due/reveal/launch/selected contact=
-`6,198/6,185/6,072/0`，episode mean=`202.53 tick`、wall median=`6.475 s/H48`。两端都已形成高eligible分母而hit仍为0，不能归为
-“课程尚未打开”。V9 Mu plant身份错误，故该negative不能移签R8；replacement验证完成后应替换，而不是
-继续等旧run。
+`c53d3b31`随后把sealed Lean Reward的完整Epoch clone替换为19-tensor窄before-image，public record和
+journal/durable边界不变。Pod exact Epoch+Reward=`160 passed`、CUDA Reward=`52 passed`；profile reward=
+`21.22 ms/call`，但profiler-off整轮只到`14.740/19.150 s/H48`。这只比`7ce9f120`改善约`.9%/1.1%`，
+而现役task-active recent50仍为`20.940/21.215 s/H48`；G05继续`Partial`，下一性能工作必须转向算法/
+数据流主墙，不能把静态安全自证或账本完整性当作可随意删除的成本。
+
+V9最终冻结窗已收口而非继续等待：Isaac updates `2119..2168`的due/accept/playback/launch/raw contact=
+`8,046/8,039/8,018/7,632/0`，episode length/return=`153.05/15.07`；Mu updates `7053..7102`的
+due/reveal=`11,384/11,384`，但launch/raw/selected=`0/0/0`，episode length/return=`108.07/9.99`且
+`11,380/11,380`个episode含tilt。旧Mu launcher被查实显式加载legacy `a3_pingpong.xml`
+（SHA `70c4fd65…36c0a`），不是A3P0807 `a3p_pingpong_0807.xml`（SHA `7bbda723…bcae1`），故旧双端差异
+不能与Jiayi的matched sim2sim主张相比，也不能裁决0807训练；旧run已按精确进程身份停止并保留root。
+
+正确0807、同clean source `954200d5`的双fresh随后在Pod1启动。`observed_at=2026-08-28T23:53:00Z`：
+Isaac ACK0..196 recent50 episode length/return=`126.54/13.06`，due/accept/playback/launch/contact=
+`9,725/9,716/9,683/4,337/0`，wall p50/p90=`20.940/21.215 s/H48`，累计contact=`0/12,847 launch`；Mu ACK0..492 recent50 episode
+length/return=`150.67/16.90`，due/launch/R03-valid/selected/raw/landing=
+`8,183/6,788/5,425/1/30/0`，p50/p90=`6.638/6.728 s/H48`。两端Reward28均finite、
+conservation/attributed fault0；episode生存改善说明balance在学习，但四项mimic误差仍方向混合。Mu唯一一次
+selected contact只证明hit可达，远未达到基本成功，opponent landing仍为0；课程入口自然重叠但尚未完成
+mimic→hit交接，launch不能冒充hit。
+
+同初态、同31-D action tape已排除joint order和decoder：initial q/dq逐位相同，qdes最大差`5.96e-8 rad`；
+但首20 ms q/dq已差`.00973 rad/.89084 rad/s`，tick47 q/root/racket差`.13028 rad/.07872 m/.05263 m`。
+源码对账显示Isaac是5 ms×4的implicit PhysX drive，Mu是1 ms×20的显式clamped PD；相同Kp/Kd/friction数值
+不代表相同执行器语义，Mu `frictionloss`也不是PhysX friction的同一对象。因此当前证据支持“旧运行对象
+确实错了，剩余是plant/controller calibration未闭合”，不支持“整个Pod环境装坏了”。要裁决Jiayi的
+“差异不大”，仍需其本机exact asset、actuator backend、friction/contact与clock receipt做同tape比较。
 
 ## 2026-08-28 FullMDP V9 tick48真实Isaac（仍`Partial`）
 
