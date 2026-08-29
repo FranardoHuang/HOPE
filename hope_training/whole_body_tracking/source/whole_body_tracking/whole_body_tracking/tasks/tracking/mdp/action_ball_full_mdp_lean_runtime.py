@@ -1407,6 +1407,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
                             "physical_epoch_postphysics",
                             physical_publish,
                             stamp,
+                            _profile_call=profile_call,
                         )
                     if result is not None:
                         raise ActionBallFullMdpLeanRuntimeError(

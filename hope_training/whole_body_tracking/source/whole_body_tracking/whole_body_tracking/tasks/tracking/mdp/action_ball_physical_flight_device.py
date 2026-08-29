@@ -29,7 +29,7 @@ import json
 import math
 from pathlib import Path
 import sys
-from typing import Mapping, Optional, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 import torch
 
@@ -7197,7 +7197,10 @@ class ActionBallPhysicalFlightDeviceOwner:
         return facts
 
     def publish_action_epoch_post_physics(
-        self, stamp: object
+        self,
+        stamp: object,
+        *,
+        _profile_call: Callable[..., object] | None = None,
     ) -> None:
         """Capture the real engine producer and publish Physical epoch facts.
 
@@ -7213,7 +7216,10 @@ class ActionBallPhysicalFlightDeviceOwner:
         if not self._action_epoch_runtime_call_active:
             self._action_epoch_runtime_call_active = True
             try:
-                return self.publish_action_epoch_post_physics(stamp)
+                return self.publish_action_epoch_post_physics(
+                    stamp,
+                    _profile_call=_profile_call,
+                )
             except BaseException:
                 epoch_owner = self._action_epoch_owner
                 self._poisoned = True
@@ -7245,6 +7251,17 @@ class ActionBallPhysicalFlightDeviceOwner:
                 raise
             finally:
                 self._action_epoch_runtime_call_active = False
+
+        def profiled_call(
+            segment_name: str,
+            operation: Callable[..., object],
+            *args: object,
+            **kwargs: object,
+        ) -> object:
+            if _profile_call is None:
+                return operation(*args, **kwargs)
+            return _profile_call(segment_name, operation, *args, **kwargs)
+
         pair = self._action_epoch_substep_pair
         if pair is None:
             raise PhysicalEpochIntegrationHold(
@@ -7504,12 +7521,14 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalEpochIntegrationHold(
                 "Epoch exact Physical postphysics row consumer is absent or patched"
             )
-        refresh_epoch()
+        profiled_call("physical_epoch_refresh", refresh_epoch)
         post_result = _require_final_r06_type(
-            publish_direct(), expected_name="ActionEpochR06PostPhysicsResult"
+            profiled_call("r06_postphysics_settle", publish_direct),
+            expected_name="ActionEpochR06PostPhysicsResult",
         )
         retire_result = _require_final_r06_type(
-            retire_direct(), expected_name="ActionEpochR06RetireResult"
+            profiled_call("r06_postphysics_retire", retire_direct),
+            expected_name="ActionEpochR06RetireResult",
         )
         self.require_owned_action_epoch_r06_postphysics_projection()
         retired = _tensor(
@@ -7575,12 +7594,18 @@ class ActionBallPhysicalFlightDeviceOwner:
                 self._action_epoch_flight_previous_ball_center_m,
             )
         )
-        scene_handle = self._prepare_action_epoch_scene_write(
+        scene_handle = profiled_call(
+            "physical_scene_retire_prepare",
+            self._prepare_action_epoch_scene_write,
             kind="retire",
             state_env_f32=self._park_state_template,
             selected_mask=safe_retired,
         )
-        self._apply_scene_write(scene_handle)
+        profiled_call(
+            "physical_scene_retire_apply",
+            self._apply_scene_write,
+            scene_handle,
+        )
         self._lifecycle = torch.where(
             safe_retired,
             torch.full_like(self._lifecycle, R06_FLIGHT_EMPTY),
@@ -7607,7 +7632,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalEpochIntegrationHold(
                 "R06 ActionEpoch fact publisher is absent or patched"
             )
-        r06_publish()
+        profiled_call("r06_epoch_facts_publish", r06_publish)
         retired = ~self._published & self._parked
         active_slots = self._action_epoch_active_flight_slot
         safe_active_slots = active_slots.clamp(0, self.flight_capacity - 1)

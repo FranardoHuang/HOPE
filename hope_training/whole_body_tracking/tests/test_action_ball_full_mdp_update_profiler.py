@@ -345,6 +345,17 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert env._full_mdp_runtime_owner._full_mdp_profile_runtime_call(
         "r07_idle_stamp", idle_snapshot
     ) == "profiled"
+    for segment in (
+        "physical_epoch_refresh",
+        "r06_postphysics_settle",
+        "r06_postphysics_retire",
+        "physical_scene_retire_prepare",
+        "physical_scene_retire_apply",
+        "r06_epoch_facts_publish",
+    ):
+        assert env._full_mdp_runtime_owner._full_mdp_profile_runtime_call(
+            segment, lambda: segment
+        ) == segment
     runtime = env._full_mdp_runtime_owner
     assert vars(type(runtime._physical_ball))[
         "publish_action_epoch_post_physics"
@@ -405,6 +416,12 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert payload["segments"]["r07_idle_state_store"]["calls"] == 1
     for segment in (
         "physical_active_flight_capture",
+        "physical_epoch_refresh",
+        "r06_postphysics_settle",
+        "r06_postphysics_retire",
+        "physical_scene_retire_prepare",
+        "physical_scene_retire_apply",
+        "r06_epoch_facts_publish",
         "r06_reward_close_impl",
         "epoch_milestone_write",
         "ppo_drain_prepare",
