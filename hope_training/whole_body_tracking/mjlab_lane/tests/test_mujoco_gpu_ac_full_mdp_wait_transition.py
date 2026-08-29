@@ -309,6 +309,13 @@ def _fixed_reward_env():
             ],
             dtype=dtype,
         ),
+        _fullmdp_paddle_playback_scales=torch.tensor(
+            [
+                spec.scale_during_playback
+                for spec in wait_env.FULLMDP_PADDLE_REWARD_SPECS
+            ],
+            dtype=dtype,
+        ),
         _fullmdp_paddle_precision_stds=torch.tensor(
             [spec.std for spec in wait_env.FULLMDP_PADDLE_REWARD_SPECS],
             dtype=dtype,
@@ -324,6 +331,11 @@ def _fixed_reward_env():
         ),
         _epoch_task_valid=torch.zeros(num_envs, dtype=torch.bool),
         _epoch_phase=torch.zeros(num_envs, dtype=torch.long),
+        _full_a_motion_phase_code=torch.full(
+            (num_envs,),
+            wait_env.FULL_A_MOTION_PREPARE_PHASE_INDEX,
+            dtype=torch.long,
+        ),
         _full_a_outcome_code=torch.zeros(num_envs, dtype=torch.long),
         _full_a_lifecycle_reward_weights=torch.tensor(
             wait_env.portable_reward.LIFECYCLE_WEIGHTS, dtype=dtype
@@ -430,6 +442,7 @@ def test_host_reward28_matches_common_and_measured_paddle_formulas():
     env = _fixed_reward_env()
     env._fullmdp_regularization_reward_terms = lambda: torch.zeros((2, 4))
     assert env._fullmdp_paddle_weights.tolist() == [1.0, 1.0, 1.0, 0.5]
+    assert env._fullmdp_paddle_playback_scales.tolist() == [4.0] * 4
     reward, terms = wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward(env)
 
     data = env.sim.data
@@ -579,6 +592,51 @@ def test_reward28_paddle_composite_channels_have_fixed_analytic_precision_value(
         ),
         rtol=0.0,
         atol=1.0e-15,
+    )
+
+
+def test_reward28_scales_only_motion_owned_playback_rows():
+    env = _fixed_reward_env()
+    env.full_a_mode = True
+    env._full_a_motion_phase_code.copy_(
+        torch.tensor(
+            [
+                wait_env.FULL_A_MOTION_SWING_PHASE_INDEX,
+                wait_env.FULL_A_MOTION_PREPARE_PHASE_INDEX,
+            ],
+            dtype=torch.long,
+        )
+    )
+    env._full_a_owner_valid_bits = torch.zeros(
+        (env.num_envs, wait_env.portable_reward.OWNER_COUNT), dtype=torch.long
+    )
+    env._full_a_owner_fault_bits = torch.zeros_like(
+        env._full_a_owner_valid_bits
+    )
+    env._full_a_owner_fact_f32 = torch.zeros(
+        (
+            env.num_envs,
+            wait_env.portable_reward.OWNER_COUNT,
+            wait_env.portable_reward.OWNER_FACT_F32_WIDTH,
+        ),
+        dtype=torch.float64,
+    )
+    env._full_a_selected_contact_event = torch.zeros(
+        env.num_envs, dtype=torch.bool
+    )
+    env._full_a_r03_present = torch.zeros(env.num_envs, dtype=torch.bool)
+    env._full_a_r06_payment_event = torch.zeros(env.num_envs, dtype=torch.bool)
+
+    reward, terms = wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward(env)
+    baseline = env._fullmdp_paddle_weights * env.step_dt
+    torch.testing.assert_close(
+        terms[0, 20:24], baseline * 4.0, rtol=0.0, atol=0.0
+    )
+    torch.testing.assert_close(
+        terms[1, 20:24], baseline, rtol=0.0, atol=0.0
+    )
+    torch.testing.assert_close(
+        reward, terms.sum(dim=1), rtol=0.0, atol=0.0
     )
 
 

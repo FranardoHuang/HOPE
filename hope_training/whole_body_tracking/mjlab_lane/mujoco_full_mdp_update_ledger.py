@@ -208,6 +208,11 @@ def _exact_paddle_prior_contract():
         raise RuntimeError("FullMDP paddle prior contract differs")
     names = tuple(spec.manager_name for spec in specs)
     weights = tuple(float(spec.manager_weight) for spec in specs)
+    if any(spec.scale_during_playback is None for spec in specs):
+        raise RuntimeError("FullMDP paddle prior contract differs")
+    playback_scales = tuple(
+        float(spec.scale_during_playback) for spec in specs
+    )
     try:
         start = REWARD_TERM_NAMES.index(names[0])
     except ValueError as exc:
@@ -216,16 +221,17 @@ def _exact_paddle_prior_contract():
         REWARD_TERM_NAMES[start : start + len(names)] != names
         or any(
             not math.isfinite(value) or value <= 0.0
-            for value in weights
+            for value in weights + playback_scales
         )
     ):
         raise RuntimeError("FullMDP paddle prior contract differs")
-    return names, weights, start
+    return names, weights, playback_scales, start
 
 
 (
     PADDLE_PRIOR_TERM_NAMES,
     PADDLE_PRIOR_WEIGHTS,
+    PADDLE_PRIOR_PLAYBACK_SCALES,
     PADDLE_PRIOR_TERM_START,
 ) = _exact_paddle_prior_contract()
 PADDLE_PRIOR_TERM_COUNT = len(PADDLE_PRIOR_TERM_NAMES)
@@ -439,8 +445,10 @@ class FullMdpUpdateLedger:
         )
         self._paddle_max_payment = torch.tensor(
             [
-                weight * FULLMDP_POLICY_STEP_S
-                for weight in PADDLE_PRIOR_WEIGHTS
+                weight * playback_scale * FULLMDP_POLICY_STEP_S
+                for weight, playback_scale in zip(
+                    PADDLE_PRIOR_WEIGHTS, PADDLE_PRIOR_PLAYBACK_SCALES
+                )
             ],
             dtype=torch.float64,
             device=device,

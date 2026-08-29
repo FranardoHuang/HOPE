@@ -215,6 +215,21 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             dtype=self.qpos_init.dtype,
             device=self.device,
         )
+        if any(
+            spec.scale_during_playback is None
+            or not math.isfinite(float(spec.scale_during_playback))
+            or float(spec.scale_during_playback) <= 0.0
+            for spec in FULLMDP_PADDLE_REWARD_SPECS
+        ):
+            raise RuntimeError("FullMDP paddle playback scales are unavailable")
+        self._fullmdp_paddle_playback_scales = self._torch.tensor(
+            [
+                spec.scale_during_playback
+                for spec in FULLMDP_PADDLE_REWARD_SPECS
+            ],
+            dtype=self.qpos_init.dtype,
+            device=self.device,
+        )
         self._fullmdp_paddle_precision_stds = self._torch.tensor(
             [spec.std for spec in FULLMDP_PADDLE_REWARD_SPECS],
             dtype=self.qpos_init.dtype,
@@ -2624,6 +2639,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         racket_kinematics=None,
         tracked_body_kinematics=None,
         *,
+        paddle_playback_mask=None,
         return_paddle_error=False,
     ):
         """Return the shared ordered Reward28 graph and its exact term vector."""
@@ -2745,8 +2761,32 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             precision_stds=self._fullmdp_paddle_precision_stds,
             coarse_stds=self._fullmdp_paddle_coarse_stds,
         )
+        if getattr(self, "full_a_mode", False):
+            if paddle_playback_mask is None:
+                paddle_playback_mask = (
+                    FullMdpInitialWaitVecEnv
+                    ._full_a_paddle_prior_playback_mask(self)
+                )
+            if (
+                type(paddle_playback_mask) is not torch.Tensor
+                or tuple(paddle_playback_mask.shape) != (self.num_envs,)
+                or paddle_playback_mask.device != self.device
+                or paddle_playback_mask.dtype is not torch.bool
+                or not paddle_playback_mask.is_contiguous()
+            ):
+                raise RuntimeError("FullMDP paddle playback Reward ABI differs")
+            paddle_raw = torch.where(
+                paddle_playback_mask[:, None],
+                paddle_raw * self._fullmdp_paddle_playback_scales[None, :],
+                paddle_raw,
+            )
+        else:
+            if paddle_playback_mask is not None:
+                raise RuntimeError("non-Full-A reward received playback state")
         paddle_configured = (
-            paddle_raw * self._fullmdp_paddle_weights * self.step_dt
+            paddle_raw
+            * self._fullmdp_paddle_weights
+            * self.step_dt
         )
         terms = torch.zeros(
             (self.num_envs, reward_contract.REWARD_TERM_COUNT),
@@ -3037,6 +3077,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         reward, reward_terms, paddle_prior_error = self._fullmdp_reward(
             racket_kinematics,
             tracked_body_kinematics,
+            paddle_playback_mask=paddle_prior_playback,
             return_paddle_error=True,
         )
         (

@@ -681,6 +681,8 @@ def test_playback_paddle_prior_reuses_reward_terms_for_non_gating_moments():
     )
     max_payment = torch.tensor(
         module.PADDLE_PRIOR_WEIGHTS, dtype=torch.float32
+    ) * torch.tensor(
+        module.PADDLE_PRIOR_PLAYBACK_SCALES, dtype=torch.float32
     ) * module.FULLMDP_POLICY_STEP_S
     terms = result[3]["reward_terms"]
     terms[
@@ -703,8 +705,11 @@ def test_playback_paddle_prior_reuses_reward_terms_for_non_gating_moments():
         ),
     ].to(torch.float64) / torch.tensor(
         [
-            weight * module.FULLMDP_POLICY_STEP_S
-            for weight in module.PADDLE_PRIOR_WEIGHTS
+            weight * playback_scale * module.FULLMDP_POLICY_STEP_S
+            for weight, playback_scale in zip(
+                module.PADDLE_PRIOR_WEIGHTS,
+                module.PADDLE_PRIOR_PLAYBACK_SCALES,
+            )
         ],
         dtype=torch.float64,
     )
@@ -748,6 +753,8 @@ def test_playback_paddle_prior_domain_violations_are_visible_but_non_gating():
     )
     max_payment = torch.tensor(
         module.PADDLE_PRIOR_WEIGHTS, dtype=torch.float32
+    ) * torch.tensor(
+        module.PADDLE_PRIOR_PLAYBACK_SCALES, dtype=torch.float32
     ) * module.FULLMDP_POLICY_STEP_S
     terms = result[3]["reward_terms"]
     terms[
