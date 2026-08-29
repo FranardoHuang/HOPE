@@ -336,12 +336,15 @@ class RacketTargetCommand:
     def _action_ball_full_mdp_deferred_exact_metrics_enabled(self):
         return True
 
+    def stage_exact_metric_rows(self, count):
+        if type(count) is not int or count < 1 or self.pending_rows != 0:
+            raise RuntimeError("fake exact metric row staging differs")
+        self.pending_rows = count
+
     def materialize_action_ball_diagnostic_metrics_for_report(
         self, *, expected_full_mdp_exact_row_counts=None
     ):
         if expected_full_mdp_exact_row_counts is not None:
-            if self.pending_rows == 0:
-                self.pending_rows = expected_full_mdp_exact_row_counts[0]
             if self.pending_rows not in expected_full_mdp_exact_row_counts:
                 raise RuntimeError("full-MDP exact metric rollout row count differs")
         self.materialize_calls += 1
@@ -966,6 +969,42 @@ def test_first_update_requires_genesis_plus_rollout_metric_rows(
     assert boundary._last_update == -1
 
 
+@pytest.mark.parametrize("pending_rows", [0, 23, 25])
+def test_later_update_requires_exactly_one_rollout_of_metric_rows(
+    tmp_path, _fake_imports, pending_rows
+):
+    env = _Env()
+    boundary = adapter.ActionBallFullMdpRsl3Adapter(
+        env=env, owner=env.owner, log_dir=str(tmp_path)
+    )
+    optimizer_calls = []
+    boundary.update(
+        lambda: optimizer_calls.append(0),
+        update_index=0,
+        completed_environment_steps=48,
+    )
+    env.action_term.snapshot = _compact_snapshot(
+        num_envs=2,
+        policy_steps=24,
+        first_sequence=24,
+        consume_sequence=1,
+    )
+    if pending_rows:
+        env.command_term.stage_exact_metric_rows(pending_rows)
+
+    with pytest.raises(RuntimeError, match="optimizer boundary failed"):
+        boundary.update(
+            lambda: optimizer_calls.append(1),
+            update_index=1,
+            completed_environment_steps=96,
+        )
+
+    assert optimizer_calls == [0]
+    assert env.owner.poisoned is True
+    assert env.owner.active is not None
+    assert boundary._last_update == 0
+
+
 def test_command_metric_assert_failure_poisons_before_optimizer(
     tmp_path, _fake_imports, monkeypatch
 ):
@@ -1175,6 +1214,7 @@ def test_stdout_delivery_failure_cannot_poison_committed_training_transaction(
         first_sequence=24,
         consume_sequence=1,
     )
+    env.command_term.stage_exact_metric_rows(24)
     assert boundary.update(
         lambda: {"loss": 0.5},
         update_index=1,
@@ -1351,6 +1391,8 @@ def test_compact_small_capacity_survives_five_n4096_updates(
         env=env, owner=env.owner, log_dir=str(tmp_path)
     )
     for update_index in range(5):
+        if update_index > 0:
+            env.command_term.stage_exact_metric_rows(24)
         env.action_term.snapshot = _compact_snapshot(
             num_envs=4096,
             policy_steps=24,

@@ -163,6 +163,7 @@ def _deferred_exact_command(num_buckets: int = 1):
         vb_metrics_only=False,
         shadow_ball=False,
         physical_ball=False,
+        rally_legacy_metrics=False,
     )
     command._action_ball_full_mdp_enabled = True
     command._action_ball_enabled = False
@@ -199,7 +200,72 @@ def _deferred_exact_command(num_buckets: int = 1):
     ):
         setattr(command, attribute, {index: 0.0 for index in range(num_buckets)})
     command._exact_composite_rate = 0.0
-    command.metrics = None
+    command._swing_starts_acc = 8.0
+    command._prestrike_fall_acc = 0.0
+    command._poststrike_fall_acc = 0.0
+    command._drift_n_acc = 0.0
+    command._drift_sum_acc = 0.0
+    command._drift_fwd_sum_acc = 0.0
+    command._station_offset_start_sum_acc = 0.0
+    command._heading_expiry_n_acc = 0.0
+    command._heading_expiry_sum_acc = 0.0
+    command._recovery_n_acc = 0.0
+    command._recovery_spawn_sum_acc = 0.0
+    command._recovery_expiry_sum_acc = 0.0
+    command._rally_starts_acc = 0.0
+    command._rally_returns_acc = 0.0
+    command._vb_exact_acc = 0.0
+    command._vb_hit_acc = 0.0
+    command._vb_net_acc = 0.0
+    command._vb_land_valid_acc = 0.0
+    command._vb_inb_acc = 0.0
+    command._swing_starts_acc_c = {
+        index: 4.0 for index in range(num_buckets)
+    }
+    for attribute in (
+        "_prestrike_fall_acc_c",
+        "_poststrike_fall_acc_c",
+        "_rally_starts_acc_c",
+        "_rally_returns_acc_c",
+        "_vb_exact_acc_c",
+        "_vb_hit_acc_c",
+        "_vb_inb_acc_c",
+    ):
+        setattr(command, attribute, {index: 0.0 for index in range(num_buckets)})
+    global_metrics = (
+        "swing_completion_rate",
+        "strike_composite_success_exact",
+        "strike_pos_pass_exact",
+        "strike_vel_pass_exact",
+        "strike_normal_pass_exact",
+        "exact_strike_pos_success_5cm",
+        "exact_strike_pos_success_10cm",
+        "exact_strike_sample_count_decayed",
+        "strike_pos_target_eligible_sample_count_decayed",
+        "strike_vel_target_eligible_sample_count_decayed",
+        "strike_normal_target_eligible_sample_count_decayed",
+        "strike_composite_target_eligible_sample_count_decayed",
+    )
+    bucket_metrics = (
+        "swing_completion_rate",
+        "strike_pos_pass_exact",
+        "strike_vel_pass_exact",
+        "strike_normal_pass_exact",
+        "strike_composite_success_exact",
+        "racket_pos_error_exact_strike",
+        "racket_vel_error_exact_strike",
+        "racket_normal_error_deg_exact_strike",
+        "strike_pos_target_eligible_sample_count_decayed",
+        "strike_vel_target_eligible_sample_count_decayed",
+        "strike_normal_target_eligible_sample_count_decayed",
+        "strike_composite_target_eligible_sample_count_decayed",
+    )
+    metric_names = list(global_metrics)
+    for bucket_name in command._clip_names.values():
+        metric_names.extend(
+            f"{name}_{bucket_name}" for name in bucket_metrics
+        )
+    command.metrics = {name: torch.zeros(1) for name in metric_names}
     return command
 
 
@@ -296,6 +362,71 @@ def test_full_mdp_exact_rows_preserve_every_global_and_bucket_float_transition()
         for old, a, b in zip(before, first, second)
     )
     assert actual == expected
+
+
+def test_full_mdp_deferred_fixed_tape_matches_legacy_public_exact_metrics():
+    deferred = _deferred_exact_command(num_buckets=2)
+    immediate = _deferred_exact_command(num_buckets=2)
+    global_attributes = (
+        "_exact_n_acc",
+        "_exact_pass_comp_acc",
+        "_exact_pass_pos_acc",
+        "_exact_pass_vel_acc",
+        "_exact_pass_5cm_acc",
+        "_exact_pass_10cm_acc",
+        "_exact_pass_normal_acc",
+        "_exact_pos_err_sum",
+        "_exact_vel_err_sum",
+        "_exact_nrm_err_sum",
+    )
+    bucket_attributes = (
+        "_exact_n_acc_c",
+        "_exact_pass_pos_acc_c",
+        "_exact_pass_vel_acc_c",
+        "_exact_pass_normal_acc_c",
+        "_exact_pass_comp_acc_c",
+        "_exact_pos_err_sum_c",
+        "_exact_vel_err_sum_c",
+        "_exact_nrm_err_sum_c",
+    )
+    bucket_order = (0, 1)
+    rows = (
+        (0.9, torch.arange(1, 27, dtype=torch.float32)),
+        (0.8, torch.arange(101, 127, dtype=torch.float32)),
+        (0.7, torch.arange(201, 227, dtype=torch.float32)),
+    )
+
+    for decay, row in rows:
+        deferred._stage_action_ball_full_mdp_exact_metric_row(
+            row.unbind(), decay=decay, bucket_order=bucket_order
+        )
+        values = iter(float(value) for value in row)
+        for attribute in global_attributes:
+            setattr(
+                immediate,
+                attribute,
+                decay * getattr(immediate, attribute) + next(values),
+            )
+        for bucket in bucket_order:
+            for attribute in bucket_attributes:
+                accumulators = getattr(immediate, attribute)
+                accumulators[bucket] = (
+                    decay * accumulators[bucket] + next(values)
+                )
+
+    deferred.materialize_action_ball_diagnostic_metrics_for_report(
+        expected_full_mdp_exact_row_counts=(3,)
+    )
+    immediate._refresh_action_ball_diagnostic_public_metrics()
+    immediate._refresh_action_ball_exact_public_metrics()
+
+    assert deferred.metrics
+    assert set(deferred.metrics) == set(immediate.metrics)
+    assert "swing_completion_rate" in deferred.metrics
+    assert "swing_completion_rate_clip0" in deferred.metrics
+    assert "strike_composite_success_exact_clip1" in deferred.metrics
+    for name in sorted(deferred.metrics):
+        assert torch.equal(deferred.metrics[name], immediate.metrics[name]), name
 
 
 def test_full_mdp_exact_deferral_keeps_immediate_consumers_on_old_path():
