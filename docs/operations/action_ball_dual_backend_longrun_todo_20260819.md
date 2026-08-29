@@ -192,8 +192,12 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    删除静默path discovery，只接受显式runtime路径。Ubuntu Noble GL来自系统`libopengl0/libglu1-mesa`，
    launcher改为核canonical file/direct SONAME并记录观察SHA，不把单一发行版字节冒充跨机学习Gate。
    `4cd30d63`真实Kit fixed-action已0 done/timeout且action/state SHA保持，launcher本地36项通过。
-   因此public软件配方已闭合；合法Isaac下载、split USD、A3P0807 Mu meshes和private凭据仍缺持久locator，
-   item 8只为这些外部输入保持开放，不再笼统写成“Python/GL不可恢复”。
+   `e14b7141`又把Pod1 Python3.12.3的133项Mu基础解析闭包作为tracked lock；fresh venv dry-run精确解析
+   `131 package + pip/setuptools`，lock SHA=`6e26d1e0…26bb1`，report SHA=`92021f56…05e47`。production仍由
+   run-local EPA48/RSL3覆盖，不能让ambient RSL5冒充执行真源。Isaac launcher也不再替人硬编码隐私同意：
+   machine-local provisioning必须给出EULA=`Y`与privacy=`Y|N`，映射到child后不泄回launcher环境。
+   因此public软件配方和重建命令已闭合；合法Isaac下载、split USD、A3P0807的92个Mu mesh和private凭据仍是
+   外部输入，item 8只为这些真实字节保持开放，不再笼统写成“Python/GL不可恢复”。
 9. [ ] 做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的exact-only/self-echo
    procedural branches，并用相同artifact/固定tape/receipt反例证明语义未变。当前四个主文件合计约
    `13,167`行，问题不是行数本身，而是construction事实、runtime动态量、诊断身份与durable账本仍有交叉；
@@ -280,6 +284,20 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    `.483/.526 s`、retire=`.362/.393 s`、Epoch refresh=`.309/.337 s`。本项继续开放：下一刀将四个子步的
    narrow PlantFacts保留在device并由一次有序typed scan结算，不能漏掉瞬时contact/crossing，也不能继续堆
    gate或用profile-on秒数代签整轮。
+   `79efd71c`完成该刀的最窄版本：每个physics substep仍立即Scene capture、R06 sample与terminal park；只把
+   score、mailbox copy、settlement prepare和retire收成control boundary一次，随后严格按
+   `P0,R0,P1,R1…`回放四个CommitEntry。R06只新增cause/crossing不可推导事实和单一candidate replay，不镜像
+   ordinal/observation/fault，也不缓存四份OutcomeRows。`255df4a1`同时修复测试harness在collection阶段替换
+   canonical module、导致合并套件27个假失败的结构债。Pod1 final clean exact checkout分组为核心
+   `286 passed,19 skipped`、lean+Scene合并`145 passed,8 skipped`、launcher/setup=`45 passed`、cfg=
+   `13 passed,25 honest skips`。GPU fixed tape、journal/WAL逐字对拍与profiler-off matched active strata仍因三卡
+   均被三条只读训练占用而未测，故item 14不关闭，也不先声称速度收益。
+   这刀production净增约545行，虽没有增加外部Gate/owner，也不能仅凭语义测试称为最终优雅结构；先用GPU
+   profile裁决收益，若不足以覆盖维护成本则撤回，若保留则再把legacy即时finalize与deferred finalize的重复数学
+   收进同一内部primitive。后续性能依赖顺序已按profile固定为：(a) adaptive-sigma关闭时把command metric
+   D2H从48次/update收为一次；(b) selected reset保留唯一preflight而让各owner只写`K`行；(c) Reward28同周期
+   staged pack。三者整段硬上界分别`.978/1.863/1.066 s`，都不是预期收益且不能线性相加。已实测回归的逐轮
+   unresolved D05 compaction继续拒绝，不因`3,584/290/22`稀疏度再次引入host/device控制流。
 15. [ ] 用单一direct-paddle经济轴修复已证学习交接失败。旧Reward28四项measured-paddle权重
    `1/1/1/.5`的最高收入`3.5`低于anchor+body mimic的`6`；现役fixed-LR大分母下Mu约`.16 m`、Isaac约
    `.20 m`拍心误差仍远离接触尺度。下一fresh contract只同比例改为`4/4/4/2`（最高`14`）：kernel宽度、
@@ -288,6 +306,14 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    matched update报告四项真实误差、episode/terminal、`selected/launch`、landing/contact与fault。旧两条
    `d8fd8423`保持只读作为baseline；不resume、不复用namespace，不混入Build4 warm-start/replay/双LR/
    sigma`.19`或新增obs。只有真实误差与contact入口相对baseline改善且balance不倒退，才采用该数值轴。
+   fresh Mu `28430d36`已在GPU0运行到ACK217。matched ACK0..217相对旧baseline：episode length=
+   `148.255 vs 143.381`，四项误差=`.24306/1.16511/.33088/.28921` vs
+   `.23902/1.17045/.33715/.29194`，即三项小幅好、一项位置略坏；launch/R03=`28,911/22,276` vs
+   `26,954/20,039`，但selected=`0` vs `13`。新run recent10误差又为
+   `.25259/1.19249/.33004/.28288`且contact仍`0/1,423 launch`。它证明单轴已真实进入训练、数值与fault
+   clean，但还不足以采用或否决；继续到至少1000的早期趋势节点，不拿4倍后不可比的return作结论。Isaac
+   同轴fresh尚未发射：GPU0/1/2分别被该Mu treatment、旧Mu baseline、旧Isaac baseline占用，禁止同卡混跑、
+   signal旧run或绕过lifetime lock；空闲GPU出现后从final clean commit发射，不复用namespace。
 
 <a id="fullmdp-v9-superseded"></a>
 

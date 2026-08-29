@@ -1,5 +1,20 @@
 # 简短进度记录
 
+## 2026-08-29 — 可重建环境、R06 control-boundary减法与训练裁决
+
+- `e14b7141`把Mu Python3.12.3基础环境收成133项tracked lock；Pod fresh resolver精确闭合`131+2`项。
+  Isaac launcher不再硬编码privacy同意，只映射machine provisioning的EULA=`Y`、privacy=`Y|N`。public
+  软件恢复路径已闭合；合法Isaac二进制、split USD、92个Mu mesh和private凭据仍是明确外部输入。
+- `79efd71c`保留每physics-substep的Scene capture、R06 sample与terminal即时park，只把重型score/mailbox/
+  finalize收成每control一次，并按原`P0,R0…`顺序回放Epoch。`255df4a1`另把会在pytest collection污染
+  canonical module的test harness限制在单test生命周期；此前合并套件27个假失败不再需要靠分进程规避。
+  Pod final clean exact为核心`286 passed,19 skipped`、合并lean/Scene=`145 passed,8 skipped`、环境/launcher
+  `45 passed`、cfg=`13 passed,25 honest skips`。真实GPU fixed tape与matched profile因三卡占用仍`未测`。
+- 学习证据不混总return：旧Mu到ACK2031仍为`663/274,670 selected/launch`、legal landing=`0/663`；旧Isaac
+  到ACK704为`0 R03 / 71,289 launch`，交接失败已非早期。fresh 4× Mu到ACK217，matched前218轮三项拍误差
+  小幅好、一项略坏，recent10又波动且selected=`0/28,911 launch`；因此继续到至少1000再裁决。对应Isaac
+  treatment等空闲GPU，从final clean source发射，不同卡混跑、不signal旧run、不复用namespace。
+
 ## 2026-08-29 — 环境fail-closed、可移植GL、当前训练与14.72秒平台
 
 - Jiayi原`ENVIRONMENT_REPRODUCTION.md`仍在Pod1（SHA=`b461ed8d…9346`），不是缺失附件。已将Isaac

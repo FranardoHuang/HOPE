@@ -4,6 +4,19 @@ Status: Partial (the base training-loop mechanics are proven; the current-fresh 
 
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
+final branch source=`255df4a1`已把逐physics-substep的R06重型finalize收为每control一次，同时保留每substep
+Scene capture、terminal即时park和`P0,R0…` durable顺序。Pod1 clean exact CPU门为核心
+`286 passed,19 skipped`、lean/Scene合并`145 passed,8 skipped`、launcher/setup=`45 passed`、cfg=
+`13 passed,25 skipped`；原来合并pytest时由test loader污染canonical module造成的27个假失败也已闭合。
+三张GPU仍分别被旧Mu、旧Isaac和fresh 4× Mu占用，所以current source真实Kit fixed tape与profiler-off
+matched active strata为`未测`，本Gate不把host语义门或profile硬上界写成速度PASS。
+
+fresh direct-paddle 4× Mu到ACK217，matched旧baseline前218轮只有三项paddle误差略好、position略坏，且
+selected contact=`0/28,911 launch`；recent10误差继续波动。旧Mu到ACK2031仍为
+`663/274,670 selected/launch`、legal=`0/663`；旧Isaac到ACK704为`0 R03 / 71,289 launch`。旧两条交接失败
+已不是“太早”，新单轴才仍属早期；继续到1000节点，不比较权重改变后的return，也不因此新增Observation或
+离散Stage Gate。
+
 现役long于`2026-08-29T10:47:30Z`只读刷新到Mu ACK1610、Isaac ACK560。Mu累计
 selected-contact/net-crossing/legal-landing=`662/596/0`（launch=`217,463`），recovery=`0/132,376`；最近
 相邻10窗四项mimic都轻微恶化。Isaac累计physical-launch/R03-valid/contact=`51,300/0/0`，长期三项paddle

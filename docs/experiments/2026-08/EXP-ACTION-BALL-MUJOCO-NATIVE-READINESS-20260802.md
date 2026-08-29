@@ -323,6 +323,19 @@ parity/direct benchmark且不冒充大提速。其后仍须把约`202.2 ms`固�
 CPU reference、完整identity/RNG/reason/fault/counter/safety逐位等价，最后用profiler-off rate裁决。
 拒绝逐轮host/device控制流、缩RK4、降solver精度或新增task-success安全Gate。
 
+本轮又关闭两个实现欠账。第一，`e14b7141`把Mu基础venv的133项Python3.12.3闭包、fresh创建命令和
+EPA48/RSL3 run-local覆盖边界收入仓；Pod1 fresh resolver按exact lock得到`131+2`项闭包。Isaac EULA与
+privacy改为machine provisioning显式选择，launcher不再硬编码`PRIVACY_CONSENT=Y`。这使public依赖可重建，
+但合法Isaac二进制、split USD、92个Mu mesh与private凭据仍是外部输入，空白机状态继续`PARTIAL`。
+第二，`79efd71c`让Physical每substep继续capture/sample/立即park，只把R06重型score/mailbox/finalize收成
+control boundary一次，再按`P0,R0…`原顺序回放Epoch；没有删engine事实或durable chronology。Pod1 final
+clean exact source=`255df4a1`的核心、合并lean/Scene、launcher/setup分别为
+`286 passed,19 skipped`、`145 passed,8 skipped`、`45 passed`；cfg为`13 passed,25 honest skips`。
+测试harness原先在collection时全局替换canonical modules、使合并运行产生27个假失败，也已改成test-scope
+namespace并由同一合并命令闭合。真实GPU fixed tape与matched profile因三卡仍被只读训练占用而`未测`；不从
+CPU门外推速度。该slice的production净增约545行，因此也不以“typed”名称冒充结构已经优雅：GPU收益不足则
+撤回；若保留，再把即时/deferred finalize的重复数学收成同一内部primitive，减少维护面。
+
 采用/延后/拒绝如下：
 
 - **采用：**真实A3P0807 root绑定；immutable teacher与robust physical birth分离；artifact作为hold/actor

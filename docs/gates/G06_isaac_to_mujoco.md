@@ -4,6 +4,16 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 
 ## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
 
+新机可复现边界现已具体化：Mu的Python3.12.3基础venv有133项tracked lock，Pod fresh resolver精确闭合；
+实际run继续由EPA48/RSL3 run-local site掌权。Isaac launcher只接受machine provisioning给出的EULA=`Y`与
+privacy=`Y|N`，不替人选择。合法Isaac二进制、split USD、Mu的92个ignored mesh和private凭据仍须外部恢复，
+所以这是可执行安装路径而非“纯clone自包含”，G06仍`Partial`。
+
+`255df4a1`的Physical/R06收敛候选已在Pod clean exact CPU套件通过，但真实GPU fixed tape、journal/WAL
+逐字对拍与matched profile尚未运行；三卡当前均由只读训练占用，不能同卡混跑或停止旧run换结果。该候选仍
+保留每个backend的Scene/plant事实和per-substep事件，只减少同一R06 owner的重复finalize，故通过后也只会
+改善实现成本，不会把任务成功变成sim2sim或安全证据。
+
 现役Mu已产生`662/217,463` selected contact和596次net crossing但0 legal landing；Isaac为
 `0/51,300 physical launch`有效strike。二者处在不同学习阶段，不能把曲线差异直接当physics parity。
 fixed tape仍把shared initial state、joint order、action decoder与qdes对齐，current Pod runtime身份也通过
