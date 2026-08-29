@@ -18,12 +18,12 @@ PASS阈值，行为接近也不等于数值parity；G06仍`Partial / diagnostic_
 这使旧run的sim2sim差异不可比，但不推出整个Pod安装损坏。correct-0807、同clean source `954200d5`的fresh
 双端现持续训练；首个Mu root因fresh checkout缺ignored 0807 `meshes/`在首ACK前fail-closed，恢复
 [setup记录](../operations/setup_local_sync.md#restore-the-ignored-a3p0807-mujoco-mesh-closure)后以新root启动，
-没有复用失败namespace。`observed_at=2026-08-29T04:13:40Z`时Isaac/Mu到ACK971/2828；Isaac recent50
-launch/contact=`6,379/0`、累计=`110,212/0`。Mu recent50
-launch/raw/selected/legal-landing=`4,883/10/1/0`、累计selected/legal=`37/0`，累计launch=`365,375`。
-这是真实学习证据，不是physics parity分母；约`.010%`累计selected/launch远未达到hit基本成功。
-Mu recent50 p50/p90=`6.709/6.858 s/H48`，两端finite与durable边界clean；Mu actual-hard-edge/qdes-guard
-rows却从first50 `4.90%/5.62%`升到recent50 `28.19%/29.31%`，因此也不能用episode增长代签两端行为接近。
+没有复用失败namespace。`observed_at=2026-08-29T04:37:38Z`时Isaac/Mu到ACK1043/3043；Isaac recent50
+launch/contact=`5,328/0`、累计=`118,014/0`。Mu recent50
+launch/raw/selected/legal-landing=`5,699/4/0/0`、累计selected/legal=`38/0`，累计launch=`387,840`。
+这是真实学习证据，不是physics parity分母；约`.0098%`累计selected/launch远未达到hit基本成功。
+Mu recent50 p50/p90=`6.681/6.820 s/H48`，两端finite与durable边界clean；Mu actual-hard-edge/qdes-guard
+rows却从first50 `4.90%/5.62%`升到recent50 `58.99%/59.73%`，因此更不能用episode/return增长代签两端行为接近。
 
 Mu `model_2000.pt`的GPU1隔离`512×240`诊断把aggregate hard edge收敛到三关节：
 `waist_pitch/waist_roll/left_ankle_roll`，且`77.47%` hard rows发生在outcome-settled/recovery。

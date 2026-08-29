@@ -156,18 +156,19 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    `fullmdp-r12-0807-mujoco-rewardpack-954200d5-20260828T2254Z-r2`（GPU2；首个同名root因ignored
    `meshes/`缺失在首ACK前fail-closed且未复用），fresh Isaac使用
    `fullmdp-r12-0807-isaac-rewardpack-954200d5-20260828T2245Z`（GPU0）。启动验收Mu ACK0..7明确绑定
-   plant SHA `7bbda723…bcae1`。`observed_at=2026-08-29T04:13:40Z`时Isaac ACK0..971、Mu ACK0..2828；
+   plant SHA `7bbda723…bcae1`。`observed_at=2026-08-29T04:37:38Z`时Isaac ACK0..1043、Mu ACK0..3043；
    两端Reward28、finite、conservation与attributed fault均clean。Isaac first50→recent50的episode
-   length/return=`105.07/11.30→244.27/23.71`，paddle position/velocity/face/long-axis误差=
-   `.2811/1.2040/.3561/.4092→.1983/.9276/.3775/.2873`；recent50 due/admitted/launch/contact=
-   `7,006/7,001/6,379/0`，累计contact=`0/110,212 launch`，wall p50/p90=`20.750/21.132 s/H48`。
-   生存与三项mimic改善，但face变差、actual-hard-edge joint-sample=`7.13%→8.94%`，故不能称balance或mimic
-   已基本成功。Mu first50→recent50的episode length/return=`136.78/15.64→270.18/29.10`，四项误差=
-   `.2059/1.1556/.3318/.2840→.2105/.9578/.2926/.2432`；recent50
-   due/launch/R03-valid/raw/selected/legal-landing=`8,914/4,883/4,816/10/1/0`，累计selected=
-   `37/365,375 launch`、legal landing=`0/37 selected`，wall p50/p90=`6.709/6.858 s/H48`。
-   Mu触球自然可达但极稀疏，且actual-hard-edge/qdes-guard rows=`4.90%/5.62%→28.19%/29.31%`；episode增长
-   可能部分来自关节边界套利。当前课程裁决仍是balance/mimic在进步、hit未基本成功、landing为`0/37`，
+   length/return=`105.07/11.30→520.12/51.89`，paddle position/velocity/face/long-axis误差=
+   `.2811/1.2040/.3561/.4092→.2293/.8819/.4110/.2918`；recent50 due/admitted/launch/contact=
+   `5,479/5,475/5,328/0`，累计contact=`0/118,014 launch`，wall p50/p90=`20.255/20.570 s/H48`。
+   生存与三项mimic仍优于first50，但face变差、actual-hard-edge joint-sample=`7.13%→12.51%`，故不能称balance或
+   mimic已基本成功。Mu first50→recent50的episode length/return=`136.78/15.64→359.06/37.44`，四项误差=
+   `.2059/1.1556/.3318/.2840→.1823/.9737/.3212/.2296`；recent50
+   due/launch/R03-valid/raw/selected/legal-landing=`7,631/5,699/5,504/4/0/0`，累计selected=
+   `38/387,840 launch`、legal landing=`0/38 selected`，wall p50/p90=`6.681/6.820 s/H48`。
+   Mu触球自然可达但最近50轮再次没有selected hit，且actual-hard-edge/qdes-guard rows=
+   `4.90%/5.62%→58.99%/59.73%`；episode/return增长已被关节边界使用严重污染。当前课程裁决仍是
+   balance/mimic有局部进步但未基本成功、hit未基本成功、landing为`0/38`，
    不是等待更多step即可自动晋级的证据。
 8. [ ] 在不停止两条fresh训练的前提下闭合本机/Pod与controller-response对照。第一层环境审计已完成：
    `origin/build_4@324e60d1`没有环境lock，其path-autodiscovery在当前Pod1默认命中Python3.10、Isaac Sim4.5、

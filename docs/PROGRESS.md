@@ -43,13 +43,14 @@
   `11,380/11,380` tilt episode且launch归零。旧错误plant谱系只证明极稀疏hit曾可达后遗忘，不能移签R8，
   也不能用generic contact冒充课程交接。
 - V9最终冻结后已按精确进程身份停止；正确A3P0807、同clean source `954200d5`的fresh Isaac/Mu长期run
-  已在GPU0/2持续训练。`observed_at=2026-08-29T04:13:40Z`时分别到ACK971/2828；两端Reward28全finite、
-  conservation/attributed fault0。Isaac first50→recent50 episode length=`105.07→244.27`，三项mimic改善、
-  face变差，recent50 launch/contact=`6,379/0`、累计=`110,212/0`，wall p50/p90=`20.750/21.132 s/H48`。
-  Mu episode length=`136.78→270.18`，recent50 launch/raw/selected/legal=`4,883/10/1/0`、累计selected/legal=
-  `37/0`（累计launch=`365,375`），wall=`6.709/6.858 s/H48`。课程自然重叠但hit约`.010%`且无合法落点；
-  Isaac hard-edge joint-sample=`7.13%→8.94%`，Mu hard-edge/qdes-guard rows=`4.90%/5.62%→28.19%/29.31%`，
-  因此生存增长不单独代签balance/mimic成功，先做per-joint/phase诊断再改controller/scale/reward。
+  已在GPU0/2持续训练。`observed_at=2026-08-29T04:37:38Z`时分别到ACK1043/3043；两端Reward28全finite、
+  conservation/attributed fault0。Isaac first50→recent50 episode length=`105.07→520.12`，四项paddle误差最近为
+  `.2293/.8819/.4110/.2918`，recent50 launch/contact=`5,328/0`、累计=`118,014/0`，wall p50/p90=
+  `20.255/20.570 s/H48`。Mu episode length=`136.78→359.06`，recent50 launch/raw/selected/legal=
+  `5,699/4/0/0`、累计selected/legal=`38/0`（累计launch=`387,840`），wall=`6.681/6.820 s/H48`。
+  课程入口自然重叠但hit仍仅约`.0098%`且无合法落点；Isaac hard-edge joint-sample=
+  `7.13%→12.51%`，Mu hard-edge/qdes-guard rows=`4.90%/5.62%→58.99%/59.73%`，因此episode/return增长
+  已被边界使用严重污染，不能代签balance/mimic成功或继续盲等。
 - GPU1已严格加载Mu `model_2000.pt`完成隔离`512×240`随机policy诊断：hard/guard=
   `8,081/8,373`、共同分母`122,880`，hard只来自`waist_pitch/waist_roll/left_ankle_roll`，其中`77.47%`在
   outcome-settled/recovery。最大项`waist_pitch`全部撞上限，但mean action=`-.551`、nominal qdes约

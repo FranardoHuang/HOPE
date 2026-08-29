@@ -115,18 +115,18 @@ controller或学习结论，也不支持为追求速度删除跨writer/journal�
 `fullmdp-r12-0807-isaac-rewardpack-954200d5-20260828T2245Z`；Mu namespace=
 `fullmdp-r12-0807-mujoco-rewardpack-954200d5-20260828T2254Z-r2`。首个Mu root因ignored `meshes/`未同步而在
 source-closure scan、首ACK前fail-closed；补齐现有受控资产后使用fresh `-r2`，失败root未复用。
-`observed_at=2026-08-29T04:13:40Z`时Isaac到ACK971：first50→recent50 episode length/return=
-`105.07/11.30→244.27/23.71`，paddle position/velocity/face/long-axis误差=
-`.2811/1.2040/.3561/.4092→.1983/.9276/.3775/.2873`；recent50 due/admitted/launch/contact=
-`7,006/7,001/6,379/0`，累计contact=`0/110,212 launch`，wall p50/p90=`20.750/21.132 s/H48`。
-Mu到ACK2828：first50→recent50 episode length/return=`136.78/15.64→270.18/29.10`，四项误差=
-`.2059/1.1556/.3318/.2840→.2105/.9578/.2926/.2432`；recent50
-due/launch/R03-valid/raw/selected/legal-landing=`8,914/4,883/4,816/10/1/0`，累计selected=
-`37/365,375 launch`、legal landing=`0/37 selected`，wall p50/p90=`6.709/6.858 s/H48`。
+`observed_at=2026-08-29T04:37:38Z`时Isaac到ACK1043：first50→recent50 episode length/return=
+`105.07/11.30→520.12/51.89`，paddle position/velocity/face/long-axis误差=
+`.2811/1.2040/.3561/.4092→.2293/.8819/.4110/.2918`；recent50 due/admitted/launch/contact=
+`5,479/5,475/5,328/0`，累计contact=`0/118,014 launch`，wall p50/p90=`20.255/20.570 s/H48`。
+Mu到ACK3043：first50→recent50 episode length/return=`136.78/15.64→359.06/37.44`，四项误差=
+`.2059/1.1556/.3318/.2840→.1823/.9737/.3212/.2296`；recent50
+due/launch/R03-valid/raw/selected/legal-landing=`7,631/5,699/5,504/4/0/0`，累计selected=
+`38/387,840 launch`、legal landing=`0/38 selected`，wall p50/p90=`6.681/6.820 s/H48`。
 两端均Reward28、finite、conservation/attributed fault0；Mu每条ACK绑定正确A3P0807 SHA
-`7bbda723…bcae1`。课程已有自然重叠，但hit仍只有约`.010%`累计selected/launch且无合法落点。Isaac
-actual-hard-edge joint-sample first50→recent50=`7.13%→8.94%`；Mu actual-hard-edge/qdes-guard rows=
-`4.90%/5.62%→28.19%/29.31%`。所以生存曲线改善不能单独代签balance/mimic成功，Mu还存在明显关节边界
+`7bbda723…bcae1`。课程已有自然重叠，但hit仍只有约`.0098%`累计selected/launch且无合法落点。Isaac
+actual-hard-edge joint-sample first50→recent50=`7.13%→12.51%`；Mu actual-hard-edge/qdes-guard rows=
+`4.90%/5.62%→58.99%/59.73%`。所以episode/return增长不能单独代签balance/mimic成功，Mu还存在严重关节边界
 套利风险；先做per-joint/phase checkpoint诊断，再决定controller、scale或reward，不盲目加权或改Done。
 
 该checkpoint诊断现已完成，不再停在aggregate猜测。GPU1隔离进程严格加载Mu `model_2000.pt`

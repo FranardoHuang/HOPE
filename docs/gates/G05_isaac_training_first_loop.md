@@ -60,19 +60,19 @@ due/reveal=`11,384/11,384`，但launch/raw/selected=`0/0/0`，episode length/ret
 （SHA `70c4fd65…36c0a`），不是A3P0807 `a3p_pingpong_0807.xml`（SHA `7bbda723…bcae1`），故旧双端差异
 不能与Jiayi的matched sim2sim主张相比，也不能裁决0807训练；旧run已按精确进程身份停止并保留root。
 
-正确0807、同clean source `954200d5`的双fresh随后在Pod1启动。`observed_at=2026-08-29T04:13:40Z`：
-Isaac ACK0..971的first50→recent50 episode length/return=`105.07/11.30→244.27/23.71`，四项paddle误差=
-`.2811/1.2040/.3561/.4092→.1983/.9276/.3775/.2873`；recent50
-due/admitted/launch/contact=`7,006/7,001/6,379/0`，wall p50/p90=`20.750/21.132 s/H48`，累计contact=
-`0/110,212 launch`。Mu ACK0..2828的first50→recent50 episode length/return=
-`136.78/15.64→270.18/29.10`，四项误差=`.2059/1.1556/.3318/.2840→.2105/.9578/.2926/.2432`；
-recent50 due/launch/R03-valid/raw/selected/legal-landing=`8,914/4,883/4,816/10/1/0`，累计selected=
-`37/365,375 launch`、legal landing=`0/37 selected`，p50/p90=`6.709/6.858 s/H48`。两端Reward28均
+正确0807、同clean source `954200d5`的双fresh随后在Pod1启动。`observed_at=2026-08-29T04:37:38Z`：
+Isaac ACK0..1043的first50→recent50 episode length/return=`105.07/11.30→520.12/51.89`，四项paddle误差=
+`.2811/1.2040/.3561/.4092→.2293/.8819/.4110/.2918`；recent50
+due/admitted/launch/contact=`5,479/5,475/5,328/0`，wall p50/p90=`20.255/20.570 s/H48`，累计contact=
+`0/118,014 launch`。Mu ACK0..3043的first50→recent50 episode length/return=
+`136.78/15.64→359.06/37.44`，四项误差=`.2059/1.1556/.3318/.2840→.1823/.9737/.3212/.2296`；
+recent50 due/launch/R03-valid/raw/selected/legal-landing=`7,631/5,699/5,504/4/0/0`，累计selected=
+`38/387,840 launch`、legal landing=`0/38 selected`，p50/p90=`6.681/6.820 s/H48`。两端Reward28均
 finite、conservation/attributed fault0。课程入口自然重叠，但Isaac face误差恶化且仍零contact；Mu hit累计
-约`.010%`、无合法落点，远未完成mimic→hit交接。Isaac actual-hard-edge joint-sample从`7.13%→8.94%`，
-Mu actual-hard-edge/qdes-guard rows从`4.90%/5.62%→28.19%/29.31%`；episode生存改善不能单独代签balance
-成功，尤其Mu可能部分利用关节边界。G05不把hard edge改成Done；下一项是隔离checkpoint的per-joint/phase
-归因，再决定controller、action scale或连续reward。
+约`.0098%`、无合法落点，远未完成mimic→hit交接。Isaac actual-hard-edge joint-sample从`7.13%→12.51%`，
+Mu actual-hard-edge/qdes-guard rows从`4.90%/5.62%→58.99%/59.73%`；episode/return增长不能单独代签balance
+成功，尤其Mu已严重利用关节边界。G05不把hard edge改成Done，并按下述已完成的per-joint/phase归因
+进入controller-response反事实。
 
 该归因已在GPU1用Mu `model_2000.pt`、同0807 plant/RSL3/EPA48、seed0完成`512×240`随机policy step：
 hard/guard=`8,081/8,373`，分母`122,880`；非零hard joint仅`waist_pitch/waist_roll/left_ankle_roll`，
