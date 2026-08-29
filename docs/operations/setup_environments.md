@@ -83,6 +83,8 @@ source setup_train_env.sh
 - `HOPE_ISAAC_PYTHON` — path to the Isaac Lab Python interpreter (`hope_isaac_py` wraps it)
 - `HOPE_ISAACLAB_ROOT` — Isaac Lab install root
 - `HOPE_ISAAC_VENV_SITE` — extra `site-packages` to inject (e.g. so `hydra`/`omegaconf` import in the Isaac Lab Python; they are not in the package `install_requires`)
+- `HOPE_ISAAC_ACCEPT_EULA` — set to `Y` in the ignored machine file only after the operator accepts the NVIDIA EULA
+- `HOPE_ISAAC_PRIVACY_CONSENT` — the operator's explicit `Y` or `N` privacy choice; the launcher never defaults it
 - `WANDB_ENTITY` — your run-logging team (`your-wandb-team`)
 - `WANDB_REGISTRY_ORG` — your motion-registry org (`your-wandb-org`); it must differ from `WANDB_ENTITY` or registry reads fail with "Unable to find organization for entity ..."
 - `WANDB_PROJECT`
@@ -207,6 +209,18 @@ version of that sequence and a real `512×48×31` Kit/PhysX fixed-action probe; 
 Current source removes personal hard-coded GL paths while reusing the already established Pod runtime authority;
 its exact Pod tests/dry-run and real `512×48×31` Kit fixed-action probe are current. Neither result is learning, physics-parity,
 deployment, or robot authority.
+
+Both current FullMDP launchers intentionally support run roots under `/workspace`; a fresh host must mount a writable
+`/workspace` rather than relying on an undocumented fallback. Before the first launch on each GPU, create its ordinary
+owner-only lock file once, for example:
+
+```bash
+install -m 0600 /dev/null /tmp/hope_lean_queue_gpu0.lock
+```
+
+The launcher reuses and locks that file; it does not create or replace it. MuJoCo's public Python environment is built
+separately from the [tracked 133-package lock](action_ball_mujoco_environment_identity_20260829.md); ignored plant meshes
+and exact EPA48/RSL3 inputs still follow [setup_local_sync.md](setup_local_sync.md).
 
 `whole_body_tracking` now declares `cryptography>=44,<51`, because tracked ActionBall authority signing and
 verification use Ed25519. The range covers the verified Isaac 5.1 bundled `44.0.0` and the Pod operation venv

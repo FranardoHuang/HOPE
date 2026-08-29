@@ -74,6 +74,8 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 RATE_PROBE_MARKER_TOKEN = "FULLMDP_H48_RATE_PROBE:"
 PROFILE_PROBE_MARKER_TOKEN = "FULLMDP_H48_PROFILE_PROBE:"
 PROFILE_JSON_PREFIX = "HOPE_ACTION_BALL_FULL_MDP_PROFILE_JSON="
+OPERATOR_EULA_ENV = "HOPE_ISAAC_ACCEPT_EULA"
+OPERATOR_PRIVACY_ENV = "HOPE_ISAAC_PRIVACY_CONSENT"
 PPO_RECIPE_MARKER_TOKEN = "full-MDP PPO recipe:"
 LEARNING_ITERATION_RE = re.compile(
     r"^\s*Learning iteration\s+([0-9]+)/([0-9]+)\s*$"
@@ -595,6 +597,25 @@ def _pythonpath(isaaclab: Path, venv_site: Path) -> str:
     return ":".join(rows)
 
 
+def _operator_runtime_authority() -> dict[str, str]:
+    """Read machine-provisioned NVIDIA choices without choosing for it."""
+
+    accept_eula = os.environ.get(OPERATOR_EULA_ENV)
+    privacy_consent = os.environ.get(OPERATOR_PRIVACY_ENV)
+    if accept_eula != "Y":
+        raise LaunchError(
+            f"{OPERATOR_EULA_ENV}=Y must come from machine provisioning"
+        )
+    if privacy_consent not in {"Y", "N"}:
+        raise LaunchError(
+            f"{OPERATOR_PRIVACY_ENV} must be Y or N from machine provisioning"
+        )
+    return {
+        "ACCEPT_EULA": accept_eula,
+        "PRIVACY_CONSENT": privacy_consent,
+    }
+
+
 def _runtime_env(
     *,
     gpu_uuid: str,
@@ -604,7 +625,14 @@ def _runtime_env(
     rsl_sha256: str,
     ld_library_path: str,
     profile_updates: int,
+    operator_runtime: dict[str, str],
 ) -> dict[str, str]:
+    if (
+        set(operator_runtime) != {"ACCEPT_EULA", "PRIVACY_CONSENT"}
+        or operator_runtime["ACCEPT_EULA"] != "Y"
+        or operator_runtime["PRIVACY_CONSENT"] not in {"Y", "N"}
+    ):
+        raise LaunchError("operator runtime authority differs")
     result = {
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
         # Kit/Omniverse, NVIDIA JIT and Python caches must be owned by this
@@ -617,8 +645,7 @@ def _runtime_env(
         "XDG_STATE_HOME": str(paths["xdg_state"]),
         "CUDA_CACHE_PATH": str(paths["cuda_cache"]),
         "TMPDIR": str(paths["tmp"]),
-        "ACCEPT_EULA": "Y",
-        "PRIVACY_CONSENT": "Y",
+        **operator_runtime,
         "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
         "CUDA_VISIBLE_DEVICES": gpu_uuid,
         "HOPE_AGIBOT_A3_USD_PATH": str(paths["asset"]),
@@ -1068,6 +1095,7 @@ def _write_diagnostic_receipt(path: Path, payload: dict[str, object]) -> None:
 
 
 def launch(args: argparse.Namespace) -> int:
+    operator_runtime = _operator_runtime_authority()
     commit = _source_commit()
     train = _canonical_regular(REPO_ROOT / TRAIN_RELATIVE, "Isaac train entry")
     kit_launcher = _canonical_regular(
@@ -1141,6 +1169,7 @@ def launch(args: argparse.Namespace) -> int:
         rsl_sha256=rsl_sha256,
         ld_library_path=str(gl_runtime["ld_library_path"]),
         profile_updates=args.profile_updates,
+        operator_runtime=operator_runtime,
     )
     boot_marker = (
         FIXED_ACTION_PROBE_BOOT_MARKER

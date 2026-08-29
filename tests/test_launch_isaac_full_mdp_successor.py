@@ -66,6 +66,8 @@ def _executable(path: Path, source: str) -> Path:
 @pytest.fixture
 def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     base = tmp_path.resolve()
+    monkeypatch.setenv("HOPE_ISAAC_ACCEPT_EULA", "Y")
+    monkeypatch.setenv("HOPE_ISAAC_PRIVACY_CONSENT", "Y")
     repo = base / "repo"
     (repo / "scripts").mkdir(parents=True)
     shutil.copy2(SCRIPT, repo / "scripts" / SCRIPT.name)
@@ -289,6 +291,41 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     assert f"hydra.run.dir={rig.root / 'training' / 'hydra'}" in payload["argv"]
     assert payload["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "0"
     assert "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES" not in payload["runtime_env"]
+    assert not rig.root.exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    (
+        ("HOPE_ISAAC_ACCEPT_EULA", None, "machine provisioning"),
+        ("HOPE_ISAAC_ACCEPT_EULA", "N", "machine provisioning"),
+        ("HOPE_ISAAC_PRIVACY_CONSENT", None, "must be Y or N"),
+        ("HOPE_ISAAC_PRIVACY_CONSENT", "maybe", "must be Y or N"),
+    ),
+)
+def test_operator_runtime_choices_must_be_machine_provisioned_before_root(
+    rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    name: str, value: str | None, message: str,
+) -> None:
+    if value is None:
+        monkeypatch.delenv(name)
+    else:
+        monkeypatch.setenv(name, value)
+    assert rig.module.main(rig.argv(dry=True)) == 2
+    assert message in capsys.readouterr().err
+    assert not rig.root.exists()
+
+
+def test_machine_provisioned_privacy_opt_out_reaches_only_the_child(
+    rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("HOPE_ISAAC_PRIVACY_CONSENT", "N")
+    assert rig.module.main(rig.argv(dry=True)) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["runtime_env"]["ACCEPT_EULA"] == "Y"
+    assert payload["runtime_env"]["PRIVACY_CONSENT"] == "N"
+    assert "ACCEPT_EULA" not in payload["launcher_env"]
+    assert "PRIVACY_CONSENT" not in payload["launcher_env"]
     assert not rig.root.exists()
 
 

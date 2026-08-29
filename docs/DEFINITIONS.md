@@ -30,8 +30,10 @@ NUMA放置，不改变训练语义，也不是性能或安全Gate；收益必须
 **Isaac FullMDP established runtime authority / 已建立运行时授权与图形库身份**：
 EULA接受是机器/runtime provisioning的一次性前置事实，不是每次训练的业务输入；当前项目已在
 [G05](gates/G05_isaac_training_first_loop.md)记录2026-06-26接受并完成真实Kit训练，当前Pod也沿用已建立的
-`ACCEPT_EULA=Y`与`PRIVACY_CONSENT=Y`运行配置。launcher只把该已建立配置封入窄child环境，不再用
-per-run flag要求重复确认。新机器仍必须由人类在安装Isaac前完成一次合法授权，代码不能代签。
+`ACCEPT_EULA=Y`与`PRIVACY_CONSENT=Y`运行配置。机器的ignored provisioning配置必须显式导出
+`HOPE_ISAAC_ACCEPT_EULA=Y`与人类选择的`HOPE_ISAAC_PRIVACY_CONSENT=Y|N`；launcher只把这两个既有选择
+映射进窄child环境，不提供per-run确认flag，也不替机器默认选择`Y`。新机器仍必须由人类在安装Isaac前完成
+一次合法授权，代码不能代签。
 `--opengl-lib-dir`和`--glu-lib-dir`分别定位headless OpenGL/GLU目录；launcher在创建run root前核canonical
 目录、真实库文件SHA-256和direct SONAME symlink，再从这两个输入唯一构造`LD_LIBRARY_PATH`，不读取
 开发者私有硬编码路径。该合同只绑定既有runtime与loader输入，不证明学习、physics parity、部署完成或
@@ -43,7 +45,9 @@ FullMDP child的canonical目录，令checkpoint、WAL和training contract归属�
 
 <a id="mujoco-fullmdp-ready-pose"></a>
 **portable MuJoCo FullMDP `--ready-pose` / 显式初始站姿输入**：one-shot launcher要求的canonical regular
-JSON文件；launcher与child都核固定SHA `ab6b7e41...8d38069`，并由launcher显式设置
+JSON文件，当前tracked locator为
+[`take061.local_closest_robust_feasible.dynamic_ready.v2.json`](../configs/action_ball_n1_measured_a3p0807_20260828/take061.local_closest_robust_feasible.dynamic_ready.v2.json)；launcher与child都核当前R8 fixed-reserve工件SHA
+`b88d93c311b439bd61296b3b3a84198200d9c6938980471071992ec52d8df18f`，并由launcher显式设置
 `ACTIONBALL_READY_POSE`。它消除外层shell的隐藏依赖，不是课程Gate、学习成绩或安全授权。
 
 <a id="mujoco-fullmdp-runtime-stack"></a>
@@ -70,8 +74,8 @@ portable identity、root/完整source closure、base compiled MJB、compiler too
 `df71f12a21fedb4b8caed182906288f573b2f05c731441a5f529996baaf056b2`、policy clock
 `decimation=20 / step_dt=0.02`、Warp allocation capacity
 `njmax_per_world=572 / nconmax_per_world=128`、实际augmented model保存出的MJB
-`sha256=1ef4bb9e52b0b46afd422d2fe712ae38628853a1704b324b20a8ec3f26030c0b /
-size_bytes=72,260,546`，以及从exact verified base独立派生的`owner_local_frame_sha256`。
+`sha256=95f08350b39f3d6e5b703906b5d4ac7cc5d8bca504d273056b03da743d42c3ba /
+size_bytes=113,765,945`，以及从exact verified base独立派生的`owner_local_frame_sha256`。
 
 该augmented MJB已在隔离Pod CPU上用`N=1`与`N=2`、两个绝对checkout路径、三个fresh进程构造，
 三份bytes完全一致；实测保存内容覆盖cone、contact pairs、spawn、MuJoCo options与model counts。
@@ -100,8 +104,8 @@ binder会在runner自身的Torch、RSL-RL、WAIT或MJLab import之前把两枚�
 `source_commit`；launcher必须先从clean Git truth
 取得commit再通过前一flag显式传入。恢复与调用边界见
 [`setup_local_sync.md`](operations/setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)；
-[`--save-interval=500`](#mujoco-fullmdp-longrun-flags)是当前typed recipe固定的500轮快照周期，另在自然终点
-update `24999`保存。completion seal只证明exact 25,000-update engineering completion；独立consumer另行报告
+[`--save-interval=2000`](#mujoco-fullmdp-longrun-flags)是当前PPO V6 typed recipe固定的2,000轮快照周期，另在自然终点
+update `99999`保存。completion seal只证明exact 100,000-update engineering completion；独立consumer另行报告
 slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，因为73动作、双侧与科学窗口
 报告未闭合。这些flag不授权checkpoint resume、promotion、跨后端matched结论或部署。
 

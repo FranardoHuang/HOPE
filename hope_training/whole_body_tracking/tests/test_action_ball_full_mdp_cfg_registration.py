@@ -58,6 +58,22 @@ FAMILY_CASES = (
 )
 
 
+def _require_live_isaac_import_surface() -> None:
+    """Skip when only an IsaacLab source tree, not a booted Kit runtime, is visible.
+
+    Pod operation venvs can expose ``isaaclab`` through a ``.pth`` file while
+    Warp and the ``omni`` extension namespace are intentionally supplied only
+    after Kit/AppLauncher boots.  Treating that partial source visibility as a
+    runnable Isaac process turns an optional host test into 20+ misleading
+    dependency failures.  Real construction is covered by the launcher probe;
+    these cfg assertions run only when their complete import surface exists.
+    """
+
+    pytest.importorskip("isaaclab")
+    pytest.importorskip("warp")
+    pytest.importorskip("omni.kit.app")
+
+
 def _load_split_asset_consumer():
     name = "_test_action_ball_full_mdp_split_asset_consumer"
     spec = importlib.util.spec_from_file_location(
@@ -416,7 +432,7 @@ def test_a_c_task_yaml_compose_to_one_common_non_self_authorizing_recipe():
 
 def test_gym_specs_resolve_to_custom_env_and_exact_cfg_leaf_types():
     gym = pytest.importorskip("gymnasium")
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
 
     import whole_body_tracking  # noqa: F401
     import whole_body_tracking.tasks  # noqa: F401
@@ -432,7 +448,7 @@ def test_gym_specs_resolve_to_custom_env_and_exact_cfg_leaf_types():
 
 
 def test_env_cfg_leaves_are_exact_role_projection_with_truthful_hold():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from isaaclab.sensors import ContactSensorCfg
     from isaaclab.sensors.contact_sensor import ContactSensor
@@ -581,7 +597,7 @@ def test_env_cfg_leaves_are_exact_role_projection_with_truthful_hold():
 
 
 def test_fresh_a_c_episode_horizon_carries_six_shots_through_retirement():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
 
     # Mechanical timing is calculated here from the independently reviewed
@@ -624,7 +640,7 @@ def test_fresh_a_c_episode_horizon_carries_six_shots_through_retirement():
 
 
 def test_fresh_a_c_alone_install_exact_deterministic_robot_reset_event():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from isaaclab.managers import EventTermCfg
     from isaaclab.managers import SceneEntityCfg
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
@@ -745,7 +761,7 @@ def test_official_contact_sensor_enables_processing_before_sim_attach():
 
 
 def test_fresh_cfg_installs_exact_code_owned_active_n1_motion_catalog():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking.mdp import commands as C
 
@@ -804,7 +820,7 @@ def test_fresh_cfg_installs_exact_code_owned_active_n1_motion_catalog():
 
 
 def test_noncanonical_continuous_cadence_exception_is_catalog_scoped():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking.mdp import commands as C
 
@@ -823,7 +839,7 @@ def test_noncanonical_continuous_cadence_exception_is_catalog_scoped():
 
 
 def test_fresh_catalog_cfg_rejects_caller_override_and_order_or_sign_swap():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking.mdp import commands as C
 
@@ -863,7 +879,7 @@ def test_fresh_catalog_cfg_rejects_caller_override_and_order_or_sign_swap():
 
 @pytest.mark.parametrize("fault", ("bytes_drift", "missing_asset"))
 def test_code_owned_catalog_rejects_motion_asset_fault(monkeypatch, fault: str):
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.mdp import commands as C
 
     table = C.load_action_ball_full_mdp_diagnostic_catalog_table()
@@ -884,7 +900,7 @@ def test_code_owned_catalog_rejects_motion_asset_fault(monkeypatch, fault: str):
 
 @pytest.mark.parametrize("device", ("cpu", "cuda:2"))
 def test_exact_active_n1_motion_loader_cold_load(device: str):
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     np = pytest.importorskip("numpy")
     torch = pytest.importorskip("torch")
     if device == "cuda:2" and torch.cuda.device_count() < 3:
@@ -921,7 +937,7 @@ def test_exact_active_n1_motion_loader_cold_load(device: str):
 
 
 def test_fresh_cfg_scene_is_frozen_and_refuses_a_duplicate_pre_env_attach():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import (
         action_ball_full_mdp_ball_scene as S,
@@ -946,7 +962,7 @@ def test_fresh_cfg_scene_is_frozen_and_refuses_a_duplicate_pre_env_attach():
 
 
 def test_reward_template_matches_exact_shared_reward28_contract():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking import mdp
 
@@ -1106,7 +1122,7 @@ def test_reward_template_matches_exact_shared_reward28_contract():
 
 
 def test_isaac_reward_manager_rejects_unmaterialized_template_before_callable_use():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from isaaclab.managers import RewardManager
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
 
@@ -1128,7 +1144,7 @@ def test_isaac_reward_manager_rejects_unmaterialized_template_before_callable_us
 
 
 def test_placement_shell_is_common_positive_while_treatment_stays_owner_bound():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
 
     left, right = _fresh_cfgs(H)
@@ -1147,7 +1163,7 @@ def test_placement_shell_is_common_positive_while_treatment_stays_owner_bound():
 
 
 def test_termination_cfg_is_dedicated_publisher_timeout_and_plant_terminal_graph():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking import mdp
 
@@ -1193,7 +1209,7 @@ def test_termination_cfg_is_dedicated_publisher_timeout_and_plant_terminal_graph
     ),
 )
 def test_reward_template_mutations_fail_closed(mutation: str, expected: str):
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking import mdp
 
@@ -1226,7 +1242,7 @@ def test_reward_template_mutations_fail_closed(mutation: str, expected: str):
 
 
 def test_family_projection_rejects_base_subclass_and_role_rewrite():
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
 
     base = H.HOPEPingPongActionBallFullMdpAgibotA3EnvCfg()
@@ -1248,7 +1264,7 @@ def test_family_projection_rejects_base_subclass_and_role_rewrite():
 
 def test_registered_env_constructor_fails_before_simulator_on_real_owner_blocker():
     gym = pytest.importorskip("gymnasium")
-    pytest.importorskip("isaaclab")
+    _require_live_isaac_import_surface()
 
     import whole_body_tracking  # noqa: F401
     import whole_body_tracking.tasks  # noqa: F401

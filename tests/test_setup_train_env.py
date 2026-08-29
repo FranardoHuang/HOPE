@@ -50,12 +50,38 @@ def test_setup_uses_only_explicit_runtime_identity(tmp_path: Path) -> None:
             "HOPE_ISAAC_PYTHON": "/usr/bin/python3",
             "HOPE_ISAACLAB_ROOT": str(isaaclab),
             "HOPE_ISAAC_VENV_SITE": str(venv_site),
+            "HOPE_ISAAC_ACCEPT_EULA": "Y",
+            "HOPE_ISAAC_PRIVACY_CONSENT": "N",
         },
     )
     assert result.returncode == 0, result.stderr
     assert "/usr/bin/python3" in result.stdout
     assert str(isaaclab) in result.stdout
     assert str(venv_site) in result.stdout
+
+
+def test_setup_refuses_to_choose_operator_authority(tmp_path: Path) -> None:
+    isaaclab = tmp_path / "IsaacLab"
+    (isaaclab / "source").mkdir(parents=True)
+    base = {
+        "PATH": os.environ["PATH"],
+        "WANDB_DIR": str(tmp_path / "wandb"),
+        "HOPE_ISAAC_PYTHON": "/usr/bin/python3",
+        "HOPE_ISAACLAB_ROOT": str(isaaclab),
+    }
+    missing = _source(":", env=base)
+    assert missing.returncode != 0
+    assert "HOPE_ISAAC_ACCEPT_EULA=Y" in missing.stderr
+    invalid_privacy = _source(
+        ":",
+        env={
+            **base,
+            "HOPE_ISAAC_ACCEPT_EULA": "Y",
+            "HOPE_ISAAC_PRIVACY_CONSENT": "maybe",
+        },
+    )
+    assert invalid_privacy.returncode != 0
+    assert "HOPE_ISAAC_PRIVACY_CONSENT" in invalid_privacy.stderr
 
 
 def test_isaac51_external_constraints_are_exact_and_complete() -> None:

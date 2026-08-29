@@ -53,7 +53,21 @@ if [ -n "${HOPE_ISAAC_VENV_SITE:-}" ] && [ ! -d "${HOPE_ISAAC_VENV_SITE}" ]; the
   unset _WBT_DIR
   return 1 2>/dev/null || exit 1
 fi
+if [ "${HOPE_ISAAC_ACCEPT_EULA:-}" != "Y" ]; then
+  echo "[hope] ERROR: set HOPE_ISAAC_ACCEPT_EULA=Y only after machine provisioning accepts the NVIDIA EULA." >&2
+  unset _WBT_DIR
+  return 1 2>/dev/null || exit 1
+fi
+case "${HOPE_ISAAC_PRIVACY_CONSENT:-}" in
+  Y|N) ;;
+  *)
+    echo "[hope] ERROR: set HOPE_ISAAC_PRIVACY_CONSENT explicitly to Y or N during machine provisioning." >&2
+    unset _WBT_DIR
+    return 1 2>/dev/null || exit 1
+    ;;
+esac
 export HOPE_ISAAC_PYTHON HOPE_ISAACLAB_ROOT HOPE_ISAAC_VENV_SITE
+export HOPE_ISAAC_ACCEPT_EULA HOPE_ISAAC_PRIVACY_CONSENT
 
 # ORDER MATTERS: the working-tree source must come first so local edits win over
 # any stale site-packages install.

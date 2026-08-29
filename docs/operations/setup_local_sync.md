@@ -28,6 +28,13 @@ git check-ignore -q vendor_assets
 
 ## 2026-08-29 FullMDP exact checkout closure
 
+MuJoCo基础venv不再是只有Pod路径、没有重建输入的隐含前提。Pod1当前Python `3.12.3`环境的完整
+`pip freeze --all`已经保存为133项tracked constraints（SHA-256=`6e26d1e0…26bb1`）；fresh创建、解析闭包
+比对和production EPA48/RSL3覆盖边界见
+[`action_ball_mujoco_environment_identity_20260829.md`](action_ball_mujoco_environment_identity_20260829.md)。
+该lock关闭公开Python依赖的复现欠账，但不包含本页列出的private/ignored资产，所以空白机总状态仍为
+`PARTIAL`。
+
 `setup.py`现显式声明`cryptography>=44,<51`；这覆盖Pod1已验证的Isaac bundled `44.0.0`与操作venv
 `50.0.0`，关闭HANDOFF中“签名测试依赖手装、缺包时可能只见skip”的隐含欠账。它不安装Isaac Sim、接受
 NVIDIA EULA或生成private asset。
@@ -140,21 +147,21 @@ printf '%s  %s\n' \
 ### Restore exact RSL-RL 3.1.2 wheel for portable MuJoCo
 
 2026-08-20核对时Pod的ambient `/workspace/mjlab_venv`已经是RSL-RL 5.4.0，不能把它当作3.1.2，
-也不得为本任务原地降级或修改。只从上表preserved source恢复exact wheel，并发布到一个原本不存在的
-ignored子树：
+也不得为本任务原地降级或修改。`rsl-rl-lib==3.1.2`有公开PyPI wheel；下载到原本不存在的staging目录，
+只在SHA逐字命中后发布到ignored子树。Pod/内容寻址备份只是网络不可用时的等价来源，不再是唯一来源：
 
 Pod的`/workspace/mjlab_venv/bin/python`必须作为已安装Torch、TensorDict和MJLab依赖的解释器入口；
 run-local fresh site中的exact RSL-RL 3.1.2置于`PYTHONPATH`最前，并逐项核版本与distribution origin。
-解释器还要独立核其resolved path为`/usr/bin/python3.12`及system binary SHA；不得因此直接用
+解释器还要独立核Python语义版本为`3.12.3`；resolved path与system binary SHA只作本机观察记录，不作
+跨发行版硬门。不得因此直接用
 `/usr/bin/python3.12`启动source gate、test或trainer，因为direct system入口不继承venv
 site-packages，封存one-shot已以`ModuleNotFoundError: No module named 'tensordict'`证明该错误边界。
 ambient RSL-RL 5.4.0仍不得成为import winner。
 
 ```bash
 RSL3_STAGE=$(mktemp -d ../nohope-rsl3-stage.XXXXXX)
-scp -P 18333 -i /Users/Franco/.ssh/id_ed25519_runpod \
-  root@162.43.172.171:/workspace/franco/mktemp/mujoco-fullmdp-wait-rsl3-host.20260818T112000CST/wheelhouse/rsl_rl_lib-3.1.2-py3-none-any.whl \
-  "$RSL3_STAGE/"
+python3 -m pip download --no-deps --only-binary=:all: \
+  --dest "$RSL3_STAGE" rsl-rl-lib==3.1.2
 printf '%s  %s\n' \
   406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d \
   "$RSL3_STAGE/rsl_rl_lib-3.1.2-py3-none-any.whl" | shasum -a 256 -c -
@@ -164,8 +171,8 @@ mv "$RSL3_STAGE" vendor_assets/rsl_rl_3_1_2
 
 Full-A发车不再把该wheel安装到ambient venv，也不由wrapper另造一份未绑定副本。先把exact wheel恢复到
 本checkout上表路径；runtime binder会stable-read该文件，并与EPA48 wheel一起解到同一个fresh run-local
-site。不得从PyPI latest、同名未知wheel或ambient 5.4.0替代。若preserved source消失，只能从另一个
-内容寻址备份恢复同一SHA；找不到时G06保持`Partial`，不得联网重建一个“近似3.1.2”。
+site。不得用PyPI latest、同名未知wheel或ambient 5.4.0替代；公开下载和备份都必须命中上述exact SHA，
+否则G06保持`Partial`。
 
 ### Restore and build the project-owned [MuJoCo-Warp EPA48 fork](../DEFINITIONS.md#mujoco-warp-epa48-fork)
 

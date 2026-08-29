@@ -51,7 +51,9 @@ Isaac Sim `4.5.0`、IsaacLab `2.1.0`、Python `3.10`，且没有提交Jiayi的�
 它的`setup_train_env.sh`只按路径存在性自动选择执行面，不核对版本、commit、ABI或PPO签名。因此同一个
 Build4 commit在两台机器上可以静默成为两个训练系统。当前branch已删除该fallback authority：
 `setup_train_env.sh`只接受caller或ignored `setup_train_env.local.sh`显式给出的Python/IsaacLab/site路径，
-缺失或路径无效直接返回失败；tracked `setup_train_env.local.example.sh`给出5.1模板。
+缺失或路径无效直接返回失败；tracked `setup_train_env.local.example.sh`给出5.1模板。该机器文件还必须在
+operator完成一次性provisioning后写入`HOPE_ISAAC_ACCEPT_EULA=Y`和明确的
+`HOPE_ISAAC_PRIVACY_CONSENT=Y|N`。launcher不再硬编码隐私同意，也不恢复逐run确认flag。
 
 2026-08-29在当前Pod1按该脚本默认选择顺序做live import，结果与当前受控FullMDP进程如下：
 
@@ -121,6 +123,9 @@ CONSTRAINTS="$STACK_REPO/configs/action_ball_isaac51_external_venv_constraints_2
 ```
 
 新机仍需人类合法下载上述Isaac Sim zip并在安装期建立一次EULA/隐私authority；仓库不能替人同意许可。
+当前两个FullMDP launcher只支持`/workspace`下的fresh run root；这是显式机器前置约束，不是path
+autodiscovery。每张GPU还需在provisioning时用`install -m 0600 /dev/null /tmp/hope_lean_queue_gpuN.lock`
+创建普通owner-only lock file，launcher只核验并持有它，不静默生成。
 Ubuntu Noble安装两项系统GL包后，launcher检查规范regular file与direct SONAME并把观察到的路径/SHA写进
 dry-run及完成JSON，不再把Noble字节SHA误当跨Ubuntu版本不变的学习身份。不同受支持发行版可以有不同GL
 bytes，但必须通过真实Kit probe；这比复制Franco私有GL目录或继续堆一个无信息Gate更直接。
