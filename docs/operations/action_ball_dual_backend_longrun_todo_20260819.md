@@ -201,7 +201,9 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     不盲加权、不把hard edge改成Done，也不停止当前长期run。仓内probe现已接到**真实plant owner**：默认
     training path不分配trace，只在显式diagnostic模式记录每个`.001 s`子步的raw/clamped torque包络与真实
     q极值；首跑会同时落固定action tape，后续controller反事实和Isaac都复用该tape，避免闭环policy把plant
-    差异重新混进输入。exact Pod model2000运行与反事实结果尚未完成，所以本项仍为未闭合。
+    差异重新混进输入。首次exact调用在首个真实plant step暴露诊断Tensor归并API错误且trace误接训练ledger；
+    修正只用公开functional API并删除该非必要依赖，不改plant。fresh Pod model2000运行与反事实结果尚未
+    完成，所以本项仍为未闭合。
 
 <a id="fullmdp-v9-superseded"></a>
 

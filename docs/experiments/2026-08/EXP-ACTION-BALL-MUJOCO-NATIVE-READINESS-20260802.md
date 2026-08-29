@@ -149,7 +149,10 @@ reference，再改controller/scale/reward。完整receipt见
 `.001 s×20` plant loop内记录raw/clamped tau、q极值和本步前后q/dq；runner只冻结checkpoint/seed并把首跑
 action保存进no-clobber NPZ，后续plant/controller候选必须复用这份action tape。这样既不复制PD公式作
 same-writer自证，也不让闭环policy因obs分叉而改变反事实输入。运行形状固定`512×240`，并禁止训练
-evidence、snapshot与completion；exact Pod首跑、Isaac同字段和最小修复均仍未完成，不得提前写成结论。
+evidence、snapshot与completion。首次exact调用在首个真实plant step因诊断专用in-place Tensor归并API
+不存在而fail-closed，未形成trajectory；修正只换成公开functional API后`copy_`，并删除trace路径误构造的
+训练ledger，不改qdes、PD、physics或长期run。fresh exact首跑、Isaac同字段和最小修复均仍未完成，不得
+提前写成结论。
 
 Pod首个新profile在environment step0前按预期fail-closed：profiler曾尝试给带`__slots__`、无instance
 `__dict__`的`PhysicalQuestionNumericCore`安装3个leaf wrapper。production/profile-off不受影响；修复是删除

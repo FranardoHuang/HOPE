@@ -1992,8 +1992,10 @@ class A3ReadyBallVecEnv:
         if substep_index == self.decimation - 1:
           trace["tau_raw_last"] = tau_raw.clone()
           trace["tau_clamped_last"] = tau.clone()
-        trace["tau_raw_abs_max"].maximum_(tau_raw.abs())
-        trace["tau_clamped_abs_max"].maximum_(tau.abs())
+        trace["tau_raw_abs_max"].copy_(torch.maximum(
+          trace["tau_raw_abs_max"], tau_raw.abs()))
+        trace["tau_clamped_abs_max"].copy_(torch.maximum(
+          trace["tau_clamped_abs_max"], tau.abs()))
         trace["tau_clamp_count"].add_(tau_raw.ne(tau).to(torch.int16))
       d.ctrl[:] = tau[:, self.actuator_from_runtime]
       tau_n = tau / self.tau_scale
@@ -2001,8 +2003,8 @@ class A3ReadyBallVecEnv:
       self.sim.step()
       if trace_enabled:
         q_now = self._qpos_act()
-        trace["q_min"].minimum_(q_now)
-        trace["q_max"].maximum_(q_now)
+        trace["q_min"].copy_(torch.minimum(trace["q_min"], q_now))
+        trace["q_max"].copy_(torch.maximum(trace["q_max"], q_now))
       self._latch_actual_hard_edge()
       contact_census = None
       if self._contact_ok:

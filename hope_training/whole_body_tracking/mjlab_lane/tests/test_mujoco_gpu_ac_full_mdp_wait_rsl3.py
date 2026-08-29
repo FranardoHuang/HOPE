@@ -1364,15 +1364,18 @@ def test_controller_trace_is_bounded_and_cannot_share_training_artifacts(
 
 
 def test_controller_trace_reads_the_live_pd_owner_not_a_copied_law():
-    source = inspect.getsource(
-        _load()._run_controller_trace
-    )
+    module = _load()
+    source = inspect.getsource(module._run_controller_trace)
+    main_source = inspect.getsource(module.main)
     plant = (LANE / "a3_train_ppo.py").read_text()
     assert "env.enable_controller_trace()" in source
     assert "trace = env.controller_trace()" in source
+    assert "if full_a_mode and not controller_trace:" in main_source
     assert "tau_raw = self.kp * (q_des - self._qpos_act()) - self.kd * self._qvel_act()" in plant
     assert 'trace["tau_raw_first"] = tau_raw.clone()' in plant
     assert 'trace["tau_clamped_first"] = tau.clone()' in plant
+    assert 'trace["tau_raw_abs_max"].copy_(torch.maximum(' in plant
+    assert 'trace["q_min"].copy_(torch.minimum(' in plant
 
 
 def test_evidence_jsonl_is_created_exclusively(monkeypatch, tmp_path):

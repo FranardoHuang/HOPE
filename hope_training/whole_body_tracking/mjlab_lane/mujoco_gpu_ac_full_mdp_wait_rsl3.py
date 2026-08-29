@@ -1299,7 +1299,7 @@ def main(
         raise RuntimeError("MuJoCo WAIT initial RSL3 surface differs")
 
     ledger = None
-    if full_a_mode:
+    if full_a_mode and not controller_trace:
         ledger_module = _update_ledger_module()
         ledger = ledger_module.FullMdpUpdateLedger(
             torch_module=torch,
