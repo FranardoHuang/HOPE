@@ -35,6 +35,29 @@ for path in (str(SOURCE), str(MDP)):
         sys.path.insert(0, path)
 
 
+def _test_namespace_snapshot() -> dict[str, object]:
+    return {
+        name: module
+        for name, module in tuple(sys.modules.items())
+        if name == "whole_body_tracking"
+        or name.startswith("whole_body_tracking.")
+        or name == "isaaclab"
+        or name.startswith("isaaclab.")
+    }
+
+
+def _clear_test_namespace() -> None:
+    for name in tuple(sys.modules):
+        if (
+            name == "whole_body_tracking"
+            or name.startswith("whole_body_tracking.")
+            or name == "isaaclab"
+            or name.startswith("isaaclab.")
+        ):
+            sys.modules.pop(name, None)
+
+
+_PRIOR_TEST_NAMESPACE = _test_namespace_snapshot()
 M = load_canonical_full_mdp_env(MODULE_PATH, retain_namespace=True)
 M._TEST_FAKE_BASE = M.ManagerBasedRLEnv
 
@@ -60,12 +83,23 @@ def _lean_modules():
 
 EPOCH, REWARDS, LEAN = _lean_modules()
 CANONICAL_ENV_MODULE = "whole_body_tracking.tasks.tracking.full_mdp_env"
+_CANONICAL_TEST_NAMESPACE = _test_namespace_snapshot()
+_clear_test_namespace()
+sys.modules.update(_PRIOR_TEST_NAMESPACE)
 
 
 @pytest.fixture(autouse=True)
 def _exact_stamp_namespace(monkeypatch):
-    """Let the real lean owner see the source-loaded env stamp identities."""
+    """Expose one canonical graph only for this test's execution lifetime.
 
+    The loader must construct a Kit-free canonical graph, but retaining that
+    graph globally during pytest collection replaces modules already owned by
+    other exact-identity suites.  Reinstall it only inside this file's tests so
+    combined collection remains equivalent to the required isolated runs.
+    """
+
+    for name, module in _CANONICAL_TEST_NAMESPACE.items():
+        monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setitem(sys.modules, CANONICAL_ENV_MODULE, M)
     monkeypatch.setattr(
         M.FullMdpPrePhysicsSubstepStamp,
