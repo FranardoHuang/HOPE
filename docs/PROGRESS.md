@@ -10,7 +10,8 @@
 - `572a7080`融合R06 masked mutation，exact Pod累计`210 passed`、fixed tape逐字一致；matched full-active
   R06 settle改善`9.65%`，但整轮仅`-1.43%`至`17.676 s/update`。`a43aae3e`再让hot path只发布本step
   one-shot typed settlement delta，retained audit与current delta共用唯一fact pack/projector；三类完整journal
-  SHA逐字一致，exact Pod `322 passed`，另1项profiler观察在父版同样失败。Pod同进程12组交替微基准
+  SHA逐字一致，exact Pod `323 passed`。原来唯一失败的profiler测试把Torch 2.7异步CUDA event按错误的
+  `cpu_parent`关系过滤；`25eb4c7a`改验最小profile内真实kernel数与名称后整文件73项全绿。Pod同进程12组交替微基准
   `1045.170→771.048 us`（`-26.23%`）；保留该结构减法，但current-source整轮Kit耗时仍待操作人授权后实测，
   不冒充约6秒闭合。
 - `e9823e90`删除launcher替人默认EULA/隐私同意与私有GL硬编码，改为操作人显式flag、caller目录及库

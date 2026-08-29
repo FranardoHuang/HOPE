@@ -253,8 +253,9 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     `5.0127→4.7754 s`（`-4.73%`），R06 settle=`2.2841→2.0637 s`（`-9.65%`）；改动正确但远不足约6秒，
     不以继续堆同类微优化关闭本项。第二轮`a43aae3e`让R06 publish只消费本物理步产生的one-shot typed
     settlement delta，不再逐子步扫描历史mailbox；retained audit/current hot path共用唯一fact pack/projector。
-    exact Pod相关套件`322 passed`，另1项CUDA profiler观察在未改父版同样失败；三类完整CommitEntry
-    canonical SHA新旧一致。Pod1空闲GPU同进程12组交替微基准median=`1045.170→771.048 us`（`-26.23%`），
+    exact Pod相关套件`323 passed`；其中`25eb4c7a`删除Torch 2.7 CUDA event必须挂到CPU parent的错误测试
+    假设，改验最小profile真实kernel数/名称与清零语义。三类完整CommitEntry canonical SHA新旧一致。
+    Pod1空闲GPU同进程12组交替微基准median=`1045.170→771.048 us`（`-26.23%`），
     故采纳该结构减法。current-source真实Kit整轮profile仍需人类操作人显式EULA/隐私授权，未测前不得把
     局部收益外推为约6秒；本项继续开放，下一步由新的整轮profile最大块决定，而不是继续堆gate。
 

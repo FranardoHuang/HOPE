@@ -14,7 +14,8 @@ hit→landing交接条件，G05不晋级。
 `572a7080`把R06同owner masked mutation融合后，exact Pod累计`210 passed`且fixed tape逐字一致；matched
 full-active两轮R06 settle改善`9.65%`，但整轮collection只改善`1.43%`至`17.676 s/update`。随后
 `a43aae3e`以one-shot typed current-settlement delta删除hot path历史mailbox扫描，retained/current共用唯一
-fact projector；三类完整journal SHA等价、exact Pod `322 passed`，12组交替微基准median
+fact projector；三类完整journal SHA等价、exact Pod `323 passed`（含修正错误`cpu_parent`假设后的真实CUDA
+kernel计数测试），12组交替微基准median
 `1045.170→771.048 us`（`-26.23%`）。该结构减法可保留，但current-source整轮Kit profile仍`未测`，远未
 闭合约6秒目标；继续保持key/generation、reason/fault/counter、scene与durable事实，不新增success Gate。
 

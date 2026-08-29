@@ -44,8 +44,10 @@ active-flight profile后的第一轮R06执行减法采用`572a7080`：同owner�
 第二轮`a43aae3e`把current hot path改为只消费本物理步的one-shot typed settlement delta，不再逐子步扫描
 retained historical mailbox；retained audit和current delta共用同一个candidate grid、fact packer与projector。
 full key/generation、newest/duplicate、finite、reason/fault、scene retire及Epoch journal/WAL/ACK路径仍保留。
-exact Pod相关套件合计`322 passed`；另1项CUDA foreach-zero profiler观察在未改父版也同样失败，登记为既有
-测试债而非本轮回归。`zero-event/early-crossing/deadline`三类完整最终`CommitEntry` canonical SHA分别为
+exact Pod相关套件合计`323 passed`。原来唯一失败的CUDA foreach-zero测试并非生产多发/少发kernel：Torch
+2.7 profiler显示唯一`multi_tensor` CUDA event但其异步`cpu_parent=None`，旧断言却只接受虚构的parent edge。
+`25eb4c7a`改为在该最小profile中核真实CUDA kernel数量/名称并继续核scratch全清零，整文件`73 passed`。
+`zero-event/early-crossing/deadline`三类完整最终`CommitEntry` canonical SHA分别为
 `9af69e…a48e`、`f7bd3e…f307a`、`2d6460…34b5c`，新旧逐字一致。Pod1空闲GPU、同进程、交替测序的12组
 `512×2`投影微基准全部改善，median=`1045.170→771.048 us`（`-26.23%`）。因此采纳这条“删历史扫描且
 合并事实真源”的结构减法；current-source真实Kit整轮profile仍需人类操作人显式授权，现阶段不得把局部
