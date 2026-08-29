@@ -26,9 +26,11 @@ Pod CPU targeted对`5f1ee728`的结果是两个可定位的实现失败，不是
 科学否定：`0.10 s`与`0.02 s`的float32表示在“先减elapsed seconds、再`ceil`”时
 把剩3 tick误计4 tick；另一失败只由`getattr(...)`换行触发。修复候选改为
 全等待期按policy boundary离散化后再减elapsed tick。`ff219672` Pod证明半ULP容差
-仍会把float64 `nextafter(0.06,+inf)`误归一；最终候选改为用integer candidate和
-`step_dt`在float64构造唯一canonical边界，cast回输入dtype后只接受逐值相等，
-其余严格`ceil`。contact patch接线改用AST检查optional `getattr`及non-None守卫下
+仍会把float64 `nextafter(0.06,+inf)`误归一；`540232b0`进一步证明直接用
+binary64 `3*0.02`构造canonical时，结果恰好就是literal `0.06`的上邻。
+最终候选将`.02`在host一次解析为十进制有理数`1/50`；device的近似
+ratio只选最近tick，canonical边界与最终取整均以同一有理timebase判定。
+contact patch接线改用AST检查optional `getattr`及non-None守卫下
 的consumer call，不再把格式当语义。后继`09d0eda0` Pod teacher-replay文件已
 `8 passed`。module union的3个新红项只是
 `wait_transition` fixture仍用旧单参lambda，无法消费现行substep/capture-boundary kwargs；

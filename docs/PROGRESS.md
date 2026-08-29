@@ -6,9 +6,11 @@
   会把本应剩3个policy tick的frame0 bridge误拖到4个；contact patch测试把单行
   源码排版当成了合同。本候选改为“完整等待期先离散化为tick，再减已过tick”；
   后继Pod反例证明“半ULP内归一”仍会把float64 `nextafter(0.06,+inf)`吞成边界，
-  故最终候选不再使用容差：用integer tick和`step_dt`在float64构造唯一canonical
-  encoding，cast回输入dtype后只接受逐值相等；`nextafter±`与普通非边界全部严格
-  向上取整，不减少真实安全余量。patch wiring改用AST验证，不再依赖换行。
+  而`540232b0`又证明binary64 `3*0.02`正好是literal `0.06`的上邻，仍会误吞
+  `nextafter(0.06,+inf)`。最终候选把配置的`.02`在host一次解析为十进制有理数
+  `1/50`；device只用近似ratio选最近integer tick，再以同一有理timebase构造
+  canonical边界并按`wait > boundary`决定是否加一tick。这使`nextafter+`严格
+  进下一tick，又不减少真实安全余量。patch wiring改用AST验证，不再依赖换行。
   `09d0eda0` Pod teacher-replay文件已`8 passed`；module union另暴露3个旧
   `wait_transition` fixture未接收新增的substep/capture-boundary kwargs。后继候选
   改用显式最终边界fixture，并从AST和真实consumer payload两层固定参数不丢失；

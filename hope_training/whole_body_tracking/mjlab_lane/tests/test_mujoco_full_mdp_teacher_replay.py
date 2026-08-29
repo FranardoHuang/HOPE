@@ -113,6 +113,22 @@ def test_teacher_replay_frozen_counter_strictly_ceils_non_boundary_wait(dtype):
     assert frozen.tolist() == [2]
 
 
+def test_teacher_replay_decimal_timebase_encodes_three_fiftieths_as_point_zero_six():
+    numerator, denominator = replay._decimal_policy_timebase_ratio(0.02)
+    assert (numerator, denominator) == (1, 50)
+    literal_boundary = torch.tensor([0.06], dtype=torch.float64)
+    upper_neighbour = torch.nextafter(
+        literal_boundary, torch.full_like(literal_boundary, torch.inf)
+    )
+    canonical_boundary = (
+        torch.tensor([3.0], dtype=torch.float64)
+        * float(numerator)
+        / float(denominator)
+    )
+    assert torch.equal(canonical_boundary, literal_boundary)
+    assert not torch.equal(canonical_boundary, upper_neighbour)
+
+
 def test_pre_step_snapshot_drives_request_while_post_step_is_independent():
     env = types.SimpleNamespace(
         _epoch_task_valid=torch.tensor([True]),

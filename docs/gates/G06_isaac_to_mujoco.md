@@ -8,8 +8,11 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 了无意多一tick，另一项测试把Python换行当成contact patch接线合同。后继候选将
 frame0等待显式定义在policy tick边界：先将完整`pre_swing_wait_s`转为整数tick，
 再减已过整数tick。Pod后继证明半ULP容差仍会吞掉float64的上方紧邻值；最终规则
-因此只认“integer candidate + `step_dt`在float64构造、cast回输入dtype”的唯一canonical
-encoding逐值相等，其余严格`ceil`。contact consumer改为AST结构验证。
+但`540232b0`证明binary64 `3*0.02`本身就是literal `0.06`的上邻，仍会
+把`nextafter+`误当canonical。最终候选在host把`.02`一次解析为十进制有理数
+`1/50`；device的近似ratio只选邻近integer tick，canonical边界和最终向上取整
+都以同一有理timebase判定，不再以binary `step_dt`回乘/回除作权威。
+contact consumer改为AST结构验证。
 `09d0eda0` Pod teacher-replay文件已`8 passed`；module union的3个新红项是
 `wait_transition` fixture仍使用只接一个census的lambda，没有接收生产已显式传递的
 substep index和capture boundary。后继fixture现在显式核对final-forward边界，AST固定

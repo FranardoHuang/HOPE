@@ -12,12 +12,27 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import dataclass
+from decimal import Decimal
+from functools import lru_cache
 
 
 TEACHER_REPLAY_SCHEMA_VERSION = 1
 TEACHER_REPLAY_DEFAULT_STEPS = 180
 TEACHER_REPLAY_NUM_ENVS = 1
 TEACHER_REPLAY_ACTION_DELAY_STEPS = 0
+
+
+@lru_cache(maxsize=8)
+def _decimal_policy_timebase_ratio(step_dt_s: float) -> tuple[int, int]:
+    """Return the configured decimal policy period as one reduced ratio."""
+
+    step_dt_s = float(step_dt_s)
+    if not math.isfinite(step_dt_s) or step_dt_s <= 0.0:
+        raise ValueError("teacher replay policy dt differs")
+    numerator, denominator = Decimal(str(step_dt_s)).as_integer_ratio()
+    if numerator <= 0 or denominator <= 0:
+        raise ValueError("teacher replay policy dt differs")
+    return int(numerator), int(denominator)
 
 
 @dataclass(frozen=True)
@@ -108,16 +123,17 @@ def remaining_teacher_frozen_steps(
     ``(0.10 - 0.04) / 0.02 == 3`` into ``3.0000002`` and silently add a tick.
 
     A configured tick boundary can itself be represented just above the exact
-    decimal in a floating dtype.  Reconstruct the one canonical encoding from
-    the integer tick candidate and ``step_dt`` in float64, then cast it back to
-    the input dtype.  Only an exact equality to that encoding is a boundary;
-    every neighbouring or off-grid value keeps strict upward rounding.
+    decimal in a floating dtype.  Parse the configured period once as a decimal
+    rational, reconstruct the one canonical encoding from the nearest integer
+    tick, and compare the encoded wait to that boundary.  Values at or below
+    the boundary need that many ticks; every representable value above it needs
+    one more.  The approximate ratio only selects a neighbouring grid point;
+    binary floating-point division is never the final ``ceil`` authority.
     """
 
     if type(common_step) is not int or common_step < 0:
         raise ValueError("teacher replay common step differs")
-    if not math.isfinite(float(step_dt)) or float(step_dt) <= 0.0:
-        raise ValueError("teacher replay policy dt differs")
+    dt_numerator, dt_denominator = _decimal_policy_timebase_ratio(step_dt)
     if (
         reveal_tick.ndim != 1
         or tuple(pre_swing_wait_s.shape) != tuple(reveal_tick.shape)
@@ -126,21 +142,22 @@ def remaining_teacher_frozen_steps(
     ):
         raise ValueError("teacher replay frozen-step tensors differ")
 
-    # Construct the canonical encoded boundary in float64 before casting it
-    # back to the input dtype.  In particular, doing ``5 * float32(0.02)`` in
-    # float32 can round to the lower neighbour of ``float32(0.10)``.  There is
-    # deliberately no tolerance: nextafter neighbours are real off-grid waits.
+    # Select the nearest grid point using the ratio, but reconstruct that point
+    # from the configured decimal rational.  In particular, binary64
+    # ``3 * 0.02`` is the upper neighbour of literal ``0.06``; ``3 * 1 / 50``
+    # is the intended decimal schedule boundary.  There is deliberately no
+    # tolerance: nextafter neighbours are real off-grid waits.
     wait_s_f64 = pre_swing_wait_s.to(dtype=torch.float64)
-    wait_ratio = wait_s_f64 / float(step_dt)
+    wait_ratio = wait_s_f64 * float(dt_denominator) / float(dt_numerator)
     integer_tick_candidate = torch.round(wait_ratio).to(torch.long)
     candidate_tick_f64 = integer_tick_candidate.to(dtype=torch.float64)
     canonical_boundary_encoded = (
-        candidate_tick_f64 * float(step_dt)
+        candidate_tick_f64 * float(dt_numerator) / float(dt_denominator)
     ).to(dtype=pre_swing_wait_s.dtype)
-    on_encoded_tick_boundary = pre_swing_wait_s == canonical_boundary_encoded
-    total_wait_ticks = torch.ceil(
-        torch.where(on_encoded_tick_boundary, candidate_tick_f64, wait_ratio)
-    ).to(torch.long)
+    above_canonical_boundary = pre_swing_wait_s > canonical_boundary_encoded
+    total_wait_ticks = integer_tick_candidate + above_canonical_boundary.to(
+        dtype=torch.long
+    )
     elapsed_ticks = torch.clamp(common_step - reveal_tick, min=0)
     frozen = torch.clamp(total_wait_ticks - elapsed_ticks, min=0)
     torch._assert_async(torch.isfinite(pre_swing_wait_s).all())
