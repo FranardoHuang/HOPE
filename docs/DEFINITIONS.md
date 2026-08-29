@@ -168,8 +168,9 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
 
 - <a id="fullmdp-reward28-direct-paddle-4x"></a>**`Reward28 direct-paddle 4x` / 二十八项直接球拍四倍经济后继合同**：
   已否决的历史单轴：保持Reward28其余定义，只把四项measured-paddle manager weight从`1/1/1/.5`
-  同比例改为`4/4/4/2`，因此ready hold与真实playback都同样取得最高`14`。fresh Mu matched ACK0..423虽使
-  三项累计paddle误差略好，却把raw/selected contact从旧baseline的`1,627/332`压到`42/1`；不能采用，
+  同比例改为`4/4/4/2`，因此ready hold与真实playback都同样取得最高`14`。fresh Mu到ACK623时recent10
+  四项paddle误差已全面坏于自身出生；matched prefix把raw/selected/crossing从旧baseline的
+  `1,665/334/281`压到`56/5/2`。它连mimic与mimic→hit都失败，不能采用，
   也不能再用total return或更多step粉饰。该名字只用于读历史negative证据。
 
 - <a id="fullmdp-reward28-playback-scaled-paddle"></a>**`Reward28 playback-scaled paddle` / 二十八项回放期增强球拍经济合同**：

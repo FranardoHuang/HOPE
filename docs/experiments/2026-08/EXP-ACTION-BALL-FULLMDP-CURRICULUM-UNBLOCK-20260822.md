@@ -1306,18 +1306,17 @@ fresh Mu namespace=`fullmdp-r23-paddle4x-mujoco-28430d36-20260829T1106Z`已自�
 launch/R03更多（`49,494/38,079` vs `46,549/34,513`），但selected contact=`1 vs 321`。matched
 ACK354..363中两边误差都坏，new/old=`.45325/1.20086/.54133/.52532` vs
 `.41334/1.30325/.59444/.56405`，仍是position更坏、其余三项较好而contact均0。new fault/nonfinite/
-conservation为0，recent10 p50/p90约`6.59/6.66 s/H48`。因此实现和rate健康，但当前行为证据已明确反对
-“4倍权重改善mimic→hit交接”；继续到预注册update1000只为排除延迟转折，不比较4倍后的return，也不采纳。
-对应Isaac fresh因Pod1三卡已有三条只读训练而未发射；下一空闲卡只运行仍有因果价值的warm-start或replay
-单轴，不停止旧run换取假闭环。
+conservation为0，recent10 p50/p90约`6.59/6.66 s/H48`。这是ACK363时的中间裁决；下节ACK623已经让
+四项mimic同时显著变坏并取消“等update1000”与“下一轴先warm-start/replay”的旧计划。对应Isaac fresh因
+Pod1三卡已有三条只读训练而未发射；下一空闲卡运行playback-scaled同核后继，不停止旧run换取假闭环。
 
 ### 11.5 四倍轴判负与playback-scaled后继
 
-`observed_at=2026-08-29T11:57:06Z`，四倍Mu已到ACK423，不再属于小分母。matched ACK0..423的新/旧
-episode length=`148.018/144.317`；四项累计mimic误差中new的velocity/face/long-axis较好、position较差，
-但raw contact=`42/1,627`、selected=`1/332`、crossing=`0/279`。new recent10四项误差又都比自己的first10
-恶化。fault/nonfinite/conservation仍为0，所以该结果否决的是“ready与playback都无条件4倍”的学习经济，
-不是环境执行或自然课程本身。
+`observed_at=2026-08-29T12:19:19Z`，四倍Mu已到ACK623，不再属于小分母。matched ACK0..623的新/旧
+raw contact=`56/1,665`、selected=`5/334`、crossing=`2/281`；ACK614..623的新/旧四项mimic误差为
+`.50920/1.31197/.74428/.61476` vs `.28529/1.12387/.39936/.50190`，新run四项全部更差。它已经消费
+`5,079,000` playback rows和`84,582` launch。fault/nonfinite/conservation仍为0，所以该结果否决的是
+“ready与playback都无条件4倍”的学习经济，不是环境执行或自然课程本身。
 
 代码复核给出一个无需新增Stage/Gate的更小因果切口：旧4倍manager weight在pre-playback ready hold也持续
 支付最高`14`，而动态teacher只在原有due后出现；policy可先把容易ready局部解强化，再难以切入挥拍。下一候选
@@ -1331,7 +1330,7 @@ clean exact source=`ff7a6c4f`的Pod CPU/Torch组合门为`444 passed,36 skipped`
 `[0,1]` normalized fidelity kernel。后者现保持两条事实：milestone kernel/error继续表达学习质量，
 configured/actual income表达真正4×付款。三卡占用下真实Kit/Mu CUDA fixed-action与fresh learning仍`未测`。
 
-旧Mu到ACK2232：`665/298,932` selected/launch、598 crossing、`0/665` legal、recovery=`0/208,696`；
-旧Isaac到ACK763：`0 R03 / 80,173 launch`，landing仍因0 selected为`未测`。二者分别确认hit→landing/recovery
+旧Mu到ACK2431：`666/321,213` selected/launch、599 crossing、`0/666` legal、recovery=`0/230,866`；
+最近10轮仍0 contact。旧Isaac到ACK833：`0 R03 / 90,779 launch`，landing仍因0 selected为`未测`。二者分别确认hit→landing/recovery
 和mimic→hit失败。现有snapshot均明确无resume authority；Build4 warm-start不能从这些字节伪造。三张GPU
 未自然空闲前只完成exact source、CPU/fixed-action与launch准备，不停止只读run换卡。

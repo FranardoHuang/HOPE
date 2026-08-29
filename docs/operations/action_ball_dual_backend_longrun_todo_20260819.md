@@ -300,11 +300,12 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    D2H从48次/update收为一次；(b) selected reset保留唯一preflight而让各owner只写`K`行；(c) Reward28同周期
    staged pack。三者整段硬上界分别`.978/1.863/1.066 s`，都不是预期收益且不能线性相加。已实测回归的逐轮
    unresolved D05 compaction继续拒绝，不因`3,584/290/22`稀疏度再次引入host/device控制流。
-15. [ ] 修复direct-paddle经济轴并fresh双端验证。无条件`4/4/4/2` Mu到ACK423后已足够判负：matched
-   ACK0..423相对旧baseline，episode length=`148.018 vs 144.317`，累计误差中velocity/face/long-axis较好而
-   position较差；launch/R03=`58,378/44,387` vs `55,119/40,769`，但raw/selected/crossing=
-   `42/1/0` vs `1,627/332/279`。四倍轴把一部分mimic残差变好却破坏mimic→真实hit，因此不是“还早”或
-   engineering fault，不能采用。其结构问题是同一个最高`14`也在容易的pre-playback ready hold持续支付，
+15. [ ] 修复direct-paddle经济轴并fresh双端验证。无条件`4/4/4/2` Mu到ACK623后已最终判负：matched
+   ACK0..623相对旧baseline，raw/selected/crossing=`56/5/2` vs `1,665/334/281`；ACK614..623新run的
+   position/velocity/face/long-axis误差=`.50920/1.31197/.74428/.61476`，四项都坏于旧baseline的
+   `.28529/1.12387/.39936/.50190`。在`5,079,000` playback rows和`84,582` launch后，它同时破坏mimic
+   与mimic→真实hit，因此不是“还早”或engineering fault，不能采用，也不再等待1000。其结构问题是同一个
+   最高`14`也在容易的pre-playback ready hold持续支付，
    policy可在第一次动态teacher出现前先强化错误局部经济。
 
    当前最小后继为[`Reward28 playback-scaled paddle`](../DEFINITIONS.md#fullmdp-reward28-playback-scaled-paddle)：

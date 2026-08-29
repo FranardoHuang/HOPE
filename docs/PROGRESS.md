@@ -2,11 +2,12 @@
 
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 
-- fresh 4× Mu到ACK423后，matched旧Mu的raw/selected/crossing=`42/1/0` vs `1,627/332/279`；这已否决
+- fresh 4× Mu到ACK623后，matched旧Mu的raw/selected/crossing=`56/5/2` vs `1,665/334/281`，最近10轮
+  四项mimic也全部更差；这已最终否决
   无条件`4/4/4/2`，不是早期或工程fault。下一候选恢复full-phase `1/1/1/.5`，只在Motion-owned真实
   playback行把同一kernel乘`4`，消除ready hold先吃满高收入的局部经济；不增加Stage/Gate/obs。
-- 旧Mu/Isaac刷新到ACK2232/763：前者legal=`0/665 selected`、recovery=`0/208,696`，后者
-  `0 R03 / 80,173 launch`。分别确认hit→landing/recovery和mimic→hit交接失败；landing无selected的格仍写
+- 旧Mu/Isaac刷新到ACK2431/833：前者legal=`0/666 selected`、recovery=`0/230,866`且最近10轮0 contact，后者
+  `0 R03 / 90,779 launch`。分别确认hit→landing/recovery和mimic→hit交接失败；landing无selected的格仍写
   `未测`，不看total return粉饰。
 - checkpoint自查确认现有snapshot只有model/optimizer/iter且明确无resume authority；缺env/owner/RNG/WAL
   consumer。旧`model_2000.pt`继续硬拒绝，不为仿Build4写extractor。R06候选只抽同义candidate-grid helper并
@@ -29,8 +30,8 @@
   `45 passed`、cfg=`13 passed,25 honest skips`。真实GPU fixed tape与matched profile因三卡占用仍`未测`。
 - 学习证据不混总return：旧Mu/Isaac的交接失败已非早期。fresh 4× Mu到ACK363时，matched旧baseline的
   selected/launch=`1/49,494` vs `321/46,549`；虽累计拍误差三项略好、position更坏，contact入口几乎消失，
-  已不支持采用简单4倍权重。run只继续到预注册1000节点排除延迟转折；下一轴分开验证warm-start或replay，
-  不继续盲加权。Isaac successor等空闲GPU，从final clean source发射，不同卡混跑、不signal旧run、不复用
+  已不支持采用简单4倍权重。该ACK363中间计划已由顶部ACK623最终裁决取代；不再等待1000，也不把
+  warm-start/replay提前混入。Isaac successor等空闲GPU，从final clean source发射，不同卡混跑、不signal旧run、不复用
   namespace。
 
 ## 2026-08-29 — 环境fail-closed、可移植GL、当前训练与14.72秒平台

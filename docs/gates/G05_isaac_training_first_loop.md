@@ -12,16 +12,17 @@ Pod1 clean exact CPU/Torch组合门=`444 passed,36 skipped`，launcher/setup=`98
 三张GPU仍分别被旧Mu、旧Isaac和fresh 4× Mu占用，所以current source真实Kit fixed tape、CUDA parity与
 profiler-off matched active strata为`未测`，本Gate不把CPU语义门或profile硬上界写成速度PASS。
 
-fresh direct-paddle 4× Mu到ACK423后已足够判负。matched ACK0..423新/旧raw contact=`42/1,627`、
-selected=`1/332`、crossing=`0/279`；新run虽有三项累计mimic误差略好，却把mimic→hit入口显著破坏，不能
-再写“太早”或采用。代码复核又发现4× manager weight在容易的pre-playback ready hold也持续支付最高`14`；
+fresh direct-paddle 4× Mu到ACK623后已最终判负。matched ACK0..623新/旧raw contact=`56/1,665`、
+selected=`5/334`、crossing=`2/281`；ACK614..623的新run四项mimic误差又全部坏于旧baseline，不能再写
+“太早”、等1000或采用。代码复核又发现4× manager weight在容易的pre-playback ready hold也持续支付最高`14`；
 下一最小候选恢复baseline manager weight=`1/1/1/.5`，只在Motion-owned playback-active行把同核乘`4`。
-它不是Stage/Gate，仍由原due状态机自然开放。旧Mu到ACK2232仍`0/665` legal、recovery=`0/208,696`；
-旧Isaac到ACK763仍`0 R03 / 80,173 launch`。这些事实不支持新增Observation或继续盲加权。
+它不是Stage/Gate，仍由原due状态机自然开放。旧Mu到ACK2431仍`0/666` legal、recovery=`0/230,866`；
+旧Isaac到ACK833仍`0 R03 / 90,779 launch`。这些事实不支持新增Observation或继续盲加权。
 
-现役long已于`2026-08-29T11:57:06Z`只读刷新到Mu ACK2232、Isaac ACK763。两端
-reward/fact/conservation fault仍为0；Mu累计selected/contact-to-landing/recovery=`665/0/0`，Isaac则是
-`0 R03-valid / 80,173 launch`。因此不是证据失真，也不再称“太早无法判断”：当前mimic→hit及
+现役long已于`2026-08-29T12:19:19Z`只读刷新到Mu ACK2431、Isaac ACK833。两端
+reward/fact/conservation fault仍为0；Mu累计selected/legal/recovery=`666/0/0`（recovery分母`230,866`），
+Isaac则是`0 R03-valid / 90,779 launch`。Mu最近10轮contact仍为0；因此不是证据失真，也不再称
+“太早无法判断”：当前mimic→hit及
 hit→landing/recovery交接失败，G05不晋级。无条件`4/4/4/2`后继也已由上段matched反例否决；唯一fresh
 候选是baseline ready economy加Motion playback期同核4倍，且仍须以matched未来窗而不是Build4历史曲线
 裁决。现有`model_2000.pt`及同类snapshot明确

@@ -77,8 +77,8 @@ due/launch/R03-valid/raw/selected/legal-landing=`11,105/6,594/4,348/0/0/0`。因
 recovery success=`0/132,376 eligible`。Isaac到ACK560，长期mimic三好一坏，但`51,300 physical launch`后仍
 `0 R03-valid / 0 selected contact`。两端fault/nonfinite/conservation继续为0。故现在已有充分分母判定Mu
 landing/recovery和Isaac mimic→hit交接失败，不再写“太早”；这不是自动Stage Gate，也不支持新增Observation。
-随后matched ACK0..423已经否决无条件`4/4/4/2`：新/旧raw contact=`42/1,627`、selected=`1/332`、
-crossing=`0/279`，即使三项累计mimic误差略好，真实hit入口仍被显著破坏。代码复核显示四倍manager weight
+随后matched ACK0..623已经否决无条件`4/4/4/2`：新/旧raw contact=`56/1,665`、selected=`5/334`、
+crossing=`2/281`；最近10轮四项mimic也全部坏于旧baseline，真实hit入口仍被显著破坏。代码复核显示四倍manager weight
 在pre-playback ready hold也支付最高`14`，形成不必要的容易局部经济。下一fresh只恢复baseline manager
 weight=`1/1/1/.5`，并在Motion唯一真源的playback-active行把同kernel乘`4`；PPO/Observation/due/plant/
 regularization/事实源全不变，不增加Stage或Gate。该候选仍须Pod exact与fresh matched才可采用。
@@ -337,17 +337,17 @@ privacy改为machine provisioning显式选择，launcher不再硬编码`PRIVACY_
 但合法Isaac二进制、split USD、92个Mu mesh与private凭据仍是外部输入，空白机状态继续`PARTIAL`。
 第二，`79efd71c`让Physical每substep继续capture/sample/立即park，只把R06重型score/mailbox/finalize收成
 control boundary一次，再按`P0,R0…`原顺序回放Epoch；没有删engine事实或durable chronology。Pod1 final
-clean exact source=`255df4a1`的核心、合并lean/Scene、launcher/setup分别为
-`286 passed,19 skipped`、`145 passed,8 skipped`、`45 passed`；cfg为`13 passed,25 honest skips`。
+clean exact validated code source=`ff7a6c4f`的Pod CPU/Torch组合与launcher/setup分别为
+`444 passed,36 skipped`、`98 passed`。
 测试harness原先在collection时全局替换canonical modules、使合并运行产生27个假失败，也已改成test-scope
 namespace并由同一合并命令闭合。真实GPU fixed tape与matched profile因三卡仍被只读训练占用而`未测`；不从
-CPU门外推速度。该slice的production净增约545行，因此也不以“typed”名称冒充结构已经优雅：GPU收益不足则
+CPU门外推速度。当前相对`79efd71c^`的production净增为`460-21=439`行，因此也不以“typed”名称冒充结构已经优雅：GPU收益不足则
 撤回；若保留，再把即时/deferred finalize的重复数学收成同一内部primitive，减少维护面。
 
-direct-paddle 4× fresh Mu到ACK363的matched证据已经改变数值轴判断：相对旧baseline，四项累计paddle
-误差三好一坏，但selected/launch=`1/49,494` vs `321/46,549`，所以更强mimic收入没有改善、反而几乎消除
-hit入口。该run继续到预注册update1000只为排除延迟转折，当前不采纳4倍值；下一学习候选应把Build4的
-warm-start与replay拆成独立轴，不新增Observation或把它们和权重混跑。
+direct-paddle 4× fresh Mu到ACK623已最终判负：matched prefix新/旧raw/selected/crossing=
+`56/5/2` vs `1,665/334/281`，最近10轮四项mimic也全部更差。在`5,079,000` playback rows后不再等
+update1000。下一学习候选只在Motion-owned playback期增强同核；Build4 warm-start/replay继续独立延后，
+不新增Observation或把它们和权重混跑。
 
 采用/延后/拒绝如下：
 
