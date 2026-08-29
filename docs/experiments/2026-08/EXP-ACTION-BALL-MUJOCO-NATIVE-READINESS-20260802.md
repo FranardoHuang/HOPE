@@ -336,6 +336,11 @@ namespace并由同一合并命令闭合。真实GPU fixed tape与matched profile
 CPU门外推速度。该slice的production净增约545行，因此也不以“typed”名称冒充结构已经优雅：GPU收益不足则
 撤回；若保留，再把即时/deferred finalize的重复数学收成同一内部primitive，减少维护面。
 
+direct-paddle 4× fresh Mu到ACK363的matched证据已经改变数值轴判断：相对旧baseline，四项累计paddle
+误差三好一坏，但selected/launch=`1/49,494` vs `321/46,549`，所以更强mimic收入没有改善、反而几乎消除
+hit入口。该run继续到预注册update1000只为排除延迟转折，当前不采纳4倍值；下一学习候选应把Build4的
+warm-start与replay拆成独立轴，不新增Observation或把它们和权重混跑。
+
 采用/延后/拒绝如下：
 
 - **采用：**真实A3P0807 root绑定；immutable teacher与robust physical birth分离；artifact作为hold/actor

@@ -14,8 +14,9 @@ privacy=`Y|N`，不替人选择。合法Isaac二进制、split USD、Mu的92个i
 保留每个backend的Scene/plant事实和per-substep事件，只减少同一R06 owner的重复finalize，故通过后也只会
 改善实现成本，不会把任务成功变成sim2sim或安全证据。
 
-现役Mu已产生`662/217,463` selected contact和596次net crossing但0 legal landing；Isaac为
-`0/51,300 physical launch`有效strike。二者处在不同学习阶段，不能把曲线差异直接当physics parity。
+`observed_at=2026-08-29T11:52:28Z`时，现役Mu已产生`663/294,108` selected contact和597次net crossing
+但0 legal landing；Isaac为`0 R03 / 78,072 physical launch`。二者处在不同学习阶段，不能把曲线差异直接
+当physics parity。
 fixed tape仍把shared initial state、joint order、action decoder与qdes对齐，current Pod runtime身份也通过
 独立检查；所以没有“Pod整体装坏”的证据。剩余first-divergence仍属于implicit PhysX drive与显式Mu PD、
 friction/contact/integrator响应，需同tape plant字段对签，不能用policy或额外Gate掩盖。

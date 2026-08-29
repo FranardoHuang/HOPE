@@ -11,11 +11,11 @@ Scene capture、terminal即时park和`P0,R0…` durable顺序。Pod1 clean exact
 三张GPU仍分别被旧Mu、旧Isaac和fresh 4× Mu占用，所以current source真实Kit fixed tape与profiler-off
 matched active strata为`未测`，本Gate不把host语义门或profile硬上界写成速度PASS。
 
-fresh direct-paddle 4× Mu到ACK217，matched旧baseline前218轮只有三项paddle误差略好、position略坏，且
-selected contact=`0/28,911 launch`；recent10误差继续波动。旧Mu到ACK2031仍为
-`663/274,670 selected/launch`、legal=`0/663`；旧Isaac到ACK704为`0 R03 / 71,289 launch`。旧两条交接失败
-已不是“太早”，新单轴才仍属早期；继续到1000节点，不比较权重改变后的return，也不因此新增Observation或
-离散Stage Gate。
+fresh direct-paddle 4× Mu到ACK363，matched旧baseline为`1/49,494` vs `321/46,549`
+selected/launch；累计四项paddle误差虽三项略好，position更坏，最近10轮也未恢复contact。因此4倍权重当前
+不满足mimic→hit交接验收，只继续到预注册1000节点排除延迟转折，不比较权重改变后的return。旧Mu到ACK2174
+recent10仍contact/landing为0；旧Isaac到ACK743 recent10仍`0 R03 / 1,514 launch`。这些事实不支持新增
+Observation、离散Stage Gate或继续盲加权。
 
 现役long于`2026-08-29T10:47:30Z`只读刷新到Mu ACK1610、Isaac ACK560。Mu累计
 selected-contact/net-crossing/legal-landing=`662/596/0`（launch=`217,463`），recovery=`0/132,376`；最近

@@ -306,14 +306,15 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    matched update报告四项真实误差、episode/terminal、`selected/launch`、landing/contact与fault。旧两条
    `d8fd8423`保持只读作为baseline；不resume、不复用namespace，不混入Build4 warm-start/replay/双LR/
    sigma`.19`或新增obs。只有真实误差与contact入口相对baseline改善且balance不倒退，才采用该数值轴。
-   fresh Mu `28430d36`已在GPU0运行到ACK217。matched ACK0..217相对旧baseline：episode length=
-   `148.255 vs 143.381`，四项误差=`.24306/1.16511/.33088/.28921` vs
-   `.23902/1.17045/.33715/.29194`，即三项小幅好、一项位置略坏；launch/R03=`28,911/22,276` vs
-   `26,954/20,039`，但selected=`0` vs `13`。新run recent10误差又为
-   `.25259/1.19249/.33004/.28288`且contact仍`0/1,423 launch`。它证明单轴已真实进入训练、数值与fault
-   clean，但还不足以采用或否决；继续到至少1000的早期趋势节点，不拿4倍后不可比的return作结论。Isaac
-   同轴fresh尚未发射：GPU0/1/2分别被该Mu treatment、旧Mu baseline、旧Isaac baseline占用，禁止同卡混跑、
-   signal旧run或绕过lifetime lock；空闲GPU出现后从final clean commit发射，不复用namespace。
+   fresh Mu `28430d36`已在GPU0运行到ACK363。matched ACK0..363相对旧baseline：episode length=
+   `148.883 vs 144.329`，四项累计误差=`.27992/1.16628/.35885/.32122` vs
+   `.25686/1.18479/.37412/.34125`，即三项小幅好、position更坏；launch/R03=
+   `49,494/38,079` vs `46,549/34,513`，但selected contact仅`1` vs `321`。ACK354..363两端都出现误差
+   恶化，新run仍为position更坏、其余三项较好，却没有恢复contact。这已否决“4倍权重本身改善mimic→hit
+   交接”的当前证据，不因return不可比而粉饰。run继续到预注册update1000只为排除延迟转折，不据此采用；
+   后继轴应分别验证Build4的warm-start或replay原则，而非继续盲加权。Isaac同轴fresh尚未发射：GPU0/1/2
+   分别被该Mu treatment、旧Mu baseline、旧Isaac baseline占用，禁止同卡混跑、signal旧run或绕过lifetime
+   lock；空闲GPU出现后只发射仍有因果价值的final clean successor，不复用namespace。
 
 <a id="fullmdp-v9-superseded"></a>
 

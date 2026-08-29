@@ -1300,11 +1300,13 @@ matched未来窗逐项报告episode/terminal、四项teacher-achieved误差、`s
 recovery和fault。只有相对旧`d8fd8423`同update前缀真实误差/contact改善且balance没有倒退才采用；否则撤回
 该数值轴，再分别考察warm-start或replay，不能把多个Build4差异混成一个不可归因版本。
 
-fresh Mu namespace=`fullmdp-r23-paddle4x-mujoco-28430d36-20260829T1106Z`已自然运行到ACK217。与旧
-`d8fd8423`的ACK0..217 matched前缀相比，episode length=`148.255 vs 143.381`，四项paddle误差=
-`.24306/1.16511/.33088/.28921` vs `.23902/1.17045/.33715/.29194`；三项略好、position略坏，
-launch/R03更多（`28,911/22,276` vs `26,954/20,039`），但selected contact=`0 vs 13`。新run
-ACK208..217又出现`.25259/1.19249/.33004/.28288`的波动，且该窗`0/1,423 launch` contact、全程
-`0/28,911`。fault/nonfinite/conservation为0，p50/p90约`6.54/6.65 s/H48`。因此单轴执行健康但行为结论
-仍早；保持运行到至少update1000再判趋势，不比较4倍权重后的return。对应Isaac fresh因Pod1三卡已有三条
-只读训练而未发射，不能同卡混跑或停止旧run换取假闭环。
+fresh Mu namespace=`fullmdp-r23-paddle4x-mujoco-28430d36-20260829T1106Z`已自然运行到ACK363。与旧
+`d8fd8423`的ACK0..363 matched前缀相比，episode length=`148.883 vs 144.329`，四项paddle误差=
+`.27992/1.16628/.35885/.32122` vs `.25686/1.18479/.37412/.34125`；三项略好、position更坏，
+launch/R03更多（`49,494/38,079` vs `46,549/34,513`），但selected contact=`1 vs 321`。matched
+ACK354..363中两边误差都坏，new/old=`.45325/1.20086/.54133/.52532` vs
+`.41334/1.30325/.59444/.56405`，仍是position更坏、其余三项较好而contact均0。new fault/nonfinite/
+conservation为0，recent10 p50/p90约`6.59/6.66 s/H48`。因此实现和rate健康，但当前行为证据已明确反对
+“4倍权重改善mimic→hit交接”；继续到预注册update1000只为排除延迟转折，不比较4倍后的return，也不采纳。
+对应Isaac fresh因Pod1三卡已有三条只读训练而未发射；下一空闲卡只运行仍有因果价值的warm-start或replay
+单轴，不停止旧run换取假闭环。

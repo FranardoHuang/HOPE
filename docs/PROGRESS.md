@@ -10,10 +10,11 @@
   canonical module的test harness限制在单test生命周期；此前合并套件27个假失败不再需要靠分进程规避。
   Pod final clean exact为核心`286 passed,19 skipped`、合并lean/Scene=`145 passed,8 skipped`、环境/launcher
   `45 passed`、cfg=`13 passed,25 honest skips`。真实GPU fixed tape与matched profile因三卡占用仍`未测`。
-- 学习证据不混总return：旧Mu到ACK2031仍为`663/274,670 selected/launch`、legal landing=`0/663`；旧Isaac
-  到ACK704为`0 R03 / 71,289 launch`，交接失败已非早期。fresh 4× Mu到ACK217，matched前218轮三项拍误差
-  小幅好、一项略坏，recent10又波动且selected=`0/28,911 launch`；因此继续到至少1000再裁决。对应Isaac
-  treatment等空闲GPU，从final clean source发射，不同卡混跑、不signal旧run、不复用namespace。
+- 学习证据不混总return：旧Mu/Isaac的交接失败已非早期。fresh 4× Mu到ACK363时，matched旧baseline的
+  selected/launch=`1/49,494` vs `321/46,549`；虽累计拍误差三项略好、position更坏，contact入口几乎消失，
+  已不支持采用简单4倍权重。run只继续到预注册1000节点排除延迟转折；下一轴分开验证warm-start或replay，
+  不继续盲加权。Isaac successor等空闲GPU，从final clean source发射，不同卡混跑、不signal旧run、不复用
+  namespace。
 
 ## 2026-08-29 — 环境fail-closed、可移植GL、当前训练与14.72秒平台
 
