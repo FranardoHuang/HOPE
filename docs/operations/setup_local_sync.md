@@ -26,6 +26,28 @@ git check-ignore -q vendor_assets
 不存在时用同一文件系统的 rename 发布。不得用 `rsync --delete` 清理一个共享
 `vendor_assets/` 根，也不得恢复进正在训练的 checkout。
 
+## 2026-08-29 FullMDP exact checkout closure
+
+`setup.py`现显式声明`cryptography>=44,<51`；这覆盖Pod1已验证的Isaac bundled `44.0.0`与操作venv
+`50.0.0`，关闭HANDOFF中“签名测试依赖手装、缺包时可能只见skip”的隐含欠账。它不安装Isaac Sim、接受
+NVIDIA EULA或生成private asset。
+
+最终source `d8fd8423f3aadda38bbe1e4ec884f255a21f9510`已从全新exact checkout
+`/workspace/franco/mktemp/fullmdp-r15-d8fd8423.exact`完成恢复验证：
+
+- A3P0807 root SHA-256为`7bbda723…bcae1`；mesh为`92 files / 25,331,878 bytes`，sorted manifest digest
+  `8c0ab325…b2b0`；
+- EPA48 build receipt/wheel为`336f6454…e041` / `58f47b1c…b561`，RSL-RL 3.1.2 wheel为
+  `40686735…e06d`；
+- lean runtime、postphysics、Mu keepout分进程为`35/24/12 passed`（另`1 skipped`），signed-authority
+  为`59 passed / 0 skipped`；tracked tree clean；
+- Isaac Kit Python 3.11/Torch 2.7与Mu venv分别运行其exact测试；不能用ambient Python一次合跑后把ABI或
+  namespace collection污染解释成production失败。
+
+因此“repo + 已合法准备的exact Isaac/EULA/private assets + 本页内容寻址恢复步骤”可部署为`PASS`；
+“纯Git clone自包含所有运行时字节”明确为`FALSE`。新机器必须先恢复下表外部输入并逐项核SHA，再创建全新
+run root/namespace；不得让path-autodiscovery静默选择另一个IsaacLab/Python/plant。
+
 ## Current Local Assets
 
 | Path | Purpose | Source | Required By |

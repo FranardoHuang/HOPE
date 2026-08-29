@@ -19,6 +19,18 @@ Mu 61-update窗finite且hard/guard降至`.789%/5.727%`，但`0/6,001 launch` con
 shared fresh路径删减没有破坏固定输入执行，并支持替换旧negative；跨backend response、hit与landing仍未闭合，
 所以不改变G06状态。
 
+最终`d8fd8423` exact checkout重复通过相同三组测试、signed-authority与fixed tape后，双端fresh长期
+replacement已取得连续ACK；旧`954200d5`双run按精确进程身份停止，root/checkpoint/log可恢复。到
+`2026-08-29T08:07:38Z`，新Mu为`0/16,501 launch` selected contact，新Isaac为`0/377 launch` raw
+actor-pair contact；两端课程入口都已打开而hit尚未形成。Mu balance边界改善、mimic三坏一好；Isaac
+mimic三好一坏。该差异仍是学习证据而非physics parity，G06保持`Partial / diagnostic_unauthorized=true`。
+
+50-update Isaac profile又证明响应差异之外存在明确的数据流成本：无active flight时Physical postphysics
+均值`.014 s/update`，全H48 active时约`5.010 s/update`，超过同轮D05的`2.650 s`。它指向每substep的
+Physical捕获→Epoch full-key join/journal→R06 settle/retire事务，不指向另一个“安全Gate”。后续融合必须让
+两backend固定tape的contact/outcome/reason/fault/counter与scene-retire结果保持一致；该性能归因不提高
+parity证据等级。
+
 旧V9不是matched 0807实验：Mu实际载入legacy root。R8固定带现从同一clean commit、同一0807 plant身份、
 同一artifact actor center、同一joint order与`512×H48×31` tape运行；两端initial q/dq exact、0 done/timeout，
 逐tick qdes最大差`5.96e-8 rad`。Isaac clock=`.005 s×4`，Mu clock=`.001 s×20`，共同policy step为`.020 s`。

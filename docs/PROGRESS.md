@@ -2,6 +2,20 @@
 
 ## 2026-08-29 — controller修复有限学习窗与fresh热路减法
 
+- final source `d8fd8423`已在Pod1全新exact checkout恢复EPA48/RSL3/A3P0807 mesh与private runtime输入，
+  重复通过分进程`35/24/12 passed`（另`1 skipped`）、signed-authority `59 passed / 0 skipped`及Isaac
+  fixed tape；旧`954200d5`双run在replacement连续ACK后按精确进程身份停止，root/checkpoint/log完整保留。
+- 新Mu/Isaac长期namespace分别为`fullmdp-r15-0807-mujoco-d8fd8423-20260829T0745Z`与
+  `fullmdp-r15-0807-isaac-d8fd8423-20260829T0752Z`。`2026-08-29T08:07:38Z`时Mu ACK0..143的
+  first10→recent10 episode length=`135.29→151.57`、hard-edge=`.708%→.204%`，但mimic三坏一好、
+  contact=`0/16,501 launch`；Isaac ACK0..56为mimic三好一坏、contact=`0/377 launch`。两端运行健康但
+  仍是balance→mimic早期过渡，不宣称mimic/hit/landing成功。
+- 同source GPU0 `512×H48×50` profile自然完成并自动退出，receipt SHA=`66d4a700…87bcf`。collection
+  全窗p50/p90=`11.096/17.178 s`，recent10=`17.178/17.746 s`；无active flight时Physical postphysics
+  均值`.014 s/update`，全H48 active时=`5.010 s`，同轮D05/reset=`2.650/1.863 s`。因此撤回5-update
+  冷启动“postphysics不是主墙”的归因；下一刀转为收敛逐子步Physical→Epoch→R06事务，保留独立事实、
+  key/generation、contact/outcome、reason/fault/counter、scene retire与WAL/ACK，不用删Gate凑约6秒。
+
 - 同一`92b56a43`源码的MuJoCo `512×H48×61` profiler-off有限窗已自然完成：p50/p90=
   `6.698/6.804 s`，hard-edge=`19,816/1,499,136=1.322%`、qdes guard=
   `123,090/1,499,136=8.211%`，相较旧长期run约`87%`的hard-edge确认maximum-inward修复有效；但

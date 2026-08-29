@@ -22,6 +22,23 @@ clean `75373daa`的Pod exact分进程测试为`35/24/12 passed`（另`1 skipped`
 p50/p90=`6.671/6.740 s`，hard/guard=`.789%/5.727%`，first10→recent10都下降；但
 launch/raw/selected/landing=`6,001/0/0/0`，所以只授权长期replacement，G05仍`Partial`且速度方向未闭合。
 
+最终`d8fd8423` exact checkout又恢复并核过EPA48/RSL3/0807 mesh与private runtime输入，重复得到
+`35/24/12 passed`（另`1 skipped`）和signed-authority `59 passed / 0 skipped`；旧`954200d5`双run在
+replacement连续ACK后按精确进程身份停止且root/checkpoint/log保留。新Mu/Isaac namespace分别为
+`fullmdp-r15-0807-mujoco-d8fd8423-20260829T0745Z`与
+`fullmdp-r15-0807-isaac-d8fd8423-20260829T0752Z`。到`2026-08-29T08:07:38Z`，Mu ACK0..143的
+first10→recent10 episode length=`135.29→151.57`、hard-edge=`.708%→.204%`，但mimic三坏一好，
+累计contact=`0/16,501 launch`；Isaac ACK0..56为三项mimic改善、face变差，contact=`0/377 launch`。
+两端finite/fault边界clean，只能说处于balance→mimic早期过渡，不能称mimic基本成功，landing继续`未测`。
+
+同source GPU0 `512×H48×50` attribution profile已自然完成并自动退出（receipt SHA=
+`66d4a700…87bcf`）：collection全窗p50/p90=`11.096/17.178 s`，recent10=
+`17.178/17.746 s`。无active flight时Physical postphysics均值`.014 s/update`，recent10为`3.941 s`，
+全48步active的两轮为`5.010 s`；同轮D05/reset=`2.650/1.863 s`。因此原5-update冷启动“postphysics不是
+主墙”结论已撤回；当前主墙是active-flight逐子步Physical→Epoch→R06事务。下一刀收敛该数据流并逐项保留
+key/generation、contact/outcome、reason/fault/counter、scene retire、WAL/ACK；不以删事实、降低solver或
+新增success Gate换速度。约6秒方向仍未闭合，G05保持`Partial`。
+
 R7被审出并非robust：右脚/support/torque slack低于自身reserve；其Isaac 61-update窗hard-edge
 `6.13%→6.79%`、contact=`0/1,242 launch`，只作weak-margin反例。R8已在真实PhysX完成
 `60 policy/240 physics/1.2 s` nonterminal prefix，最终最小hard gap=`.21966 rad`，但frame0拍心teacher

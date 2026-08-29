@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`controller-fix-finite-canary-complete / exact-structure-cut-validating / no-authorized-formal-run`
+- 状态：`corrected-dual-fresh-running / active-flight-profile-complete / no-authorized-formal-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -53,6 +53,44 @@ Mu `512×H48×61` profiler-off窗自然完成，p50/p90=`6.671/6.740 s`；hard/g
 due/launch/R03-valid/raw/selected/legal-landing=`11,120/6,001/4,123/0/0/0`，finite、conservation与
 fact fault均0。fixed tape证明删除路径不改变固定行为；随机训练窗比父版更好不能单独证明因果。它只授权
 启动长期replacement，约6秒目标仍未达到，balance/mimic/hit/landing均不晋级。
+
+最终依赖/文档source `d8fd8423`又在独立exact checkout
+`/workspace/franco/mktemp/fullmdp-r15-d8fd8423.exact`恢复全部外部输入并逐项复核：A3P0807 mesh为
+`92 files / 25,331,878 bytes / manifest 8c0ab3…b2b0`，EPA48 receipt/wheel、RSL3 wheel与0807 root SHA均
+匹配；分进程测试继续为`35/24/12 passed`（另`1 skipped`），signed-authority=`59 passed / 0 skipped`，
+checkout tracked tree clean。`cryptography>=44,<51`因此不再是HANDOFF所述的手装隐含依赖；但Isaac/EULA、
+private USD与ignored mesh仍是显式外部输入，纯Git clone仍不自包含。
+
+旧`954200d5`双长期run在replacement连续ACK后按PID/startticks/PGID/cwd/source/namespace精确停止，旧root、
+日志和checkpoint全部只读保留。Mu最终update=`4813`，evidence SHA=`acdef5a7…032`、`model_4000.pt` SHA=
+`e78bd02c…a12`；Isaac最终update=`1639`，run log SHA=`5003c214…92d8`、`model_0.pt` SHA=
+`e97e6377…74c`。停止审计分别位于
+`/workspace/franco/stop_audits/fullmdp-r12-0807-{mujoco,isaac}-954200d5-replaced-by-d8fd8423-20260829`；
+Mu一个进程组TERM即空，Isaac outer退出后只对预先绑定的同PGID Kit child再发精确终止信号，没有广域kill，
+数据可恢复而进程不可误续。
+
+最终fresh replacement均绑定`d8fd8423`与同一R8工件：Mu namespace=
+`fullmdp-r15-0807-mujoco-d8fd8423-20260829T0745Z`（GPU1），Isaac namespace=
+`fullmdp-r15-0807-isaac-d8fd8423-20260829T0752Z`（GPU2）。`observed_at=2026-08-29T08:07:38Z`时Mu已有
+ACK0..143：全窗episode length/return=`140.15/15.89`，first10→recent10 length=`135.29→151.57`，
+hard-edge=`.708%→.204%`、qdes guard=`4.691%→4.168%`，但mimic四误差
+`.1742/1.1534/.3215/.2606→.3262/1.1494/.3940/.3675`，三坏一好；累计
+due/launch/R03/raw/selected/landing=`25,327/16,501/11,958/0/0/0`，p50/p90=
+`6.676/6.771 s/H48`。Isaac ACK0..56的episode length/return=`105.30/11.35`，first10→recent10
+length=`97.26→108.22`；四误差`.2724/1.1946/.2893/.4755→.2470/1.1255/.3677/.4441`，三好一坏；
+累计due/playback/launch/contact=`13,329/350,950/377/0`，hard joint fraction约`7.05%`，finite、
+conservation与attributed fault均0。两端工程运行健康、课程入口自然重叠，但mimic未一致改善，hit为已有分母的
+0，landing仍无selected-contact分母；这只是早期学习，不晋级，也不新增Observation。
+
+为避免5-update冷启动profile误判成熟热路，另在GPU0让同source Isaac `512×H48×50` profile自然结束并
+自动退出；receipt SHA=`66d4a700…87bcf`。全窗collection p50/p90=`11.096/17.178 s`，recent10=
+`17.178/17.746 s`。无active flight的22轮`physical_epoch_postphysics`均值仅`.014 s/update`；recent10
+均值`3.941 s`，两轮全48步active时均值`5.010 s`，对应parent postphysics=`5.396 s`。同两轮D05/reset
+均值为`2.650/1.863 s`，reward/sim约`1.098/1.486 s`；这些inclusive nested段不可相加。故成熟期主墙不是
+100-step virtual-ball RK4，也不是已删除的R07→Motion self-echo，而是active-flight每物理子步重复的
+Physical→Epoch→R06事实事务，其次才是异步小批D05与reset。下一性能刀固定为收敛该状态转移的数据流；必须
+保持engine事实、full key/generation、first-contact/settlement/reason/fault/counter、scene retire、WAL/ACK
+与fixed-tape输出，不能拿删安全事实、缩solver或隐藏terminal凑6秒。
 
 MuJoCo attach日志一度显示parent `.002 s`、child `.001 s`，但独立加载该run最终`runtime.mjb`实测为
 `.001 s`、Euler、Newton、iterations100、noslip0；故实际policy clock仍`.001×20=.020 s`，warning来自

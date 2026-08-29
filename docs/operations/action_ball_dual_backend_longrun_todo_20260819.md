@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`controller-fix-finite-canary-complete / exact-structure-cut-validating / branch-scoped / diagnostic_unauthorized`
+> 状态：`corrected-dual-fresh-running / active-flight-profile-complete / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-29
@@ -222,17 +222,27 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
 12. [x] 修正portable completion consumer仍期待旧Take061 UID的漂移：producer/live owner为当前0807
     `2552478955674699`，consumer旧值`5527597793770800`会让任何正确完成件末端失败。只更新独立consumer
     expected value，保留writer→consumer单侧漂移会红的测试，不用producer输出反写expected。
-13. [ ] 将本轮结构减法提交并在Pod1全新exact checkout分进程复跑lean-runtime、post-physics与Mu keepout；
+13. [x] 将本轮结构减法提交并在Pod1全新exact checkout分进程复跑lean-runtime、post-physics与Mu keepout；
     随后重跑同源码Isaac fixed tape和Mu profiler-off rate，只有source、receipt、测试与有限run一致后，才启动
     fresh双端长期replacement。长期判读按自然重叠课程分别报告episode/mimic、due/playback/launch、
     raw/selected contact与legal landing分母；上阶段基本形成时，下阶段必须已经出现入口增长，但不新增
     “成功后才允许开始学”的自动Gate。Observation V3保持`215/231`，除非证明有新的可观测、非冗余状态。
     新机恢复同时关闭HANDOFF遗留的`cryptography`手装欠账：package声明`>=44,<51`，兼容已验证的Isaac
     bundled `44.0.0`和Pod操作venv `50.0.0`；外部Isaac/EULA/private assets仍按显式SHA恢复，不伪装纯Git自包含。
-    当前前半段已闭合：clean `75373daa` Pod exact=`35/24/12 passed`（另`1 skipped`）、signed-authority=
+    clean `75373daa` Pod exact=`35/24/12 passed`（另`1 skipped`）、signed-authority=
     `59 passed / 0 skipped`、Isaac fixed tape=0 done/timeout且SHA一致；Mu 61-update p50/p90=
-    `6.671/6.740 s`、hard/guard=`.789%/5.727%`、launch/contact/landing=`6,001/0/0`。剩余项只有final
-    dependency/docs commit的exact复核与双端长期replacement ACK；完成前item 13保持打开。
+    `6.671/6.740 s`、hard/guard=`.789%/5.727%`、launch/contact/landing=`6,001/0/0`。最终依赖source
+    `d8fd8423`又在新exact checkout恢复并核过全部external input，重复上述测试；双端replacement已分别在
+    GPU1/GPU2取得连续ACK，旧`954200d5`双run按exact进程身份停止并保留全部数据。到
+    `2026-08-29T08:07:38Z`，新Mu/Isaac分别到ACK143/56，finite/conservation/fault clean，contact为
+    `0/16,501`与`0/377 launch`；课程入口已开但学习不晋级。故item 13的source→test→run→replace闭环完成。
+14. [ ] 将active-flight Physical→Epoch→R06逐物理子步事务收敛成最小typed状态转移。50-update exact profile
+    （receipt SHA=`66d4a700…87bcf`）显示collection全窗p50/p90=`11.096/17.178 s`、recent10=
+    `17.178/17.746 s`；无active flight时Physical postphysics均值`.014 s/update`，全H48 active时为
+    `5.010 s/update`，高于同轮D05/reset的`2.650/1.863 s`。先用分段或fixed capture确定Epoch full-record
+    clone/journal、R06 settle/retire与scene write各自份额，再只融合最大块；验收必须覆盖固定tape、
+    first-observed/contact、settled/retired、reason/fault/counter、scene state、journal/WAL/ACK与profiler-off
+    matched active strata。禁止删除engine事实、full-key/generation、finite/joint/table或用降低solver凑速度。
 
 <a id="fullmdp-v9-superseded"></a>
 
