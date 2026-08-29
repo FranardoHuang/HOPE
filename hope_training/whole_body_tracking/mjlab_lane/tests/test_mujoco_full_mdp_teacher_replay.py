@@ -270,21 +270,54 @@ def test_contact_patch_bridge_distinguishes_torch_proxy_warp_and_device_duck():
             calls.append(value)
             return torch.tensor([3.0])
 
+    class FakeTorchArray:
+        def __init__(self, tensor):
+            self.tensor = tensor
+            self.device = tensor.device
+            self.indexes = []
+
+        def __getitem__(self, index):
+            self.indexes.append(index)
+            return self.tensor[index]
+
     direct = torch.tensor([1.0])
     proxy_view = torch.tensor([2.0])
-    proxy = types.SimpleNamespace(torch=proxy_view, device=proxy_view.device)
+    proxy = FakeTorchArray(proxy_view)
     warp_value = FakeWarpArray()
     bridge = wait_env.FullMdpInitialWaitVecEnv._diagnostic_contact_field_torch_view
 
-    assert bridge(torch=torch, warp=FakeWarp, value=direct) is direct
-    assert bridge(torch=torch, warp=FakeWarp, value=proxy) is proxy_view
-    bridged_warp = bridge(torch=torch, warp=FakeWarp, value=warp_value)
+    assert bridge(
+        torch=torch,
+        warp=FakeWarp,
+        torch_array_type=FakeTorchArray,
+        value=direct,
+    ) is direct
+    bridged_proxy = bridge(
+        torch=torch,
+        warp=FakeWarp,
+        torch_array_type=FakeTorchArray,
+        value=proxy,
+    )
+    assert torch.equal(bridged_proxy, proxy_view)
+    assert bridged_proxy.data_ptr() == proxy_view.data_ptr()
+    assert proxy.indexes == [Ellipsis]
+    bridged_warp = bridge(
+        torch=torch,
+        warp=FakeWarp,
+        torch_array_type=FakeTorchArray,
+        value=warp_value,
+    )
     assert torch.equal(bridged_warp, torch.tensor([3.0]))
     assert calls == [warp_value]
 
     device_only = types.SimpleNamespace(device=torch.device("cpu"))
     with pytest.raises(TypeError, match="no supported Torch view"):
-        bridge(torch=torch, warp=FakeWarp, value=device_only)
+        bridge(
+            torch=torch,
+            warp=FakeWarp,
+            torch_array_type=FakeTorchArray,
+            value=device_only,
+        )
 
 
 def test_teacher_replay_cli_is_n1_zero_ppo_and_reuses_live_owner():

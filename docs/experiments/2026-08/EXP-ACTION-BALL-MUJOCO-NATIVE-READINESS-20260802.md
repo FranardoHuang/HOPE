@@ -27,7 +27,11 @@
 live contact field的Torch-facing proxy被误当Warp array，`wp.to_torch`读其`torch.device`时
 触发`is_cpu` AttributeError。后继候选以真实表示分流：Tensor直接使用，显式
 `.torch` proxy使用零拷贝view，真`warp.array`才调Warp zero-copy bridge，其他对象
-fail closed。spent root `/workspace/franco/runs/fullmdp-teacher-replay-eff08cc-gpu1-20260829T224645Z-r1`
+fail closed。第二个CUDA证明这仍是错的：真proxy无`.torch`。不再发射猜测后，
+pinned MJLab 1.5.3 `sim_data.py`将真实类唯一确认为`TorchArray`；它的公开
+`__getitem__`委托到缓存的shared-memory Tensor。新候选仅对这一exact class用
+`value[...]`取zero-copy view，不引入第三个鸭子类型接口。spent root
+`/workspace/franco/runs/fullmdp-teacher-replay-eff08cc-gpu1-20260829T224645Z-r1`
 保留，只有runtime MJB、无summary/NPZ，不复用。
 
 Pod CPU targeted对`5f1ee728`的结果是两个可定位的实现失败，不是teacher replay

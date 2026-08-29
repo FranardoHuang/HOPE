@@ -534,22 +534,27 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         return self._full_a_contact_force_f32[:, 0]
 
     @staticmethod
-    def _diagnostic_contact_field_torch_view(*, torch, warp, value):
+    def _diagnostic_contact_field_torch_view(
+        *, torch, warp, torch_array_type, value
+    ):
         """Return the field's existing Torch storage without guessing by device.
 
-        MJLab may publish live MuJoCo-Warp fields as its Torch-facing proxy:
-        that object owns a ``torch.device`` but is not itself a ``Tensor`` or a
-        Warp array.  Its explicit ``.torch`` view is already the zero-copy
-        consumer surface.  Native contiguous Warp arrays instead use Warp's
-        zero-copy Torch bridge.  No other object is accepted merely because it
-        exposes a shape, device, or DLPack-like attribute.
+        MJLab 1.5.3 publishes live MuJoCo-Warp fields as its exact
+        ``mjlab.sim.sim_data.TorchArray`` class.  Its public indexing API
+        delegates to the cached shared-memory Torch tensor; ``value[...]`` is
+        therefore a zero-copy view rather than a host transfer.  Native
+        contiguous Warp arrays instead use Warp's zero-copy Torch bridge.  No
+        other object is accepted merely because it exposes a shape, device,
+        similarly named attribute, or DLPack-like protocol.
         """
 
         if torch.is_tensor(value):
             return value
-        proxy_view = getattr(value, "torch", None)
-        if torch.is_tensor(proxy_view):
-            return proxy_view
+        if isinstance(value, torch_array_type):
+            result = value[...]
+            if torch.is_tensor(result):
+                return result
+            raise TypeError("MJLab TorchArray indexing did not return a Tensor")
         warp_array_type = getattr(warp, "array", None)
         if (
             isinstance(warp_array_type, type)
@@ -581,10 +586,14 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             raise RuntimeError("MuJoCo-Warp generic contact patch surface differs")
         try:
             import warp as wp
+            from mjlab.sim.sim_data import TorchArray
 
             tensors = {
                 name: self._diagnostic_contact_field_torch_view(
-                    torch=self._torch, warp=wp, value=value
+                    torch=self._torch,
+                    warp=wp,
+                    torch_array_type=TorchArray,
+                    value=value,
                 )
                 for name in ("pos", "frame", "dist")
                 for value in (getattr(contact, name),)

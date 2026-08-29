@@ -7,7 +7,10 @@
   proxy，它有`torch.device`但不是`torch.Tensor`或Warp array；旧桥接把所有非Tensor
   都传给`wp.to_torch`，因而触发`torch.device.is_cpu` AttributeError。后继候选改为
   三分类：真Torch tensor直接用，显式`.torch` proxy取其零拷贝view，只有真
-  `warp.array`走`wp.to_torch`；仅有`.device`的鸭子类型明确拒绝。spent root
+  `warp.array`走`wp.to_torch`；仅有`.device`的鸭子类型明确拒绝。第二个CUDA
+  证明该proxy也没有`.torch`。随后对pinned MJLab 1.5.3源码的审计唯一定位为
+  `mjlab.sim.sim_data.TorchArray`：其公开`__getitem__`直接返回共享底层Tensor，因此
+  后继只对该精确类型用`value[...]`取zero-copy view，删除`.torch`猜测。spent root
   `fullmdp-teacher-replay-eff08cc-gpu1-20260829T224645Z-r1`保留，无summary/NPZ，不复用。
 - Pod CPU targeted在`5f1ee728`暴露两个实现问题：float32秒数先相减再`ceil`
   会把本应剩3个policy tick的frame0 bridge误拖到4个；contact patch测试把单行
