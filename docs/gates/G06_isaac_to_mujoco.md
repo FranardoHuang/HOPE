@@ -18,12 +18,12 @@ PASS阈值，行为接近也不等于数值parity；G06仍`Partial / diagnostic_
 这使旧run的sim2sim差异不可比，但不推出整个Pod安装损坏。correct-0807、同clean source `954200d5`的fresh
 双端现持续训练；首个Mu root因fresh checkout缺ignored 0807 `meshes/`在首ACK前fail-closed，恢复
 [setup记录](../operations/setup_local_sync.md#restore-the-ignored-a3p0807-mujoco-mesh-closure)后以新root启动，
-没有复用失败namespace。`observed_at=2026-08-29T04:37:38Z`时Isaac/Mu到ACK1043/3043；Isaac recent50
-launch/contact=`5,328/0`、累计=`118,014/0`。Mu recent50
-launch/raw/selected/legal-landing=`5,699/4/0/0`、累计selected/legal=`38/0`，累计launch=`387,840`。
-这是真实学习证据，不是physics parity分母；约`.0098%`累计selected/launch远未达到hit基本成功。
-Mu recent50 p50/p90=`6.681/6.820 s/H48`，两端finite与durable边界clean；Mu actual-hard-edge/qdes-guard
-rows却从first50 `4.90%/5.62%`升到recent50 `58.99%/59.73%`，因此更不能用episode/return增长代签两端行为接近。
+没有复用失败namespace。`observed_at=2026-08-29T05:18:37Z`时Isaac/Mu到ACK1172/3421；Isaac recent50
+launch/contact=`4,882/0`、累计=`131,132/0`。Mu recent50 launch/raw/selected/legal-landing=
+`5,096/3/0/0`、累计selected/legal=`48/0`，累计launch=`430,287`。这是真实学习证据，不是physics parity
+分母；约`.0112%`累计selected/launch远未达到hit基本成功，recent50又为0。Mu recent50 p50/p90=
+`6.264/6.392 s/H48`，两端finite与durable边界clean；Mu recent50 actual-hard-edge/qdes-guard已到
+`93.139%/93.380%`，因此episode/return增长主要是边界污染，不能代签两端行为接近或课程晋级。
 
 Mu `model_2000.pt`的GPU1隔离`512×240`诊断把aggregate hard edge收敛到三关节：
 `waist_pitch/waist_roll/left_ankle_roll`，且`77.47%` hard rows发生在outcome-settled/recovery。
@@ -38,6 +38,11 @@ environment reproduction合同一致。因此已证wrong-object是旧Mu plant选
 但Build4 branch本身没有锁这套环境：其path-autodiscovery在当前Pod1默认命中Python3.10、Isaac Sim4.5、
 `IsaacLab@21f71363…`、RSL2.3.1和旧PPO接口。若Jiayi本机Build4用5.1/RSL3而Pod用默认脚本，两条曲线确实
 不是同一运行环境。历史actual override/argv/input SHA仍缺，故不能把差异的全部比例归因给这项漂移。
+
+仓库部署能力不再依赖补齐这份历史证据：Pod1远端clean clone `e3ef4e98…`已经用显式exact runtime输入完成
+dry-run、`52 passed`和真实Kit/PhysX fixed-action probe，0 done/time-out且退出后GPU释放。receipt见
+[`fresh-clone deployment`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。它回答
+“repo能否接入一台已合法准备好Isaac 5.1及private assets的新机器”，不回答跨机器逐位一致或G06 parity。
 
 当前sim2sim裁决缺的不是另一个“响应差异必须小”的安全Gate，而是匹配对象：Jiayi本机exact asset SHA、
 implicit/explicit actuator backend、clamp/effort、friction/contact参数、substep clock以及同一31-D tape。

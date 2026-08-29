@@ -60,19 +60,18 @@ due/reveal=`11,384/11,384`，但launch/raw/selected=`0/0/0`，episode length/ret
 （SHA `70c4fd65…36c0a`），不是A3P0807 `a3p_pingpong_0807.xml`（SHA `7bbda723…bcae1`），故旧双端差异
 不能与Jiayi的matched sim2sim主张相比，也不能裁决0807训练；旧run已按精确进程身份停止并保留root。
 
-正确0807、同clean source `954200d5`的双fresh随后在Pod1启动。`observed_at=2026-08-29T04:37:38Z`：
-Isaac ACK0..1043的first50→recent50 episode length/return=`105.07/11.30→520.12/51.89`，四项paddle误差=
-`.2811/1.2040/.3561/.4092→.2293/.8819/.4110/.2918`；recent50
-due/admitted/launch/contact=`5,479/5,475/5,328/0`，wall p50/p90=`20.255/20.570 s/H48`，累计contact=
-`0/118,014 launch`。Mu ACK0..3043的first50→recent50 episode length/return=
-`136.78/15.64→359.06/37.44`，四项误差=`.2059/1.1556/.3318/.2840→.1823/.9737/.3212/.2296`；
-recent50 due/launch/R03-valid/raw/selected/legal-landing=`7,631/5,699/5,504/4/0/0`，累计selected=
-`38/387,840 launch`、legal landing=`0/38 selected`，p50/p90=`6.681/6.820 s/H48`。两端Reward28均
-finite、conservation/attributed fault0。课程入口自然重叠，但Isaac face误差恶化且仍零contact；Mu hit累计
-约`.0098%`、无合法落点，远未完成mimic→hit交接。Isaac actual-hard-edge joint-sample从`7.13%→12.51%`，
-Mu actual-hard-edge/qdes-guard rows从`4.90%/5.62%→58.99%/59.73%`；episode/return增长不能单独代签balance
-成功，尤其Mu已严重利用关节边界。G05不把hard edge改成Done，并按下述已完成的per-joint/phase归因
-进入controller-response反事实。
+正确0807、同clean source `954200d5`的双fresh随后在Pod1启动。`observed_at=2026-08-29T05:18:37Z`：
+Isaac ACK0..1172的first50→recent50 episode length/return=`105.07/11.30→1311.79/125.64`，四项paddle
+最近误差=`.24872/.85594/.47811/.30615`；recent50 due/launch/contact=`4,920/4,882/0`，wall p50/p90=
+`19.425/19.832 s/H48`，累计contact=`0/131,132 launch`。Mu ACK0..3421的first50→recent50 episode
+length/return=`136.78/15.64→1310.24/132.50`，四项最近误差=`.15259/.87934/.38563/.20259`；recent50
+due/launch/R03-valid/raw/selected/legal-landing=`5,248/5,096/5,066/3/0/0`，累计selected=
+`48/430,287 launch`、legal landing=`0/48 selected`，p50/p90=`6.264/6.392 s/H48`。两端Reward28均
+finite、conservation/attributed fault0。课程入口自然重叠，但Isaac仍零contact；Mu hit累计仅约`.0112%`、
+最近50轮又为0且无合法落点。Isaac actual-hard-edge joint-sample已到`14.747%`，Mu actual-hard-edge/
+qdes-guard rows已到`93.139%/93.380%`。这已足以判定当前学习异常，不是“太早”：balance/mimic未基本成功，
+hit未基本成功，landing=`0/48`，episode/return增长被边界使用污染。G05不把hard edge改成Done，并按下述
+per-joint/phase归因进入controller-response反事实。
 
 该归因已在GPU1用Mu `model_2000.pt`、同0807 plant/RSL3/EPA48、seed0完成`512×240`随机policy step：
 hard/guard=`8,081/8,373`，分母`122,880`；非零hard joint仅`waist_pitch/waist_roll/left_ankle_roll`，
@@ -95,6 +94,12 @@ RSL2.3.1与旧`act(obs, critic_obs)`接口；现役FullMDP明确绑定Python3.11
 `8320e0be…`、RSL3.1.2/TensorDict接口。若Jiayi本机Build4用后者而Pod用默认脚本，所谓“同Build4”曲线
 不是同环境。历史run缺actual local override/argv/input SHA，所以本Gate只记录已证漂移，不把全部曲线差
 归因给它；下一次可比复现必须显式唯一runtime identity，不能靠path autodiscovery或兼容分支代签。
+
+仓内新机恢复路径已经独立闭合：Pod1远端clean clone `e3ef4e98…`显式绑定Isaac 5.1、Kit、
+IsaacLab `8320e0be…`、Python site、split USD、RSL wheel、GL和GPU后，通过launcher dry-run、
+`52 passed`及真实`512×48×31` Kit/PhysX fixed-action probe，0 done/time-out且自然释放GPU。receipt见
+[`fresh-clone deployment`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。这只证明
+repo可接入已合法准备的exact外部runtime；不把EULA/private bytes伪装成Git内容，也不改变G05 `Partial`。
 
 ## 2026-08-28 FullMDP V9 tick48真实Isaac（仍`Partial`）
 

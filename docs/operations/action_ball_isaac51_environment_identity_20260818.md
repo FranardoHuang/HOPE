@@ -2,8 +2,9 @@
 
 > 状态：`PASS-environment / branch-scoped`
 > 更新：2026-08-29
-> 来源：Jiayi 的 `ENVIRONMENT_REPRODUCTION.md`、Pod2 import/ABI/AppLauncher验证，以及
-> `origin/build_4@324e60d1`与Pod1实际路径/import复核。
+> 来源：Jiayi 曾外部提供的 `ENVIRONMENT_REPRODUCTION.md`、Pod2 import/ABI/AppLauncher验证，以及
+> `origin/build_4@324e60d1`与Pod1实际路径/import复核。原始说明当前不在任何Git ref或Pod1文件系统中；
+> 本页、显式launcher和tracked验证receipt才是仓内可恢复合同，不能把缺失附件写成仓内依赖。
 > 本页不改变 `origin/main:docs/NOW.md` 的项目优先级。
 
 ## 为什么必须换环境
@@ -78,6 +79,29 @@ Git root:  /workspace/franco/mktemp/fullmdp-isaac51-rsl3-git.20260818T091500CST
 `isaaclab/isaaclab_tasks/isaaclab_assets/isaaclab_rl`。训练由
 `/workspace/isaacsim-5.1.0/python.sh` 启动，不能调用旧 `/workspace/hope_isaac_venv/bin/python`。
 
+## 新机器部署边界与实测
+
+`git clone`本身不是完整Isaac安装包，也不应成为一个：Isaac Sim二进制受EULA约束，split-rubber USD、
+RSL wheel及headless OpenGL/GLU又是ignored或机器级资产。仓库负责的第一性合同是另一层：所有外部输入用
+显式路径、版本和SHA绑定；代码只从一个clean commit启动；缺任何一项都在scene/training前失败，不能靠
+path autodiscovery悄悄换成另一套ABI。
+
+2026-08-29在Pod1从远端重新克隆
+`Franco_codex/actionball-fullmdp-v2-20260821@e3ef4e98e903adc006775c6b23b97005f1473df0`，不复用原开发
+checkout，完成了以下闭环：
+
+- clean checkout上用`launch_isaac_full_mdp_successor.py`显式传入Isaac Python、Kit Python、
+  IsaacLab root、Python 3.11 site、USD、RSL wheel、GPU UUID和CPU affinity；`--dry-run`通过；
+- focused launcher/runtime-inventory测试为`52 passed in 10.96 s`；
+- GPU1真实启动Kit/PhysX并自然完成`512×48×31` fixed-action probe，`done/time-out=0/0`，日志中的
+  traceback/CUDA/OOM/runtime/fatal/segfault扫描为0，退出后GPU释放且checkout仍clean。
+
+完整路径与字节receipt见
+[`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。
+这把“仓库能否部署到一台已经合法准备好精确外部runtime的新机器”裁决为`PASS`；它**不**宣称纯Git自包含
+安装，也不授权学习、physics parity、promotion、部署或真机。历史Jiayi本机和旧Pod曲线是否逐位可比仍未
+补证，但已不再阻塞仓内恢复合同。
+
 ## Git 与非 Git 资产
 
 代码已经通过 Git branch `Franco_codex/actionball-isaac51-rsl3-20260818` 传输；`758e88e…`只保留为
@@ -106,7 +130,8 @@ URDF/meshes仍是非 Git 资产；如复现 Jiayi 的 Hitter baseline，必须�
 - `PASS-historical-N2`：FullMDP RSL3真实 `N=2×2`曾闭合optimizer/WAL，只作工程证据。
 - `PASS-Pod-CUDA`：clean Git `2c8ef444…`在Jiayi Python3.11/Torch2.7-cu128完成LM info/NaN/finite-overflow三参数，CUDA context存活。
 - `PASS-environment / FAIL-first-4096-entry`：commit `5ee1ffa6…` 的first one-shot通过GPU preexec、sealed RSL和真实Kit Python身份，但身份代码在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault；Hydra解析成功，scene/PPO/WAL零调用。successor必须把class/source attestation移到AppLauncher成功后的同一Kit进程，不能用pre-App import代签。
-- `未测`：可信4096 A1000趋势、C、完整checkpoint/restore、portable MuJoCo Full-A semantic runtime。
+- `PASS-repo-to-runtime`：remote clean clone `e3ef4e98…`完成dry-run、52项focused test和真实Kit/PhysX fixed-action probe；边界只覆盖“已有精确外部runtime时仓库能启动”。
+- `未测`：可信4096 A1000趋势、C、完整checkpoint/restore、跨机器逐位曲线一致性。
 
 环境 `PASS` 只回答“代码在同一软件栈上执行”，不回答 Reward 是否合理、是否可学或跨机逐位相同。
 后续 FullMDP 运行继续标记 `diagnostic_unauthorized=true`。

@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "kind": "action_ball_isaac51_fresh_clone_deployment_v1",
+  "diagnostic_unauthorized": true,
+  "observed_at_utc": "2026-08-29T05:02:08Z",
+  "source": {
+    "remote": "git@github.com:dongc1/nohope.git",
+    "branch": "Franco_codex/actionball-fullmdp-v2-20260821",
+    "commit": "e3ef4e98e903adc006775c6b23b97005f1473df0",
+    "checkout": "/workspace/franco/mktemp/actionball-envdeploy-e3ef4e98.xZiW8V/checkout",
+    "clean": true
+  },
+  "runtime": {
+    "isaac_python": "/workspace/isaacsim-5.1.0/python.sh",
+    "kit_python": {
+      "path": "/workspace/isaacsim-5.1.0/kit/python/bin/python3",
+      "sha256": "5ab9c6fa43fc97154473ba58c9feaf22a4d6134fd6b4dee7b6a4f2b4c3c2ae8f"
+    },
+    "isaaclab": {
+      "path": "/opt/IsaacLab-8320e0be",
+      "commit": "8320e0be5c0f2def58d5b19d308c6d2539d47cb2",
+      "clean": true
+    },
+    "venv_site": "/opt/hope_drone_venv/lib/python3.11/site-packages",
+    "asset_usd": {
+      "path": "/workspace/franco/runtime_assets/a3p0807_split_rubber_diagnostic_v3/model.usd",
+      "sha256": "a3cd382943ff9f70beecf88c729a6cc1c052a3c0a0cbffe91003ec319ab78140"
+    },
+    "rsl_wheel": {
+      "path": "/workspace/franco/mktemp/fullmdp-r12-954200d5.exact/vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl",
+      "sha256": "406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d"
+    },
+    "gl_runtime": {
+      "opengl_sha256": "9a0a6024499300f918ef1b42d581427cdb20bbc17a7d8239a4b7434833a98d4a",
+      "glu_sha256": "af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4"
+    },
+    "gpu": {
+      "index": 1,
+      "uuid": "GPU-a8f7dd24-1162-15d4-2f22-7552ce2a6cb6"
+    },
+    "cpu_affinity": "48-63,112-127"
+  },
+  "checks": {
+    "launcher_dry_run": "PASS",
+    "focused_tests": {
+      "status": "PASS",
+      "passed": 52,
+      "duration_seconds": 10.96,
+      "scope": [
+        "tests/test_launch_isaac_full_mdp_successor.py",
+        "action_ball_runtime_inventory focused tests"
+      ]
+    },
+    "fixed_action_probe": {
+      "status": "DIAGNOSTIC_FIXED_ACTION_PROBE_COMPLETE",
+      "run_root": "/workspace/franco/runs/actionball-envdeploy-e3ef4e98-fixedprobe-20260829",
+      "num_envs": 512,
+      "num_ticks": 48,
+      "action_width": 31,
+      "done_rows": 0,
+      "timeout_rows": 0,
+      "action_tape_sha256": "b633da891b8a935d21cb647285d2ad1c14b7d6500dcd4d91a7056b9012d3def8",
+      "portable_state_sha256": "23dd2a69c0fe097f791e0f57d1ff6cfaff14ba0156a13d3bd253ce3aaf741c6f",
+      "summary_sha256": "b9f25e920b2a5aee4487fa88bdeb325c80da8155e2942b271eb94aa5de4b8f14",
+      "run_log_sha256": "868d88fd6db8146ca17c7565a4dfbf94b4f80f2154e9e98affa227927a464500",
+      "runtime_receipt_sha256": "5c588f65d71053a6d56b29b1652b93a27419a197758b66bbea0ffd530a52a9c4",
+      "error_scan_matches": 0,
+      "gpu_released_after_probe": true
+    }
+  },
+  "boundary": {
+    "git_clone_self_contained": false,
+    "answers": "repo_to_preprovisioned_exact_runtime",
+    "external_requirements": [
+      "user-accepted Isaac Sim 5.1 binary",
+      "exact IsaacLab checkout",
+      "Python 3.11 dependency site",
+      "split-rubber USD bytes",
+      "RSL-RL 3.1.2 wheel",
+      "private OpenGL and GLU runtime bytes"
+    ],
+    "not_authorized": [
+      "formal learning",
+      "physics parity",
+      "promotion",
+      "deployment",
+      "real robot execution"
+    ]
+  }
+}

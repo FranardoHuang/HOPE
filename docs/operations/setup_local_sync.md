@@ -34,6 +34,10 @@ git check-ignore -q vendor_assets
 | `vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg/` | 2026-08-03 A3-P1 raw URDF/mesh/workbook/PDF delivery；project-owned q=0 locked-left-gripper 31-action candidate 的 byte authority，仍不是 current runtime canonical | Restore the exact private vendor delivery and verify `configs/a3_p1_0803_raw_intake_v1.json`: 112 files, 57,803,270 bytes, closure SHA-256 `b1da6430...7818f`, primary URDF SHA-256 `7dc98e48...51704`. 用 `scripts/prepare_a3_p1_0803_31d_asset.py` 产生独立 ignored output；20 个缺失 gripper collision 只按 receipt 显式 disabled；不覆盖现役 `agi/` 或 `assets/agibot_a3/` | G04/G05/G06 successor plant |
 | `external_repos/TTRL-ICRA2026/` | Auto-synced local TTRL reference clone | Public but may be access-gated: [purdue-tracelab/TTRL-ICRA2026](https://github.com/purdue-tracelab/TTRL-ICRA2026.git) | G05, G08 |
 | `external_repos/IsaacLab/` | Local Isaac Lab source checkout used by `setup_train_env.sh` when a pre-provisioned Isaac Lab checkout is absent | Public: [isaac-sim/IsaacLab](https://github.com/isaac-sim/IsaacLab.git), observed tag `v2.1.0` / commit `21f7136` | G05 |
+| `/workspace/isaacsim-5.1.0/` | Current ActionBall FullMDP Isaac Sim runtime; includes the exact Kit Python whose SHA-256 is `5ab9c6fa43fc97154473ba58c9feaf22a4d6134fd6b4dee7b6a4f2b4c3c2ae8f` | Install/provision Isaac Sim `5.1.0-rc.19+release.26219.9c81211b.gl` only after the user accepts the NVIDIA EULA; these licensed bytes are not copied by Git | G04/G05 current FullMDP |
+| `/opt/IsaacLab-8320e0be/` | Current ActionBall FullMDP IsaacLab source and package roots | Public IsaacLab clean checkout at exact commit `8320e0be5c0f2def58d5b19d308c6d2539d47cb2`; do not substitute floating `/workspace/IsaacLab` | G04/G05 current FullMDP |
+| `/opt/hope_drone_venv/lib/python3.11/site-packages/` | Python 3.11 dependency layer consumed by the exact Isaac 5.1 launcher | Recreate/provision from the accepted team environment contract; launcher inventories distribution versions and origins before use | G05 current FullMDP |
+| `/workspace/franco/runtime_assets/a3p0807_split_rubber_diagnostic_v3/` | Current FullMDP split-rubber Isaac USD snapshot | Restore the exact ignored bundle; require `model.usd` SHA-256 `a3cd382943ff9f70beecf88c729a6cc1c052a3c0a0cbffe91003ec319ab78140` | G04/G05 current FullMDP |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Package-local Isaac A3 URDF, meshes, and config; ignored by upstream `**/assets/` rule | Normally rebuild from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/`. For C3/D3 K100 v2, do **not** rebuild or hand-copy: the attestor inventories the exact training checkout source under `/workspace/codexschema/nohope_signed_face_c3d3_l1_4467d79/.../assets/agibot_a3` and hydrates a fresh eval checkout per [v2 operation](run_phase1_signed_face_c3d3_k100_v2.md) | G04, G05, G06 |
 | Stable A3 pre-converted runtime directory containing `model.usd` and `configuration/` | Optional Isaac robot-scene cache selected by `HOPE_AGIBOT_A3_USD_PATH`; it avoids converting the same robot description again in every training process | Copy the complete directory produced by one successful conversion to an ignored, stable runtime path; do not commit it | G05 training sprint |
 | `hope_training/GMR/` | Motion retargeting (SMPL-X -> robot) clone | Public: [YanjieZe/GMR](https://github.com/YanjieZe/GMR.git) (observed pin `bb1bbe4`) | G05 motion references |
@@ -1319,6 +1323,13 @@ manifest；禁止用同名重生成文件、M0 diagnostic GMR 输出或别的 ch
 - Promote external repos to submodules only after a project decision.
 
 ## Pod A3 preconverted USD、headless GLU 与 private OpenGL
+
+For current ActionBall FullMDP, the complete new-machine boundary is the Isaac 5.1 rows above, the exact RSL-RL
+3.1.2 wheel, the split-rubber USD, and the OpenGL/GLU bytes below. After restoring them, use the explicit launcher
+and the [environment identity contract](action_ball_isaac51_environment_identity_20260818.md); do not source the
+legacy path-discovery script. A clean remote clone has completed a real Kit/PhysX probe against this bundle; see
+[`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json).
+The restore contract intentionally does not vendor Isaac Sim or bypass its EULA.
 
 ActionBall 的 fresh detached checkout 不应因 URDF 绝对路径变化重复转换同一台 A3。Pod1 当前
 Franco-owned 的 ignored/runtime 副本是：

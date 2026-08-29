@@ -51,8 +51,14 @@ Python3.10.18、Isaac Sim4.5.0.0、IsaacLab0.36.21、RSL2.3.1、TensorDict0.9.1�
 `PPO.act(obs, critic_obs)`。当前受控run实际是Python3.11.13、Isaac Sim5.1路径、
 `IsaacLab@8320e0be…`、RSL3.1.2、TensorDict0.10.0及`PPO.act(obs: TensorDict)`。所以“同Build4 commit”
 不能证明本机/Pod同环境；若Jiayi本机使用5.1而Pod使用脚本默认值，曲线比较已经污染。历史两条run仍缺actual
-local override/argv、asset/motion/checkpoint SHA和seed，故暂不把全部差异归因给环境。修法是显式唯一运行
-身份和进程内receipt，不是用兼容代码或额外学习Gate把两套ABI拼成一套。
+local override/argv、asset/motion/checkpoint SHA和seed，故暂不把全部差异归因给环境。原始
+`ENVIRONMENT_REPRODUCTION.md`也不在当前任何Git ref或Pod1文件系统中，不能让新机恢复继续依赖一个缺失附件。
+仓内修法已经闭环为显式唯一身份：Pod1从远端clean clone `e3ef4e98…`，传入exact Isaac/Kit/IsaacLab/
+Python-site/USD/RSL/GL/GPU后通过launcher dry-run、`52 passed`和真实`512×H48×31` Kit/PhysX probe，0
+done/time-out且退出后GPU释放。故“repo + 已合法准备的exact外部runtime”可部署为`PASS`；纯Git clone不包含
+EULA二进制/private asset，历史跨机曲线逐位相同仍未测。receipt见
+[`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。
+这不是用兼容代码或额外学习Gate把两套ABI拼成一套。
 
 第二个实现错误来自physical birth定义。exact teacher frame0在0807 plant静态不可执行：waist-pitch hold
 需要约`-49.155 Nm`，可执行position-control authority约`-21.704 Nm`。R7正确地把teacher与physical birth
@@ -115,19 +121,18 @@ controller或学习结论，也不支持为追求速度删除跨writer/journal�
 `fullmdp-r12-0807-isaac-rewardpack-954200d5-20260828T2245Z`；Mu namespace=
 `fullmdp-r12-0807-mujoco-rewardpack-954200d5-20260828T2254Z-r2`。首个Mu root因ignored `meshes/`未同步而在
 source-closure scan、首ACK前fail-closed；补齐现有受控资产后使用fresh `-r2`，失败root未复用。
-`observed_at=2026-08-29T04:37:38Z`时Isaac到ACK1043：first50→recent50 episode length/return=
-`105.07/11.30→520.12/51.89`，paddle position/velocity/face/long-axis误差=
-`.2811/1.2040/.3561/.4092→.2293/.8819/.4110/.2918`；recent50 due/admitted/launch/contact=
-`5,479/5,475/5,328/0`，累计contact=`0/118,014 launch`，wall p50/p90=`20.255/20.570 s/H48`。
-Mu到ACK3043：first50→recent50 episode length/return=`136.78/15.64→359.06/37.44`，四项误差=
-`.2059/1.1556/.3318/.2840→.1823/.9737/.3212/.2296`；recent50
-due/launch/R03-valid/raw/selected/legal-landing=`7,631/5,699/5,504/4/0/0`，累计selected=
-`38/387,840 launch`、legal landing=`0/38 selected`，wall p50/p90=`6.681/6.820 s/H48`。
+`observed_at=2026-08-29T05:18:37Z`时Isaac到ACK1172：first50→recent50 episode length/return=
+`105.07/11.30→1311.79/125.64`，paddle position/velocity/face/long-axis最近误差=
+`.24872/.85594/.47811/.30615`；recent50 due/launch/contact=`4,920/4,882/0`，累计contact=
+`0/131,132 launch`，wall p50/p90=`19.425/19.832 s/H48`。Mu到ACK3421：first50→recent50 episode
+length/return=`136.78/15.64→1310.24/132.50`，四项最近误差=`.15259/.87934/.38563/.20259`；recent50
+due/launch/R03-valid/raw/selected/legal-landing=`5,248/5,096/5,066/3/0/0`，累计selected=
+`48/430,287 launch`、legal landing=`0/48 selected`，wall p50/p90=`6.264/6.392 s/H48`。
 两端均Reward28、finite、conservation/attributed fault0；Mu每条ACK绑定正确A3P0807 SHA
-`7bbda723…bcae1`。课程已有自然重叠，但hit仍只有约`.0098%`累计selected/launch且无合法落点。Isaac
-actual-hard-edge joint-sample first50→recent50=`7.13%→12.51%`；Mu actual-hard-edge/qdes-guard rows=
-`4.90%/5.62%→58.99%/59.73%`。所以episode/return增长不能单独代签balance/mimic成功，Mu还存在严重关节边界
-套利风险；先做per-joint/phase checkpoint诊断，再决定controller、scale或reward，不盲目加权或改Done。
+`7bbda723…bcae1`。课程已有自然重叠，但hit仍只有约`.0112%`累计selected/launch且无合法落点，最近50轮又是
+0 selected。Isaac actual-hard-edge joint-sample已到`14.747%`；Mu actual-hard-edge/qdes-guard rows已到
+`93.139%/93.380%`。所以现在不是“太早看不出”：episode/return增长已经被边界使用污染，balance/mimic
+未基本成功、hit未基本成功、landing=`0/48`。per-joint诊断后继续做controller反事实，不盲目加权或改Done。
 
 该checkpoint诊断现已完成，不再停在aggregate猜测。GPU1隔离进程严格加载Mu `model_2000.pt`
 （SHA `46d78c4e…bd1c`）、同source/0807 plant/RSL3/EPA48、seed0，跑`512 env×240 policy step`随机policy

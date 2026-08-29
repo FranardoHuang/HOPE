@@ -162,9 +162,35 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-### GPU / Isaac (grasping) box
+### GPU / Isaac Environment
 
-The reference path assumes this box is pre-provisioned with:
+Current ActionBall FullMDP does **not** use the legacy auto-discovered Isaac 4.5 stack below. Its one
+supported runtime identity is Isaac Sim 5.1, Python 3.11, IsaacLab
+`8320e0be5c0f2def58d5b19d308c6d2539d47cb2`, RSL-RL 3.1.2 and the exact split-rubber USD. Follow
+[the Isaac 5.1 environment identity contract](action_ball_isaac51_environment_identity_20260818.md) and launch through
+`scripts/launch_isaac_full_mdp_successor.py` with explicit paths. Do not let `setup_train_env.sh` path ordering select
+this runtime: the same branch can otherwise become an Isaac 4.5/RSL2 process on one host and an Isaac 5.1/RSL3
+process on another.
+
+On Pod1 the verified external restore points are:
+
+```text
+Isaac Sim:  /workspace/isaacsim-5.1.0
+IsaacLab:   /opt/IsaacLab-8320e0be
+venv site:  /opt/hope_drone_venv/lib/python3.11/site-packages
+split USD:  /workspace/franco/runtime_assets/a3p0807_split_rubber_diagnostic_v3/model.usd
+```
+
+The Isaac Sim binary, private/ignored USD, exact RSL wheel and headless OpenGL/GLU bytes are not supplied by a
+Git clone. Restore them according to [setup_local_sync.md](setup_local_sync.md), obtain any required license/EULA
+acceptance from the user, and then use the launcher dry-run before a bounded diagnostic. A remote clean clone at
+`e3ef4e98…` has completed that sequence and a real `512×48×31` Kit/PhysX fixed-action probe; the tracked evidence is
+[`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json).
+That is a repo-to-preprovisioned-runtime deployment check, not learning, physics-parity, deployment, or robot authority.
+
+#### Legacy Isaac 4.5 / grasping box
+
+Older G04/G05 tasks may still require the following pre-provisioned stack:
 
 - Isaac Sim 4.5.0
 - Isaac Lab 2.1.0
@@ -182,7 +208,7 @@ A local bringup on 2026-06-25 used an ignored conda env and source checkout inst
 First Isaac/Kit launch prompts for the NVIDIA Omniverse EULA. Do not set `OMNI_KIT_ACCEPT_EULA=YES`
 unless the user has explicitly accepted that EULA.
 
-A from-scratch Isaac install is otherwise **not fully documented here** — follow the official [Isaac Lab installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html) to provision the GPU box, then point `setup_train_env.sh` at it.
+A from-scratch legacy Isaac install is otherwise **not fully documented here** — follow the official [Isaac Lab installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html) to provision the GPU box, then point `setup_train_env.sh` at it. This legacy route must not be used for the current ActionBall FullMDP.
 
 `source setup_train_env.sh` provides the `hope_isaac_py` launcher and the `WANDB_*` exports. The scrubbed script reads the overridable `HOPE_ISAAC_PYTHON` / `HOPE_ISAACLAB_ROOT` / `HOPE_ISAAC_VENV_SITE` env vars (or your git-ignored `setup_train_env.local.sh`) — see [GPU / Isaac Environment](#gpu--isaac-environment) above; on the current shared RunPod the launcher resolves to `/workspace/hope_isaac_venv` plus `/workspace/IsaacLab/isaaclab.sh`. `hydra` and `omegaconf` are not in the package `install_requires`; they must be importable in the Isaac Lab Python (inject them via `HOPE_ISAAC_VENV_SITE` if needed). Sanity check:
 

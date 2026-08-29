@@ -13,6 +13,12 @@ legacy输入直接拒绝。pinned IsaacLab/Kit/RSL/USD与Mu runtime均能在Pod1
 本机/Pod曲线已经不是同环境；缺actual override/argv/input SHA前不能继续归因。G04要求显式runtime identity，
 不接受path autodiscovery、branch名或兼容代码代签模型一致。
 
+显式身份的仓内恢复路径已在Pod1从远端clean clone `e3ef4e98…`实测：绑定exact Isaac 5.1、Kit、
+IsaacLab、Python site、split USD、RSL wheel、GL和GPU后，launcher dry-run、`52 passed`及真实
+`512×48×31` Kit/PhysX fixed-action probe全部通过，0 done/time-out且GPU自然释放。receipt见
+[`fresh-clone deployment`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。这说明
+repo可接入已合法准备的外部runtime；不把EULA/private资产伪装为Git内容，也不授权model parity或G04晋级。
+
 R8把immutable teacher frame0与physical birth分开：旧ready仅作optimizer start，13项具名reserve是固定
 可行域，不再用数值正slack冒充robust。Pod真实PhysX `60/240/1.2 s` prefix双足接触率`1.0`、无terminal或
 hard-edge、最终最小hard gap=`.21966 rad`；它只证明有限稳定出生，不证明mimic或formal安全。

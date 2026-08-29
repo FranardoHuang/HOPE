@@ -156,28 +156,29 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    `fullmdp-r12-0807-mujoco-rewardpack-954200d5-20260828T2254Z-r2`（GPU2；首个同名root因ignored
    `meshes/`缺失在首ACK前fail-closed且未复用），fresh Isaac使用
    `fullmdp-r12-0807-isaac-rewardpack-954200d5-20260828T2245Z`（GPU0）。启动验收Mu ACK0..7明确绑定
-   plant SHA `7bbda723…bcae1`。`observed_at=2026-08-29T04:37:38Z`时Isaac ACK0..1043、Mu ACK0..3043；
+   plant SHA `7bbda723…bcae1`。`observed_at=2026-08-29T05:18:37Z`时Isaac ACK0..1172、Mu ACK0..3421；
    两端Reward28、finite、conservation与attributed fault均clean。Isaac first50→recent50的episode
-   length/return=`105.07/11.30→520.12/51.89`，paddle position/velocity/face/long-axis误差=
-   `.2811/1.2040/.3561/.4092→.2293/.8819/.4110/.2918`；recent50 due/admitted/launch/contact=
-   `5,479/5,475/5,328/0`，累计contact=`0/118,014 launch`，wall p50/p90=`20.255/20.570 s/H48`。
-   生存与三项mimic仍优于first50，但face变差、actual-hard-edge joint-sample=`7.13%→12.51%`，故不能称balance或
-   mimic已基本成功。Mu first50→recent50的episode length/return=`136.78/15.64→359.06/37.44`，四项误差=
-   `.2059/1.1556/.3318/.2840→.1823/.9737/.3212/.2296`；recent50
-   due/launch/R03-valid/raw/selected/legal-landing=`7,631/5,699/5,504/4/0/0`，累计selected=
-   `38/387,840 launch`、legal landing=`0/38 selected`，wall p50/p90=`6.681/6.820 s/H48`。
-   Mu触球自然可达但最近50轮再次没有selected hit，且actual-hard-edge/qdes-guard rows=
-   `4.90%/5.62%→58.99%/59.73%`；episode/return增长已被关节边界使用严重污染。当前课程裁决仍是
-   balance/mimic有局部进步但未基本成功、hit未基本成功、landing为`0/38`，
-   不是等待更多step即可自动晋级的证据。
-8. [ ] 在不停止两条fresh训练的前提下闭合本机/Pod与controller-response对照。第一层环境审计已完成：
+   length/return=`105.07/11.30→1311.79/125.64`，paddle position/velocity/face/long-axis最近误差=
+   `.24872/.85594/.47811/.30615`；recent50 due/launch/contact=`4,920/4,882/0`，
+   累计contact=`0/131,132 launch`，wall p50/p90=`19.425/19.832 s/H48`。生存和部分mimic量仍改善，
+   但face比first50恶化、actual-hard-edge joint-sample已到`14.747%`，故不能称balance或mimic基本成功。
+   Mu first50→recent50的episode length/return=`136.78/15.64→1310.24/132.50`，四项最近误差=
+   `.15259/.87934/.38563/.20259`；recent50 due/launch/R03-valid/raw/selected/legal-landing=
+   `5,248/5,096/5,066/3/0/0`，累计selected=`48/430,287 launch`、legal landing=`0/48 selected`，
+   wall p50/p90=`6.264/6.392 s/H48`。Mu recent50 actual-hard-edge/qdes-guard rows已到
+   `93.139%/93.380%`；episode/return几乎完全被边界使用污染。当前不是“太早看不出”，而是已有足够分母
+   判定学习异常：balance/mimic未基本成功、hit仅约`.0112%`且最近窗为0、landing为`0/48`。继续跑只保留
+   诊断时间序列，不提供“再等就会自然晋级”的理由。
+8. [x] 闭合仓库可部署边界；不再把历史Jiayi本机附件当仓内前置条件。第一层环境审计确认：
    `origin/build_4@324e60d1`没有环境lock，其path-autodiscovery在当前Pod1默认命中Python3.10、Isaac Sim4.5、
    `/workspace/IsaacLab@21f71363…`、RSL2.3.1；当前受控run则是Python3.11、Isaac Sim5.1、
-   `/opt/IsaacLab-8320e0be`、RSL3.1.2。若Jiayi本机使用后者而Pod直接source Build4脚本，两条Build4曲线已不是
-   同环境。仍需向Jiayi索取实际local override/argv、asset/motion/checkpoint SHA、seed、actuator backend、
-   friction/contact、clock与同tape结果；本端再按首20 ms与tick47 q/dq/root/racket逐字段比较。先关闭运行
-   身份，再对齐implicit PhysX drive与显式clamped PD/Coulomb friction语义；不把同branch名或相同Kp/Kd
-   数字做成新Gate，也不围绕未知差异改policy/reward。
+   `/opt/IsaacLab-8320e0be`、RSL3.1.2。Pod1随后从远端clean clone `e3ef4e98…`，显式绑定exact
+   Isaac/Kit/IsaacLab/Python-site/USD/RSL/GL/GPU后通过dry-run、`52 passed`和真实`512×H48×31` Kit/PhysX
+   fixed-action probe，0 done/time-out，退出后GPU释放。receipt见
+   [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。
+   因此“repo + 已合法准备的exact外部runtime”可部署已经PASS；纯`git clone`不包含EULA二进制和private
+   assets，也不应该被伪装成自包含安装。Jiayi历史本机/Pod逐位对比仍缺输入，保留为可选溯源，不阻塞仓内
+   新机恢复。controller-response首差则仍由item 11闭合；不把二者混成新Gate。
 9. [ ] 做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的exact-only/self-echo
    procedural branches，并用相同artifact/固定tape/receipt反例证明语义未变。当前四个主文件合计约
    `13,167`行，问题不是行数本身，而是construction事实、runtime动态量、诊断身份与durable账本仍有交叉；

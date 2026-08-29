@@ -43,14 +43,14 @@
   `11,380/11,380` tilt episode且launch归零。旧错误plant谱系只证明极稀疏hit曾可达后遗忘，不能移签R8，
   也不能用generic contact冒充课程交接。
 - V9最终冻结后已按精确进程身份停止；正确A3P0807、同clean source `954200d5`的fresh Isaac/Mu长期run
-  已在GPU0/2持续训练。`observed_at=2026-08-29T04:37:38Z`时分别到ACK1043/3043；两端Reward28全finite、
-  conservation/attributed fault0。Isaac first50→recent50 episode length=`105.07→520.12`，四项paddle误差最近为
-  `.2293/.8819/.4110/.2918`，recent50 launch/contact=`5,328/0`、累计=`118,014/0`，wall p50/p90=
-  `20.255/20.570 s/H48`。Mu episode length=`136.78→359.06`，recent50 launch/raw/selected/legal=
-  `5,699/4/0/0`、累计selected/legal=`38/0`（累计launch=`387,840`），wall=`6.681/6.820 s/H48`。
-  课程入口自然重叠但hit仍仅约`.0098%`且无合法落点；Isaac hard-edge joint-sample=
-  `7.13%→12.51%`，Mu hard-edge/qdes-guard rows=`4.90%/5.62%→58.99%/59.73%`，因此episode/return增长
-  已被边界使用严重污染，不能代签balance/mimic成功或继续盲等。
+  已在GPU0/2持续训练。`observed_at=2026-08-29T05:18:37Z`时分别到ACK1172/3421；两端Reward28全finite、
+  conservation/attributed fault0。Isaac first50→recent50 episode length=`105.07→1311.79`，四项paddle误差
+  最近为`.24872/.85594/.47811/.30615`，recent50 launch/contact=`4,882/0`、累计=`131,132/0`，wall
+  p50/p90=`19.425/19.832 s/H48`。Mu episode length=`136.78→1310.24`，recent50 launch/raw/selected/legal=
+  `5,096/3/0/0`、累计selected/legal=`48/0`（累计launch=`430,287`），wall=`6.264/6.392 s/H48`。
+  课程入口自然重叠但hit仍仅约`.0112%`且最近50轮为0、无合法落点；Isaac hard-edge joint-sample已到
+  `14.747%`，Mu hard-edge/qdes-guard rows已到`93.139%/93.380%`。这不是“太早看不出”：episode/return
+  已被边界使用严重污染，balance/mimic未基本成功、hit未基本成功、landing=`0/48`，不能继续盲等晋级。
 - GPU1已严格加载Mu `model_2000.pt`完成隔离`512×240`随机policy诊断：hard/guard=
   `8,081/8,373`、共同分母`122,880`，hard只来自`waist_pitch/waist_roll/left_ankle_roll`，其中`77.47%`在
   outcome-settled/recovery。最大项`waist_pitch`全部撞上限，但mean action=`-.551`、nominal qdes约
@@ -65,6 +65,12 @@
   IsaacLab `8320e0be…`/RSL3.1.2。若Jiayi本机Build4用后者而Pod使用默认脚本，曲线不属于同环境对照；仍缺
   历史actual override/argv/input SHA，故不把全部差异归因给它。后续用显式唯一runtime identity取代path
   autodiscovery，不新增事后learning/safety Gate。
+- 仓内新机恢复边界已实测闭合：Pod1从远端clean clone `e3ef4e98…`，显式绑定exact Isaac/Kit/IsaacLab/
+  Python-site/USD/RSL/GL/GPU后通过launcher dry-run、`52 passed in 10.96 s`，并真实完成`512×48×31`
+  Kit/PhysX fixed-action probe，0 done/time-out、错误扫描0且退出后GPU释放。故“repo + 已合法准备的exact
+  外部runtime”可部署为PASS；纯Git clone不包含EULA二进制/private assets，历史跨机逐位曲线仍未测，
+  也不授权学习、physics parity、部署或真机。tracked receipt=
+  [`configs/action_ball_isaac51_fresh_clone_deployment_20260829.json`](../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。
 - `7ce9f120`把regularization静态关节几何从每个Reward热调用移到construction一次验证，并补one-shot、
   unbound fail-loud与静态source mutation反例。Pod组合=`123 passed,5 skipped`，exact CUDA lean Reward=
   `52 passed`；12-update profile的reward span `24.87→22.59 ms/call`。同GPU profiler-off 50个measured
