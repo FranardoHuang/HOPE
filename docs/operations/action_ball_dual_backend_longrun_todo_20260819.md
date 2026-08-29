@@ -62,6 +62,14 @@ root/31q/racket到teacher的距离。fresh backend cache-miss重验和真实Phys
 `selected contact / launch`及target误差，landing按`opponent landing / selected contact`。缺eligible写
 `未测`，已有分母的零结果写`0/denominator`；return和安全计数都不能代替这些行为证据。
 
+`observed_at=2026-08-29T10:34:32Z`的只读刷新已不是“太早看不出”。Mu ACK0..1493的first10→recent10
+episode length/return=`135.289/15.644→162.083/18.486`，但mimic四误差只有position改善，velocity/face/
+long-axis恶化；累计launch/R03-valid/raw/selected/crossing/legal/recovery-success=
+`200,827/162,875/7,523/657/591/0/0`，所以hit极稀疏，landing是明确`0/657 selected`而非未测。
+Isaac ACK0..523的episode length/return=`97.255/10.946→152.414/15.776`，mimic位置/速度/长轴改善但face
+恶化；`45,813 physical-observed`后R03-valid/selected=`0/0`，故mimic→hit交接已失败，landing因selected
+分母0仍为`未测`。两端fault/nonfinite/conservation均0：工程运行健康不等于课程成功，自然重叠预期尚未满足。
+
 R7弱裕量工件的MuJoCo 61-update profiler-off canary只达到rate/health证据：p50/p90=
 `6.963/7.021 s/H48`，first10→recent10 episode mean=`131.66→129.20`，hard-edge=
 `5.389%→2.323%`，但paddle四项误差均略恶化，contact=`0/launch`、landing=`未测`，所以不能称mimic成功。
@@ -178,24 +186,28 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json)。
    因此该版本“repo + 该Pod已合法准备的exact外部runtime”有历史PASS；纯`git clone`不包含EULA二进制和
    private assets，也不应伪装成自包含安装。后续复核判定`e9823e90…`把已在G05/现役Pod成立的一次性
-   EULA/隐私setup事实错做成per-run显式flag，已删除这两个重复Gate；OpenGL/GLU目录、真实库SHA与SONAME
-   继续由caller显式绑定并验真，本地35项launcher测试通过。
-   但RSL wheel、split USD、A3P0807 Mu meshes、GLU及两个Python环境仍缺持久artifact locator或完整
-   lock/wheelhouse/OCI recipe，当前source真实Kit probe也仍`未测`。所以代码身份闭合、空白机可获得性未闭合，
-   item 8保持开；Jiayi历史本机/Pod逐位对比只作可选溯源，controller-response首差仍由item 11裁决。
+   EULA/隐私setup事实错做成per-run显式flag，已删除这两个重复Gate。Jiayi原环境说明实际仍在Pod1，已按
+   原文SHA吸收Isaac zip身份、安装顺序和83项非editable exact constraints；通用`setup_train_env.sh`也已
+   删除静默path discovery，只接受显式runtime路径。Ubuntu Noble GL来自系统`libopengl0/libglu1-mesa`，
+   launcher改为核canonical file/direct SONAME并记录观察SHA，不把单一发行版字节冒充跨机学习Gate。
+   `4cd30d63`真实Kit fixed-action已0 done/timeout且action/state SHA保持，launcher本地36项通过。
+   因此public软件配方已闭合；合法Isaac下载、split USD、A3P0807 Mu meshes和private凭据仍缺持久locator，
+   item 8只为这些外部输入保持开放，不再笼统写成“Python/GL不可恢复”。
 9. [ ] 做behavior-preserving瘦身：提取typed physical-birth consumer，删除已迁移的exact-only/self-echo
    procedural branches，并用相同artifact/固定tape/receipt反例证明语义未变。当前四个主文件合计约
    `13,167`行，问题不是行数本身，而是construction事实、runtime动态量、诊断身份与durable账本仍有交叉；
    每次只切一个owner边界，不做全文件重写。Epoch每step约`5.95 MiB`的44次record clone和14份payment image
    只有在journal bytes/chronology/carry逐项保持后才可收敛，不能为追求简洁删掉独立可消费证据。
    Build4的环境path-autodiscovery是同类结构债：procedural fallback同时决定Python、IsaacLab与ABI，却没有
-   唯一运行身份。后续替换为显式typed runtime identity和一次进程内receipt，删除fallback authority；这会
-   减少分支与误比较，不是再加一圈启动后Gate。
+   唯一运行身份；当前branch已用显式runtime输入替换该authority，而不是再加启动后Gate。
    第一刀已删除fresh FullMDP的R07→Motion ready self-echo：fresh Motion从自身可观测task/teacher event推进，
    没有读取该opaque capability；R07 publish/critic和legacy消费者保持。较大的R06 settle/retire融合与Epoch
    snapshot窄化暂不采纳，先等active-flight matched profile证明其收益并逐项保持journal/reason/carry。
    当前本地与Pod exact分进程聚焦测试均为`35/24/12 passed`（另`1 skipped`），Isaac fixed tape的
    action/state SHA与父版逐字一致。第一刀已验证，但完整typed owner清债尚未完成，所以item 9仍开。
+   第二刀按全仓AST/callsite审计删除三个无生产consumer的兼容decoder/view及两个只为它们存在的facts类型：
+   Physical/R06不再各自重读并clone完整Epoch slice，Epoch也不再暴露未消费的active D05 rows；源码净减约
+   214行。该刀不在active调用图上，预期不改变墙钟；其价值是缩小owner/API面，仍须Pod exact相关套件确认。
 10. [x] 已在GPU1隔离、严格加载Mu `model_2000.pt`做`512×240`随机policy轨迹诊断；optimizer未加载，当前
     GPU0/2长期run未改。`8,081/122,880=6.58%` policy rows有actual hard edge，`8,373/122,880=6.81%`
     有qdes guard，非零hard joint只有`waist_pitch/waist_roll/left_ankle_roll`三项；其中`77.47%` hard rows在
@@ -256,9 +268,12 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
     settlement delta，不再逐子步扫描历史mailbox；retained audit/current hot path共用唯一fact pack/projector。
     exact Pod相关套件`323 passed`；其中`25eb4c7a`删除Torch 2.7 CUDA event必须挂到CPU parent的错误测试
     假设，改验最小profile真实kernel数/名称与清零语义。三类完整CommitEntry canonical SHA新旧一致。
-    Pod1空闲GPU同进程12组交替微基准median=`1045.170→771.048 us`（`-26.23%`），
-    故采纳该结构减法。current-source真实Kit整轮profile在已建立Pod runtime authority下继续，未测前不得把
-    局部收益外推为约6秒；本项继续开放，下一步由新的整轮profile最大块决定，而不是继续堆gate。
+   Pod1空闲GPU同进程12组交替微基准median=`1045.170→771.048 us`（`-26.23%`），
+   故采纳该结构减法。current-source真实Kit整轮profile在已建立Pod runtime authority下继续，未测前不得把
+   局部收益外推为约6秒。其同源profiler-off `512×H48×61`现已自然完成，50个measured update的
+   p50/p90=`14.720/19.377 s`（receipt SHA=`1d7508bc…415c`）；它复现上一版约14.74秒平台，证明仍远离约6秒。
+   当前50-update full-active profile继续自然运行；本项继续开放，下一步只融合profile确认的最大块，而不是
+   继续堆gate或用局部微基准代签整轮。
 
 <a id="fullmdp-v9-superseded"></a>
 

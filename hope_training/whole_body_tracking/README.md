@@ -23,9 +23,9 @@ A from-scratch Isaac Sim/Lab install is out of scope here — follow the upstrea
 - Install into the Isaac Lab python: `python -m pip install -e source/whole_body_tracking`.
 - Extra pip deps NOT in `setup.py` `install_requires` (must be importable in the Isaac Lab python):
   `hydra` and `omegaconf`.
-- `source setup_train_env.sh` (must be **sourced**, in the GPU/Isaac shell) to get the `hope_isaac_py`
-  launcher and `WANDB_*` exports. Edit its site-specific paths, or provide an (git-ignored)
-  `setup_train_env.local.sh` override that it auto-sources.
+- Copy `setup_train_env.local.example.sh` to the git-ignored `setup_train_env.local.sh`, bind the exact
+  Python/IsaacLab/site-packages paths, then `source setup_train_env.sh` (must be **sourced**). The setup
+  refuses ambient path discovery so an older installed stack cannot silently become the trainer.
 
 ### A3 asset and motions
 

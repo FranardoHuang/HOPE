@@ -2,9 +2,11 @@
 
 > 状态：`PASS-current-Pod-runtime / PARTIAL-fresh-machine-availability / branch-scoped`
 > 更新：2026-08-29
-> 来源：Jiayi 曾外部提供的 `ENVIRONMENT_REPRODUCTION.md`、Pod2 import/ABI/AppLauncher验证，以及
-> `origin/build_4@324e60d1`与Pod1实际路径/import复核。原始说明当前不在任何Git ref或Pod1文件系统中；
-> 本页、显式launcher和tracked验证receipt才是仓内可恢复合同，不能把缺失附件写成仓内依赖。
+> 来源：Jiayi 的 `ENVIRONMENT_REPRODUCTION.md`、Pod2 import/ABI/AppLauncher验证，以及
+> `origin/build_4@324e60d1`与Pod1实际路径/import复核。原文仍在Pod1 Jiayi checkout，SHA-256为
+> `b461ed8d98fad352680abf16833f6c706f1c9fde8af8074ec5d27e016ecf9346`、`17,075` bytes；仓库已把其中
+> FullMDP共用的软件身份、安装顺序与83项非editable约束吸收到本页和tracked constraints。旧Hitter资产与
+> checkpoint只用于Build4历史复现，不混入FullMDP运行合同。
 > 本页不改变 `origin/main:docs/NOW.md` 的项目优先级。
 
 ## 为什么必须换环境
@@ -29,6 +31,9 @@ RSL-RL 3.1.2/TensorDict。前者的 PPO rollout 接口是 `act(obs, critic_obs)`
 | RSL-RL | `3.1.2` |
 | TensorDict / TorchRL | `0.10.0 / 0.10.1` |
 | gymnasium / wandb / numpy | `1.2.1 / 0.25.1 / 1.26.4` |
+| 已验证OS/GPU | Ubuntu 22.04.5 + RTX 5070 Ti Laptop；Ubuntu 24.04.3 + RTX 5090 |
+| Isaac Sim下载件 | `isaac-sim-standalone-5.1.0-linux-x86_64.zip`，`8,768,419,777` bytes |
+| 外部venv constraints | `configs/action_ball_isaac51_external_venv_constraints_20260829.txt`，SHA-256 `6b1c9a34cd3ac40a970c5bf53330069b420f5f993d298b34ec72ff55ccea81e9` |
 
 必须在实际进程中看到：
 
@@ -42,12 +47,11 @@ PPO.process_env_step(self, obs: TensorDict, rewards, dones, extras)
 ## Build4 本机与 Pod 曲线差异：先关闭运行身份漂移
 
 `origin/build_4`的exact commit是`324e60d120856556875d65eb26931c6f89d7f5de`。该branch自己的README目标仍是
-Isaac Sim `4.5.0`、IsaacLab `2.1.0`、Python `3.10`，且没有提交`ENVIRONMENT_REPRODUCTION.md`或
-package lock。更关键的是`hope_training/whole_body_tracking/setup_train_env.sh`只按路径存在性自动选择执行面：
-Python依次探测`/workspace/isaacsim/python.sh`、`/workspace/hope_isaac_venv/bin/python`、
-`/opt/isaacsim/python.sh`；IsaacLab依次探测`/workspace/omni_drones/.../IsaacLab`、
-`/workspace/IsaacLab`、`/opt/IsaacLab`。它不核对版本、commit、ABI或PPO签名。因此同一个Build4 commit在
-两台机器上可以静默成为两个训练系统。
+Isaac Sim `4.5.0`、IsaacLab `2.1.0`、Python `3.10`，且没有提交Jiayi的后续环境说明或package lock。
+它的`setup_train_env.sh`只按路径存在性自动选择执行面，不核对版本、commit、ABI或PPO签名。因此同一个
+Build4 commit在两台机器上可以静默成为两个训练系统。当前branch已删除该fallback authority：
+`setup_train_env.sh`只接受caller或ignored `setup_train_env.local.sh`显式给出的Python/IsaacLab/site路径，
+缺失或路径无效直接返回失败；tracked `setup_train_env.local.example.sh`给出5.1模板。
 
 2026-08-29在当前Pod1按该脚本默认选择顺序做live import，结果与当前受控FullMDP进程如下：
 
@@ -79,12 +83,47 @@ Git root:  /workspace/franco/mktemp/fullmdp-isaac51-rsl3-git.20260818T091500CST
 `isaaclab/isaaclab_tasks/isaaclab_assets/isaaclab_rl`。训练由
 `/workspace/isaacsim-5.1.0/python.sh` 启动，不能调用旧 `/workspace/hope_isaac_venv/bin/python`。
 
-## 新机器部署边界与实测
+## 新机器部署边界、重建配方与实测
 
-`git clone`本身不是完整Isaac安装包，也不应成为一个：Isaac Sim二进制受EULA约束，split-rubber USD、
-RSL wheel及headless OpenGL/GLU又是ignored或机器级资产。仓库负责的第一性合同是另一层：所有外部输入用
+`git clone`本身不是完整Isaac安装包，也不应成为一个：Isaac Sim二进制受EULA约束，split-rubber USD与
+A3P0807 Mu meshes是ignored/private资产。仓库负责的第一性合同是另一层：所有外部输入用
 显式路径、版本和SHA绑定；代码只从一个clean commit启动；缺任何一项都在scene/training前失败，不能靠
 path autodiscovery悄悄换成另一套ABI。
+
+仓库现在闭合了可由公开软件重建的部分：IsaacLab固定到`8320e0be…`；Python环境使用
+[`action_ball_isaac51_external_venv_constraints_20260829.txt`](../../configs/action_ball_isaac51_external_venv_constraints_20260829.txt)
+的83项exact约束，并保持Jiayi已验证的分阶段安装顺序；Ubuntu Noble的headless GL直接来自系统
+`libopengl0=1.7.0-1build1`和`libglu1-mesa=9.0.2-1.1build1`。一个最小重建序列是：
+
+```bash
+git clone https://github.com/isaac-sim/IsaacLab.git "$STACK_ISAACLAB"
+git -C "$STACK_ISAACLAB" checkout --detach 8320e0be5c0f2def58d5b19d308c6d2539d47cb2
+/usr/bin/python3.11 -m venv "$STACK_VENV"
+CONSTRAINTS="$STACK_REPO/configs/action_ball_isaac51_external_venv_constraints_20260829.txt"
+"$STACK_VENV/bin/python" -m pip install -c "$CONSTRAINTS" \
+  --index-url https://download.pytorch.org/whl/cu128 \
+  torch==2.7.0+cu128 torchvision==0.22.0+cu128 torchaudio==2.7.0+cu128
+"$STACK_VENV/bin/python" -m pip install -c "$CONSTRAINTS" \
+  gymnasium==1.2.1 wandb==0.25.1 hydra-core==1.3.2 pillow==11.3.0 \
+  packaging==23.2 GitPython==3.1.59 onnx==1.22.0 cloudpickle==3.1.2 \
+  orjson==3.12.0 importlib-metadata==9.0.0 toml==0.10.2 prettytable==3.3.0 \
+  flatdict==4.1.0 h5py==3.16.0 moviepy==2.2.1 tensorboard==2.21.0
+"$STACK_VENV/bin/python" -m pip install -c "$CONSTRAINTS" --no-deps \
+  pyvers==0.1.0 tensordict==0.10.0 torchrl==0.10.1 rsl-rl-lib==3.1.2
+"$STACK_VENV/bin/python" -m pip install --no-deps \
+  -e "$STACK_ISAACLAB/source/isaaclab" \
+  -e "$STACK_ISAACLAB/source/isaaclab_assets" \
+  -e "$STACK_ISAACLAB/source/isaaclab_contrib" \
+  -e "$STACK_ISAACLAB/source/isaaclab_tasks" \
+  -e "$STACK_ISAACLAB/source/isaaclab_rl" \
+  -e "$STACK_ISAACLAB/source/isaaclab_mimic"
+"$STACK_VENV/bin/python" -m pip install -c "$CONSTRAINTS" --no-deps numpy==1.26.4
+```
+
+新机仍需人类合法下载上述Isaac Sim zip并在安装期建立一次EULA/隐私authority；仓库不能替人同意许可。
+Ubuntu Noble安装两项系统GL包后，launcher检查规范regular file与direct SONAME并把观察到的路径/SHA写进
+dry-run及完成JSON，不再把Noble字节SHA误当跨Ubuntu版本不变的学习身份。不同受支持发行版可以有不同GL
+bytes，但必须通过真实Kit probe；这比复制Franco私有GL目录或继续堆一个无信息Gate更直接。
 
 2026-08-29在Pod1从远端重新克隆
 `Franco_codex/actionball-fullmdp-v2-20260821@e3ef4e98e903adc006775c6b23b97005f1473df0`，不复用原开发
@@ -101,13 +140,14 @@ checkout，完成了以下闭环：
 这把当时源码“能否接入该Pod已经合法准备好的精确外部runtime”裁决为历史`PASS`；它**不**宣称纯Git
 自包含安装，也不授权学习、physics parity、promotion、部署或真机。后续复核确认G05已记录EULA接受、
 当前Pod长期运行同一隐私配置，故删除`e9823e90…`错误新增的两个per-run确认Gate；OpenGL/GLU目录和真实库
-SHA、direct SONAME链接仍纳入pre-root身份。本地35项launcher测试通过，当前source真实Kit fixed-action
-probe进入执行。
+路径、观察SHA与direct SONAME链接仍纳入pre-root身份。本地36项launcher测试通过。当前source
+`4cd30d63…`真实Kit fixed-action probe已在GPU0自然完成：`512×48×31`、`done/time-out=0/0`，action/state
+SHA与历史受控probe逐字相同，退出后GPU释放；这仍只是工程/运行身份证据。
 
-新空白机器的**可获得性**仍为`PARTIAL`：RSL wheel、split USD、A3P0807 Mu meshes和GLU现在只有team/Pod
-保存路径，Python site与Mu venv也没有完整lock/wheelhouse/OCI配方。仓库已能拒绝错误输入，却尚不能仅凭
-Git自动取得这些合法字节；这类外部来源不能由launcher或Gate臆造。历史Jiayi本机和旧Pod曲线是否逐位可比
-仍未补证，但不阻塞当前Pod的受控运行。
+新空白机器的**可获得性**仍为`PARTIAL`，但范围已缩小：split USD、A3P0807 Mu meshes、合法Isaac下载和
+private repo/artifact凭据仍需团队持久locator；RSL wheel有公共安装来源与现存exact SHA，Python环境已有
+tracked constraints，OpenGL/GLU有系统包来源。历史Jiayi本机和旧Pod曲线不保证逐位可比，也不阻塞当前
+Pod受控运行；真正要比较曲线时必须同时保存source、runtime、全部输入、seed和实际argv receipt。
 
 ## Git 与非 Git 资产
 
@@ -138,8 +178,8 @@ URDF/meshes仍是非 Git 资产；如复现 Jiayi 的 Hitter baseline，必须�
 - `PASS-Pod-CUDA`：clean Git `2c8ef444…`在Jiayi Python3.11/Torch2.7-cu128完成LM info/NaN/finite-overflow三参数，CUDA context存活。
 - `PASS-environment / FAIL-first-4096-entry`：commit `5ee1ffa6…` 的first one-shot通过GPU preexec、sealed RSL和真实Kit Python身份，但身份代码在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault；Hydra解析成功，scene/PPO/WAL零调用。successor必须把class/source attestation移到AppLauncher成功后的同一Kit进程，不能用pre-App import代签。
 - `PASS-repo-to-runtime-historical`：remote clean clone `e3ef4e98…`完成dry-run、52项focused test和真实Kit/PhysX fixed-action probe；边界只覆盖“该Pod已有精确外部runtime时仓库能启动”。
-- `PASS-current-source-contract / CURRENT-real-probe`：一次性runtime authority不再错误地逐run确认；35项launcher测试通过，GL bytes继续显式绑定；current-source真实Kit probe正在补。
-- `PARTIAL-fresh-machine-availability`：上述ignored/private/runtime字节缺少全部可持久取得的位置与环境重建锁；纯clone不能完成。
+- `PASS-current-source-contract / PASS-real-probe`：一次性runtime authority不再错误地逐run确认；current-source launcher测试与真实Kit fixed-action probe通过，GL观察身份写入输出。
+- `PASS-public-software-recipe / PARTIAL-private-assets`：IsaacLab、83项Python约束、RSL版本与系统GL来源已tracked；合法Isaac下载、split USD、92项Mu meshes和private访问仍需外部提供。
 - `未测`：可信4096 A1000趋势、C、完整checkpoint/restore、跨机器逐位曲线一致性。
 
 环境 `PASS` 只回答“代码在同一软件栈上执行”，不回答 Reward 是否合理、是否可学或跨机逐位相同。

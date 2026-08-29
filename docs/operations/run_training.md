@@ -342,7 +342,7 @@ source `a3c528f1b4c9b0a60f5cd3aeec28a11e990044b3`已clean/push，并用closed-pi
 
 Isaac Full-A的对应单次入口是`scripts/launch_isaac_full_mdp_successor.py`。它复用仓库现有Kit boot
 owner，不再建立第二套supervisor：从clean Git固定同一typed H48 argv，核exact IsaacLab、Kit Python、
-RSL wheel、A3 USD与显式OpenGL/GLU bytes，先取得目标GPU的nonblocking lifetime lock，再核index→UUID和empty compute-app，最后
+RSL wheel、A3 USD与显式OpenGL/GLU SONAME binding，先取得目标GPU的nonblocking lifetime lock，再核index→UUID和empty compute-app，最后
 才创建fresh run root。fd16 runtime receipt、fd18 sealed RSL archive与GPU lock由唯一child继承；训练child
 通过`/usr/bin/env -i`获得窄runtime环境，避免Kit launcher的环境清洗丢失attestation输入。
 当前exact Pod调用中，`--isaac-python`是`/workspace/isaacsim-5.1.0/python.sh`，而
@@ -385,7 +385,8 @@ python3 scripts/launch_isaac_full_mdp_successor.py \
 两个目录的人话语义见
 [已建立运行时授权与图形库身份](../DEFINITIONS.md#isaac-operator-runtime-authority)：当前Pod的EULA与隐私
 设置属于已建立runtime配置，不是每条run重复确认的Gate；新机器在安装阶段由人类完成一次授权。launcher
-只核调用者定位的真实库SHA与SONAME后构造`LD_LIBRARY_PATH`，缺任一库输入必须在run root之前失败。
+核调用者定位的规范regular file与direct SONAME，记录观察到的路径/SHA后构造`LD_LIBRARY_PATH`；缺任一
+库输入必须在run root之前失败。观察SHA用于审计，不再把Ubuntu Noble的一份系统包字节误作跨平台Gate。
 
 这里最外层launcher owner必须由普通host Python启动（Pod1为`/usr/bin/python3`），不得用
 `/workspace/isaacsim-5.1.0/python.sh`替代命令首项；Isaac wrapper只通过`--isaac-python`传给launcher。

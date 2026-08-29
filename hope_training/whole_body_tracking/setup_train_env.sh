@@ -25,27 +25,33 @@ if [ -f "${_WBT_DIR}/setup_train_env.local.sh" ]; then
   source "${_WBT_DIR}/setup_train_env.local.sh"
 fi
 
+# Runtime identity must come from the caller or the ignored local file.  Path
+# discovery used to silently select whichever old Isaac/Python tree happened to
+# exist first, so the same source commit could denote two different trainers.
 if [ -z "${HOPE_ISAAC_PYTHON:-}" ]; then
-  if [ -x /workspace/isaacsim/python.sh ]; then
-    HOPE_ISAAC_PYTHON=/workspace/isaacsim/python.sh
-  elif [ -x /workspace/hope_isaac_venv/bin/python ]; then
-    # shared pip-venv layout (Isaac Sim 4.5 + Isaac Lab as packages)
-    HOPE_ISAAC_PYTHON=/workspace/hope_isaac_venv/bin/python
-  else
-    HOPE_ISAAC_PYTHON=/opt/isaacsim/python.sh
-  fi
+  echo "[hope] ERROR: set HOPE_ISAAC_PYTHON explicitly; runtime path discovery is forbidden." >&2
+  unset _WBT_DIR
+  return 1 2>/dev/null || exit 1
+fi
+if [ ! -x "${HOPE_ISAAC_PYTHON}" ]; then
+  echo "[hope] ERROR: HOPE_ISAAC_PYTHON is not executable: ${HOPE_ISAAC_PYTHON}" >&2
+  unset _WBT_DIR
+  return 1 2>/dev/null || exit 1
 fi
 if [ -z "${HOPE_ISAACLAB_ROOT:-}" ]; then
-  if [ -d /workspace/omni_drones/third_party/IsaacLab/source ]; then
-    HOPE_ISAACLAB_ROOT=/workspace/omni_drones/third_party/IsaacLab
-  elif [ -d /workspace/IsaacLab/source ]; then
-    HOPE_ISAACLAB_ROOT=/workspace/IsaacLab
-  else
-    HOPE_ISAACLAB_ROOT=/opt/IsaacLab
-  fi
+  echo "[hope] ERROR: set HOPE_ISAACLAB_ROOT explicitly; runtime path discovery is forbidden." >&2
+  unset _WBT_DIR
+  return 1 2>/dev/null || exit 1
 fi
-if [ -z "${HOPE_ISAAC_VENV_SITE:-}" ] && [ -d /opt/drone_venv/lib/python3.11/site-packages ]; then
-  HOPE_ISAAC_VENV_SITE=/opt/drone_venv/lib/python3.11/site-packages
+if [ ! -d "${HOPE_ISAACLAB_ROOT}/source" ]; then
+  echo "[hope] ERROR: HOPE_ISAACLAB_ROOT has no source directory: ${HOPE_ISAACLAB_ROOT}" >&2
+  unset _WBT_DIR
+  return 1 2>/dev/null || exit 1
+fi
+if [ -n "${HOPE_ISAAC_VENV_SITE:-}" ] && [ ! -d "${HOPE_ISAAC_VENV_SITE}" ]; then
+  echo "[hope] ERROR: HOPE_ISAAC_VENV_SITE is not a directory: ${HOPE_ISAAC_VENV_SITE}" >&2
+  unset _WBT_DIR
+  return 1 2>/dev/null || exit 1
 fi
 export HOPE_ISAAC_PYTHON HOPE_ISAACLAB_ROOT HOPE_ISAAC_VENV_SITE
 
@@ -82,6 +88,3 @@ unset _WBT_DIR _il
 echo "[hope] training env ready."
 echo "[hope]   hope_isaac_py -> ${HOPE_ISAAC_PYTHON}"
 echo "[hope]   WANDB_ENTITY=$WANDB_ENTITY  WANDB_REGISTRY_ORG=$WANDB_REGISTRY_ORG  WANDB_PROJECT=$WANDB_PROJECT  WANDB_DIR=$WANDB_DIR"
-if [ ! -x "${HOPE_ISAAC_PYTHON}" ]; then
-  echo "[hope]   WARNING: HOPE_ISAAC_PYTHON='${HOPE_ISAAC_PYTHON}' is not executable."
-fi

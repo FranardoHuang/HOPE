@@ -4,10 +4,10 @@ Status: Partial (the base training-loop mechanics are proven; the current-fresh 
 
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
-现役long于`2026-08-29T09:35Z`只读刷新到Mu ACK974、Isaac ACK344。Mu累计
-selected-contact/net-crossing/legal-landing=`386/332/0`（launch=`127,199`），说明已到稀疏hit但未学会落台；
-recent10相对first10四项paddle误差均更差。Isaac累计physical-observed/R03-valid/contact=
-`31,473/0/0`，recent10四项paddle误差均改善，说明balance→mimic确实在学，但尚未进入有效strike。两端
+现役long于`2026-08-29T10:34:32Z`只读刷新到Mu ACK1493、Isaac ACK523。Mu累计
+selected-contact/net-crossing/legal-landing=`657/591/0`（launch=`200,827`），说明已到极稀疏hit但未学会落台；
+recent10相对first10仅paddle position改善，其余三项mimic恶化。Isaac累计physical-observed/R03-valid/contact=
+`45,813/0/0`，recent10四项paddle误差三好一坏，说明balance→mimic仍在学但尚未进入有效strike。两端
 reward/fact/conservation fault均0，因此不是证据失真，也不再称“太早无法判断”：当前未达到mimic→hit和
 hit→landing交接条件，G05不晋级。
 
@@ -16,8 +16,15 @@ full-active两轮R06 settle改善`9.65%`，但整轮collection只改善`1.43%`�
 `a43aae3e`以one-shot typed current-settlement delta删除hot path历史mailbox扫描，retained/current共用唯一
 fact projector；三类完整journal SHA等价、exact Pod `323 passed`（含修正错误`cpu_parent`假设后的真实CUDA
 kernel计数测试），12组交替微基准median
-`1045.170→771.048 us`（`-26.23%`）。该结构减法可保留，但current-source整轮Kit profile仍`未测`，远未
-闭合约6秒目标；继续保持key/generation、reason/fault/counter、scene与durable事实，不新增success Gate。
+`1045.170→771.048 us`（`-26.23%`）。同源profiler-off整轮已测得p50/p90=
+`14.720/19.377 s/H48`，复现上一版约14.74秒平台，远未闭合约6秒目标；50-update full-active profile正在
+自然执行以定位下一最大块。继续保持key/generation、reason/fault/counter、scene与durable事实，不新增
+success Gate。
+
+环境闭环也已落实到实现：通用setup删除会静默选择Isaac4.5/RSL2的path discovery，tracked constraints吸收
+Jiayi已验证的83项Python环境；GL改核canonical file/direct SONAME并记录观察SHA。`4cd30d63`真实Kit
+fixed-action为0 done/timeout且固定摘要保持。三个无生产callsite的Physical/R06/Epoch兼容view另被删除，
+不拿无调用代码减法冒充速度收益。合法Isaac下载与private plant资产仍是新机外部输入，Gate保持`Partial`。
 
 ## 2026-08-29 R8稳定出生与学习短窗（仍`Partial`）
 

@@ -1,5 +1,22 @@
 # 简短进度记录
 
+## 2026-08-29 — 环境fail-closed、可移植GL、当前训练与14.72秒平台
+
+- Jiayi原`ENVIRONMENT_REPRODUCTION.md`仍在Pod1（SHA=`b461ed8d…9346`），不是缺失附件。已将Isaac
+  下载件身份、分阶段安装和83项非editable constraints纳入仓库；`setup_train_env.sh`删除会静默选中
+  Isaac4.5/RSL2的path discovery，只接受显式runtime路径，并提供tracked本地模板。
+- launcher不再把Ubuntu Noble系统OpenGL/GLU的固定字节当跨机学习Gate；现在核canonical regular file、
+  direct SONAME，并在dry-run/完成JSON记录观察路径与SHA。`4cd30d63`真实Kit fixed-action自然完成
+  `512×48×31`、0 done/timeout且action/state SHA保持；本地launcher/setup=`36/3 passed`。
+- 同源profiler-off `512×H48×61`自然完成，50-update p50/p90=`14.720/19.377 s`，receipt/log SHA=
+  `1d7508bc…415c` / `94c321b1…481a`。它复现上一版约14.74秒平台，明确仍未达到约6秒；50-update
+  full-active profile已启动归因，profiler-on不作速度证据。
+- 结构审计删除Physical/R06/Epoch中三个无任何生产callsite的兼容decoder/view及两个孤立facts类型，净减约
+  214行；它不在active调用图，不冒充速度提升。Pod exact相关套件与current-source real Kit probe继续补齐。
+- `10:34:32Z`长期run刷新：Mu ACK1493累计`200,827 launch / 657 selected / 591 crossing / 0 legal`；
+  Isaac ACK523在`45,813 physical observed`后仍`0 R03-valid / 0 selected`。两端安全/数值事实clean，但Mu
+  landing和Isaac mimic→hit交接已有足够分母判失败，不再写“太早”。
+
 ## 2026-08-29 — 当前学习复核、R06数据流减法与部署授权纠正
 
 - 现役`d8fd8423`于`2026-08-29T09:35Z`只读刷新到Mu ACK974、Isaac ACK344。Mu累计

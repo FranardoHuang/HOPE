@@ -237,18 +237,6 @@ class _SealedEnvRewardHotPath:
 
 
 @dataclass(frozen=True)
-class DirectR06RewardFacts:
-    """Compatibility decode of the immutable R06 epoch fact slice."""
-
-    eligible: torch.Tensor
-    policy_eligible: torch.Tensor
-    producer_fault_bits: torch.Tensor
-    common_on_table_outcome: torch.Tensor
-    canonical_total: torch.Tensor
-    placement_treatment_gain: torch.Tensor
-
-
-@dataclass(frozen=True)
 class DiagnosticN2RewardManagerBundle:
     """Exact graph plus real manager cfg for the disposable N=2 smoke."""
 
@@ -1498,7 +1486,6 @@ __all__ = [
     "DIAGNOSTIC_N2_WEIGHTS",
     "DIAGNOSTIC_N2_R03_SCALES",
     "DirectR03RewardFacts",
-    "DirectR06RewardFacts",
     "DiagnosticN2RewardManagerBundle",
     "LeanRewardError",
     "LeanRewardConstructionHold",

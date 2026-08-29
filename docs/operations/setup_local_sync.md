@@ -46,11 +46,12 @@ NVIDIA EULA或生成private asset。
 
 因此当前Pod的“repo + 已合法准备的exact Isaac/EULA/private assets”执行路径有历史`PASS`；
 “纯Git clone自包含所有运行时字节”明确为`FALSE`，而“按本页在一台空白机器取得全部外部输入”仍为
-`PARTIAL`。RSL wheel、split USD、A3P0807 Mu meshes和GLU只有现存team/Pod locator，Python site与Mu venv
-也没有完整lock/wheelhouse/OCI重建配方；这些路径是保存点，不是持久制品服务。新机器必须先由团队提供合法
-来源、逐项核SHA，再创建fresh root/namespace；不得让path-autodiscovery静默替换IsaacLab/Python/plant。
-当前launcher复用已建立的[运行时授权](../DEFINITIONS.md#isaac-operator-runtime-authority)，并用显式GL目录在
-root前拒绝缺失或错误loader输入；新机器仍在安装阶段由人类完成一次合法授权。代码层fail-closed不能替代
+`PARTIAL`。真正未持久闭合的是split USD、A3P0807 Mu meshes、合法Isaac下载与private访问；RSL 3.1.2有
+公共来源和exact wheel SHA，Python 3.11环境已有83项tracked constraints，Ubuntu Noble GL来自系统包。
+新机器必须逐项核版本/SHA后再创建fresh root/namespace；`setup_train_env.sh`已删除path autodiscovery，
+不会静默替换IsaacLab/Python。当前launcher复用已建立的
+[运行时授权](../DEFINITIONS.md#isaac-operator-runtime-authority)，并用显式GL目录在root前拒绝缺失或错误
+SONAME输入、记录观察SHA；新机器仍在安装阶段由人类完成一次合法授权。代码层fail-closed不能替代private
 外部字节的可获得性。
 
 ## Current Local Assets
@@ -1349,12 +1350,13 @@ manifest；禁止用同名重生成文件、M0 diagnostic GMR 输出或别的 ch
 - Keep reference-only external repos synced through `scripts/sync_external_repos.sh`.
 - Promote external repos to submodules only after a project decision.
 
-## Pod A3 preconverted USD、headless GLU 与 private OpenGL
+## Pod A3 preconverted USD 与 headless system GL
 
-For current ActionBall FullMDP, the complete new-machine boundary is the Isaac 5.1 rows above, the exact RSL-RL
-3.1.2 wheel, the split-rubber USD, and the OpenGL/GLU bytes below. After restoring them, use the explicit launcher
-and the [environment identity contract](action_ball_isaac51_environment_identity_20260818.md); do not source the
-legacy path-discovery script. A clean remote clone has completed a real Kit/PhysX probe against this bundle; see
+For current ActionBall FullMDP, the complete new-machine boundary is the Isaac 5.1 rows above, RSL-RL 3.1.2,
+the split-rubber USD, and a working headless OpenGL/GLU loader. Use the explicit launcher and the
+[environment identity contract](action_ball_isaac51_environment_identity_20260818.md); if the generic environment
+setup is used, it now requires explicit paths rather than performing legacy path discovery. A clean remote clone has
+completed a real Kit/PhysX probe against this bundle; see
 [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json).
 The restore contract intentionally does not vendor Isaac Sim or bypass its EULA.
 
@@ -1362,43 +1364,40 @@ ActionBall 的 fresh detached checkout 不应因 URDF 绝对路径变化重复�
 Franco-owned 的 ignored/runtime 副本是：
 
 - `/workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7/`
-- `/workspace/franco/runtime_assets/libglu_af791d1e/`
-- `/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu/`
+- `/workspace/franco/runtime_assets/libglu_af791d1e/`（历史隔离副本）
+- `/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu/`（历史隔离副本）
 
 USD 四层 SHA-256（`model / base / physics / sensor`）依次为
 `1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c`、
 `8e521141bfee4274b8a2369d382cdd8aac9bb1cfcae5bfa480666a1935a7fb42`、
 `5b5fc00b96566be295a0cd4eb6b0cd276e360d9cca189057cef452ad0bfc7981`、
 `c76c5bdd9e9b5434d72b45c9001858a9c80363656272011ed50d1419149ca60a`；
-`libGLU.so.1.3.1` 为
-`af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4`；
-`libOpenGL.so.0.0.0` 为
+Pod1 Ubuntu Noble系统`libGLU.so.1.3.1`观察SHA为
+`af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4`，`libOpenGL.so.0.0.0`观察SHA为
 `9a0a6024499300f918ef1b42d581427cdb20bbc17a7d8239a4b7434833a98d4a`，同目录还须有
 `libOpenGL.so.0 -> libOpenGL.so.0.0.0` symlink。
 
 若副本丢失，只能从团队保留的 exact six-file USD bundle
 `/workspace/codexschema/simple_half_second_sprint_20260718/assets/a3_preconverted_usd/`
-和已审计 private GLU 恢复到新的 no-clobber 目录，逐文件复算上述 SHA 后再设置
-`HOPE_AGIBOT_A3_USD_PATH` / `LD_LIBRARY_PATH`；不能按同名或目录存在判定等价。private
-OpenGL 丢失时，在 fresh 临时目录用 Ubuntu Noble 的 `libopengl0=1.7.0-1build1` 包执行
-`apt-get download`，再用 `dpkg-deb -x` 解包到新的 no-clobber runtime 目录；只抽取私有文件，
-禁止 `apt install` 或改动系统 linker。复算上面 exact SHA 后才可使用。
+恢复到新的 no-clobber目录，逐文件复算USD SHA后再设置`HOPE_AGIBOT_A3_USD_PATH`；不能按同名或目录存在
+判定等价。GL不是private资产：Pod1使用Ubuntu Noble系统包`libopengl0=1.7.0-1build1`与
+`libglu1-mesa=9.0.2-1.1build1`，两者当前真实目录均为`/usr/lib/x86_64-linux-gnu`。其他受支持发行版可以
+产生不同字节；launcher保留regular-file/direct-SONAME检查和观察SHA，并以真实Kit probe裁决可运行性。
 
 fresh checkout 的 headless 命令还必须显式构造：
 
 ```bash
 SOURCE_ROOT=/workspace/franco/<clean-checkout>
-ISAAC_SOURCE=/workspace/IsaacLab/source
-export PYTHONPATH="$SOURCE_ROOT/hope_training/whole_body_tracking/source/whole_body_tracking:/opt/drone_venv/lib/python3.11/site-packages:$ISAAC_SOURCE/isaaclab:$ISAAC_SOURCE/isaaclab_tasks:$ISAAC_SOURCE/isaaclab_assets:$ISAAC_SOURCE/isaaclab_rl"
-export LD_LIBRARY_PATH="/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e"
+ISAAC_SOURCE=/opt/IsaacLab-8320e0be/source
+export PYTHONPATH="$SOURCE_ROOT/hope_training/whole_body_tracking/source/whole_body_tracking:/opt/hope_drone_venv/lib/python3.11/site-packages:$ISAAC_SOURCE/isaaclab:$ISAAC_SOURCE/isaaclab_tasks:$ISAAC_SOURCE/isaaclab_assets:$ISAAC_SOURCE/isaaclab_rl"
+export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu"
 ```
 
-缺任一 source 根或私有库时，应在 scene creation 前 fail，不能把 importer/模块缺失记成
+缺任一 source 根或loader库时，应在 scene creation 前 fail，不能把 importer/模块缺失记成
 nominal-hold 或 PhysX 科学失败。
 
-正式 N1 launcher 的 runtime-assets claim 自 schema-v2 起要求上面的 `LD_LIBRARY_PATH` **逐字相等**：
-OpenGL 在前、GLU 在后，不接受反序、缺项或继承 ambient/system 尾部。claim 同时钉两份 library
-bytes、direct SONAME、USD closure 与
+正式 N1 launcher 的历史runtime-assets claim自schema-v2起钉过Noble两份library bytes。当前successor
+改为caller显式给出两个规范目录，claim记录两份观察SHA、direct SONAME、USD closure 与
 `pathname_sha256_revalidated_immediately_before_exec_no_concurrent_local_writers_v1` integrity model。
 因此从 plan 到 exec 的整个 launch window 内，该 runtime tree 必须保持静止，禁止另一个任务并发恢复、
 替换或维护文件；该模型诚实地不声称抵御恶意本地写者。

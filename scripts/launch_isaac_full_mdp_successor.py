@@ -40,12 +40,6 @@ PINNED_KIT_PYTHON_SHA256 = (
 PINNED_A3_USD_SHA256 = (
     "a3cd382943ff9f70beecf88c729a6cc1c052a3c0a0cbffe91003ec319ab78140"
 )
-PINNED_OPENGL_SHA256 = (
-    "9a0a6024499300f918ef1b42d581427cdb20bbc17a7d8239a4b7434833a98d4a"
-)
-PINNED_GLU_SHA256 = (
-    "af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4"
-)
 DYNAMIC_READY_ARTIFACT_RELATIVE = Path(
     "configs/action_ball_n1_measured_a3p0807_20260828/"
     "take061.local_closest_robust_feasible.dynamic_ready.v2.json"
@@ -458,8 +452,8 @@ def _asset_package(asset_source: Path) -> Path:
     return package
 
 
-def _validate_gl_runtime(opengl_dir: Path, glu_dir: Path) -> str:
-    """Bind exact headless OpenGL/GLU bytes before spending a run root."""
+def _validate_gl_runtime(opengl_dir: Path, glu_dir: Path) -> dict[str, object]:
+    """Bind canonical headless GL SONAMEs and report their observed identity."""
 
     opengl = _canonical_directory(opengl_dir, "OpenGL library directory")
     glu = _canonical_directory(glu_dir, "GLU library directory")
@@ -468,21 +462,18 @@ def _validate_gl_runtime(opengl_dir: Path, glu_dir: Path) -> str:
             opengl,
             "libOpenGL.so.0.0.0",
             "libOpenGL.so.0",
-            PINNED_OPENGL_SHA256,
             "OpenGL",
         ),
         (
             glu,
             "libGLU.so.1.3.1",
             "libGLU.so.1",
-            PINNED_GLU_SHA256,
             "GLU",
         ),
     )
-    for directory, real_name, link_name, expected_sha256, label in rows:
+    libraries: dict[str, dict[str, str]] = {}
+    for directory, real_name, link_name, label in rows:
         real = _canonical_regular(directory / real_name, f"{label} runtime")
-        if _sha256(real) != expected_sha256:
-            raise LaunchError(f"{label} runtime digest differs")
         link = directory / link_name
         try:
             link_stat = link.lstat()
@@ -491,7 +482,16 @@ def _validate_gl_runtime(opengl_dir: Path, glu_dir: Path) -> str:
             raise LaunchError(f"{label} SONAME link is absent") from exc
         if not stat.S_ISLNK(link_stat.st_mode) or target != real_name:
             raise LaunchError(f"{label} SONAME link differs")
-    return f"{opengl}:{glu}"
+        libraries[label.lower()] = {
+            "real_path": str(real),
+            "sha256": _sha256(real),
+            "soname_path": str(link),
+            "soname_target": target,
+        }
+    return {
+        "ld_library_path": f"{opengl}:{glu}",
+        "libraries": libraries,
+    }
 
 
 def _create_root(root: Path, paths: dict[str, Path], asset_package: Path) -> None:
@@ -1087,7 +1087,7 @@ def launch(args: argparse.Namespace) -> int:
     rsl_sha256 = _sha256(rsl_wheel)
     if rsl_sha256 != PINNED_RSL_WHEEL_SHA256:
         raise LaunchError("RSL-RL wheel digest differs")
-    ld_library_path = _validate_gl_runtime(
+    gl_runtime = _validate_gl_runtime(
         args.opengl_lib_dir,
         args.glu_lib_dir,
     )
@@ -1139,7 +1139,7 @@ def launch(args: argparse.Namespace) -> int:
         isaaclab=isaaclab,
         venv_site=venv_site,
         rsl_sha256=rsl_sha256,
-        ld_library_path=ld_library_path,
+        ld_library_path=str(gl_runtime["ld_library_path"]),
         profile_updates=args.profile_updates,
     )
     boot_marker = (
@@ -1161,6 +1161,7 @@ def launch(args: argparse.Namespace) -> int:
                 boot_marker=boot_marker,
             ),
             "runtime_env": runtime_env,
+            "gl_runtime": gl_runtime,
             "run_root": str(root),
             "cpu_affinity": cpu_affinity,
             "cpu_ids": cpu_ids,
@@ -1283,6 +1284,7 @@ def launch(args: argparse.Namespace) -> int:
             "run_root": str(root),
             "source_commit": commit,
             "status": status,
+            "gl_runtime": gl_runtime,
             **(
                 {
                     "rate_receipt": str(paths["rate_receipt"]),

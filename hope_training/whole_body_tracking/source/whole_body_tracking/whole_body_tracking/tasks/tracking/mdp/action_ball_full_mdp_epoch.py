@@ -2347,15 +2347,6 @@ class ActionEpochOwner:
                 raise ActionEpochError("R06 close projection owner/lifetime differs")
             return self._current_closed_rows.clone()
 
-    def active_after_command_rows(self) -> ActionEpochDueRows:
-        """D05-only full-N due view; it carries no candidate or public key."""
-
-        with self._lock:
-            tx = self._active_d05
-            if tx is None:
-                raise ActionEpochError("no active after-command D05 transaction")
-            return tx.rows.clone()
-
     def abort_d05_transaction(self, *, owner: object) -> None:
         """Abort only the still-private, zero-writer D05 opportunity."""
 

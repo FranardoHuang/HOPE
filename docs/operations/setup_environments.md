@@ -168,9 +168,8 @@ Current ActionBall FullMDP does **not** use the legacy auto-discovered Isaac 4.5
 supported runtime identity is Isaac Sim 5.1, Python 3.11, IsaacLab
 `8320e0be5c0f2def58d5b19d308c6d2539d47cb2`, RSL-RL 3.1.2 and the exact split-rubber USD. Follow
 [the Isaac 5.1 environment identity contract](action_ball_isaac51_environment_identity_20260818.md) and launch through
-`scripts/launch_isaac_full_mdp_successor.py` with explicit paths. Do not let `setup_train_env.sh` path ordering select
-this runtime: the same branch can otherwise become an Isaac 4.5/RSL2 process on one host and an Isaac 5.1/RSL3
-process on another.
+`scripts/launch_isaac_full_mdp_successor.py` with explicit paths. `setup_train_env.sh` no longer performs path
+discovery: copy its tracked `.local.example.sh` template to the ignored `.local.sh` and bind one runtime explicitly.
 
 On Pod1 the verified external restore points are:
 
@@ -181,16 +180,18 @@ venv site:  /opt/hope_drone_venv/lib/python3.11/site-packages
 split USD:  /workspace/franco/runtime_assets/a3p0807_split_rubber_diagnostic_v3/model.usd
 ```
 
-The Isaac Sim binary, private/ignored USD, exact RSL wheel and headless OpenGL/GLU bytes are not supplied by a
-Git clone. Restore them according to [setup_local_sync.md](setup_local_sync.md). A human must establish the
+The Isaac Sim binary and private/ignored USD are not supplied by a Git clone. The public Python stack now has a
+tracked 83-package constraints file; Ubuntu Noble OpenGL/GLU come from pinned system package versions, while the
+RSL wheel remains caller-bound by its observed exact SHA. Restore inputs according to
+[setup_local_sync.md](setup_local_sync.md). A human must establish the
 [runtime authority](../DEFINITIONS.md#isaac-operator-runtime-authority) once while provisioning a new machine; it is
-not re-attested per training run. The caller must provide the OpenGL/GLU directories, and the launcher verifies their
-exact bytes and direct SONAME links before creating a run root.
+not re-attested per training run. The caller provides OpenGL/GLU directories; the launcher verifies canonical regular
+files and direct SONAME links, then records their observed paths/SHA instead of demanding one Pod-specific byte hash.
 Then use the launcher dry-run before a bounded diagnostic. A remote clean clone at `e3ef4e98…` completed the earlier
 version of that sequence and a real `512×48×31` Kit/PhysX fixed-action probe; the tracked historical evidence is
 [`action_ball_isaac51_fresh_clone_deployment_20260829.json`](../../configs/action_ball_isaac51_fresh_clone_deployment_20260829.json).
-Current source removes the personal hard-coded GL paths while reusing the already established Pod runtime authority;
-its exact Pod tests/dry-run are current, while a current-source real Kit probe is the next bounded check. Neither result is learning, physics-parity,
+Current source removes personal hard-coded GL paths while reusing the already established Pod runtime authority;
+its exact Pod tests/dry-run and real `512×48×31` Kit fixed-action probe are current. Neither result is learning, physics-parity,
 deployment, or robot authority.
 
 `whole_body_tracking` now declares `cryptography>=44,<51`, because tracked ActionBall authority signing and

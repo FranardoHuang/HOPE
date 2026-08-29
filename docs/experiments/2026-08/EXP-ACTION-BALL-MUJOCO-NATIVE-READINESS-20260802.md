@@ -56,10 +56,12 @@ exact Pod相关套件合计`323 passed`。原来唯一失败的CUDA foreach-zero
 部署审计另纠正了历史“fresh clone PASS”的范围。`e3ef4e98…`只证明该Pod预装runtime可被旧source接入。
 `e9823e90…`把已有EULA/隐私设置错误重定成每条run的两个确认flag；G05已记录2026-06-26接受EULA，当前Pod
 多条真实Kit run又一直使用同一`PRIVACY_CONSENT=Y`配置，2026-08-29用户明确要求不重复确认多方已确认事实，
-故后续删除这两个per-run Gate。caller传入OpenGL/GLU真实文件SHA和direct SONAME仍在run root前验真；本地
-35项launcher测试通过，current-source真实Kit probe进入执行。
-纯Git clone还缺RSL/USD/Mu meshes/GLU的持久取得位置以及Python环境完整重建锁，故新空白机availability为
-`PARTIAL`，不能用fail-closed代码或历史receipt代替外部资产供应。
+故后续删除这两个per-run Gate。进一步核验发现Jiayi原说明仍在Pod1，原文SHA=`b461ed8d…9346`；现已把
+Isaac下载件身份、分阶段安装与83项非editable constraints吸收入仓。旧`setup_train_env.sh`会按路径顺序
+静默命中4.5/RSL2，当前branch已删该fallback，只接受显式runtime路径。OpenGL/GLU是Ubuntu系统包而非private
+学习身份；launcher核canonical file/direct SONAME并把观察SHA写进输出，不再硬拒绝其他受支持平台字节。
+合法Isaac下载、split USD、92项Mu meshes和private访问仍是外部边界，新机availability因此仍`PARTIAL`。
+`4cd30d63`真实Kit fixed-action已自然完成`512×48×31`、0 done/timeout且action/state SHA保持。
 
 maximum-inward controller修复后的首个同源码MuJoCo有限学习窗已经自然完成。`512×H48×61`、
 profiler-off的p50/p90=`6.698/6.804 s`；全窗hard-edge=`19,816/1,499,136=1.322%`、qdes guard=
@@ -69,6 +71,19 @@ due/launch/R03-valid/raw/selected/legal-landing=`11,105/6,594/4,348/0/0/0`。因
 不授权称balance/mimic基本成功；hit与landing仍为0，不以短窗失败盲改reward或新增Observation。
 当前Observation V3继续保持actor/critic `215/231`：只有发现policy需要、运行时真实可观测且现有字段不能
 推导的状态，才讨论新增；本次controller故障不满足该条件。
+
+`observed_at=2026-08-29T10:34:32Z`再次只读刷新长期run。Mu到ACK1493，episode length/return继续上升，
+但recent10 mimic仅position改善；累计`200,827 launch / 657 selected / 591 crossing / 0 legal landing`，
+recovery success=`0/119,593 eligible`。Isaac到ACK523，mimic三好一坏，但`45,813 physical observed`后仍
+`0 R03-valid / 0 selected contact`。两端fault/nonfinite/conservation继续为0。故现在已有充分分母判定Mu
+landing交接和Isaac mimic→hit交接失败，不再写“太早”；这不是自动Stage Gate，也不支持新增Observation。
+
+同源`4cd30d63`的profiler-off `512×H48×61`自然完成，50 measured updates p50/p90=
+`14.720/19.377 s`，receipt/log SHA=`1d7508bc…415c` / `94c321b1…481a`。该值与上一版
+`14.740/19.150 s`平台相符，R06 current-delta结构正确但整轮仍远离约6秒。随后启动50-update full-active
+profile作下一最大块归因；profiler-on不作速度证据。并行结构审计删除Physical/R06/Epoch中三个全仓无调用的
+兼容view/decoder及两个孤立facts类型，净减约214行；它不在active调用图，目的仅是缩小owner/API审计面，
+不会拿这项减法冒充加速。
 
 同一源码Isaac固定动作probe在真实Kit/PhysX自然完成，`512×H48×31`为0 done/timeout，action tape与state
 摘要和既有exact probe一致。另一个5-update profile尚未进入active flight，collection约

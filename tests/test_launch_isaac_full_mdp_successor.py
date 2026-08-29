@@ -155,10 +155,6 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     monkeypatch.setattr(module, "PINNED_KIT_PYTHON_SHA256", _sha(kit_python))
     monkeypatch.setattr(module, "PINNED_A3_USD_SHA256", _sha(asset))
     monkeypatch.setattr(module, "PINNED_RSL_WHEEL_SHA256", _sha(wheel))
-    monkeypatch.setattr(
-        module, "PINNED_OPENGL_SHA256", _sha(opengl / "libOpenGL.so.0.0.0")
-    )
-    monkeypatch.setattr(module, "PINNED_GLU_SHA256", _sha(glu / "libGLU.so.1.3.1"))
 
     def argv(*, dry: bool = False, expected: str = UUID) -> list[str]:
         values = [
@@ -251,6 +247,23 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     assert payload["runtime_env"]["LD_LIBRARY_PATH"] == (
         f"{rig.opengl}:{rig.glu}"
     )
+    assert payload["gl_runtime"] == {
+        "ld_library_path": f"{rig.opengl}:{rig.glu}",
+        "libraries": {
+            "opengl": {
+                "real_path": str(rig.opengl / "libOpenGL.so.0.0.0"),
+                "sha256": _sha(rig.opengl / "libOpenGL.so.0.0.0"),
+                "soname_path": str(rig.opengl / "libOpenGL.so.0"),
+                "soname_target": "libOpenGL.so.0.0.0",
+            },
+            "glu": {
+                "real_path": str(rig.glu / "libGLU.so.1.3.1"),
+                "sha256": _sha(rig.glu / "libGLU.so.1.3.1"),
+                "soname_path": str(rig.glu / "libGLU.so.1"),
+                "soname_target": "libGLU.so.1.3.1",
+            },
+        },
+    }
     assert payload["runtime_env"]["HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT"] == str(
         rig.root / "training"
     )
@@ -818,17 +831,27 @@ def test_wrong_pinned_asset_or_rsl_bytes_fail_before_root(rig, capsys) -> None:
     assert not rig.root.exists()
 
 
-@pytest.mark.parametrize("failure", ("opengl_bytes", "glu_link"))
+@pytest.mark.parametrize("failure", ("opengl_file", "glu_link"))
 def test_wrong_gl_runtime_fails_before_root(rig, failure: str, capsys) -> None:
-    if failure == "opengl_bytes":
-        (rig.opengl / "libOpenGL.so.0.0.0").write_bytes(b"changed")
-        expected = "OpenGL runtime digest differs"
+    if failure == "opengl_file":
+        (rig.opengl / "libOpenGL.so.0.0.0").unlink()
+        (rig.opengl / "libOpenGL.so.0.0.0").mkdir()
+        expected = "OpenGL runtime must be one canonical regular file"
     else:
         (rig.glu / "libGLU.so.1").unlink()
         (rig.glu / "libGLU.so.1").symlink_to("wrong")
         expected = "GLU SONAME link differs"
     assert rig.module.main(rig.argv(dry=True)) == 2
     assert expected in capsys.readouterr().err
+    assert not rig.root.exists()
+
+
+def test_portable_gl_bytes_are_accepted_and_reported(rig, capsys) -> None:
+    runtime = rig.opengl / "libOpenGL.so.0.0.0"
+    runtime.write_bytes(b"different-supported-platform-build")
+    assert rig.module.main(rig.argv(dry=True)) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["gl_runtime"]["libraries"]["opengl"]["sha256"] == _sha(runtime)
     assert not rig.root.exists()
 
 

@@ -1100,25 +1100,6 @@ class ActionEpochPhysicalPostPhysicsCaptureRequest:
 
 
 @dataclass(frozen=True)
-class PhysicalEpochSelectedContactFacts:
-    """Clone-only direct Reward facts from the latest real engine capture.
-
-    ``eligible`` means that the selected launched ball had a real selected
-    rubber contact on this post-physics source step.  An ordinary live miss is
-    ``present=True, eligible=False, producer_fault_bits=0``.  Missing or stale
-    producers are never converted to a miss.
-    """
-
-    present: torch.Tensor
-    eligible: torch.Tensor
-    source_step: torch.Tensor
-    producer_fault_bits: torch.Tensor
-    current_ball_center_m: torch.Tensor
-    selected_contact_ball_center_m: torch.Tensor
-    selected_contact_outgoing_segment_anchor_m: torch.Tensor
-
-
-@dataclass(frozen=True)
 class _ActionEpochPendingLaunchState:
     """Full-N Physical-private rows waiting for their Motion launch tick."""
 
@@ -7690,105 +7671,6 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._action_epoch_substep_pair = None
         return None
 
-    def action_epoch_reward_facts_v1(
-        self, epoch_record: object
-    ) -> PhysicalEpochSelectedContactFacts:
-        """Decode only this Physical owner's immutable current epoch slice.
-
-        The record version is part of the read boundary; scalar journal epoch
-        is never used as shot identity.  Validity bits, not numeric payloads,
-        decide whether a real observation and selected contact exist.
-        """
-
-        epoch_owner = self._action_epoch_owner
-        if epoch_owner is None:
-            raise PhysicalEpochIntegrationHold(
-                "Physical reward facts have no cold-bound ActionEpoch owner"
-            )
-        try:
-            from whole_body_tracking.tasks.tracking.mdp import (
-                action_ball_full_mdp_epoch as epoch,
-            )
-        except ImportError:
-            import action_ball_full_mdp_epoch as epoch
-        current = epoch_owner.current()
-        if (
-            type(epoch_record) is not epoch.ActionEpochRecord
-            or type(current) is not epoch.ActionEpochRecord
-            or epoch_record.version != current.version
-        ):
-            raise PhysicalEpochIntegrationHold(
-                "Physical reward facts require the exact current epoch version"
-            )
-        owner_slot = epoch.OWNER_ORDER.index("physical_ball")
-        env_ids = torch.arange(
-            self.num_envs, dtype=torch.int64, device=self.device
-        )
-        shot_slots = current.current_task_slot
-        shot_slot_valid = shot_slots.ge(0) & shot_slots.lt(
-            epoch_owner.shot_slot_capacity
-        )
-        safe_shot_slots = shot_slots.clamp(
-            min=0, max=epoch_owner.shot_slot_capacity - 1
-        )
-        bits = current.fact_valid_bits[
-            env_ids, safe_shot_slots, owner_slot
-        ]
-        faults = current.owner_fault_bits[
-            env_ids, safe_shot_slots, owner_slot
-        ]
-        present = (
-            shot_slot_valid
-            & faults.eq(0)
-            & torch.bitwise_and(bits, PHYSICAL_EPOCH_FACT_PRESENT).ne(0)
-        )
-        eligible = (
-            present
-            & torch.bitwise_and(bits, PHYSICAL_EPOCH_FACT_SELECTED_CONTACT).ne(0)
-        )
-        source = current.fact_source_step[
-            env_ids, safe_shot_slots, owner_slot
-        ]
-        values = current.fact_f32[
-            env_ids, safe_shot_slots, owner_slot
-        ]
-        return PhysicalEpochSelectedContactFacts(
-            present=present.detach().clone(),
-            eligible=eligible.detach().clone(),
-            source_step=torch.where(
-                present, source, torch.full_like(source, -1)
-            ).detach().clone(),
-            producer_fault_bits=faults.detach().clone(),
-            current_ball_center_m=torch.where(
-                present[:, None],
-                values[:, PHYSICAL_EPOCH_FACT_CURRENT_CENTER],
-                torch.zeros_like(values[:, PHYSICAL_EPOCH_FACT_CURRENT_CENTER]),
-            ).detach().clone(),
-            selected_contact_ball_center_m=torch.where(
-                eligible[:, None],
-                values[:, PHYSICAL_EPOCH_FACT_CONTACT_CENTER],
-                torch.zeros_like(values[:, PHYSICAL_EPOCH_FACT_CONTACT_CENTER]),
-            ).detach().clone(),
-            selected_contact_outgoing_segment_anchor_m=torch.where(
-                eligible[:, None],
-                values[:, PHYSICAL_EPOCH_FACT_OUTGOING_ANCHOR],
-                torch.zeros_like(values[:, PHYSICAL_EPOCH_FACT_OUTGOING_ANCHOR]),
-            ).detach().clone(),
-        )
-
-    def action_epoch_selected_contact_reward_facts(
-        self,
-    ) -> PhysicalEpochSelectedContactFacts:
-        """Compatibility spelling for the immutable current epoch decoder."""
-
-        if self._action_epoch_owner is None:
-            raise PhysicalEpochIntegrationHold(
-                "Physical selected-contact reward has no ActionEpoch owner"
-            )
-        return self.action_epoch_reward_facts_v1(
-            self._action_epoch_owner.current()
-        )
-
     def build_post_physics_publication(
         self,
         *,
@@ -11966,7 +11848,6 @@ __all__ = [
     "PhysicalFlightDeviceError",
     "PhysicalFlightOwnerPoisonedError",
     "PhysicalEpochIntegrationHold",
-    "PhysicalEpochSelectedContactFacts",
     "PhysicalHotChildCommitToken",
     "PhysicalHotPreparedInstall",
     "PhysicalLateLaunchProductionHold",
