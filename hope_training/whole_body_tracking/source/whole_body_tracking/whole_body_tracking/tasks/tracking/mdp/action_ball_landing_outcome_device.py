@@ -6817,7 +6817,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         key_values = torch.where(valid.unsqueeze(1), key_values, invalid_key)
         key = _row_identity.ActionEpochShotKey(
             **{
-                field.name: key_values[:, index]
+                field.name: key_values[:, index].contiguous()
                 for index, field in enumerate(fields(_row_identity.ActionEpochShotKey))
             }
         )
