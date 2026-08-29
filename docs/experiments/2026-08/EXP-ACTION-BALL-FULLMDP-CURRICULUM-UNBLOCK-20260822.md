@@ -1310,3 +1310,23 @@ conservation为0，recent10 p50/p90约`6.59/6.66 s/H48`。因此实现和rate健
 “4倍权重改善mimic→hit交接”；继续到预注册update1000只为排除延迟转折，不比较4倍后的return，也不采纳。
 对应Isaac fresh因Pod1三卡已有三条只读训练而未发射；下一空闲卡只运行仍有因果价值的warm-start或replay
 单轴，不停止旧run换取假闭环。
+
+### 11.5 四倍轴判负与playback-scaled后继
+
+`observed_at=2026-08-29T11:57:06Z`，四倍Mu已到ACK423，不再属于小分母。matched ACK0..423的新/旧
+episode length=`148.018/144.317`；四项累计mimic误差中new的velocity/face/long-axis较好、position较差，
+但raw contact=`42/1,627`、selected=`1/332`、crossing=`0/279`。new recent10四项误差又都比自己的first10
+恶化。fault/nonfinite/conservation仍为0，所以该结果否决的是“ready与playback都无条件4倍”的学习经济，
+不是环境执行或自然课程本身。
+
+代码复核给出一个无需新增Stage/Gate的更小因果切口：旧4倍manager weight在pre-playback ready hold也持续
+支付最高`14`，而动态teacher只在原有due后出现；policy可先把容易ready局部解强化，再难以切入挥拍。下一候选
+因此恢复full-phase baseline manager weight=`1/1/1/.5`，只在Motion唯一真源的playback-active行把同一
+coarse+precision kernel乘`4`。网络、PPO V6/H48、Observation V3、任务、plant、regularization、事件与
+所有事实源不变，仍从rollout 0使用完整图；这只是连续Reward的eligibility/scale，不是success后才开放的门。
+该因果解释仍需fresh matched run验证，未提前采用。
+
+旧Mu到ACK2232：`665/298,932` selected/launch、598 crossing、`0/665` legal、recovery=`0/208,696`；
+旧Isaac到ACK763：`0 R03 / 80,173 launch`，landing仍因0 selected为`未测`。二者分别确认hit→landing/recovery
+和mimic→hit失败。现有snapshot均明确无resume authority；Build4 warm-start不能从这些字节伪造。三张GPU
+未自然空闲前只完成exact source、CPU/fixed-action与launch准备，不停止只读run换卡。

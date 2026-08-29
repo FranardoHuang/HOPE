@@ -14013,14 +14013,15 @@ class MotionCommand(CommandTerm):
         return ~task_valid
 
     def action_ball_full_mdp_playback_active_mask(self) -> torch.Tensor:
-        """Return Motion's sole existing FullMDP playback-started row mask.
+        """Return Motion's sole FullMDP playback-started row mask.
 
-        This is a zero-copy telemetry accessor.  It exposes no new lifecycle
-        state and does not infer playback from task validity, reward values,
-        reference steps, physical outcome, or recovery.  Motion turns it on
-        only after the teacher leaves selected frame 0, and clears it at the
-        suffix-hidden transition.  Prepare/ready/recovery are therefore false;
-        canonical swing/follow-through are true.
+        This zero-copy public owner view is consumed by reward and telemetry.
+        It exposes no new lifecycle state and does not infer playback from task
+        validity, reward values, reference steps, physical outcome, or
+        recovery.  Motion turns it on only after the teacher leaves selected
+        frame 0, and clears it at the suffix-hidden transition.  Prepare,
+        ready, and recovery are therefore false; canonical swing and
+        follow-through are true.
         """
 
         if not getattr(

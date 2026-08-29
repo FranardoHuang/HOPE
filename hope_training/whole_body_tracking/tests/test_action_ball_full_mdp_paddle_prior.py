@@ -22,11 +22,11 @@ import action_ball_full_mdp_paddle_prior as P  # noqa: E402
 import action_ball_full_mdp_reward_contract as C  # noqa: E402
 
 
-def test_direct_paddle_successor_changes_only_the_shared_weight_axis():
-    assert C.PADDLE_MOTION_PRIOR_WEIGHT_SCALE == 4.0
+def test_direct_paddle_successor_strengthens_only_dynamic_playback_rows():
+    assert C.PADDLE_MOTION_PRIOR_PLAYBACK_SCALE == 4.0
     assert tuple(
         spec.manager_weight for spec in C.PADDLE_MOTION_PRIOR_SPECS
-    ) == (4.0, 4.0, 4.0, 2.0)
+    ) == (1.0, 1.0, 1.0, 0.5)
     assert tuple(spec.std for spec in C.PADDLE_MOTION_PRIOR_SPECS) == (
         0.075,
         0.50,
@@ -41,7 +41,7 @@ def test_direct_paddle_successor_changes_only_the_shared_weight_axis():
     )
     assert all(
         spec.command_name == "racket_target"
-        and spec.scale_in_strike_window == 1.0
+        and spec.scale_during_playback == 4.0
         for spec in C.PADDLE_MOTION_PRIOR_SPECS
     )
 

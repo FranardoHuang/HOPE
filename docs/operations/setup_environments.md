@@ -215,10 +215,17 @@ Both current FullMDP launchers intentionally support run roots under `/workspace
 owner-only lock file once, for example:
 
 ```bash
-install -m 0600 /dev/null /tmp/hope_lean_queue_gpu0.lock
+LOCK_PATH=/tmp/hope_lean_queue_gpu0.lock
+test ! -e "$LOCK_PATH"
+(umask 077; set -o noclobber; : > "$LOCK_PATH")
+test -f "$LOCK_PATH" && test ! -L "$LOCK_PATH"
+chmod 0600 "$LOCK_PATH"
 ```
 
-The launcher reuses and locks that file; it does not create or replace it. MuJoCo's public Python environment is built
+The absent check and shell `noclobber` create the pathname with `O_EXCL` semantics; rerunning this while a trainer owns
+the lock must fail rather than replace/truncate the inode and silently break mutual exclusion. `/tmp` is normally cleared
+on reboot, so repeat provisioning only after confirming no trainer for that GPU is alive. The launcher reuses and locks
+that file; it does not create or replace it. MuJoCo's public Python environment is built
 separately from the [tracked 133-package lock](action_ball_mujoco_environment_identity_20260829.md); ignored plant meshes
 and exact EPA48/RSL3 inputs still follow [setup_local_sync.md](setup_local_sync.md).
 

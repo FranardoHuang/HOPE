@@ -2659,10 +2659,8 @@ def _action_ball_full_mdp_dense_fixed_func_params(
         )
     elif spec.body_scope is not None:
         raise RuntimeError("fresh full-MDP dense body scope differs")
-    if spec.scale_in_strike_window is not None:
-        params.append(
-            ("scale_in_strike_window", spec.scale_in_strike_window)
-        )
+    if spec.scale_during_playback is not None:
+        params.append(("scale_during_playback", spec.scale_during_playback))
     return tuple(params)
 
 

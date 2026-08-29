@@ -63,8 +63,12 @@ diff -u configs/action_ball_mujoco_base_venv_constraints_20260829.txt \
 2. 在fresh exact checkout分别运行host测试；
 3. 用`launch_mujoco_full_mdp_successor.py --dry-run`核显式Python、plant、ready pose、GPU UUID和run root；
 4. 确认机器有writable `/workspace`，并为目标GPU一次性执行
-   `install -m 0600 /dev/null /tmp/hope_lean_queue_gpuN.lock`；
+   `LOCK_PATH=/tmp/hope_lean_queue_gpuN.lock; test ! -e "$LOCK_PATH";`
+   `(umask 077; set -o noclobber; : > "$LOCK_PATH")`，再核它是owner-only regular file且不是symlink；
 5. 只在空闲GPU和fresh namespace启动fixed-action或训练。
+
+第4步必须只对不存在的pathname执行；若文件已存在就停下核进程，而不是用`install`重写inode。`/tmp`在重启
+后通常清空，只能在确认该GPU没有trainer后重新provision。
 
 因此“repo + 本文package来源 + setup_local_sync列出的外部字节”具备可复现步骤；“纯Git clone立即训练”仍为
 `FALSE`。缺失private/ignored输入必须报告为`PARTIAL`，不能用更多success Gate掩盖。

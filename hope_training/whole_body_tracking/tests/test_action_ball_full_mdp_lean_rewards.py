@@ -1304,21 +1304,21 @@ def test_common_dense_reuses_motion_evaluator_and_changes_with_reference_error(
 
 
 @pytest.mark.parametrize(
-    "telemetry_mode", ("valid", "absent", "malformed", "noncontiguous_errors")
+    "reward_abi_mode", ("valid", "absent", "malformed", "noncontiguous_errors")
 )
 def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
-    monkeypatch, telemetry_mode
+    monkeypatch, reward_abi_mode
 ):
     target_calls = 0
-    telemetry_calls = 0
+    playback_mask_calls = 0
 
     class Motion:
         def action_ball_full_mdp_playback_active_mask(self):
-            nonlocal telemetry_calls
-            telemetry_calls += 1
-            if telemetry_mode == "absent":
-                raise RuntimeError("optional diagnostic telemetry unavailable")
-            if telemetry_mode == "malformed":
+            nonlocal playback_mask_calls
+            playback_mask_calls += 1
+            if reward_abi_mode == "absent":
+                raise RuntimeError("playback reward ABI unavailable")
+            if reward_abi_mode == "malformed":
                 return torch.ones((2, 1), dtype=torch.bool, device=TEST_DEVICE)
             return torch.tensor(
                 [True, False], dtype=torch.bool, device=TEST_DEVICE
@@ -1335,7 +1335,7 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
     def tracking_errors_now(_cmd):
         nonlocal target_calls
         target_calls += 1
-        if telemetry_mode == "noncontiguous_errors":
+        if reward_abi_mode == "noncontiguous_errors":
             return exact_errors.t().contiguous().t()
         return exact_errors
 
@@ -1367,16 +1367,25 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
     first = R.LIFECYCLE_PAYMENT_COUNT + len(R.COMMON_DENSE_SPECS)
     values = []
     for ordinal, spec in enumerate(R.PADDLE_MOTION_PRIOR_SPECS, start=first):
-        values.append(
-            R.paddle_motion_prior_reward(
+        def call():
+            return R.paddle_motion_prior_reward(
                 env,
                 ordinal=ordinal,
                 command_name=spec.command_name,
                 std=spec.std,
                 coarse_std=spec.coarse_std,
-                scale_in_strike_window=spec.scale_in_strike_window,
+                scale_during_playback=spec.scale_during_playback,
             )
-        )
+        if reward_abi_mode != "valid":
+            with pytest.raises(
+                (RuntimeError, R.LeanRewardCycleError),
+                match="playback|paddle-error|poisoned|unavailable",
+            ):
+                call()
+            assert graph.poisoned is True
+            assert graph.completed_cycle_count == 0
+            return
+        values.append(call())
     assert graph._paddle_reward_cycle_cache is None
     for ordinal in range(R.REGULARIZATION_FIRST_ORDINAL, R.MANAGER_TERM_COUNT):
         graph.record_common_dense(
@@ -1396,11 +1405,12 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
         ),
         dim=1,
     )
+    expected_values[0].mul_(R.reward_contract.PADDLE_MOTION_PRIOR_PLAYBACK_SCALE)
     assert torch.equal(
         torch.stack(values, dim=1).view(torch.int32),
         expected_values.view(torch.int32),
     )
-    assert telemetry_calls == 1
+    assert playback_mask_calls == 1
     assert target_calls == 1
     owner_telemetry = graph.epoch_owner.milestone
     # Batched milestone reductions are committed only when RewardManager's
@@ -1416,9 +1426,8 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
         )
     ).as_json(R.MANAGER_NAMES)
     playback_rows = payload["paddle_motion_prior_playback"]["terms"]
-    telemetry_available = telemetry_mode == "valid"
-    expected_unavailable = [0] * 4 if telemetry_available else [2] * 4
-    expected_playback = [1] * 4 if telemetry_available else [0] * 4
+    expected_unavailable = [0] * 4
+    expected_playback = [1] * 4
     assert [
         row["telemetry_unavailable_count"] for row in playback_rows
     ] == expected_unavailable
@@ -1427,15 +1436,15 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
     assert [row["error_finite_count"] for row in playback_rows] == expected_playback
     assert [row["domain_violation_count"] for row in playback_rows] == [0] * 4
     for row, value in zip(playback_rows, values):
-        expected_sum = float(value[0]) if telemetry_available else 0.0
+        expected_sum = float(value[0])
         assert row["kernel_sum"] == pytest.approx(expected_sum)
     expected_error = exact_errors[0].tolist()
     for row, error in zip(playback_rows, expected_error):
         assert row["error_sum"] == pytest.approx(
-            error if telemetry_available else 0.0
+            error
         )
         assert row["error_sum_sq"] == pytest.approx(
-            error * error if telemetry_available else 0.0
+            error * error
         )
 
 

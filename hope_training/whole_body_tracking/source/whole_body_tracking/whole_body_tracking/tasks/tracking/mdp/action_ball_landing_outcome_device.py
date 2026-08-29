@@ -4063,6 +4063,23 @@ class _ActionEpochOutcomeCandidateGrid:
     owner_fault_bits: torch.Tensor
 
 
+def _with_action_epoch_candidate(
+    grid: _ActionEpochOutcomeCandidateGrid, candidate: torch.Tensor
+) -> _ActionEpochOutcomeCandidateGrid:
+    """Reuse one immutable fact grid while narrowing only its row mask."""
+
+    return _ActionEpochOutcomeCandidateGrid(
+        candidate=candidate,
+        shot_key_values=grid.shot_key_values,
+        publication_ordinal=grid.publication_ordinal,
+        settlement_step=grid.settlement_step,
+        policy_eligible=grid.policy_eligible,
+        fact_values=grid.fact_values,
+        outcome_code=grid.outcome_code,
+        owner_fault_bits=grid.owner_fault_bits,
+    )
+
+
 @dataclass(frozen=True, eq=False)
 class _RetainedPostPhysicsContactAuthority:
     """Owner-private registry row behind one opaque contact authority."""
@@ -6890,16 +6907,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 "R06 current-settlement delta lifetime differs"
             )
         projection = self._project_action_epoch_outcome_candidates(
-            _ActionEpochOutcomeCandidateGrid(
-                candidate=retire_valid,
-                shot_key_values=prepared.shot_key_values,
-                publication_ordinal=prepared.publication_ordinal,
-                settlement_step=prepared.settlement_step,
-                policy_eligible=prepared.policy_eligible,
-                fact_values=prepared.fact_values,
-                outcome_code=prepared.outcome_code,
-                owner_fault_bits=prepared.owner_fault_bits,
-            )
+            _with_action_epoch_candidate(prepared, retire_valid)
         )
         return self._mint_action_epoch_outcome_rows(projection)
 
@@ -7017,15 +7025,8 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 "R06 ActionEpoch control outcome replay is stale or out of order"
             )
         rows = self._project_action_epoch_outcome_candidates(
-            _ActionEpochOutcomeCandidateGrid(
-                candidate=replay.candidate & replay_substep.eq(substep_index),
-                shot_key_values=replay.shot_key_values,
-                publication_ordinal=replay.publication_ordinal,
-                settlement_step=replay.settlement_step,
-                policy_eligible=replay.policy_eligible,
-                fact_values=replay.fact_values,
-                outcome_code=replay.outcome_code,
-                owner_fault_bits=replay.owner_fault_bits,
+            _with_action_epoch_candidate(
+                replay, replay.candidate & replay_substep.eq(substep_index)
             )
         )
         self._mint_action_epoch_outcome_rows(rows)
@@ -11498,7 +11499,6 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 fault_bits=fault_bits,
                 settlement_cause=settlement_cause,
                 policy_nonfinite_crossing=policy_nonfinite_crossing,
-                safe_crossing=safe_crossing,
                 chosen_crossing_xy=chosen_crossing_xy,
                 effective_crossing_stamp=effective_crossing_stamp,
                 observation_stamp=observation_stamp,
@@ -11786,7 +11786,6 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         fault_bits: torch.Tensor,
         settlement_cause: torch.Tensor,
         policy_nonfinite_crossing: torch.Tensor,
-        safe_crossing: torch.Tensor,
         chosen_crossing_xy: torch.Tensor,
         effective_crossing_stamp: PhysicsStampBatch,
         observation_stamp: PhysicsStampBatch,
@@ -12076,16 +12075,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                     "R06 ActionEpoch control outcome source differs"
                 )
             self._action_epoch_control_replay = (
-                _ActionEpochOutcomeCandidateGrid(
-                    candidate=retire_valid,
-                    shot_key_values=prepared.shot_key_values,
-                    publication_ordinal=prepared.publication_ordinal,
-                    settlement_step=prepared.settlement_step,
-                    policy_eligible=prepared.policy_eligible,
-                    fact_values=prepared.fact_values,
-                    outcome_code=prepared.outcome_code,
-                    owner_fault_bits=prepared.owner_fault_bits,
-                )
+                _with_action_epoch_candidate(prepared, retire_valid)
             )
             self._action_epoch_control_replay_substep = (
                 self._flight_last_observation_substep.detach().clone()

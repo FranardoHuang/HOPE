@@ -298,23 +298,23 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    D2H从48次/update收为一次；(b) selected reset保留唯一preflight而让各owner只写`K`行；(c) Reward28同周期
    staged pack。三者整段硬上界分别`.978/1.863/1.066 s`，都不是预期收益且不能线性相加。已实测回归的逐轮
    unresolved D05 compaction继续拒绝，不因`3,584/290/22`稀疏度再次引入host/device控制流。
-15. [ ] 用单一direct-paddle经济轴修复已证学习交接失败。旧Reward28四项measured-paddle权重
-   `1/1/1/.5`的最高收入`3.5`低于anchor+body mimic的`6`；现役fixed-LR大分母下Mu约`.16 m`、Isaac约
-   `.20 m`拍心误差仍远离接触尺度。下一fresh contract只同比例改为`4/4/4/2`（最高`14`）：kernel宽度、
-   PPO V6、Observation V3 `215/231`、H48、due cadence、plant、regularization、事件与安全事实均不变。
-   先过host/Pod exact Reward与fixed-action，再以fresh namespace跑matched未来窗；按first10、相邻recent10和
-   matched update报告四项真实误差、episode/terminal、`selected/launch`、landing/contact与fault。旧两条
-   `d8fd8423`保持只读作为baseline；不resume、不复用namespace，不混入Build4 warm-start/replay/双LR/
-   sigma`.19`或新增obs。只有真实误差与contact入口相对baseline改善且balance不倒退，才采用该数值轴。
-   fresh Mu `28430d36`已在GPU0运行到ACK363。matched ACK0..363相对旧baseline：episode length=
-   `148.883 vs 144.329`，四项累计误差=`.27992/1.16628/.35885/.32122` vs
-   `.25686/1.18479/.37412/.34125`，即三项小幅好、position更坏；launch/R03=
-   `49,494/38,079` vs `46,549/34,513`，但selected contact仅`1` vs `321`。ACK354..363两端都出现误差
-   恶化，新run仍为position更坏、其余三项较好，却没有恢复contact。这已否决“4倍权重本身改善mimic→hit
-   交接”的当前证据，不因return不可比而粉饰。run继续到预注册update1000只为排除延迟转折，不据此采用；
-   后继轴应分别验证Build4的warm-start或replay原则，而非继续盲加权。Isaac同轴fresh尚未发射：GPU0/1/2
-   分别被该Mu treatment、旧Mu baseline、旧Isaac baseline占用，禁止同卡混跑、signal旧run或绕过lifetime
-   lock；空闲GPU出现后只发射仍有因果价值的final clean successor，不复用namespace。
+15. [ ] 修复direct-paddle经济轴并fresh双端验证。无条件`4/4/4/2` Mu到ACK423后已足够判负：matched
+   ACK0..423相对旧baseline，episode length=`148.018 vs 144.317`，累计误差中velocity/face/long-axis较好而
+   position较差；launch/R03=`58,378/44,387` vs `55,119/40,769`，但raw/selected/crossing=
+   `42/1/0` vs `1,627/332/279`。四倍轴把一部分mimic残差变好却破坏mimic→真实hit，因此不是“还早”或
+   engineering fault，不能采用。其结构问题是同一个最高`14`也在容易的pre-playback ready hold持续支付，
+   policy可在第一次动态teacher出现前先强化错误局部经济。
+
+   当前最小后继为[`Reward28 playback-scaled paddle`](../DEFINITIONS.md#fullmdp-reward28-playback-scaled-paddle)：
+   manager weight恢复baseline `1/1/1/.5`，只在Motion-owned playback-active行把同核乘`4`；H48、PPO V6、
+   Observation V3、due cadence、plant、regularization、事件与安全事实均不变。它不增加Stage/Gate，仍是
+   balance→mimic→hit→landing自然重叠。host静态验证后必须过Pod exact Reward/配置/fixed-action，再以fresh
+   namespace做matched训练；三卡当前仍由三条只读run占用，禁止为取卡signal、同卡混跑或复用namespace。
+
+   Build4的mandatory actor warm-start仍是最强混杂项，但现有`model_2000.pt`明确
+   `checkpoint_authority=false/resume_authority=false`。当前FullMDP也没有贯通env/owner/WAL的resume consumer，
+   所以不写extractor偷用；未来若实现“全env重置后的numerical continuation”，必须另用新schema、新namespace
+   和parent SHA，且不能冒充step-exact resume。本轮不为此再造一套臃肿状态机。
 
 <a id="fullmdp-v9-superseded"></a>
 

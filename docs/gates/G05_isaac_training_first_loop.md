@@ -11,19 +11,22 @@ Scene capture、terminal即时park和`P0,R0…` durable顺序。Pod1 clean exact
 三张GPU仍分别被旧Mu、旧Isaac和fresh 4× Mu占用，所以current source真实Kit fixed tape与profiler-off
 matched active strata为`未测`，本Gate不把host语义门或profile硬上界写成速度PASS。
 
-fresh direct-paddle 4× Mu到ACK363，matched旧baseline为`1/49,494` vs `321/46,549`
-selected/launch；累计四项paddle误差虽三项略好，position更坏，最近10轮也未恢复contact。因此4倍权重当前
-不满足mimic→hit交接验收，只继续到预注册1000节点排除延迟转折，不比较权重改变后的return。旧Mu到ACK2174
-recent10仍contact/landing为0；旧Isaac到ACK743 recent10仍`0 R03 / 1,514 launch`。这些事实不支持新增
-Observation、离散Stage Gate或继续盲加权。
+fresh direct-paddle 4× Mu到ACK423后已足够判负。matched ACK0..423新/旧raw contact=`42/1,627`、
+selected=`1/332`、crossing=`0/279`；新run虽有三项累计mimic误差略好，却把mimic→hit入口显著破坏，不能
+再写“太早”或采用。代码复核又发现4× manager weight在容易的pre-playback ready hold也持续支付最高`14`；
+下一最小候选恢复baseline manager weight=`1/1/1/.5`，只在Motion-owned playback-active行把同核乘`4`。
+它不是Stage/Gate，仍由原due状态机自然开放。旧Mu到ACK2232仍`0/665` legal、recovery=`0/208,696`；
+旧Isaac到ACK763仍`0 R03 / 80,173 launch`。这些事实不支持新增Observation或继续盲加权。
 
-现役long于`2026-08-29T10:47:30Z`只读刷新到Mu ACK1610、Isaac ACK560。Mu累计
-selected-contact/net-crossing/legal-landing=`662/596/0`（launch=`217,463`），recovery=`0/132,376`；最近
-相邻10窗四项mimic都轻微恶化。Isaac累计physical-launch/R03-valid/contact=`51,300/0/0`，长期三项paddle
-误差改善但face仍坏于起始。两端reward/fact/conservation fault均0，因此不是证据失真，也不再称“太早无法
-判断”：当前mimic→hit及hit→landing/recovery交接失败，G05不晋级。下一fresh学习轴只把measured-paddle
-weight从`1/1/1/.5`提高到`4/4/4/2`，其余Reward核、PPO、Observation、课程、plant与Gate不变；仍须以
-matched未来窗而不是Build4历史曲线裁决。
+现役long已于`2026-08-29T11:57:06Z`只读刷新到Mu ACK2232、Isaac ACK763。两端
+reward/fact/conservation fault仍为0；Mu累计selected/contact-to-landing/recovery=`665/0/0`，Isaac则是
+`0 R03-valid / 80,173 launch`。因此不是证据失真，也不再称“太早无法判断”：当前mimic→hit及
+hit→landing/recovery交接失败，G05不晋级。无条件`4/4/4/2`后继也已由上段matched反例否决；唯一fresh
+候选是baseline ready economy加Motion playback期同核4倍，且仍须以matched未来窗而不是Build4历史曲线
+裁决。现有`model_2000.pt`及同类snapshot明确
+`checkpoint_authority=false/resume_authority=false`；当前FullMDP也无贯通env/owner/WAL的resume consumer，
+因此不允许为复制Build4 warm-start而写extractor偷用。未来continuation若实现必须独立schema/new namespace，
+不能把policy+optimizer bytes冒充逐步精确恢复。
 
 `572a7080`把R06同owner masked mutation融合后，exact Pod累计`210 passed`且fixed tape逐字一致；matched
 full-active两轮R06 settle改善`9.65%`，但整轮collection只改善`1.43%`至`17.676 s/update`。随后
@@ -2402,13 +2405,17 @@ Not done:
 - The corrected `_hopex.npz` motion clips are ignored local artifacts; new machines must restore or regenerate them through `setup_local_sync.md` before reproducing the recorded local-clip `HOPEPingPong*` training runs.
 - The v5 R15 ablation clips have no accepted smoke, training run, or quality baseline; forehand is hand-verified at phase 0.673, while backhand phase 0.345 is still unverified.
 
-## Current Verification Commands
+## Historical 2026-06-26 Verification Commands
 
-Account-free reproduction (no WandB, no motion data — the 2026-06-26 path). On a Blackwell GPU apply the
-torch-cu128 fix first (see [run_training.md](../operations/run_training.md#blackwell-rtx-50-series-sm_120-torch-fix)):
+These commands preserve the old account-free path; they are not the current FullMDP environment authority. Provision
+the machine first through [`setup_environments.md`](../operations/setup_environments.md), where a human records
+`HOPE_ISAAC_ACCEPT_EULA=Y` and an explicit `HOPE_ISAAC_PRIVACY_CONSENT=Y|N` in the ignored machine file. The launcher
+maps those choices into the child process; do not replace that contract with the old direct export below. On a Blackwell
+GPU the historical path also required the torch-cu128 fix (see
+[run_training.md](../operations/run_training.md#blackwell-rtx-50-series-sm_120-torch-fix)):
 
 ```bash
-export OMNI_KIT_ACCEPT_EULA=YES
+# Historical only: current FullMDP launchers consume machine-local HOPE_ISAAC_* authority.
 hope_isaac_py scripts/make_static_motion.py --robot agibot_a3 \
   --output_file ../motions/a3_stand.npz --frames 600 --fps 50
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \

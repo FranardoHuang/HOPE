@@ -96,11 +96,12 @@ if (
     )
     or len({spec.command_name for spec in PADDLE_MOTION_PRIOR_SPECS}) != 1
     or any(
-        float(spec.scale_in_strike_window) != 1.0
+        float(spec.scale_during_playback)
+        != reward_contract.PADDLE_MOTION_PRIOR_PLAYBACK_SCALE
         for spec in PADDLE_MOTION_PRIOR_SPECS
     )
 ):
-    raise RuntimeError("paddle pack requires the full-strength ordered contract")
+    raise RuntimeError("paddle pack requires the ordered playback-scaled contract")
 
 R03_PRESENT = 1 << 0
 R03_PHYSICALLY_VALID = 1 << 1
@@ -586,9 +587,39 @@ class LeanActionEpochRewardGraph:
                 env, PADDLE_MOTION_PRIOR_SPECS[0].command_name
             )
             errors = tracking_errors(cmd)
+            # Motion's phase is part of the reward definition now, not
+            # optional telemetry.  Resolve it once from the unique owner and
+            # reject malformed/missing state before any dense row is paid.
+            motion = cmd._motion()
+            accessor = getattr(
+                motion, "action_ball_full_mdp_playback_active_mask", None
+            )
+            if not callable(accessor):
+                raise RuntimeError(
+                    "Motion lacks its public FullMDP playback-active accessor"
+                )
+            playback_active = accessor()
+            if (
+                type(playback_active) is not torch.Tensor
+                or tuple(playback_active.shape) != (self.num_envs,)
+                or playback_active.device != self.device
+                or playback_active.dtype is not torch.bool
+                or not playback_active.is_contiguous()
+            ):
+                raise RuntimeError("Motion playback Reward ABI differs")
+            if (
+                type(errors) is not torch.Tensor
+                or tuple(errors.shape)
+                != (self.num_envs, len(PADDLE_MOTION_PRIOR_SPECS))
+                or errors.device != self.device
+                or errors.dtype is not torch.float32
+                or not errors.is_contiguous()
+            ):
+                raise RuntimeError("Motion paddle-error Reward ABI differs")
+
             # Keep the adopted four scalar kernel expressions bitwise exact on
             # CUDA while sharing the materially larger teacher/error decode.
-            value = tuple(
+            base_value = tuple(
                 paddle_prior.coarse_precision_kernel(
                     errors[:, column],
                     precision_std=spec.std,
@@ -596,40 +627,15 @@ class LeanActionEpochRewardGraph:
                 )
                 for column, spec in enumerate(PADDLE_MOTION_PRIOR_SPECS)
             )
-            try:
-                motion = cmd._motion()
-                accessor = getattr(
-                    motion, "action_ball_full_mdp_playback_active_mask", None
+            cached = tuple(
+                torch.where(
+                    playback_active,
+                    value * float(spec.scale_during_playback),
+                    value,
                 )
-                if not callable(accessor):
-                    raise RuntimeError(
-                        "Motion lacks its public FullMDP playback-active accessor"
-                    )
-                candidate = accessor()
-                if (
-                    type(candidate) is not torch.Tensor
-                    or tuple(candidate.shape) != (self.num_envs,)
-                    or candidate.device != self.device
-                    or candidate.dtype is not torch.bool
-                    or not candidate.is_contiguous()
-                ):
-                    raise RuntimeError("Motion playback telemetry ABI differs")
-                if (
-                    type(errors) is not torch.Tensor
-                    or tuple(errors.shape)
-                    != (self.num_envs, len(PADDLE_MOTION_PRIOR_SPECS))
-                    or errors.device != self.device
-                    or errors.dtype is not torch.float32
-                    or not errors.is_contiguous()
-                ):
-                    raise RuntimeError("Motion paddle-error telemetry ABI differs")
-                playback_active, telemetry_errors = candidate, errors
-            except Exception:
-                # This denominator is diagnostic only.  Reward remains the
-                # exact measured-paddle pack even when telemetry is absent.
-                playback_active = None
-                telemetry_errors = None
-            cached = value
+                for value, spec in zip(base_value, PADDLE_MOTION_PRIOR_SPECS)
+            )
+            telemetry_errors = errors
             self._paddle_reward_cycle_cache = cached
         column = ordinal - first
         return (
@@ -1089,9 +1095,9 @@ def paddle_motion_prior_reward(
     command_name: str,
     std: float,
     coarse_std: float,
-    scale_in_strike_window: float,
+    scale_during_playback: float,
 ) -> torch.Tensor:
-    """Evaluate one full-phase official-site motion prior and record its row."""
+    """Pay the baseline prior everywhere and its stronger value during playback."""
 
     first = PADDLE_MOTION_PRIOR_FIRST_ORDINAL
     if type(ordinal) is not int or not first <= ordinal < REGULARIZATION_FIRST_ORDINAL:
@@ -1109,23 +1115,29 @@ def paddle_motion_prior_reward(
         ).hex()
         != spec.coarse_std.hex()
         or _positive_host_number(
-            scale_in_strike_window,
-            label=spec.manager_name + " strike-window scale",
+            scale_during_playback,
+            label=spec.manager_name + " playback scale",
         ).hex()
-        != float(spec.scale_in_strike_window).hex()
+        != float(spec.scale_during_playback).hex()
     ):
         raise LeanRewardConstructionHold(
             "paddle motion-prior term parameters differ"
         )
     binding = _env_reward_hot_path(env)
-    value, playback_active, paddle_error_components = (
-        binding.graph.paddle_motion_prior_cycle_value(
-            env,
-            ordinal=ordinal,
-            command_lookup=binding.paddle_command_lookup,
-            tracking_errors=binding.paddle_tracking_errors,
+    try:
+        value, playback_active, paddle_error_components = (
+            binding.graph.paddle_motion_prior_cycle_value(
+                env,
+                ordinal=ordinal,
+                command_lookup=binding.paddle_command_lookup,
+                tracking_errors=binding.paddle_tracking_errors,
+            )
         )
-    )
+    except BaseException as exc:
+        binding.graph._poison(
+            "paddle playback-scaled reward failed: " + type(exc).__name__
+        )
+        raise
     return binding.dispatcher(
         env,
         ordinal=ordinal,
@@ -1428,10 +1440,8 @@ def materialize_reward_manager_cfg(
                 raise LeanRewardConstructionHold(
                     name + " dense body scope is unknown"
                 )
-            if spec.scale_in_strike_window is not None:
-                params["scale_in_strike_window"] = (
-                    spec.scale_in_strike_window
-                )
+            if spec.scale_during_playback is not None:
+                params["scale_during_playback"] = spec.scale_during_playback
         result[name] = reward_term_type(
             func=REWARD_TERM_CALLABLES[ordinal], weight=weight, params=params
         )

@@ -21,6 +21,11 @@ fixed tape仍把shared initial state、joint order、action decoder与qdes对齐
 独立检查；所以没有“Pod整体装坏”的证据。剩余first-divergence仍属于implicit PhysX drive与显式Mu PD、
 friction/contact/integrator响应，需同tape plant字段对签，不能用policy或额外Gate掩盖。
 
+`11:57:06Z`的同分母刷新进一步把4× Mu判负：ACK0..423新/旧selected contact=`1/332`，但这是同一Mu
+backend内的Reward经济反例，不是sim2sim差异。后继只在playback-active行增强paddle kernel，先分别在两端
+做exact fixed-action与fresh learning；三卡未自然空闲前保持`未测`。现有snapshot无resume authority，不能
+用旧checkpoint跳过fresh对照或把Build4 warm-start混进跨引擎判定。
+
 当前repo部署合同也不等于跨机parity：一次性EULA/隐私setup事实不再被错做成per-run Gate；setup已删除
 环境path discovery，GL由caller显式绑定、核SONAME并记录观察SHA。最新`bb0be1a2`从全新exact checkout完成
 真实Kit fixed-action：0 done/timeout，action/state SHA与既有基线逐字一致，checkout clean且GPU/lock释放；

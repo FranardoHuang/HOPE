@@ -77,8 +77,16 @@ due/launch/R03-valid/raw/selected/legal-landing=`11,105/6,594/4,348/0/0/0`。因
 recovery success=`0/132,376 eligible`。Isaac到ACK560，长期mimic三好一坏，但`51,300 physical launch`后仍
 `0 R03-valid / 0 selected contact`。两端fault/nonfinite/conservation继续为0。故现在已有充分分母判定Mu
 landing/recovery和Isaac mimic→hit交接失败，不再写“太早”；这不是自动Stage Gate，也不支持新增Observation。
-按已记录的因果顺序，下一fresh学习轴只将四项direct-paddle weight从`1/1/1/.5`同比例提高为`4/4/4/2`；
-coarse/precision核、fixed LR、Observation、课程和plant全不变。该数值只有matched未来窗改善才会被采用。
+随后matched ACK0..423已经否决无条件`4/4/4/2`：新/旧raw contact=`42/1,627`、selected=`1/332`、
+crossing=`0/279`，即使三项累计mimic误差略好，真实hit入口仍被显著破坏。代码复核显示四倍manager weight
+在pre-playback ready hold也支付最高`14`，形成不必要的容易局部经济。下一fresh只恢复baseline manager
+weight=`1/1/1/.5`，并在Motion唯一真源的playback-active行把同kernel乘`4`；PPO/Observation/due/plant/
+regularization/事实源全不变，不增加Stage或Gate。该候选仍须Pod exact与fresh matched才可采用。
+
+Build4 mandatory warm-start仍是混杂而非可复制答案：当前`model_2000.pt`明确
+`checkpoint_authority=false/resume_authority=false`，FullMDP也没有完整env/owner/WAL cold consumer。
+因此不写权重提取器或翻metadata；若以后实现diagnostic numerical continuation，必须新schema/new namespace/
+parent SHA并明确环境不连续，不能叫exact resume。本轮优先闭合已经量到的Reward经济，不再扩建状态机。
 
 同源`4cd30d63`的profiler-off `512×H48×61`自然完成，50 measured updates p50/p90=
 `14.720/19.377 s`，receipt/log SHA=`1d7508bc…415c` / `94c321b1…481a`。该值与上一版

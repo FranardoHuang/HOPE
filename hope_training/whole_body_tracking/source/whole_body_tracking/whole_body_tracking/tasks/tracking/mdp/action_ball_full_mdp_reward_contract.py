@@ -43,7 +43,7 @@ class DenseRewardSpec(NamedTuple):
     std: float
     body_scope: Optional[str] = None
     coarse_std: Optional[float] = None
-    scale_in_strike_window: Optional[float] = None
+    scale_during_playback: Optional[float] = None
 
 
 class RegularizationRewardSpec(NamedTuple):
@@ -150,58 +150,56 @@ COMMON_DENSE_SPECS = (
     ),
 )
 
-# The first Reward28 lineage capped the four direct paddle channels at 3.5,
-# below the 6.0 cap of the anchor/body imitation terms.  Matched fresh runs
-# then reached large playback/launch denominators while remaining about
-# 0.16--0.20 m from the teacher paddle and almost never contacting the ball.
-# This successor changes one learning axis only: multiply all four direct
-# paddle channels by four.  Their relative 1/1/1/.5 economy, kernels, clocks,
-# observations, curriculum, and regularization stay unchanged.  The resulting
-# 14.0 cap makes paddle accuracy the primary imitation objective while staying
-# well below Build4's confounded 14/14/5 total of 33.
-# The contact target is constructed from the same measured motion row, so the
-# prior remains full strength through the strike window instead of creating a
-# timing hole before the one-tick lifecycle target is paid.  ``std`` is the
-# physically anchored precision width and ``coarse_std`` is exactly four times
-# wider.  The evaluator mixes their exponential/Cauchy kernels 50/50, so every
-# term still peaks at one and the four-channel cap is exactly 14.0.
-PADDLE_MOTION_PRIOR_WEIGHT_SCALE = 4.0
+# A matched fresh run falsified the first successor's unconditional 4x manager
+# weights: it improved three aggregate paddle residuals but collapsed selected
+# contact from 332 to 1 by update 423.  The fault was structural, not a request
+# for another scalar search.  The same high-value paddle objective paid while
+# Motion still held the easy ready pose, so the learner could strengthen a
+# pre-task local optimum before the first dynamic teacher row appeared.
+#
+# Keep the original 1/1/1/.5 full-phase prior so ready/balance retains the
+# already observed baseline economy, then multiply the *same* four kernels by
+# four only on Motion-owned playback rows.  This is a reward eligibility shape,
+# not a hard training stage: the network, observation, task, and all rewards are
+# present from rollout zero, and playback opens naturally at the existing due
+# transition.  The dynamic cap is 14.0 while the ready cap remains 3.5.
+PADDLE_MOTION_PRIOR_PLAYBACK_SCALE = 4.0
 PADDLE_MOTION_PRIOR_SPECS = (
     DenseRewardSpec(
         "motion_racket_position",
         "motion_racket_position_tracking_cauchy",
-        1.0 * PADDLE_MOTION_PRIOR_WEIGHT_SCALE,
+        1.0,
         "racket_target",
         0.075,
         coarse_std=0.30,
-        scale_in_strike_window=1.0,
+        scale_during_playback=PADDLE_MOTION_PRIOR_PLAYBACK_SCALE,
     ),
     DenseRewardSpec(
         "motion_racket_velocity",
         "motion_racket_velocity_tracking_cauchy",
-        1.0 * PADDLE_MOTION_PRIOR_WEIGHT_SCALE,
+        1.0,
         "racket_target",
         0.50,
         coarse_std=2.0,
-        scale_in_strike_window=1.0,
+        scale_during_playback=PADDLE_MOTION_PRIOR_PLAYBACK_SCALE,
     ),
     DenseRewardSpec(
         "motion_racket_normal",
         "motion_racket_normal_tracking_cauchy",
-        1.0 * PADDLE_MOTION_PRIOR_WEIGHT_SCALE,
+        1.0,
         "racket_target",
         0.2617993877991494,
         coarse_std=1.0471975511965976,
-        scale_in_strike_window=1.0,
+        scale_during_playback=PADDLE_MOTION_PRIOR_PLAYBACK_SCALE,
     ),
     DenseRewardSpec(
         "motion_racket_long_axis",
         "motion_racket_long_axis_tracking_cauchy",
-        0.5 * PADDLE_MOTION_PRIOR_WEIGHT_SCALE,
+        0.5,
         "racket_target",
         0.17453292519943295,
         coarse_std=0.6981317007977318,
-        scale_in_strike_window=1.0,
+        scale_during_playback=PADDLE_MOTION_PRIOR_PLAYBACK_SCALE,
     ),
 )
 
@@ -236,7 +234,7 @@ __all__ = [
     "REGULARIZATION_MARGIN_FLOOR_FRAC",
     "LIFECYCLE_MANAGER_NAMES",
     "COMMON_DENSE_SPECS",
-    "PADDLE_MOTION_PRIOR_WEIGHT_SCALE",
+    "PADDLE_MOTION_PRIOR_PLAYBACK_SCALE",
     "PADDLE_MOTION_PRIOR_SPECS",
     "COMMON_DENSE_NAMES",
     "PADDLE_MOTION_PRIOR_NAMES",

@@ -167,12 +167,18 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   它不增加actor observation、termination、Stage、owner、receipt或安全Gate。
 
 - <a id="fullmdp-reward28-direct-paddle-4x"></a>**`Reward28 direct-paddle 4x` / 二十八项直接球拍四倍经济后继合同**：
-  保持Reward28的28个term、四个coarse+precision核、PPO V6、Observation V3、自然重叠课程、plant、
-  regularization与全部事件定义，只把四项measured-paddle manager weight从`1/1/1/.5`同比例改为
-  `4/4/4/2`。四通道最高收入由`3.5`变为`14`，高于anchor+body mimic的`6`，但低于Build4混杂配方的
-  `14/14/5`总量`33`。这是由现役fixed-LR长期窗中Mu约`.16 m`、Isaac约`.20 m`拍心误差和极低/零接触
-  触发的单一学习轴，不是安全Gate、Stage、warm-start、replay、sigma、Observation或kernel-width改动；
-  是否采用只由fresh matched未来窗的真实paddle误差、`selected contact / launch`、balance和fault分母裁决。
+  已否决的历史单轴：保持Reward28其余定义，只把四项measured-paddle manager weight从`1/1/1/.5`
+  同比例改为`4/4/4/2`，因此ready hold与真实playback都同样取得最高`14`。fresh Mu matched ACK0..423虽使
+  三项累计paddle误差略好，却把raw/selected contact从旧baseline的`1,627/332`压到`42/1`；不能采用，
+  也不能再用total return或更多step粉饰。该名字只用于读历史negative证据。
+
+- <a id="fullmdp-reward28-playback-scaled-paddle"></a>**`Reward28 playback-scaled paddle` / 二十八项回放期增强球拍经济合同**：
+  保留四项manager weight=`1/1/1/.5`，所以ready/balance阶段仍是已观察baseline的最高`3.5`；只在Motion
+  唯一真源报告真实teacher playback active的行，把同一个coarse+precision kernel乘`4`，动态回放期最高
+  `14`。它不是离散Stage或success Gate：网络、Observation、任务和全部Reward从rollout 0都存在，增强项
+  随原有due→playback状态机自然出现。它消除“先用高收入反复强化容易ready pose、动态teacher尚未出现”
+  的可避免局部经济冲突；是否采用仍只由fresh matched的mimic误差、`raw/selected contact / launch`、
+  balance和fault分母裁决。
 
 - <a id="fullmdp-v6-candidate"></a>**`fullmdp-a-h48-v6-*` / FullMDP第六批最小学习闭环lineage**：
   2026-08-25以PPO V5、Reward24、Observation V3、四次真实cadence、terminal-overlap跨writer合成、

@@ -124,8 +124,11 @@ CONSTRAINTS="$STACK_REPO/configs/action_ball_isaac51_external_venv_constraints_2
 
 新机仍需人类合法下载上述Isaac Sim zip并在安装期建立一次EULA/隐私authority；仓库不能替人同意许可。
 当前两个FullMDP launcher只支持`/workspace`下的fresh run root；这是显式机器前置约束，不是path
-autodiscovery。每张GPU还需在provisioning时用`install -m 0600 /dev/null /tmp/hope_lean_queue_gpuN.lock`
-创建普通owner-only lock file，launcher只核验并持有它，不静默生成。
+autodiscovery。每张GPU还需在provisioning时对不存在的pathname执行
+`LOCK_PATH=/tmp/hope_lean_queue_gpuN.lock; test ! -e "$LOCK_PATH";`
+`(umask 077; set -o noclobber; : > "$LOCK_PATH")`，随后核regular file、非symlink与`0600`权限。
+已存在时必须停下核进程，不能用`install`替换/截断正在被trainer锁住的inode；`/tmp`重启清空后仅在GPU
+没有trainer时重建。launcher只核验并持有该文件，不静默生成。
 Ubuntu Noble安装两项系统GL包后，launcher检查规范regular file与direct SONAME并把观察到的路径/SHA写进
 dry-run及完成JSON，不再把Noble字节SHA误当跨Ubuntu版本不变的学习身份。不同受支持发行版可以有不同GL
 bytes，但必须通过真实Kit probe；这比复制Franco私有GL目录或继续堆一个无信息Gate更直接。

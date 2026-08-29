@@ -1,5 +1,19 @@
 # 简短进度记录
 
+## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
+
+- fresh 4× Mu到ACK423后，matched旧Mu的raw/selected/crossing=`42/1/0` vs `1,627/332/279`；这已否决
+  无条件`4/4/4/2`，不是早期或工程fault。下一候选恢复full-phase `1/1/1/.5`，只在Motion-owned真实
+  playback行把同一kernel乘`4`，消除ready hold先吃满高收入的局部经济；不增加Stage/Gate/obs。
+- 旧Mu/Isaac刷新到ACK2232/763：前者legal=`0/665 selected`、recovery=`0/208,696`，后者
+  `0 R03 / 80,173 launch`。分别确认hit→landing/recovery和mimic→hit交接失败；landing无selected的格仍写
+  `未测`，不看total return粉饰。
+- checkpoint自查确认现有snapshot只有model/optimizer/iter且明确无resume authority；缺env/owner/RNG/WAL
+  consumer。旧`model_2000.pt`继续硬拒绝，不为仿Build4写extractor。R06候选只抽同义candidate-grid helper并
+  删除死参数，不在GPU profile前合并不同事务。
+- 新机文档把GPU lock provisioning改为absent+`noclobber`，避免重写正在持锁的inode；RSL3主恢复源改为
+  public exact PyPI wheel，Pod路径只作备用；G05旧2026-06-26命令标成历史并路由到machine-local EULA/privacy。
+
 ## 2026-08-29 — 可重建环境、R06 control-boundary减法与训练裁决
 
 - `e14b7141`把Mu Python3.12.3基础环境收成133项tracked lock；Pod fresh resolver精确闭合`131+2`项。
