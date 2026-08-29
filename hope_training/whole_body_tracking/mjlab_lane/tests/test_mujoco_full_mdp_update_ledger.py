@@ -983,9 +983,10 @@ def test_prepare_rejects_named_recovery_completion_fault_with_invalid_contact():
         _prepare(ledger, 0, environment_steps=1)
 
 
-@pytest.mark.parametrize("cause_name,bit", (
-    (name, bit) for name, bit in _load().FACT_INTEGRITY_CAUSES
-))
+@pytest.mark.parametrize(
+    "cause_name,bit",
+    tuple((name, bit) for name, bit in _load().FACT_INTEGRITY_CAUSES),
+)
 def test_prepare_rejects_each_named_fact_integrity_cause_before_optimizer(
     cause_name, bit
 ):
