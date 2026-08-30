@@ -3655,12 +3655,16 @@ def test_motion_playback_publication_does_not_clone_the_full_epoch_record(
     monkeypatch.setattr(E.ActionEpochRecord, "clone", forbidden_record_clone)
 
     started = epoch.publish_motion_playback_started(owner=playback)
-    assert type(playback.projection) is E.ActionEpochMotionPlaybackProjection
+    assert type(playback.projection) is E.ActionEpochCurrentShotProjection
+    assert (
+        E.ActionEpochMotionPlaybackProjection
+        is E.ActionEpochCurrentShotProjection
+    )
     assert tuple(field.name for field in fields(playback.projection)) == (
-        "current_task_slot",
+        "slot_valid",
         "phase",
-        "selected_mask",
         "shot_key",
+        "publication_ordinal",
     )
     assert type(started) is torch.Tensor
     assert started.dtype is torch.bool
@@ -3671,6 +3675,18 @@ def test_motion_playback_publication_does_not_clone_the_full_epoch_record(
         [True],
         [False],
     ]
+    phase_before_hostile_projection_write = (
+        epoch._publication.current.phase.clone()
+    )
+    playback.projection.slot_valid.zero_()
+    playback.projection.phase.fill_(777)
+    playback.projection.publication_ordinal.fill_(888)
+    for field in fields(E.ActionEpochShotKey):
+        getattr(playback.projection.shot_key, field.name).fill_(999)
+    current = epoch._publication.current
+    assert current is not None
+    assert torch.equal(current.phase, phase_before_hostile_projection_write)
+    assert current.motion_playback_started.tolist() == [[True], [False]]
 
 
 @pytest.mark.parametrize(
