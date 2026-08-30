@@ -448,6 +448,7 @@ def _compose_recurring_question_projection(
         active_ttc = compact(ttc)
         active_draw_u01 = compact(draw_u01)
         active_candidate_identity = compact(candidate_identity)
+        active_reveal_tick_row = compact(cadence.reveal_tick)
         active_contact_tick = compact(contact_tick)
 
         # Sampling remains the Isaac adapter's cadence/RNG responsibility.
@@ -510,6 +511,9 @@ def _compose_recurring_question_projection(
             base_goal_xy_m=_flat_round_cells(base_goal),
             time_to_contact_s=_flat_round_cells(
                 _expand_round_cells(active_ttc, rounds, support)
+            ),
+            reveal_tick=_flat_round_cells(
+                _expand_round_cells(active_reveal_tick_row, rounds, support)
             ),
             contact_tick=_flat_round_cells(active_contact_tick),
             teacher_rate_min=_flat_round_cells(

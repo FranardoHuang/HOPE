@@ -123,6 +123,7 @@ def solve_fixed_action_question_device(
     mount_normal_sign: torch.Tensor,
     base_goal_xy_m: torch.Tensor,
     time_to_contact_s: torch.Tensor,
+    reveal_tick: torch.Tensor,
     contact_tick: torch.Tensor,
     teacher_rate_min: torch.Tensor,
     teacher_rate_max: torch.Tensor,
@@ -189,6 +190,7 @@ def solve_fixed_action_question_device(
     for name, value in (
         ("action_slot", action_slot),
         ("candidate_identity", candidate_identity),
+        ("reveal_tick", reveal_tick),
         ("contact_tick", contact_tick),
     ):
         if (
@@ -260,6 +262,7 @@ def solve_fixed_action_question_device(
     physical = _physical.solve_max_final_segment_device(
         physical_batch,
         candidate_identity=candidate_identity,
+        reveal_tick=reveal_tick,
         contact_tick=contact_tick,
         params=physical_params,
         config=physical_config,

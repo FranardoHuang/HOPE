@@ -54,6 +54,34 @@ def _physical_owner():
     )
 
 
+def _full_horizon_physical_tape():
+    params = physical.PhysicalQuestionFlightParams(
+        k_d=0.0,
+        k_m=0.0,
+        g=9.81,
+        ball_radius_m=0.02,
+    )
+    config = physical.PhysicalQuestionNumericConfig(
+        motion_tick_s=0.02,
+        integration_substeps_per_motion_tick=2,
+        max_final_segment_motion_ticks=30,
+        table_surface_z_m=0.76,
+    )
+    batch = physical.PhysicalQuestionCandidateBatch(
+        candidate_identity=torch.tensor([501], dtype=torch.int64),
+        contact_position_env_m=torch.tensor(
+            [[0.0, 0.0, 5.0]], dtype=torch.float32
+        ),
+        incoming_linear_velocity_world_mps=torch.tensor(
+            [[-1.0, 0.0, 0.0]], dtype=torch.float32
+        ),
+        incoming_angular_velocity_world_radps=torch.zeros(
+            (1, 3), dtype=torch.float32
+        ),
+    )
+    return batch, params, config
+
+
 def _bundle_harness(*, num_envs: int = 2, angular_velocity_z_radps=None):
     # timing_test's structural fixture puts the racket at z=0 and seals that
     # cold table immediately.  Delay only that seal so this question fixture
@@ -370,10 +398,12 @@ def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypat
     )
     receipt = harness.physical_owner.issue_horizon_for_test(legacy_batch)
     horizon = harness.physical_owner.project_horizon_for_test(receipt)
+    legacy_reveal_tick = original_kwargs["reveal_tick"].reshape(1, 3, 3)
     legacy_contact_tick = original_kwargs["contact_tick"].reshape(1, 3, 3)
+    legacy_remaining_tick = legacy_contact_tick - legacy_reveal_tick
     legacy_horizon = torch.minimum(
         horizon.max_feasible_motion_ticks,
-        legacy_contact_tick.clamp(min=0),
+        (legacy_remaining_tick - 1).clamp(min=0),
     ).contiguous()
     legacy_launch_tick = (legacy_contact_tick - legacy_horizon).contiguous()
     legacy = harness.physical_owner.finalize_exact_ticks_for_test(
@@ -429,6 +459,69 @@ def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypat
     assert bool(both.any())
     assert not torch.equal(
         result.racket_task_f32[both], speed_result.racket_task_f32[both]
+    )
+
+
+def test_physical_launch_horizon_is_reveal_relative_and_keeps_current_n1_bytes():
+    batch, params, config = _full_horizon_physical_tape()
+    current_reveal = torch.tensor([48], dtype=torch.int64)
+    current_contact = current_reveal + 92
+    current = physical.solve_max_final_segment_device(
+        batch,
+        candidate_identity=batch.candidate_identity,
+        reveal_tick=current_reveal,
+        contact_tick=current_contact,
+        params=params,
+        config=config,
+    )
+    assert current.max_feasible_motion_ticks.tolist() == [30]
+    assert current.chosen_horizon_ticks.tolist() == [30]
+    assert current.launch_tick.tolist() == [110]
+
+    # The adopted N1 row has 92 ticks remaining, so the strict reveal-relative
+    # cap cannot alter its legacy 30-tick launch state or any float32 byte.
+    owner = physical.make_test_physical_question_numeric_core(
+        params=params, config=config
+    )
+    receipt = owner.issue_horizon_for_test(batch)
+    legacy = owner.finalize_exact_ticks_for_test(
+        receipt,
+        candidate_identity=batch.candidate_identity,
+        contact_tick=current_contact,
+        launch_tick=current_contact - 30,
+    )
+    assert torch.equal(
+        current.physical_state_f32.view(torch.uint8),
+        legacy.physical_state_f32.view(torch.uint8),
+    )
+    assert torch.equal(
+        current.effective_contact_horizon_s.view(torch.uint8),
+        legacy.effective_contact_horizon_s.view(torch.uint8),
+    )
+
+    # Future cadence counterexample: absolute contact=253 used to choose all
+    # 30 ticks and launch at 223, ten ticks before reveal=233.  The strict Mu
+    # semantics ttc_ticks > launch_horizon_ticks instead choose 19 and launch
+    # one tick after reveal.
+    short_reveal = torch.tensor([233], dtype=torch.int64)
+    short_contact = short_reveal + 20
+    short = physical.solve_max_final_segment_device(
+        batch,
+        candidate_identity=batch.candidate_identity,
+        reveal_tick=short_reveal,
+        contact_tick=short_contact,
+        params=params,
+        config=config,
+    )
+    assert short.max_feasible_motion_ticks.tolist() == [30]
+    assert short.chosen_horizon_ticks.tolist() == [19]
+    assert short.launch_tick.tolist() == [234]
+    assert torch.all(short.launch_tick.gt(short_reveal))
+    assert torch.all(
+        (short_contact - short_reveal).gt(short.chosen_horizon_ticks)
+    )
+    assert torch.all(
+        short.construction_reason.eq(physical.CONSTRUCTION_REASON_ADMITTED)
     )
 
 
