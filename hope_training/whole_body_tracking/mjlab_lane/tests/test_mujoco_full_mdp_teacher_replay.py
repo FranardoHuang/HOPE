@@ -264,7 +264,7 @@ def test_direct_frame0_install_is_atomic_one_shot_and_preserves_shot_state():
     ("controller_history_exact", lambda env: env.actions.__setitem__((0, 0), 9.0)),
 ))
 def test_direct_frame0_install_returns_typed_atomic_failure_bits(
-    receipt_field, mutate
+    receipt_field, mutate, tmp_path
 ):
     env, _joint_q0, _forward_calls = _direct_frame0_install_rig()
     env._compute_obs = lambda: mutate(env)
@@ -273,6 +273,34 @@ def test_direct_frame0_install_returns_typed_atomic_failure_bits(
         torch.tensor([0], dtype=torch.long)
     )
     assert not bool(receipt[receipt_field][0])
+    arrays = _valid_direct_frame0_validation_arrays()
+    predicate = "direct_frame0_" + receipt_field
+    arrays[predicate][0, 0] = bool(receipt[receipt_field][0])
+    failure_root = tmp_path / receipt_field
+    failure_root.mkdir()
+    with pytest.raises(RuntimeError, match="payload_sha256="):
+        runner._validate_or_raise_direct_frame0(
+            arrays=arrays,
+            root=failure_root,
+            identity_context=_direct_frame0_failure_identity(),
+        )
+    artifact = failure_root / "direct_frame0_validation_failure.json"
+    persisted = json.loads(artifact.read_text())
+    assert persisted["validation"]["failed_predicates"] == [predicate]
+    row = persisted["validation"]["predicates"][predicate]
+    assert row["actual"] is False
+    assert row["expected"] is True
+    assert row["evaluated"] is True
+    assert "reason_not_evaluated" not in row
+    assert stat.S_IMODE(artifact.stat().st_mode) == 0o600
+    assert not (failure_root / "summary.json").exists()
+    assert not (failure_root / "teacher_replay.npz").exists()
+    with pytest.raises(FileExistsError):
+        runner._validate_or_raise_direct_frame0(
+            arrays=arrays,
+            root=failure_root,
+            identity_context=_direct_frame0_failure_identity(),
+        )
 
 
 def test_direct_frame0_actor_boundary_reports_real_park_drift_without_gating_it():
@@ -637,8 +665,7 @@ def test_direct_frame0_failure_artifact_precedes_trace_and_summary_writes():
     helper_source = inspect.getsource(runner._validate_or_raise_direct_frame0)
     assert helper_source.index("_write_direct_frame0_validation_failure") \
         < helper_source.index("raise RuntimeError")
-    assert failure_raise < trace_write < summary_write
-    assert "payload_sha256={failure_sha256}" in source
+    assert "payload_sha256={failure_sha256}" in helper_source
 
 
 def test_direct_frame0_expected_executable_comes_from_production_guard_trace():
