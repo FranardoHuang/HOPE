@@ -725,6 +725,15 @@ class ActionBallFullMdpLeanRuntimeOwner:
                         "Reward graph has unfinished actual-buffer accounting"
                     )
 
+                publish_physical_faults = self._bound_plain_method(
+                    self._physical_ball,
+                    "publish_action_epoch_runtime_faults_for_ppo",
+                )
+                publish_physical_faults(
+                    expected_activity_control_step=(
+                        self._last_before_policy_control_step + 1
+                    )
+                )
                 start, end = self._epoch.prepare_drain()
                 if start != self._acked_commit_end:
                     self._poison_locked(
@@ -1264,7 +1273,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     raise
                 refresh_activity = self._bound_plain_method(
                     self._physical_ball,
-                    "refresh_action_epoch_host_activity",
+                    "refresh_action_epoch_device_activity",
                 )
                 if refresh_activity(next_control_step=step + 1) is not None:
                     raise ActionBallFullMdpLeanRuntimeError(
@@ -1272,21 +1281,20 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     )
                 read_activity = self._bound_plain_method(
                     self._physical_ball,
-                    "action_epoch_host_activity_verdict",
+                    "action_epoch_device_activity_projection",
                 )
                 activity = read_activity(control_step=step + 1)
                 # Fresh Racket compute deliberately never arms R03.  This is
                 # the sole callpoint, after the possible D05 epoch change, for
                 # genesis, ordinary not-due cadence and due reveal alike.
-                if activity.transport_work:
-                    arm = self._bound_plain_method(
-                        self._racket,
-                        "arm_action_ball_full_mdp_epoch_strike_fact",
+                arm = self._bound_plain_method(
+                    self._racket,
+                    "arm_action_ball_full_mdp_epoch_strike_fact",
+                )
+                if arm(activity_rows=activity.transport_rows) is not None:
+                    raise ActionBallFullMdpLeanRuntimeError(
+                        "Racket epoch strike-fact arm must return None"
                     )
-                    if arm() is not None:
-                        raise ActionBallFullMdpLeanRuntimeError(
-                            "Racket epoch strike-fact arm must return None"
-                        )
                 if genesis:
                     self._genesis_after_command_completed = True
                 else:
@@ -1416,18 +1424,17 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     if substep == count - 1:
                         read_activity = self._bound_plain_method(
                             self._physical_ball,
-                            "action_epoch_host_activity_verdict",
+                            "action_epoch_device_activity_projection",
                         )
                         activity = read_activity(control_step=control)
-                        if activity.transport_work:
-                            racket_publish = self._bound_plain_method(
-                                self._racket,
-                                "publish_action_ball_full_mdp_epoch_strike_fact",
+                        racket_publish = self._bound_plain_method(
+                            self._racket,
+                            "publish_action_ball_full_mdp_epoch_strike_fact",
+                        )
+                        if racket_publish(source_step=control) is not None:
+                            raise ActionBallFullMdpLeanRuntimeError(
+                                "Racket epoch strike-fact publisher must return None"
                             )
-                            if racket_publish(source_step=control) is not None:
-                                raise ActionBallFullMdpLeanRuntimeError(
-                                    "Racket epoch strike-fact publisher must return None"
-                                )
                         # The recovery bit is the fixed task-close-relative
                         # producer window, independent of R06 outcome phase.
                         # Thus a selected-contact/no-crossing LAUNCH row still
@@ -1435,36 +1442,26 @@ class ActionBallFullMdpLeanRuntimeOwner:
                         # separately keeps pre-outcome payment at zero.  The
                         # Physical verdict is the sole row authority; idle/out
                         # of-window rows retain the neutral N/A stamp.
-                        full_r07 = activity.recovery_epoch_work
-                        recovery_method = (
-                            "publish_epoch_reward_facts"
-                            if full_r07
-                            else "stamp_epoch_idle_observation_without_keyed_facts"
-                        )
                         recovery_publish = self._bound_plain_method(
-                            self._r07_recovery, recovery_method
+                            self._r07_recovery, "publish_epoch_reward_facts"
                         )
-                        source_step = (
-                            torch.full(
-                                (self._epoch.num_envs,),
-                                control - 1,
-                                dtype=torch.int64,
-                                device=self._epoch.device,
-                            )
-                            if full_r07
-                            else control - 1
+                        source_step = torch.full(
+                            (self._epoch.num_envs,),
+                            control - 1,
+                            dtype=torch.int64,
+                            device=self._epoch.device,
                         )
                         if profile_call is None:
-                            recovery_publish(current_source_step=source_step)
+                            recovery_publish(
+                                current_source_step=source_step,
+                                activity_rows=activity.recovery_rows,
+                            )
                         else:
                             profile_call(
-                                (
-                                    "r07_idle_stamp"
-                                    if not full_r07
-                                    else "r07_keyed_publish"
-                                ),
+                                "r07_masked_publish",
                                 recovery_publish,
                                 current_source_step=source_step,
+                                activity_rows=activity.recovery_rows,
                             )
                         # Fresh FullMDP Motion advances from its own observable
                         # task/teacher events and deliberately does not consume

@@ -73,12 +73,17 @@ _ACTION_EPOCH_SUBSTEP_IDLE = "idle"
 
 
 @dataclass(frozen=True)
-class ActionEpochHostActivityVerdict:
-    """One control-bound host view from the existing packed activity sync."""
+class ActionEpochDeviceActivityProjection:
+    """One control-bound device projection for Racket and R07 consumers.
+
+    The masks stay on the simulation device for the whole rollout.  They are
+    scheduling facts, not health verdicts: sticky Physical faults join the
+    existing single packed Epoch drain immediately before the optimizer.
+    """
 
     control_step: int
-    transport_work: bool
-    recovery_epoch_work: bool
+    transport_rows: torch.Tensor
+    recovery_rows: torch.Tensor
 
 
 RUNTIME_INTEGRATED = False
@@ -2699,13 +2704,13 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._action_epoch_active_physics_fact_allocation: (
             ActionEpochPhysicsFactAllocationProjection | None
         ) = None
-        # One D2H reduction at the post-command control boundary decides
-        # whether the *next* control step has any Physical/R06/scene work.
-        # The per-substep pair kind remains host-only and may never cross a
-        # pre/post boundary.
-        self._action_epoch_host_activity_control_step: int | None = None
-        self._action_epoch_host_activity_has_work = True
-        self._action_epoch_host_activity_has_recovery_work = True
+        # Activity is a device-resident per-row projection.  The prior host
+        # scalar forced one CUDA synchronization per policy step merely to
+        # choose Python branches.  Racket/R07 now consume these masks directly;
+        # sticky faults are decoded by Epoch's one packed PPO-boundary drain.
+        self._action_epoch_device_activity_control_step: int | None = None
+        self._action_epoch_device_transport_rows: torch.Tensor | None = None
+        self._action_epoch_device_recovery_rows: torch.Tensor | None = None
         self._action_epoch_substep_pair: str | None = None
         self._action_epoch_empty_env_mask = torch.zeros(
             (self.num_envs,), dtype=torch.bool, device=self.device
@@ -3758,10 +3763,10 @@ class ActionBallPhysicalFlightDeviceOwner:
             ),
         )
 
-    def refresh_action_epoch_host_activity(
+    def refresh_action_epoch_device_activity(
         self, *, next_control_step: int
     ) -> None:
-        """Cache one multi-writer verdict after D05; synchronize exactly once."""
+        """Cache exact per-row activity after D05 without a host transfer."""
 
         self._require_operable(allow_diagnostic_scene_observation=True)
         if type(next_control_step) is not int or next_control_step < 1:
@@ -3792,16 +3797,16 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalEpochIntegrationHold(
                 "Physical activity refresh is stale, skipped, or replayed"
             )
-        if self._action_epoch_host_activity_control_step == next_control_step:
+        if self._action_epoch_device_activity_control_step == next_control_step:
             raise PhysicalEpochIntegrationHold(
                 "Physical activity refresh is stale, skipped, or replayed"
             )
 
-        # Fail dense if any part of the reduction raises.  A prior cached idle
-        # verdict can therefore never leak into a later control step.
-        self._action_epoch_host_activity_control_step = None
-        self._action_epoch_host_activity_has_work = True
-        self._action_epoch_host_activity_has_recovery_work = True
+        # Fail dense if any projection raises.  A prior device mask can never
+        # leak into a later control step.
+        self._action_epoch_device_activity_control_step = None
+        self._action_epoch_device_transport_rows = None
+        self._action_epoch_device_recovery_rows = None
         motion = self._current_action_epoch_motion_observation()
         current_tick = getattr(motion, "control_tick")
         pending = self._action_epoch_pending_launch
@@ -3856,7 +3861,7 @@ class ActionBallPhysicalFlightDeviceOwner:
                 device=self.device,
             )
             scene_work = scene_activity.any(dim=1)
-        transport_work = torch.any(physical_work | r06_work | scene_work)
+        transport_rows = physical_work | r06_work | scene_work
         epoch_owner = self._action_epoch_owner
         project_recovery = getattr(
             epoch_owner, "project_recovery_postphysics_activity_mask", None
@@ -3875,60 +3880,109 @@ class ActionBallPhysicalFlightDeviceOwner:
             dtype=torch.bool,
             device=self.device,
         )
-        recovery_epoch_work = torch.any(recovery_rows)
-        # Pack all activity facts plus all named fault classes into the one
-        # existing scalar.  No second device-to-host synchronization is added.
-        summary = transport_work.to(torch.int64)
-        summary += recovery_epoch_work.to(torch.int64) * 2
-        for ordinal, (bit, _name) in enumerate(
-            _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=2
-        ):
-            present = torch.any(
-                torch.bitwise_and(
-                    self._action_epoch_runtime_fault_bits, bit
-                ).ne(0)
-            )
-            summary += present.to(torch.int64) * (1 << ordinal)
-        host_summary = int(summary.item())
-        fault_names = tuple(
-            name
-            for ordinal, (_bit, name) in enumerate(
-                _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=2
-            )
-            if host_summary & (1 << ordinal)
+        self._action_epoch_device_transport_rows = (
+            transport_rows.detach().clone().contiguous()
         )
-        if fault_names:
-            self._poisoned = True
-            self._poison_reason = (
-                "Physical ActionEpoch runtime fault: " + ",".join(fault_names)
-            )
-            raise PhysicalEpochIntegrationHold(self._poison_reason)
-        self._action_epoch_host_activity_has_work = bool(host_summary & 1)
-        self._action_epoch_host_activity_has_recovery_work = bool(
-            host_summary & 2
+        self._action_epoch_device_recovery_rows = (
+            recovery_rows.detach().clone().contiguous()
         )
-        self._action_epoch_host_activity_control_step = next_control_step
+        self._action_epoch_device_activity_control_step = next_control_step
 
-    def action_epoch_host_activity_verdict(
+    def action_epoch_device_activity_projection(
         self, *, control_step: int
-    ) -> ActionEpochHostActivityVerdict:
-        """Return the already-synchronized facts for one exact control step."""
+    ) -> ActionEpochDeviceActivityProjection:
+        """Return clone-only device masks for one exact control step."""
 
         if type(control_step) is not int or control_step < 1:
             raise PhysicalEpochIntegrationHold(
                 "Physical activity verdict control step differs"
             )
-        if self._action_epoch_host_activity_control_step != control_step:
+        transport = self._action_epoch_device_transport_rows
+        recovery = self._action_epoch_device_recovery_rows
+        if (
+            self._action_epoch_device_activity_control_step != control_step
+            or type(transport) is not torch.Tensor
+            or type(recovery) is not torch.Tensor
+            or transport.dtype != torch.bool
+            or recovery.dtype != torch.bool
+            or transport.device != self.device
+            or recovery.device != self.device
+            or tuple(transport.shape) != (self.num_envs,)
+            or tuple(recovery.shape)
+            != (self.num_envs, self._action_epoch_owner.shot_slot_capacity)
+        ):
             raise PhysicalEpochIntegrationHold(
-                "Physical activity verdict is absent, stale, or replayed"
+                "Physical activity projection is absent, stale, or replayed"
             )
-        return ActionEpochHostActivityVerdict(
+        return ActionEpochDeviceActivityProjection(
             control_step=control_step,
-            transport_work=self._action_epoch_host_activity_has_work,
-            recovery_epoch_work=(
-                self._action_epoch_host_activity_has_recovery_work
+            transport_rows=transport.detach().clone(),
+            recovery_rows=recovery.detach().clone(),
+        )
+
+    def publish_action_epoch_runtime_faults_for_ppo(
+        self, *, expected_activity_control_step: int
+    ) -> None:
+        """Join sticky Physical causes into Epoch before its one packed D2H."""
+
+        self._require_operable(allow_diagnostic_scene_observation=True)
+        if (
+            type(expected_activity_control_step) is not int
+            or expected_activity_control_step < 1
+            or self._action_epoch_device_activity_control_step
+            != expected_activity_control_step
+        ):
+            raise PhysicalEpochIntegrationHold(
+                "Physical runtime-fault PPO projection source step differs"
+            )
+        if any(
+            value is not None
+            for value in (
+                self._action_epoch_substep_pair,
+                self._action_epoch_active_scene_write,
+                self._action_epoch_active_r06_launch,
+                self._action_epoch_active_r06_postphysics,
+                self._action_epoch_active_physics_fact_allocation,
+                self._active_postphysics_capture,
+                self._active_postphysics_capture_image,
+            )
+        ):
+            raise PhysicalEpochIntegrationHold(
+                "Physical runtime-fault PPO projection crossed active work"
+            )
+        try:
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_full_mdp_epoch as epoch,
+            )
+        except ImportError:
+            import action_ball_full_mdp_epoch as epoch
+        reason_map = (
+            (
+                _ACTION_EPOCH_RUNTIME_FAULT_ACCEPT_NOT_LAUNCHABLE,
+                epoch.ROW_FAULT_PHYSICAL_ACCEPT_NOT_LAUNCHABLE,
+            ),
+            (
+                _ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST,
+                epoch.ROW_FAULT_PHYSICAL_DUE_IDENTITY_LOST,
+            ),
+            (
+                _ACTION_EPOCH_RUNTIME_FAULT_R06_RETIRE_MISMATCH,
+                epoch.ROW_FAULT_PHYSICAL_R06_RETIRE_MISMATCH,
+            ),
+            (
+                _ACTION_EPOCH_RUNTIME_FAULT_MISSED_LAUNCH_TICK,
+                epoch.ROW_FAULT_PHYSICAL_MISSED_LAUNCH_TICK,
             ),
         )
+        for source_bit, epoch_bit in reason_map:
+            self._action_epoch_owner.latch_runtime_row_fault(
+                "physical_ball",
+                epoch_bit,
+                torch.bitwise_and(
+                    self._action_epoch_runtime_fault_bits, source_bit
+                ).ne(0),
+                owner=self,
+            )
 
     def _action_epoch_expected_control(
         self, *, require_control_boundary: bool
@@ -3949,7 +4003,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalEpochIntegrationHold(
                 "Physical pre-physics call crossed an unconsumed post pair"
             )
-        cached_control = self._action_epoch_host_activity_control_step
+        cached_control = self._action_epoch_device_activity_control_step
         if cached_control is None:
             return False
         if cached_control != self._action_epoch_expected_control(
@@ -3958,7 +4012,10 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalEpochIntegrationHold(
                 "Physical cached activity control step is stale"
             )
-        return not self._action_epoch_host_activity_has_work
+        # A device mask cannot authorize a Python branch without synchronizing.
+        # Keep the exact chronology check and conservatively execute the
+        # branchless masked dense path.
+        return False
 
     def launch_action_epoch(self) -> None:
         """Launch full-N pending rows whose exact Motion-owned tick is due."""
@@ -10621,9 +10678,9 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._action_epoch_flight_previous_ball_center_m.copy_(
                 direct_after.flight_previous_ball_center_m
             )
-            self._action_epoch_host_activity_control_step = None
-            self._action_epoch_host_activity_has_work = True
-            self._action_epoch_host_activity_has_recovery_work = True
+            self._action_epoch_device_activity_control_step = None
+            self._action_epoch_device_transport_rows = None
+            self._action_epoch_device_recovery_rows = None
             self._host_reset_generation_projection_current = False
             self._advance_owner_mutation_version()
         except Exception as exc:
@@ -11889,9 +11946,9 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._device_fault[list(selected), :] = False
             self._slot_version[list(selected), :] += 1
             self._reset_generation = predicted_reset_generations
-            self._action_epoch_host_activity_control_step = None
-            self._action_epoch_host_activity_has_work = True
-            self._action_epoch_host_activity_has_recovery_work = True
+            self._action_epoch_device_activity_control_step = None
+            self._action_epoch_device_transport_rows = None
+            self._action_epoch_device_recovery_rows = None
             self._advance_owner_mutation_version()
         except Exception as exc:
             self._poisoned = True
@@ -11920,7 +11977,7 @@ class ActionBallPhysicalFlightDeviceOwner:
 __all__ = [
     "AcknowledgedR06PhysicalSnapshot",
     "ActionEpochPhysicsFactAllocationProjection",
-    "ActionEpochHostActivityVerdict",
+    "ActionEpochDeviceActivityProjection",
     "ActionEpochPhysicalPostPhysicsCaptureRequest",
     "ActionEpochR06LaunchProjection",
     "ActionEpochR06PostPhysicsProjection",

@@ -195,6 +195,13 @@ ROW_FAULT_R06_OWNER_PRODUCER_CONTRACT = 1 << 43
 ROW_FAULT_R06_OWNER_ENGINE_OVERFLOW = 1 << 44
 ROW_FAULT_R06_OWNER_NONFINITE = 1 << 45
 ROW_FAULT_R06_OWNER_OTHER = 1 << 46
+# Physical's rollout activity projection remains device-only.  These disjoint
+# public bits carry its four sticky runtime causes into the existing single
+# optimizer-boundary drain without forcing a per-control host verdict.
+ROW_FAULT_PHYSICAL_ACCEPT_NOT_LAUNCHABLE = 1 << 47
+ROW_FAULT_PHYSICAL_DUE_IDENTITY_LOST = 1 << 48
+ROW_FAULT_PHYSICAL_R06_RETIRE_MISMATCH = 1 << 49
+ROW_FAULT_PHYSICAL_MISSED_LAUNCH_TICK = 1 << 50
 
 ACTION_EPOCH_ROW_FAULT_NAMES = (
     (ROW_FAULT_RESET_GENESIS_CONTRACT, "reset_genesis_contract"),
@@ -297,6 +304,22 @@ ACTION_EPOCH_ROW_FAULT_NAMES = (
     ),
     (ROW_FAULT_R06_OWNER_NONFINITE, "r06_owner_nonfinite"),
     (ROW_FAULT_R06_OWNER_OTHER, "r06_owner_other"),
+    (
+        ROW_FAULT_PHYSICAL_ACCEPT_NOT_LAUNCHABLE,
+        "physical_accept_not_launchable",
+    ),
+    (
+        ROW_FAULT_PHYSICAL_DUE_IDENTITY_LOST,
+        "physical_due_identity_lost",
+    ),
+    (
+        ROW_FAULT_PHYSICAL_R06_RETIRE_MISMATCH,
+        "physical_r06_retire_mismatch",
+    ),
+    (
+        ROW_FAULT_PHYSICAL_MISSED_LAUNCH_TICK,
+        "physical_missed_launch_tick",
+    ),
 )
 _KNOWN_ROW_FAULT_MASK = sum(bit for bit, _name in ACTION_EPOCH_ROW_FAULT_NAMES)
 _R06_RUNTIME_ROW_FAULT_BITS = frozenset(
@@ -330,6 +353,14 @@ _RUNTIME_ROW_FAULT_BITS_BY_OWNER = {
             ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW,
             ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT,
             ROW_FAULT_MOTION_TASK_TIMING_CONTRACT,
+        )
+    ),
+    "physical_ball": frozenset(
+        (
+            ROW_FAULT_PHYSICAL_ACCEPT_NOT_LAUNCHABLE,
+            ROW_FAULT_PHYSICAL_DUE_IDENTITY_LOST,
+            ROW_FAULT_PHYSICAL_R06_RETIRE_MISMATCH,
+            ROW_FAULT_PHYSICAL_MISSED_LAUNCH_TICK,
         )
     ),
 }
@@ -4787,9 +4818,13 @@ __all__ = [
     "ROW_FAULT_MOTION_TASK_TIMING_CONTRACT",
     "ROW_FAULT_OWNER_FACT_ACTIVE_JOIN",
     "ROW_FAULT_PHYSICAL_LAUNCH_JOIN",
+    "ROW_FAULT_PHYSICAL_ACCEPT_NOT_LAUNCHABLE",
+    "ROW_FAULT_PHYSICAL_DUE_IDENTITY_LOST",
+    "ROW_FAULT_PHYSICAL_MISSED_LAUNCH_TICK",
     "ROW_FAULT_PHYSICAL_POSTPHYSICS_JOIN",
     "ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE",
     "ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER",
+    "ROW_FAULT_PHYSICAL_R06_RETIRE_MISMATCH",
     "ROW_FAULT_R03_EPOCH_IDENTITY",
     "ROW_FAULT_R03_NONFINITE_FACT",
     "ROW_FAULT_R03_STALE_SOURCE_STEP",

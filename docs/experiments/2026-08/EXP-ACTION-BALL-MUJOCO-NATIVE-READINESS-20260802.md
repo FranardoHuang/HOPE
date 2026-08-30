@@ -8,7 +8,7 @@
 - 复核/决策负责人：Franco
 - 本 successor 当前最高证据等级：最终V3/PPO V6两端各自runtime/rate与fresh prefix达到诊断`E2`；
   跨引擎physics parity、formal learning与promotion仍低于`E2`，历史negative-control的`E3`不向新系统传递
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-29
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-30
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
@@ -19,6 +19,15 @@
 > “2026-08-21 portable successor事实纠正”起的229/399、211/319、H24、`history=8`与旧schema/gate结论
 > 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
+
+## 2026-08-30 Physical activity host-sync减法候选
+
+`8200c4a2`后继只改热路调度表示：原Physical activity把transport/recovery与四类runtime fault压成一个
+`summary.item()`，因此每policy step必然同步host。候选改为逐行device mask，R03/R07无host分支消费；四类
+fault保持device sticky，在PPO optimizer前映射到Epoch具名row fault，继续复用唯一packed drain D2H。
+Pod1 CPU exact已覆盖49-step no-host-scalar tape、正常/故障各一次D2H、具名cause、R03/R07与runner/reset
+语义。它不改变D05、Reward28、Observation或课程；真实CUDA parity与profiler-off wall尚未测，当前只算
+可上Pod验证的结构候选，不能采纳为训练source或速度结论。
 
 ## 2026-08-29 current correction
 

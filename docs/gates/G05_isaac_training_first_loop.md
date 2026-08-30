@@ -2,6 +2,14 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-30 Physical activity device-mask候选（仍`Partial`）
+
+基于`8200c4a2`的分支候选移除Physical activity每policy step无条件`summary.item()`：Racket/R03与R07只消费
+device bool mask，accept-not-launchable、due-identity-lost、R06-retire-mismatch与missed-launch-tick四类
+sticky fault在optimizer前写入既有Epoch row-fault pack，并仍由同一次drain D2H fail-stop。Pod1 CPU exact已
+验证H48/H+1、单D2H、具名cause与R03/R07 reason/counter/payment边界；真实CUDA fixed tape和
+profiler-off matched strata尚未测，所以本项不改变Gate状态，也不授权训练替换或速度结论。
+
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
 validated code source=`b0d7d562`保留`255df4a1`的每control一次R06 finalize与每substep Scene capture、terminal

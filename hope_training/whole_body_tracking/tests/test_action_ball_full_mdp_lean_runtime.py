@@ -134,8 +134,8 @@ class _Racket:
     def __init__(self, calls):
         self.calls = calls
 
-    def arm_action_ball_full_mdp_epoch_strike_fact(self):
-        self.calls.append("racket")
+    def arm_action_ball_full_mdp_epoch_strike_fact(self, *, activity_rows):
+        self.calls.append(("racket", activity_rows.clone()))
         return None
 
 
@@ -151,16 +151,26 @@ class _Physical:
         self.transport_work = transport_work
         self.recovery_epoch_work = recovery_epoch_work
 
-    def refresh_action_epoch_host_activity(self, *, next_control_step):
+    def refresh_action_epoch_device_activity(self, *, next_control_step):
         self.calls.append(("physical", next_control_step))
         return None
 
-    def action_epoch_host_activity_verdict(self, *, control_step):
+    def action_epoch_device_activity_projection(self, *, control_step):
         return type("Activity", (), {
             "control_step": control_step,
-            "transport_work": self.transport_work,
-            "recovery_epoch_work": self.recovery_epoch_work,
+            "transport_rows": torch.full(
+                (2,), self.transport_work, dtype=torch.bool
+            ),
+            "recovery_rows": torch.full(
+                (2, 1), self.recovery_epoch_work, dtype=torch.bool
+            ),
         })()
+
+    def publish_action_epoch_runtime_faults_for_ppo(
+        self, *, expected_activity_control_step
+    ):
+        assert type(expected_activity_control_step) is int
+        return None
 
 
 class _R06:
@@ -201,11 +211,15 @@ class _PostPhysicsPhysical:
         self.publish_count += 1
         return None
 
-    def action_epoch_host_activity_verdict(self, *, control_step):
+    def action_epoch_device_activity_projection(self, *, control_step):
         return types.SimpleNamespace(
             control_step=control_step,
-            transport_work=self.transport_work,
-            recovery_epoch_work=self.recovery_epoch_work,
+            transport_rows=torch.full(
+                (2,), self.transport_work, dtype=torch.bool
+            ),
+            recovery_rows=torch.full(
+                (2, 1), self.recovery_epoch_work, dtype=torch.bool
+            ),
         )
 
 
@@ -226,9 +240,13 @@ class _PostPhysicsR07:
         self.idle_source_steps = []
         self.projection_count = 0
 
-    def publish_epoch_reward_facts(self, *, current_source_step):
+    def publish_epoch_reward_facts(
+        self, *, current_source_step, activity_rows
+    ):
         assert type(current_source_step) is torch.Tensor
-        self.full_source_steps.append(current_source_step.clone())
+        self.full_source_steps.append(
+            (current_source_step.clone(), activity_rows.clone())
+        )
         return self.returned_facts
 
     def stamp_epoch_idle_observation_without_keyed_facts(
@@ -326,7 +344,7 @@ def _owner(
         r05_runtime=object() if r05 is None else r05,
         motion=object() if motion is None else motion,
         racket=object() if racket is None else racket,
-        physical_ball=object() if physical is None else physical,
+        physical_ball=_Physical([]) if physical is None else physical,
         r06_landing_outcome=object() if r06 is None else r06,
         r03_strike_fact=object(),
         r07_recovery=object() if r07 is None else r07,
@@ -532,15 +550,23 @@ def test_prepare_materializes_once_and_ack_commits_the_typed_summary(
     owner, epoch, _graph = _owner(device=device)
     original = E.ActionEpochOwner.materialize_drain
     calls = []
+    d2h_calls = []
+    original_d2h = E._single_d2h_packed_bytes
 
     def counted(self, *, start, end):
         calls.append((start, end))
         return original(self, start=start, end=end)
 
+    def counted_d2h(device_bytes):
+        d2h_calls.append(device_bytes)
+        return original_d2h(device_bytes)
+
     monkeypatch.setattr(E.ActionEpochOwner, "materialize_drain", counted)
+    monkeypatch.setattr(E, "_single_d2h_packed_bytes", counted_d2h)
     summary = _complete_boundary(owner, update=0, completed=8)
     assert type(summary) is L.ActionEpochPpoBoundarySummary
     assert calls == [(0, 1)]
+    assert len(d2h_calls) == 1
     assert summary.frontier.start_commit == 0
     assert summary.frontier.end_commit == 1
     assert summary.frontier.update_index == 0
@@ -680,6 +706,53 @@ def test_host_selected_reset_generation_overflow_fault_is_named_exactly():
     assert owner.poisoned
 
 
+def test_physical_device_fault_is_named_before_optimizer_with_one_transfer(
+    monkeypatch,
+):
+    owner, epoch, _graph = _owner()
+    rows = torch.tensor([True, False], dtype=torch.bool, device=epoch.device)
+
+    class PhysicalFaultPublisher:
+        def action_epoch_r06_launch_projection(self):
+            return None
+
+        def require_owned_action_epoch_r06_postphysics_projection(self):
+            return None
+
+        def publish_action_epoch_runtime_faults_for_ppo(
+            self, *, expected_activity_control_step
+        ):
+            assert expected_activity_control_step == 1
+            epoch.latch_runtime_row_fault(
+                "physical_ball",
+                E.ROW_FAULT_PHYSICAL_MISSED_LAUNCH_TICK,
+                rows,
+                owner=self,
+            )
+
+    physical = PhysicalFaultPublisher()
+    epoch.bind_fact_owner("physical_ball", physical)
+    epoch.bind_async_owner("physical_ball", physical)
+    owner._physical_ball = physical
+    d2h_calls = []
+    original_d2h = E._single_d2h_packed_bytes
+
+    def counted_d2h(device_bytes):
+        d2h_calls.append(device_bytes)
+        return original_d2h(device_bytes)
+
+    monkeypatch.setattr(E, "_single_d2h_packed_bytes", counted_d2h)
+    with pytest.raises(
+        L.ActionBallFullMdpEpochRowFaultError,
+        match=r"physical_missed_launch_tick\(rows=1,envs=\[0\]\)",
+    ):
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=48
+        )
+    assert len(d2h_calls) == 1
+    assert owner.poisoned
+
+
 def test_exact_bound_runtime_faults_pack_and_decode_each_named_cause():
     owner, epoch, _graph = _owner()
     r06 = epoch_rowwise._R06(epoch, epoch.device)
@@ -784,10 +857,14 @@ def test_after_command_orders_r05_then_racket_without_caller_rows():
         physical=_Physical(calls),
     )
     owner.after_command_compute_before_observation(0)
-    assert calls == ["r05", ("physical", 1), "racket"]
+    assert calls[:2] == ["r05", ("physical", 1)]
+    assert calls[2][0] == "racket"
+    assert calls[2][1].tolist() == [True, True]
     owner.before_policy_step(1, torch.zeros((2, 1)))
     owner.after_command_compute_before_observation(1)
-    assert calls[-3:] == ["r05", ("physical", 2), "racket"]
+    assert calls[-3:-1] == ["r05", ("physical", 2)]
+    assert calls[-1][0] == "racket"
+    assert calls[-1][1].tolist() == [True, True]
     with pytest.raises(
         L.ActionBallFullMdpLeanRuntimeError, match="stale, skipped, or replayed"
     ):
@@ -795,7 +872,9 @@ def test_after_command_orders_r05_then_racket_without_caller_rows():
 
 
 @pytest.mark.parametrize("recovery_epoch_work", (False, True))
-def test_after_command_transport_idle_skips_r03_arm(recovery_epoch_work):
+def test_after_command_transport_idle_arms_r03_with_device_false_mask(
+    recovery_epoch_work,
+):
     calls = []
     physical = _Physical(
         calls,
@@ -808,10 +887,17 @@ def test_after_command_transport_idle_skips_r03_arm(recovery_epoch_work):
         physical=physical,
     )
     owner.after_command_compute_before_observation(0)
-    assert calls == ["r05", ("physical", 1)]
-    verdict = physical.action_epoch_host_activity_verdict(control_step=1)
-    assert verdict.transport_work is False
-    assert verdict.recovery_epoch_work is recovery_epoch_work
+    assert calls[:2] == ["r05", ("physical", 1)]
+    assert calls[2][0] == "racket"
+    assert calls[2][1].tolist() == [False, False]
+    projection = physical.action_epoch_device_activity_projection(
+        control_step=1
+    )
+    assert projection.transport_rows.tolist() == [False, False]
+    assert projection.recovery_rows[:, 0].tolist() == [
+        recovery_epoch_work,
+        recovery_epoch_work,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -823,9 +909,9 @@ def test_after_command_transport_idle_skips_r03_arm(recovery_epoch_work):
         "expected_idle_r07",
     ),
     (
-        pytest.param(False, False, 0, 0, 1, id="idle"),
-        pytest.param(True, False, 1, 0, 1, id="transport-pre-recovery"),
-        pytest.param(False, True, 0, 1, 0, id="actual-recovery"),
+        pytest.param(False, False, 1, 1, 0, id="idle"),
+        pytest.param(True, False, 1, 1, 0, id="transport-pre-recovery"),
+        pytest.param(False, True, 1, 1, 0, id="actual-recovery"),
     ),
 )
 def test_post_physics_reads_r07_plant_only_for_actual_recovery_epoch(
@@ -867,9 +953,14 @@ def test_post_physics_reads_r07_plant_only_for_actual_recovery_epoch(
     assert r07.projection_count == 0
     assert motion.installed == []
     if expected_full_r07:
+        source_steps, recovery_rows = r07.full_source_steps[0]
         assert torch.equal(
-            r07.full_source_steps[0], torch.zeros(2, dtype=torch.int64)
+            source_steps, torch.zeros(2, dtype=torch.int64)
         )
+        assert recovery_rows[:, 0].tolist() == [
+            recovery_epoch_work,
+            recovery_epoch_work,
+        ]
     assert not owner.poisoned
 
 

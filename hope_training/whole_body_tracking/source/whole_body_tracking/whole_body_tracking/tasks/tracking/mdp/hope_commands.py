@@ -15981,7 +15981,9 @@ class RacketTargetCommand(CommandTerm):
                 exact_strike
             )
 
-    def _arm_action_ball_strike_fact_for_next_transition(self) -> None:
+    def _arm_action_ball_strike_fact_for_next_transition(
+        self, *, activity_rows: torch.Tensor | None = None
+    ) -> None:
         """Arm the current immutable task for the next physics transition.
 
         ManagerBasedRLEnv calls CommandManager only after the current Reward
@@ -16023,6 +16025,7 @@ class RacketTargetCommand(CommandTerm):
                     target_face_normal=self.target_normal_cmd,
                     ball_position=self._action_ball_ball_contact_target_w,
                     ball_velocity=self.vb_vel_in_w,
+                    activity_rows=activity_rows,
                 )
             finally:
                 self._action_ball_full_mdp_r03_writer_active = False
@@ -16082,21 +16085,38 @@ class RacketTargetCommand(CommandTerm):
         ):
             self._arm_action_ball_strike_fact_for_next_transition()
 
-    def arm_action_ball_full_mdp_epoch_strike_fact(self) -> None:
+    def arm_action_ball_full_mdp_epoch_strike_fact(
+        self, *, activity_rows: torch.Tensor | None = None
+    ) -> None:
         """Arm the bound R03 after D05 reveal and before the next physics.
 
-        This helper accepts no mask, identity, step, or verdict from the top
-        owner.  The Racket leaf owns the exact one-shot eligibility, live task
-        integers, targets, and the manager's next-transition clock; R03 joins
-        them to its independently bound current ActionEpoch after the D05
-        coordinator operation has returned.
+        The device-only activity mask suppresses inactive transport rows without
+        becoming task or strike authority.  The Racket leaf still owns exact
+        one-shot eligibility, live task integers, targets, and the manager's
+        next-transition clock; R03 joins them to its independently bound current
+        ActionEpoch after the D05 coordinator operation has returned.
         """
 
         if getattr(self, "_action_ball_full_mdp_enabled", False) is not True:
             raise ActionBallContinuousRacketStrikeFactHold(
                 "epoch R03 arm is full-MDP-only"
             )
-        self._arm_action_ball_strike_fact_for_next_transition()
+        if activity_rows is None:
+            activity_rows = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        elif (
+            type(activity_rows) is not torch.Tensor
+            or activity_rows.dtype != torch.bool
+            or activity_rows.device != self.device
+            or tuple(activity_rows.shape) != (self.num_envs,)
+        ):
+            raise ActionBallContinuousRacketStrikeFactHold(
+                "epoch R03 activity_rows must be device bool [num_envs]"
+            )
+        self._arm_action_ball_strike_fact_for_next_transition(
+            activity_rows=activity_rows
+        )
 
     def require_active_action_epoch_r03_writer(self) -> None:
         """Require the exact scalar Racket call stack around an R03 mutation."""

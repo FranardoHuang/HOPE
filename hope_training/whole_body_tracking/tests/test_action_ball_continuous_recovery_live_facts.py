@@ -167,13 +167,15 @@ def _publish_epoch_reward_facts(
     *,
     cadence_tick: int,
     current_source_step: int,
+    activity_rows: torch.Tensor | None = None,
 ):
     """Publish after installing this test's explicit Motion row clock."""
 
     assert type(cadence_tick) is int
     motion._action_ball_continuous_episode_step.fill_(cadence_tick)
     return bundle.publish_epoch_reward_facts(
-        current_source_step=current_source_step
+        current_source_step=current_source_step,
+        activity_rows=activity_rows,
     )
 
 
@@ -2053,6 +2055,61 @@ def test_neutral_observation_breaks_consecutive_recovery_dwell(
     )
     assert consecutive_view.ready.tolist() == [True, True]
     assert consecutive_view.ready_streak.tolist() == [2, 2]
+
+
+def test_device_activity_mask_blends_keyed_row_and_neutral_chronology(
+    monkeypatch,
+):
+    device = torch.device("cpu")
+    env, motion, robot, sensor, bundle, epoch_owner = (
+        _rowwise_settled_subject(monkeypatch, device=device)
+    )
+    sensor.data.net_forces_w.zero_()
+    for name in FEET:
+        sensor.data.net_forces_w[:, BODY_NAMES.index(name), 2] = 10.0
+    robot.data.body_lin_vel_w.zero_()
+    capacity = epoch_owner.shot_slot_capacity
+    inactive = torch.zeros((2, capacity), dtype=torch.bool, device=device)
+
+    env.common_step_counter = 49
+    _publish_epoch_reward_facts(
+        bundle,
+        motion,
+        cadence_tick=49,
+        current_source_step=torch.full(
+            (2,), 49, dtype=torch.int64, device=device
+        ),
+        activity_rows=inactive,
+    )
+    neutral = bundle.action_epoch_observation_state()
+    assert neutral.postphysics_valid.tolist() == [True, True]
+    assert neutral.ready_streak.tolist() == [0, 0]
+    assert not torch.any(neutral.foot_supported_lr)
+    r07_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
+    assert not torch.any(
+        epoch_owner.current().fact_valid_bits[:, :, r07_slot]
+    )
+
+    active = inactive.clone()
+    active[0, :] = True
+    env.common_step_counter = 50
+    _publish_epoch_reward_facts(
+        bundle,
+        motion,
+        cadence_tick=50,
+        current_source_step=torch.full(
+            (2,), 50, dtype=torch.int64, device=device
+        ),
+        activity_rows=active,
+    )
+    mixed = bundle.action_epoch_observation_state()
+    assert mixed.postphysics_valid.tolist() == [True, True]
+    assert mixed.ready_streak[1].item() == 0
+    assert not torch.any(mixed.foot_supported_lr[1])
+    record = epoch_owner.current()
+    assert torch.any(record.fact_valid_bits[0, :, r07_slot])
+    assert not torch.any(record.fact_valid_bits[1, :, r07_slot])
+    assert not torch.any(record.owner_fault_bits[:, :, r07_slot])
 
 
 def test_epoch_invalid_fact_resets_dwell_and_cannot_mint_ready(monkeypatch):

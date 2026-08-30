@@ -907,6 +907,7 @@ class ActionBallStrikeFactDeviceCoordinator:
         target_face_normal: torch.Tensor,
         ball_position: torch.Tensor,
         ball_velocity: torch.Tensor,
+        activity_rows: torch.Tensor | None = None,
     ) -> None:
         """Arm from the bound epoch and Racket's independent integer state.
 
@@ -953,9 +954,16 @@ class ActionBallStrikeFactDeviceCoordinator:
             getattr(racket_owner, "_action_ball_strike_fact_exact_eligibility", None),
             "bound_racket.exact_strike_eligible",
         )
+        if activity_rows is None:
+            active = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        else:
+            active = self._mask(activity_rows, "activity_rows")
         eligible = (
             selected(epoch.phase).eq(epoch_module.PHASE_LAUNCH_SETTLED)
             & exact
+            & active
         )
         identity_fault = eligible & (
             ~shot_key_valid

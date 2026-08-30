@@ -3,7 +3,7 @@
 > 状态：`corrected-dual-fresh-running / active-flight-profile-complete / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-29
+> 更新：2026-08-30
 >
 > `origin/main:docs/NOW.md` 是全项目唯一优先级权威。本页只维护
 > [FullMDP](../DEFINITIONS.md)（完整球路、击球、落点与恢复状态机）单动作双后端
@@ -13,6 +13,14 @@
 <a id="fullmdp-v6-todo-current"></a>
 
 ## 0.6 2026-08-29 current：同一 A3P0807、robust physical birth 与可解释的双后端差异
+
+### 2026-08-30 hot-path候选：先验收，不替换现役run
+
+- [x] 删除Physical activity每policy step的host scalar verdict；transport与recovery按device row mask交给
+  R03/R07，四个Physical runtime cause在optimizer前进入既有唯一Epoch packed drain。Pod1 CPU exact的
+  H48+1、单D2H、fault-before-optimizer与受影响runner/reset套件已绿。
+- [ ] 在clean commit上补双端真实CUDA fixed-action，对拍RNG、reason/counter/payment、安全与H48/H+1；随后
+  做profiler-off matched strata。未完成前不得热补或替换现役namespace，也不得把CPU门写成wall-time收益。
 
 本节是唯一现役局部执行合同；`origin/main:docs/NOW.md`仍是项目优先级权威。当前V9两个长期namespace、
 exact source和证据root继续只读，不hot-patch、不resume、不复用。R8只有在下列独立事实闭合后才替换它们；

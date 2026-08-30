@@ -614,13 +614,17 @@ class DiagnosticN2ContinuousRecoveryBundle:
         return self._require_bound_owner().action_epoch_observation_state()
 
     def publish_epoch_reward_facts(
-        self, *, current_source_step: torch.Tensor
+        self,
+        *,
+        current_source_step: torch.Tensor,
+        activity_rows: torch.Tensor | None = None,
     ) -> "R07EpochDirectRewardFacts":
         """Publish R07 readiness and keyed facts for an active ActionEpoch."""
 
         return self._publish_epoch_reward_facts(
             current_source_step=current_source_step,
             publish_keyed_action_epoch=True,
+            activity_rows=activity_rows,
         )
 
     def stamp_epoch_idle_observation_without_keyed_facts(
@@ -674,6 +678,7 @@ class DiagnosticN2ContinuousRecoveryBundle:
         *,
         current_source_step: torch.Tensor,
         publish_keyed_action_epoch: bool,
+        activity_rows: torch.Tensor | None = None,
     ) -> "R07EpochDirectRewardFacts":
         """Publish one real post-physics R07 fact group into ActionEpoch.
 
@@ -694,6 +699,21 @@ class DiagnosticN2ContinuousRecoveryBundle:
             shape=(owner.num_envs,),
             dtype=torch.int64,
         )
+        if activity_rows is None:
+            active_rows = torch.ones(
+                owner.num_envs, dtype=torch.bool, device=owner.device
+            )
+        else:
+            activity = owner._tensor(
+                activity_rows,
+                label="R07 epoch activity_rows",
+                shape=(
+                    owner.num_envs,
+                    epoch_owner.shot_slot_capacity,
+                ),
+                dtype=torch.bool,
+            )
+            active_rows = activity.any(dim=1)
         method_name = "project_action_ball_full_mdp_recovery_ready_reference"
         project_reference = getattr(self.motion_owner, method_name, None)
         exact_method = _exact_motion_reference_producer_definition(
@@ -733,6 +753,7 @@ class DiagnosticN2ContinuousRecoveryBundle:
                 epoch_owner=epoch_owner,
                 epoch_snapshot=epoch_snapshot,
                 result=result,
+                activity_rows=active_rows,
             )
         n = owner.num_envs
         try:
@@ -749,6 +770,7 @@ class DiagnosticN2ContinuousRecoveryBundle:
             observed_source_step=self.plant_fact_adapter.last_source_step,
             shot_key=reference_shot_key,
             publish_keyed_first_ready=publish_keyed_action_epoch,
+            activity_rows=active_rows,
         )
         return result
 
@@ -759,6 +781,7 @@ class DiagnosticN2ContinuousRecoveryBundle:
         epoch_owner: object,
         epoch_snapshot: object,
         result: "R07EpochDirectRewardFacts",
+        activity_rows: torch.Tensor,
     ) -> None:
         """Publish only the keyed ActionEpoch planes for a real shot."""
 
@@ -822,6 +845,12 @@ class DiagnosticN2ContinuousRecoveryBundle:
         )
         publish_rows = (
             slot_valid
+            & owner._tensor(
+                activity_rows,
+                label="R07 keyed activity_rows",
+                shape=(n,),
+                dtype=torch.bool,
+            )
             & completed
             & active_phase
             & _row_identity.action_epoch_shot_key_valid(current_key)
@@ -3968,6 +3997,7 @@ class ContinuousRecoveryDeviceCoordinator:
         observed_source_step: object,
         shot_key: _row_identity.ActionEpochShotKey | None,
         publish_keyed_first_ready: bool = True,
+        activity_rows: torch.Tensor | None = None,
     ) -> None:
         """Commit lean dwell state and mint only the next-tick Motion view."""
 
@@ -4029,12 +4059,32 @@ class ContinuousRecoveryDeviceCoordinator:
             shape=(self.num_envs, self.num_feet),
             dtype=torch.bool,
         )
-        generation_changed, chronology_valid = (
+        active_rows = (
+            torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+            if activity_rows is None
+            else self._tensor(
+                activity_rows,
+                label="R07 readiness activity_rows",
+                shape=(self.num_envs,),
+                dtype=torch.bool,
+            )
+        )
+        generation_changed, active_chronology_valid = (
             self._action_epoch_motion_cadence_chronology(
                 reset_generation=result.reset_generation,
                 motion_cadence_tick=result.motion_cadence_tick,
                 allow_same_generation_hold=False,
             )
+        )
+        _idle_generation_changed, idle_chronology_valid = (
+            self._action_epoch_motion_cadence_chronology(
+                reset_generation=result.reset_generation,
+                motion_cadence_tick=result.motion_cadence_tick,
+                allow_same_generation_hold=True,
+            )
+        )
+        chronology_valid = torch.where(
+            active_rows, active_chronology_valid, idle_chronology_valid
         )
         writable_rows = self._latch_r07_row_fault(
             ~chronology_valid,
@@ -4069,7 +4119,7 @@ class ContinuousRecoveryDeviceCoordinator:
             | key_changed
         )
         reference_identity_changed |= generation_changed
-        reference_identity_changed &= writable_rows
+        reference_identity_changed &= writable_rows & active_rows
         prior_streak = torch.where(
             reference_identity_changed,
             torch.zeros_like(self._action_epoch_ready_streak),
@@ -4081,7 +4131,8 @@ class ContinuousRecoveryDeviceCoordinator:
             self._action_epoch_first_ready_source_step,
         )
         ready_instant = (
-            result.ready_instant
+            active_rows
+            & result.ready_instant
             & result.facts_valid
             & ~result.infrastructure_fault
             & result.producer_fault_bits.eq(0)
@@ -4117,21 +4168,21 @@ class ContinuousRecoveryDeviceCoordinator:
         )
         self._action_epoch_ready_reference_kind.copy_(
             torch.where(
-                writable_rows,
+                writable_rows & active_rows,
                 result.reference_kind,
                 self._action_epoch_ready_reference_kind,
             )
         )
         self._action_epoch_ready_reference_action_slot.copy_(
             torch.where(
-                writable_rows,
+                writable_rows & active_rows,
                 result.reference_action_slot,
                 self._action_epoch_ready_reference_action_slot,
             )
         )
         self._action_epoch_ready_reference_action_uid.copy_(
             torch.where(
-                writable_rows,
+                writable_rows & active_rows,
                 result.reference_action_uid,
                 self._action_epoch_ready_reference_action_uid,
             )
@@ -4144,7 +4195,7 @@ class ContinuousRecoveryDeviceCoordinator:
                 else getattr(key, field.name)
             )
             destination.copy_(
-                torch.where(writable_rows, source, destination)
+                torch.where(writable_rows & active_rows, source, destination)
             )
         self._action_epoch_first_ready_source_step.copy_(
             torch.where(
@@ -4185,6 +4236,7 @@ class ContinuousRecoveryDeviceCoordinator:
         epoch_first_ready = (
             first_ready
             & writable_rows
+            & active_rows
             & result.reference_kind.eq(
                 R07_REFERENCE_COMPLETED_ACTION_FRAME0
             )
@@ -4198,6 +4250,9 @@ class ContinuousRecoveryDeviceCoordinator:
             )
 
         neutral_i64 = torch.full_like(result.source_step, -1)
+        observed_step_rows = torch.full_like(
+            result.source_step, int(observed_source_step)
+        )
         control_cadence = torch.where(
             writable_rows,
             result.motion_cadence_tick,
@@ -4207,10 +4262,19 @@ class ContinuousRecoveryDeviceCoordinator:
             owner_identity=self._identity,
             owner=self,
             postphysics_valid=(
-                result.facts_valid & writable_rows
+                torch.where(
+                    active_rows,
+                    result.facts_valid,
+                    torch.ones_like(result.facts_valid),
+                )
+                & writable_rows
             ).detach().clone(),
             source_step=torch.where(
-                writable_rows, result.source_step, neutral_i64
+                writable_rows,
+                torch.where(
+                    active_rows, result.source_step, observed_step_rows
+                ),
+                neutral_i64,
             ).detach().clone(),
             reset_generation=torch.where(
                 writable_rows, result.reset_generation, neutral_i64
@@ -4228,7 +4292,9 @@ class ContinuousRecoveryDeviceCoordinator:
             ).detach().clone(),
             required_dwell=int(self.profile.ready_dwell_ticks),
             foot_supported_lr=(
-                foot_supported_lr & writable_rows[:, None]
+                foot_supported_lr
+                & writable_rows[:, None]
+                & active_rows[:, None]
             ).detach().clone(),
         )
         self._latest_motion_ready_projection = _mint_full_mdp_identity(

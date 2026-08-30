@@ -485,6 +485,15 @@ def test_r03_producer_fault_stops_preoptimizer_with_exact_named_cause():
         module_prefix + ".action_ball_full_mdp_lean_runtime"
     )
     reward = lean_rewards.LeanActionEpochRewardGraph(epoch_owner=epoch)
+
+    class _Physical:
+        def publish_action_epoch_runtime_faults_for_ppo(
+            self,
+            *, expected_activity_control_step
+        ):
+            assert expected_activity_control_step == 1
+            return None
+
     runtime = lean.ActionBallFullMdpLeanRuntimeOwner(
         env=object(),
         runtime_lease=object(),
@@ -493,7 +502,7 @@ def test_r03_producer_fault_stops_preoptimizer_with_exact_named_cause():
         r05_runtime=object(),
         motion=object(),
         racket=racket,
-        physical_ball=object(),
+        physical_ball=_Physical(),
         r06_landing_outcome=object(),
         r03_strike_fact=owner,
         r07_recovery=object(),

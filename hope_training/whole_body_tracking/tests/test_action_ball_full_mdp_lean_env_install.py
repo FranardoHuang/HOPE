@@ -697,6 +697,13 @@ class _SelectedResetLeafPort:
     ):
         return None
 
+    def publish_action_epoch_runtime_faults_for_ppo(
+        self, *, expected_activity_control_step
+    ):
+        assert isinstance(expected_activity_control_step, int)
+        assert expected_activity_control_step >= 1
+        return None
+
     def prepare_action_ball_continuous_motion_selected_reset(self, _prepared):
         return self._mint("prepare")
 

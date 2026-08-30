@@ -588,8 +588,8 @@ class _Racket:
         self.time_left = torch.ones(count)
         self.command_counter = torch.zeros(count, dtype=torch.long)
 
-    def arm_action_ball_full_mdp_epoch_strike_fact(self):
-        self.trace.append(("racket_arm",))
+    def arm_action_ball_full_mdp_epoch_strike_fact(self, *, activity_rows):
+        self.trace.append(("racket_arm", tuple(activity_rows.tolist())))
         return None
 
     def publish_action_ball_full_mdp_epoch_strike_fact(self, *, source_step):
@@ -610,16 +610,26 @@ class _Physical:
         self.trace.append(("physical_launch",))
         return None
 
-    def refresh_action_epoch_host_activity(self, *, next_control_step):
+    def refresh_action_epoch_device_activity(self, *, next_control_step):
         self.trace.append(("physical_refresh", next_control_step))
         return None
 
-    def action_epoch_host_activity_verdict(self, *, control_step):
+    def action_epoch_device_activity_projection(self, *, control_step):
         return type("Activity", (), {
             "control_step": control_step,
-            "transport_work": self.transport_work,
-            "recovery_epoch_work": self.recovery_epoch_work,
+            "transport_rows": torch.full(
+                (2,), self.transport_work, dtype=torch.bool
+            ),
+            "recovery_rows": torch.full(
+                (2, 1), self.recovery_epoch_work, dtype=torch.bool
+            ),
         })()
+
+    def publish_action_epoch_runtime_faults_for_ppo(
+        self, *, expected_activity_control_step
+    ):
+        assert type(expected_activity_control_step) is int
+        return None
 
     def publish_action_epoch_post_physics(self, stamp):
         self.trace.append(("physical_publish", stamp.exact_tuple()))
@@ -644,9 +654,15 @@ class _R07:
         self.trace = trace
         self.ready = object()
 
-    def publish_epoch_reward_facts(self, *, current_source_step):
+    def publish_epoch_reward_facts(
+        self, *, current_source_step, activity_rows
+    ):
         self.trace.append(
-            ("r07_publish", tuple(current_source_step.shape))
+            (
+                "r07_publish",
+                tuple(current_source_step.shape),
+                tuple(activity_rows.reshape(-1).tolist()),
+            )
         )
         return None
 
@@ -1035,7 +1051,7 @@ def test_render_path_preserves_exact_lean_physics_parity_without_rng_use():
     assert len(plain_result) == len(rendered_result) == 5
 
 
-def test_global_idle_without_key_skips_r03_and_all_motion_ready_work(
+def test_global_idle_without_key_uses_false_device_masks_without_motion_install(
     monkeypatch,
 ):
     def reject_projection(_self):
@@ -1057,10 +1073,18 @@ def test_global_idle_without_key_skips_r03_and_all_motion_ready_work(
     )
     env.step(torch.zeros(2, 4))
     names = [row[0] for row in trace]
-    assert "racket_arm" not in names
-    assert "racket_publish" not in names
-    assert "r07_publish" not in names
-    assert names.count("r07_idle_stamp") == 1
+    assert names.count("racket_arm") == 1
+    assert names.count("racket_publish") == 1
+    assert names.count("r07_publish") == 1
+    assert "r07_idle_stamp" not in names
+    assert next(row for row in trace if row[0] == "racket_arm")[1] == (
+        False,
+        False,
+    )
+    assert next(row for row in trace if row[0] == "r07_publish")[2] == (
+        False,
+        False,
+    )
     assert "r07_ready" not in names
     assert "motion_ready" not in names
     assert names.count("physical_publish") == 2
@@ -1088,8 +1112,8 @@ def test_transport_idle_recovery_epoch_keeps_r07_but_not_dead_motion_install(
     )
     env.step(torch.zeros(2, 4))
     names = [row[0] for row in trace]
-    assert "racket_arm" not in names
-    assert "racket_publish" not in names
+    assert names.count("racket_arm") == 1
+    assert names.count("racket_publish") == 1
     assert names.count("r07_publish") == 1
     assert "r07_idle_stamp" not in names
     assert "r07_ready" not in names
@@ -1118,9 +1142,9 @@ def test_transport_idle_outside_recovery_window_uses_neutral_chronology_only(
     )
     env.step(torch.zeros(2, 4))
     names = [row[0] for row in trace]
-    assert "racket_publish" not in names
-    assert "r07_publish" not in names
-    assert names.count("r07_idle_stamp") == 1
+    assert names.count("racket_publish") == 1
+    assert names.count("r07_publish") == 1
+    assert "r07_idle_stamp" not in names
     assert "r07_ready" not in names
     assert "motion_ready" not in names
 
@@ -1148,8 +1172,8 @@ def test_live_transport_before_recovery_uses_neutral_chronology_only(
     env.step(torch.zeros(2, 4))
     names = [row[0] for row in trace]
     assert names.count("racket_publish") == 1
-    assert "r07_publish" not in names
-    assert names.count("r07_idle_stamp") == 1
+    assert names.count("r07_publish") == 1
+    assert "r07_idle_stamp" not in names
     assert "r07_ready" not in names
     assert "motion_ready" not in names
 
@@ -1163,8 +1187,8 @@ def test_transport_work_outside_recovery_keeps_r03_but_skips_r07_writes():
     env.step(torch.zeros(2, 4))
     names = [row[0] for row in trace]
     assert names.count("racket_publish") == 1
-    assert "r07_publish" not in names
-    assert names.count("r07_idle_stamp") == 1
+    assert names.count("r07_publish") == 1
+    assert "r07_idle_stamp" not in names
     assert "r07_ready" not in names
     assert "motion_ready" not in names
 

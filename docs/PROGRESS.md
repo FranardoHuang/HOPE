@@ -1,5 +1,16 @@
 # 简短进度记录
 
+## 2026-08-30 — Physical activity 去逐步 host verdict 候选
+
+- `Franco_codex/fullmdp-physical-host-activity-batch-20260830`基于`8200c4a2`把Physical每个
+  policy step 的`summary.item()`主机同步改为device-resident逐行mask；R03/R07直接消费mask，四类
+  Physical runtime fault在PPO optimizer前并入既有唯一packed Epoch drain。没有新增success Gate、
+  Observation、Reward或学习语义；R03/R07 reason/counter/payment与fault-before-optimizer继续保留。
+- Pod1 CPU exact聚焦套件已通过：核心device/runtime=`111 passed`，Epoch rowwise=`111 passed`，
+  R07 live/device=`53+86 passed`，R03/R07=`10 passed`，runner drain=`77 passed`，selected-reset与
+  runtime/install相关套件均通过；H48+1 fixed tape明确拒绝host scalar read，正常/Physical fault边界都只
+  发生一次packed D2H。尚未做真实CUDA fixed tape与profiler-off wall，不能把结构正确外推成速度PASS。
+
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 
 - fresh 4× Mu到ACK623后，matched旧Mu的raw/selected/crossing=`56/5/2` vs `1,665/334/281`，最近10轮

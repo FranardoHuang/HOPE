@@ -250,6 +250,15 @@ def test_lean_loader_preserves_reward_manager_callable_pickle_identity(
     assert pickle.loads(pickle.dumps(function)) is function
 
 
+class _NoPhysicalRuntimeFaults:
+    def publish_action_epoch_runtime_faults_for_ppo(
+        self, *, expected_activity_control_step
+    ):
+        assert isinstance(expected_activity_control_step, int)
+        assert expected_activity_control_step >= 1
+        return None
+
+
 def _lean_owner(
     runner_module,
     events,
@@ -283,7 +292,7 @@ def _lean_owner(
         r05_runtime=object(),
         motion=object(),
         racket=object(),
-        physical_ball=object(),
+        physical_ball=_NoPhysicalRuntimeFaults(),
         r06_landing_outcome=object(),
         r03_strike_fact=object(),
         r07_recovery=object(),

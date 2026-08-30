@@ -112,6 +112,10 @@ _ROW_FAULT_NAMED_BIT_ORACLE = (
     (1 << 44, "r06_owner_engine_overflow"),
     (1 << 45, "r06_owner_nonfinite"),
     (1 << 46, "r06_owner_other"),
+    (1 << 47, "physical_accept_not_launchable"),
+    (1 << 48, "physical_due_identity_lost"),
+    (1 << 49, "physical_r06_retire_mismatch"),
+    (1 << 50, "physical_missed_launch_tick"),
 )
 
 _RUNTIME_OWNER_ALLOWED_NAMED_BIT_ORACLE = {
@@ -139,6 +143,12 @@ _RUNTIME_OWNER_ALLOWED_NAMED_BIT_ORACLE = {
         ("r06_closed_projection_contract", 1 << 20),
         ("r06_closed_debt_mismatch", 1 << 21),
         ("r06_current_flight_duplicate", 1 << 22),
+    ),
+    "physical_ball": (
+        ("physical_accept_not_launchable", 1 << 47),
+        ("physical_due_identity_lost", 1 << 48),
+        ("physical_r06_retire_mismatch", 1 << 49),
+        ("physical_missed_launch_tick", 1 << 50),
     ),
 }
 
