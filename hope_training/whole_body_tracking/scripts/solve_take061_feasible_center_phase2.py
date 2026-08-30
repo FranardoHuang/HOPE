@@ -302,6 +302,13 @@ def solve(args):
             "plant": plant_summary(chosen["plant"]),
         },
         "fixed_action_solver_inverse": solver_inverse,
+        "timing": {
+            "reference_t_hit_s": args.reference_t_hit_s,
+            "reference_t_cycle_s": args.reference_t_cycle_s,
+            "selected_timewarp": chosen["timewarp"],
+            "retarget_t_hit_s": args.reference_t_hit_s * chosen["timewarp"],
+            "retarget_t_cycle_s": args.reference_t_cycle_s * chosen["timewarp"],
+        },
         "candidate_summaries": [
             {
                 "window": row["window"], "timewarp": row["timewarp"],
@@ -369,6 +376,8 @@ def parser():
     result.add_argument("--surface-z", type=float, default=0.78)
     result.add_argument("--net-x", type=float, default=1.87)
     result.add_argument("--net-top-z", type=float, default=0.9325)
+    result.add_argument("--reference-t-hit-s", type=float, default=0.96)
+    result.add_argument("--reference-t-cycle-s", type=float, default=1.12)
     return result
 
 
