@@ -5196,6 +5196,12 @@ class RacketTargetCommand(CommandTerm):
             )
             self._action_ball_full_mdp_command_metric_pending_row = None
             self._action_ball_full_mdp_command_metric_step_count = 0
+            self._action_ball_full_mdp_last_exact_pos_error = torch.zeros(
+                self.num_envs, device=self.device
+            )
+            self._action_ball_full_mdp_last_exact_pos_mask = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
         # Diagnostic-only one-step staging for pure hold/recovery telemetry.  The next policy
         # step fuses these five reductions into the mandatory exact-any host packet; the final
         # rollout step is drained once at the PPO update boundary.
@@ -25364,12 +25370,19 @@ class RacketTargetCommand(CommandTerm):
         # for the attempt.  Let exact win over pre-strike; wrap/reveal always win over exact.
         close = (self.pre_strike.detach().bool() & ~exact) | wrapped | revealed
         continuing = self._post_strike_elapsed_valid & ~close
-        self._post_strike_elapsed_s[continuing] += dt
         origin = exact & ~wrapped & ~revealed
-        self._post_strike_elapsed_s[origin] = 0.0
-        self._post_strike_elapsed_valid[origin] = True
-        self._post_strike_elapsed_s[close] = 0.0
-        self._post_strike_elapsed_valid[close] = False
+        reset = origin | close
+        elapsed = torch.where(
+            continuing, self._post_strike_elapsed_s + dt,
+            self._post_strike_elapsed_s,
+        )
+        self._post_strike_elapsed_s.copy_(
+            torch.where(reset, torch.zeros_like(elapsed), elapsed)
+        )
+        self._post_strike_elapsed_valid.copy_(
+            torch.where(close, torch.zeros_like(close),
+                        self._post_strike_elapsed_valid | origin)
+        )
 
     def post_strike_age_and_same_attempt(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the control-time recovery age and current-attempt validity mask."""
@@ -27488,6 +27501,25 @@ class RacketTargetCommand(CommandTerm):
             )
         return torch.stack(tuple(value.detach() for value in scalars)).to(torch.float64)
 
+    def _stage_action_ball_full_mdp_exact_pos_error(
+        self, values: torch.Tensor, mask: torch.Tensor
+    ) -> None:
+        """Retain the last nonempty exact sample without a dynamic CUDA index."""
+
+        retained = self._action_ball_full_mdp_last_exact_pos_error
+        retained_mask = self._action_ball_full_mdp_last_exact_pos_mask
+        if (
+            type(values) is not torch.Tensor or type(mask) is not torch.Tensor
+            or values.dtype != retained.dtype or mask.dtype != torch.bool
+            or values.device != retained.device or mask.device != retained.device
+            or tuple(values.shape) != tuple(retained.shape)
+            or tuple(mask.shape) != tuple(retained.shape)
+        ):
+            raise RuntimeError("full-MDP exact position-error sample ABI differs")
+        present = mask.any()
+        retained.copy_(torch.where(present, values.detach(), retained))
+        retained_mask.copy_(torch.where(present, mask.detach(), retained_mask))
+
     def _materialize_action_ball_full_mdp_command_metrics(
         self,
         expected_steps: int | None,
@@ -27530,6 +27562,28 @@ class RacketTargetCommand(CommandTerm):
         )
         if any(type(target) is not dict or 0 not in target for target in bucket_targets):
             raise RuntimeError("full-MDP command metric bucket key is missing")
+        error_values = self._action_ball_full_mdp_last_exact_pos_error
+        error_mask = self._action_ball_full_mdp_last_exact_pos_mask
+        error_metrics = tuple(
+            self.metrics.get(name) for name in
+            ("exact_strike_pos_err_mean", "exact_strike_pos_err_p90")
+        )
+        if (
+            type(error_values) is not torch.Tensor
+            or type(error_mask) is not torch.Tensor
+            or not error_values.is_floating_point()
+            or error_values.device != state.device or error_mask.device != state.device
+            or error_mask.dtype != torch.bool
+            or tuple(error_values.shape) != (self.num_envs,)
+            or tuple(error_mask.shape) != (self.num_envs,)
+            or any(type(metric) is not torch.Tensor
+                   or not metric.is_floating_point()
+                   or metric.dtype != error_values.dtype
+                   or metric.device != state.device
+                   or tuple(metric.shape) != (self.num_envs,)
+                   for metric in error_metrics)
+        ):
+            raise RuntimeError("full-MDP exact position-error report ABI differs")
         global_names = (
             "_exact_n_acc", "_exact_pass_comp_acc", "_exact_pass_pos_acc",
             "_exact_pass_vel_acc", "_exact_pass_5cm_acc", "_exact_pass_10cm_acc",
@@ -27544,12 +27598,33 @@ class RacketTargetCommand(CommandTerm):
         values = host.tolist()
         if len(values) != 23 or any(not math.isfinite(value) for value in values):
             raise RuntimeError("full-MDP command metric snapshot is non-finite")
+        # Linear p90 over the retained finite subset, with fixed-size device work only.
+        error_n = error_mask.sum()
+        safe_error_n = error_n.clamp_min(1)
+        ordered_errors = torch.sort(torch.where(
+            error_mask, error_values, torch.full_like(error_values, math.inf)
+        )).values
+        rank = (safe_error_n - 1).to(error_values.dtype) * 0.90
+        lower = rank.floor().to(torch.long).reshape(1)
+        upper = rank.ceil().to(torch.long).reshape(1)
+        p90 = torch.lerp(
+            torch.gather(ordered_errors, 0, lower)[0],
+            torch.gather(ordered_errors, 0, upper)[0],
+            rank - lower[0].to(error_values.dtype),
+        )
+        mean = torch.where(error_mask, error_values, 0.0).sum() / safe_error_n
+        error_public = tuple(
+            torch.where(error_n > 0, value, metric)
+            for value, metric in zip((mean, p90), error_metrics)
+        )
         for name, value in zip(global_names, values[:10]):
             setattr(self, name, value)
         for target, value in zip(bucket_targets, values[10:18]):
             target[0] = value
         for name, value in zip(hold_names, values[18:]):
             setattr(self, name, value)
+        for metric, value in zip(error_metrics, error_public):
+            metric.copy_(value)
         self._exact_composite_rate = (
             self._exact_pass_comp_acc / max(self._exact_n_acc, 1.0e-6)
             if self._exact_n_acc >= float(self.cfg.exact_success_min_count)
@@ -31679,11 +31754,17 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["exact_strike_pos_success_10cm"][:] = (
             self._exact_pass_10cm_acc / _pos_target_denom if _pos_target_enough else 0.0
         )
-        # Distribution of position error over THIS step's exact-strike samples (p90 + mean), broadcast.
-        _ex_errs = pos_err[pos_target_eligible]
-        if _ex_errs.numel() > 0:
-            self.metrics["exact_strike_pos_err_mean"][:] = _ex_errs.mean()
-            self.metrics["exact_strike_pos_err_p90"][:] = torch.quantile(_ex_errs, 0.90)
+        # FullMDP has no command-reset consumer; its live logger reads this after the PPO boundary.
+        # Legacy recipes retain the immediate per-step distribution below.
+        if self._action_ball_full_mdp_command_metrics_device_enabled:
+            self._stage_action_ball_full_mdp_exact_pos_error(
+                pos_err, pos_target_eligible
+            )
+        else:
+            _ex_errs = pos_err[pos_target_eligible]
+            if _ex_errs.numel() > 0:
+                self.metrics["exact_strike_pos_err_mean"][:] = _ex_errs.mean()
+                self.metrics["exact_strike_pos_err_p90"][:] = torch.quantile(_ex_errs, 0.90)
         self.metrics["exact_strike_sample_count_decayed"][:] = self._exact_n_acc
         for _channel, _count in (
             ("pos", _pos_target_count),
