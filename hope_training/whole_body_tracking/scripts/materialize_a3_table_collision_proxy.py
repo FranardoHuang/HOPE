@@ -6,10 +6,11 @@ mesh byte and rewriting only its path.  This tool therefore reads that tracked
 source directly, folds fixed-joint collision children into their runtime rigid
 body, and emits one or more conservative local OBBs per collision component.
 
-The resulting artifact is data, not a hand-tuned safety margin.  Every source
-triangle is assigned intact to exactly one proxy box, and that box contains all
-three triangle vertices.  Splitting a non-convex mesh this way removes empty
-corner volume without ever deleting any source-mesh geometry.
+The resulting artifact is data, not a hand-tuned safety margin.  For a split
+mesh, the complete backend convex hull is decomposed into a facet-to-interior
+tetrahedron fan.  Every complete tetrahedron is assigned to exactly one proxy
+OBB, and that OBB contains all four vertices; the OBB union therefore covers
+the collision hull, not merely the STL surface.
 Runtime may conservatively broaden the rotated OBB to a world AABB, but must
 never shrink these materialized half axes.
 
@@ -121,14 +122,20 @@ ASSET_HASH_EXCLUDED_CONFIG_KEYS = ("asset_path", "usd_dir", "usd_file_name")
 PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v2"
 # The hand+racket support mesh is non-convex.  Its old single AABB contained a
 # large empty corner that crossed the 20 mm table keep-out even though the raw
-# mesh was 72 mm clear.  A deterministic two-way triangle partition is the
-# smallest split that removes that measured false positive with >5 mm reserve
-# (15.67 mm in the frozen 2026-08-30 witness).  Every other source component
-# deliberately stays one box, keeping the runtime row count at 63.
+# mesh was 72 mm clear. A deterministic two-way convex-hull tetra partition
+# with PCA-oriented leaf boxes is the smallest split that removes that measured
+# false positive with >5 mm reserve (26.49 mm before the outward pad in the
+# frozen 2026-08-30 witness). Every other source component deliberately stays
+# one box, keeping the runtime row count at 63.
 MULTI_OBB_LEAF_COUNTS = {"right_hand_pingpang_link.stl": 2}
 TRIANGLE_PARTITION_ALGORITHM = (
-    "recursive_largest_centroid_span_stable_median_v1"
+    "convex_hull_tetra_fan_recursive_centroid_median_pca_obb_v1"
 )
+PINNED_HULL_NUMPY_VERSION = "1.26.4"
+PINNED_HULL_SCIPY_VERSION = "1.11.4"
+PINNED_HULL_QHULL_OPTIONS = "Qt"
+PCA_EIGENVALUE_TIE_RTOL = 1.0e-10
+PROXY_OBB_OUTWARD_PAD_M = 1.0e-6
 # The 20 OmniPicker3 left-gripper collision links.  They enter the table guard
 # for the first time with the 0807 plant, and a later "cleanup" that quietly
 # drops them would silently re-open the volume they occupy.  Naming them here
@@ -344,31 +351,139 @@ def _stl_triangles(
     return triangles
 
 
-def _partition_triangles(
-    triangles: Sequence[Sequence[Sequence[float]]], leaf_count: int
+def _convex_hull_tetrahedra(
+    triangles: Sequence[Sequence[Sequence[float]]],
+) -> tuple[list[tuple[tuple[float, float, float], ...]], dict[str, object]]:
+    """Return a deterministic complete tetra fan for the backend convex hull.
+
+    Isaac's ``convexHull`` mesh approximation and MuJoCo's mesh collision both
+    consume the convex hull, not merely the STL surface.  Joining every
+    canonical triangular hull facet to one strictly interior point partitions
+    that full convex body into tetrahedra (up to shared zero-volume faces).
+    """
+
+    import numpy as np
+    import scipy
+    from scipy.spatial import ConvexHull
+
+    if (
+        np.__version__ != PINNED_HULL_NUMPY_VERSION
+        or scipy.__version__ != PINNED_HULL_SCIPY_VERSION
+    ):
+        raise ValueError(
+            "convex-hull materialization requires the pinned NumPy/SciPy "
+            f"toolchain {PINNED_HULL_NUMPY_VERSION}/"
+            f"{PINNED_HULL_SCIPY_VERSION}, got "
+            f"{np.__version__}/{scipy.__version__}"
+        )
+    points = np.unique(
+        np.asarray(
+            [vertex for triangle in triangles for vertex in triangle],
+            dtype=np.float64,
+        ),
+        axis=0,
+    )
+    hull = ConvexHull(points, qhull_options=PINNED_HULL_QHULL_OPTIONS)
+    facets = tuple(
+        sorted(tuple(sorted(int(index) for index in row)) for row in hull.simplices)
+    )
+    interior = points[np.sort(hull.vertices)].mean(axis=0)
+    signed_interior = hull.equations[:, :3] @ interior + hull.equations[:, 3]
+    if not bool(np.all(signed_interior < 0.0)):
+        raise ValueError("convex-hull fan point is not strictly interior")
+    tetrahedra = [
+        tuple(
+            tuple(float(value) for value in vertex)
+            for vertex in (interior, *(points[index] for index in facet))
+        )
+        for facet in facets
+    ]
+    tetra_volume = 0.0
+    for tetrahedron in tetrahedra:
+        vertices = np.asarray(tetrahedron, dtype=np.float64)
+        tetra_volume += abs(
+            float(
+                np.linalg.det(
+                    np.stack(
+                        (
+                            vertices[1] - vertices[0],
+                            vertices[2] - vertices[0],
+                            vertices[3] - vertices[0],
+                        ),
+                        axis=1,
+                    )
+                )
+            )
+        ) / 6.0
+    if not math.isclose(
+        tetra_volume,
+        float(hull.volume),
+        rel_tol=1.0e-10,
+        abs_tol=1.0e-15,
+    ):
+        raise ValueError("convex-hull tetra fan does not conserve hull volume")
+    hull_vertices = tuple(
+        tuple(float(value) for value in points[index])
+        for index in sorted(int(index) for index in hull.vertices)
+    )
+    hull_digest_payload = {
+        "facets": facets,
+        "vertices_m": hull_vertices,
+    }
+    receipt = {
+        "facet_count": len(facets),
+        "facets_sha256": _sha256_bytes(_canonical_json_bytes(facets)),
+        "hull_geometry_sha256": _sha256_bytes(
+            _canonical_json_bytes(hull_digest_payload)
+        ),
+        "hull_vertex_count": int(len(hull.vertices)),
+        "hull_vertices_sha256": _sha256_bytes(
+            _canonical_json_bytes(hull_vertices)
+        ),
+        "hull_volume_m3": float(hull.volume),
+        "interior_point_m": [float(value) for value in interior],
+        "interior_strict_max_plane_value_m": float(np.max(signed_interior)),
+        "numpy_version": np.__version__,
+        "qhull_options": PINNED_HULL_QHULL_OPTIONS,
+        "scipy_version": scipy.__version__,
+        "tetra_count": len(tetrahedra),
+        "tetra_fan_volume_m3": tetra_volume,
+        "tetra_fan_volume_abs_error_m3": abs(
+            tetra_volume - float(hull.volume)
+        ),
+        "tetrahedra_sha256": _sha256_bytes(
+            _canonical_json_bytes(tetrahedra)
+        ),
+        "unique_source_vertex_count": int(points.shape[0]),
+    }
+    return tetrahedra, receipt
+
+
+def _partition_simplices(
+    simplices: Sequence[Sequence[Sequence[float]]], leaf_count: int
 ) -> list[tuple[int, ...]]:
-    """Partition complete triangles by a deterministic spatial median tree."""
+    """Partition complete simplices by a deterministic spatial median tree."""
 
     if (
         isinstance(leaf_count, bool)
         or not isinstance(leaf_count, int)
         or leaf_count <= 0
-        or leaf_count > len(triangles)
+        or leaf_count > len(simplices)
     ):
-        raise ValueError("multi-OBB leaf count must fit the triangle count")
+        raise ValueError("multi-OBB leaf count must fit the simplex count")
     centroids = tuple(
         tuple(
-            sum(float(triangle[vertex][axis]) for vertex in range(3)) / 3.0
+            sum(float(vertex[axis]) for vertex in simplex) / len(simplex)
             for axis in range(3)
         )
-        for triangle in triangles
+        for simplex in simplices
     )
 
     def split(indices: tuple[int, ...], leaves: int) -> list[tuple[int, ...]]:
         if leaves == 1:
             return [indices]
         if len(indices) < leaves:
-            raise ValueError("triangle partition would create an empty leaf")
+            raise ValueError("simplex partition would create an empty leaf")
         spans = tuple(
             max(centroids[index][axis] for index in indices)
             - min(centroids[index][axis] for index in indices)
@@ -388,33 +503,181 @@ def _partition_triangles(
             ordered[midpoint:], right_leaves
         )
 
-    leaves = split(tuple(range(len(triangles))), leaf_count)
+    leaves = split(tuple(range(len(simplices))), leaf_count)
     flattened = [index for leaf in leaves for index in leaf]
-    if sorted(flattened) != list(range(len(triangles))):
-        raise ValueError("triangle partition does not cover each triangle exactly once")
+    if sorted(flattened) != list(range(len(simplices))):
+        raise ValueError("simplex partition does not cover each simplex exactly once")
     return leaves
 
 
-def _partition_bounds(
-    triangles: Sequence[Sequence[Sequence[float]]],
+def _canonical_pca_basis(
+    covariance: Any,
+) -> tuple[Any, tuple[float, float, float], tuple[int, ...]]:
+    """Return a platform-independent basis for a symmetric covariance.
+
+    Eigenvector signs are arbitrary, and an eigensolver may return any basis
+    inside a repeated-eigenvalue subspace.  We remove both freedoms: values
+    are ordered descending with source-index tie breaking, near-equal values
+    form one eigenspace, and that space is reconstructed by projecting the
+    fixed X/Y/Z axes followed by deterministic Gram--Schmidt.  The first two
+    axes then receive a largest-component-positive sign and the third is their
+    right-handed cross product.
+    """
+
+    import numpy as np
+
+    eigenvalues_raw, eigenvectors_raw = np.linalg.eigh(covariance)
+    order = tuple(
+        sorted(
+            range(3),
+            key=lambda axis: (-float(eigenvalues_raw[axis]), axis),
+        )
+    )
+    eigenvalues = tuple(float(eigenvalues_raw[axis]) for axis in order)
+    scale = max(max(abs(value) for value in eigenvalues), 1.0e-30)
+    groups: list[tuple[int, ...]] = []
+    current = [0]
+    for rank in range(1, 3):
+        if abs(eigenvalues[rank] - eigenvalues[current[-1]]) <= (
+            PCA_EIGENVALUE_TIE_RTOL * scale
+        ):
+            current.append(rank)
+        else:
+            groups.append(tuple(current))
+            current = [rank]
+    groups.append(tuple(current))
+
+    ordered_vectors = eigenvectors_raw[:, list(order)]
+    columns = []
+    canonical_seeds = np.eye(3, dtype=np.float64)
+    for group in groups:
+        raw_space = ordered_vectors[:, list(group)]
+        projector = raw_space @ raw_space.T
+        group_columns = []
+        for seed in canonical_seeds:
+            candidate = projector @ seed
+            for existing in group_columns:
+                candidate -= existing * float(existing @ candidate)
+            norm = float(np.linalg.norm(candidate))
+            if norm > 1.0e-12:
+                group_columns.append(candidate / norm)
+            if len(group_columns) == len(group):
+                break
+        if len(group_columns) != len(group):
+            raise ValueError("cannot canonicalize a PCA eigenspace")
+        columns.extend(group_columns)
+    basis = np.stack(columns, axis=1)
+    for axis in range(2):
+        pivot = int(np.argmax(np.abs(basis[:, axis])))
+        if basis[pivot, axis] < 0.0:
+            basis[:, axis] *= -1.0
+    basis[:, 2] = np.cross(basis[:, 0], basis[:, 1])
+    basis[:, 2] /= np.linalg.norm(basis[:, 2])
+    if not np.allclose(basis.T @ basis, np.eye(3), rtol=0.0, atol=1.0e-12):
+        raise ValueError("canonical PCA basis is not orthonormal")
+    if not math.isclose(float(np.linalg.det(basis)), 1.0, abs_tol=1.0e-12):
+        raise ValueError("canonical PCA basis is not right handed")
+    return basis, eigenvalues, tuple(len(group) for group in groups)
+
+
+def _float32_max_abs_obb_coefficient(
+    center: Any,
+    half_axes: Any,
+    vertices: Any,
+) -> float:
+    """Prove that the float32 geometry still contains every supplied vertex."""
+
+    import numpy as np
+
+    center_f32 = np.asarray(center, dtype=np.float32).astype(np.float64)
+    axes_f32 = np.asarray(half_axes, dtype=np.float32).astype(np.float64)
+    vertices_f64 = np.asarray(vertices, dtype=np.float64)
+    coefficients = np.linalg.solve(
+        axes_f32.T,
+        (vertices_f64 - center_f32).T,
+    ).T
+    maximum = float(np.max(np.abs(coefficients)))
+    if maximum > 1.0:
+        raise ValueError("float32 proxy OBB shrinks below its coverage vertices")
+    return maximum
+
+
+def _partition_pca_obbs(
+    simplices: Sequence[Sequence[Sequence[float]]],
     leaves: Sequence[Sequence[int]],
-) -> list[tuple[tuple[float, float, float], tuple[float, float, float]]]:
-    """Bound each complete-triangle leaf and verify every source vertex."""
+) -> tuple[
+    list[
+        tuple[
+            tuple[float, float, float],
+            tuple[tuple[float, float, float], ...],
+        ]
+    ],
+    list[dict[str, object]],
+]:
+    """Fit a pinned PCA OBB around every complete-simplex leaf."""
+
+    import numpy as np
 
     result = []
+    receipts = []
     for leaf in leaves:
-        vertices = [
-            triangles[index][vertex]
-            for index in leaf
-            for vertex in range(3)
-        ]
-        center, half = _bounds(vertices)
+        vertices = np.unique(
+            np.asarray(
+                [
+                    simplices[index][vertex]
+                    for index in leaf
+                    for vertex in range(len(simplices[index]))
+                ],
+                dtype=np.float64,
+            ),
+            axis=0,
+        )
+        mean = vertices.mean(axis=0)
+        centered = vertices - mean
+        covariance = centered.T @ centered / float(vertices.shape[0])
+        basis, eigenvalues, tie_group_sizes = _canonical_pca_basis(covariance)
+        projected = centered @ basis
+        lower = projected.min(axis=0)
+        upper = projected.max(axis=0)
+        center = mean + basis @ ((lower + upper) * 0.5)
+        half = (upper - lower) * 0.5 + PROXY_OBB_OUTWARD_PAD_M
+        half_axes = np.stack(
+            [basis[:, axis] * half[axis] for axis in range(3)], axis=0
+        )
         for vertex in vertices:
-            for axis in range(3):
-                if abs(float(vertex[axis]) - center[axis]) > half[axis]:
-                    raise ValueError("multi-OBB leaf failed full-triangle coverage")
-        result.append((center, half))
-    return result
+            relative = vertex - center
+            projection = np.abs(basis.T @ relative)
+            if bool(np.any(projection > half)):
+                raise ValueError("multi-OBB leaf failed full-simplex coverage")
+        # Consumers use float32 on the GPU.  Validate the serialized geometry
+        # in that precision as well; the 1 um outward pad must dominate all
+        # center/basis conversion roundoff rather than relying on luck.
+        max_abs_coefficient = _float32_max_abs_obb_coefficient(
+            center, half_axes, vertices
+        )
+        result.append(
+            (
+                tuple(float(value) for value in center),
+                tuple(
+                    tuple(float(value) for value in axis)
+                    for axis in half_axes
+                ),
+            )
+        )
+        receipts.append(
+            {
+                "basis_sha256": _sha256_bytes(
+                    _canonical_json_bytes(
+                        [[float(value) for value in row] for row in basis]
+                    )
+                ),
+                "eigenvalue_tie_group_sizes": list(tie_group_sizes),
+                "eigenvalues_m2": list(eigenvalues),
+                "float32_max_abs_obb_coefficient": max_abs_coefficient,
+                "unique_vertex_count": int(vertices.shape[0]),
+            }
+        )
+    return result, receipts
 
 
 def _bounds(
@@ -758,8 +1021,62 @@ def _artifact(
                 for triangle in _stl_triangles(mesh_path)
             ]
             leaf_count = MULTI_OBB_LEAF_COUNTS.get(relative_mesh.lower(), 1)
-            triangle_leaves = _partition_triangles(triangles, leaf_count)
-            leaf_bounds = _partition_bounds(triangles, triangle_leaves)
+            source_vertices = tuple(
+                sorted(
+                    {
+                        tuple(float(value) for value in vertex)
+                        for triangle in triangles
+                        for vertex in triangle
+                    }
+                )
+            )
+            source_vertices_sha256 = _sha256_bytes(
+                _canonical_json_bytes(source_vertices)
+            )
+            hull_receipt: dict[str, object] | None = None
+            if leaf_count == 1:
+                mesh_center, mesh_half = _bounds(source_vertices)
+                mesh_half = tuple(
+                    float(value) + PROXY_OBB_OUTWARD_PAD_M
+                    for value in mesh_half
+                )
+                leaf_obbs = [
+                    (
+                        mesh_center,
+                        (
+                            (mesh_half[0], 0.0, 0.0),
+                            (0.0, mesh_half[1], 0.0),
+                            (0.0, 0.0, mesh_half[2]),
+                        ),
+                    )
+                ]
+                # A convex box containing every source vertex contains their
+                # convex hull, exactly the geometry used by both backends.
+                leaf_primitive_indices = [tuple(range(len(source_vertices)))]
+                leaf_fit_receipts = [
+                    {
+                        "float32_max_abs_obb_coefficient": (
+                            _float32_max_abs_obb_coefficient(
+                                mesh_center,
+                                leaf_obbs[0][1],
+                                source_vertices,
+                            )
+                        ),
+                        "unique_vertex_count": len(source_vertices),
+                    }
+                ]
+                coverage_basis = "source_vertex_aabb_convex_hull_superset"
+                coverage_primitive_kind = "source_vertex"
+            else:
+                tetrahedra, hull_receipt = _convex_hull_tetrahedra(triangles)
+                leaf_primitive_indices = _partition_simplices(
+                    tetrahedra, leaf_count
+                )
+                leaf_obbs, leaf_fit_receipts = _partition_pca_obbs(
+                    tetrahedra, leaf_primitive_indices
+                )
+                coverage_basis = "complete_convex_hull_tetra_fan_pca_obb_union"
+                coverage_primitive_kind = "convex_hull_tetrahedron"
             link_from_mesh_rotation, link_from_mesh_translation = (
                 _origin_transform(collision.find("origin"))
             )
@@ -777,20 +1094,37 @@ def _artifact(
             )
             source_component_count += 1
             partition_sha256 = _sha256_bytes(
-                _canonical_json_bytes([list(leaf) for leaf in triangle_leaves])
+                _canonical_json_bytes(
+                    [list(leaf) for leaf in leaf_primitive_indices]
+                )
             )
-            partition_receipts.append(
-                {
-                    "leaf_count": leaf_count,
-                    "mesh_path": repo_relative_mesh,
-                    "partition_sha256": partition_sha256,
-                    "source_component_id": source_component_id,
-                    "triangle_count": len(triangles),
-                }
-            )
-            for leaf_index, ((mesh_center, mesh_half), triangle_leaf) in enumerate(
-                zip(leaf_bounds, triangle_leaves)
-            ):
+            partition_receipt: dict[str, object] = {
+                "coverage_basis": coverage_basis,
+                "coverage_primitive_kind": coverage_primitive_kind,
+                "leaf_count": leaf_count,
+                "leaf_fit_receipts": leaf_fit_receipts,
+                "leaf_primitive_counts": [
+                    len(leaf) for leaf in leaf_primitive_indices
+                ],
+                "leaf_primitive_indices_sha256": [
+                    _sha256_bytes(_canonical_json_bytes(list(leaf)))
+                    for leaf in leaf_primitive_indices
+                ],
+                "mesh_path": repo_relative_mesh,
+                "mesh_sha256": mesh_sha,
+                "partition_sha256": partition_sha256,
+                "source_component_id": source_component_id,
+                "source_triangle_count": len(triangles),
+                "source_vertex_count": len(source_vertices),
+                "source_vertices_sha256": source_vertices_sha256,
+            }
+            if hull_receipt is not None:
+                partition_receipt["convex_hull"] = hull_receipt
+            partition_receipts.append(partition_receipt)
+            for leaf_index, (
+                (mesh_center, mesh_half_axes),
+                primitive_leaf,
+            ) in enumerate(zip(leaf_obbs, leaf_primitive_indices)):
                 center_owner = _vector_add(
                     _matrix_vector(owner_from_mesh_rotation, mesh_center),
                     owner_from_mesh_translation,
@@ -799,12 +1133,8 @@ def _artifact(
                 # half-axis vectors. Runtime rotates each vector by the live
                 # body quaternion and sums absolute components.
                 half_axes_owner = tuple(
-                    tuple(
-                        float(owner_from_mesh_rotation[row][axis])
-                        * float(mesh_half[axis])
-                        for row in range(3)
-                    )
-                    for axis in range(3)
+                    _matrix_vector(owner_from_mesh_rotation, half_axis)
+                    for half_axis in mesh_half_axes
                 )
                 component_id = source_component_id
                 if leaf_count > 1:
@@ -812,6 +1142,12 @@ def _artifact(
                 components.append(
                     {
                         "component_id": component_id,
+                        "coverage_basis": coverage_basis,
+                        "coverage_primitive_count": len(primitive_leaf),
+                        "coverage_primitive_indices_sha256": _sha256_bytes(
+                            _canonical_json_bytes(list(primitive_leaf))
+                        ),
+                        "coverage_primitive_kind": coverage_primitive_kind,
                         "local_center_owner_m": list(center_owner),
                         "local_half_axes_owner_m": [
                             list(axis) for axis in half_axes_owner
@@ -825,10 +1161,8 @@ def _artifact(
                         "source_component_id": source_component_id,
                         "source_link_name": link_name,
                         "source_triangle_count": len(triangles),
-                        "triangle_count": len(triangle_leaf),
-                        "triangle_indices_sha256": _sha256_bytes(
-                            _canonical_json_bytes(list(triangle_leaf))
-                        ),
+                        "source_vertex_count": len(source_vertices),
+                        "source_vertices_sha256": source_vertices_sha256,
                     }
                 )
             owner_counts[owner] += 1
@@ -859,11 +1193,24 @@ def _artifact(
         "components": components,
         "decomposition": {
             "algorithm": TRIANGLE_PARTITION_ALGORITHM,
-            "coverage_contract": (
-                "each source triangle belongs to exactly one proxy box and "
-                "all three vertices are contained by that box"
+            "backend_collision_authority": (
+                "convex hull: Isaac convexHull approximation and MuJoCo mesh"
             ),
+            "coverage_contract": (
+                "one-box rows contain every source vertex and therefore its "
+                "convex hull; split rows partition the complete hull tetra "
+                "fan exactly once and each PCA OBB contains every vertex of "
+                "its complete tetrahedra"
+            ),
+            "float32_coverage_validated": True,
+            "hull_toolchain": {
+                "numpy_version": PINNED_HULL_NUMPY_VERSION,
+                "pca_eigenvalue_tie_rtol": PCA_EIGENVALUE_TIE_RTOL,
+                "qhull_options": PINNED_HULL_QHULL_OPTIONS,
+                "scipy_version": PINNED_HULL_SCIPY_VERSION,
+            },
             "leaf_count_overrides": dict(sorted(MULTI_OBB_LEAF_COUNTS.items())),
+            "outward_pad_m": PROXY_OBB_OUTWARD_PAD_M,
             "partition_receipts": sorted(
                 partition_receipts, key=lambda row: str(row["source_component_id"])
             ),
