@@ -453,17 +453,19 @@ def _point_to_convex_subset_distance(
             np.sum((point[None, :] - a) * normal, axis=1) / normal_sq
         )
         projection = point[None, :] - plane_amount[:, None] * normal
-        gram_aa = np.sum(ab * ab, axis=1)
-        gram_ab = np.sum(ab * ac, axis=1)
-        gram_cc = np.sum(ac * ac, axis=1)
-        rhs_a = np.sum((projection - a) * ab, axis=1)
-        rhs_c = np.sum((projection - a) * ac, axis=1)
-        determinant = gram_aa * gram_cc - gram_ab * gram_ab
-        if bool(np.any(determinant <= 0.0)):
-            raise ValueError("convex hull contains a singular triangle facet")
-        weight_b = (rhs_a * gram_cc - rhs_c * gram_ab) / determinant
-        weight_c = (rhs_c * gram_aa - rhs_a * gram_ab) / determinant
-        weight_a = 1.0 - weight_b - weight_c
+        # Cross-product barycentrics divide by the already-validated squared
+        # facet area.  The algebraically equivalent Gram determinant suffers
+        # catastrophic cancellation on A3's very thin but non-degenerate
+        # facets and incorrectly classified them as singular.
+        weight_a = np.sum(
+            np.cross(b - projection, c - projection) * normal, axis=1
+        ) / normal_sq
+        weight_b = np.sum(
+            np.cross(c - projection, a - projection) * normal, axis=1
+        ) / normal_sq
+        weight_c = np.sum(
+            np.cross(a - projection, b - projection) * normal, axis=1
+        ) / normal_sq
         raw_weights = np.stack((weight_a, weight_b, weight_c), axis=1)
         valid_face = np.all(raw_weights >= 0.0, axis=1)
         weights = np.maximum(raw_weights, 0.0)
