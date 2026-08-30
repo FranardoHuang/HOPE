@@ -144,12 +144,14 @@ def test_pure_physical_max_segment_is_bitwise_owner_numeric_semantics(
     owner = _physical_owner()
     params = owner.flight_params
     config = owner.numeric_config
+    reveal_tick = torch.zeros_like(batch.candidate_identity)
     contact_tick = torch.full_like(batch.candidate_identity, 17)
 
     receipt = owner.issue_horizon_for_test(batch)
     horizon = owner.project_horizon_for_test(receipt)
     chosen = torch.minimum(
-        horizon.max_feasible_motion_ticks, contact_tick.clamp(min=0)
+        horizon.max_feasible_motion_ticks,
+        (contact_tick - reveal_tick - 1).clamp(min=0),
     ).contiguous()
     launch_tick = (contact_tick - chosen).contiguous()
     owned = owner.finalize_exact_ticks_for_test(
@@ -161,6 +163,7 @@ def test_pure_physical_max_segment_is_bitwise_owner_numeric_semantics(
     pure = physical.solve_max_final_segment_device(
         batch,
         candidate_identity=batch.candidate_identity,
+        reveal_tick=reveal_tick,
         contact_tick=contact_tick,
         params=params,
         config=config,

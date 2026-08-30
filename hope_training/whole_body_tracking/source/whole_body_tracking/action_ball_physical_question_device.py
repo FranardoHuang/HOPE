@@ -1050,6 +1050,7 @@ def solve_max_final_segment_device(
     batch: PhysicalQuestionCandidateBatch,
     *,
     candidate_identity: torch.Tensor,
+    reveal_tick: torch.Tensor,
     contact_tick: torch.Tensor,
     params: PhysicalQuestionFlightParams,
     config: PhysicalQuestionNumericConfig,
@@ -1066,8 +1067,36 @@ def solve_max_final_segment_device(
     if type(config) is not PhysicalQuestionNumericConfig:
         raise PhysicalQuestionError("numeric config type differs")
     record = _discover_horizon(batch, params=params, config=config)
+    shape = tuple(record.candidate_identity.shape)
+    device = record.candidate_identity.device
+    if (
+        type(reveal_tick) is not torch.Tensor
+        or reveal_tick.device != device
+        or reveal_tick.dtype is not torch.int64
+        or tuple(reveal_tick.shape) != shape
+        or not reveal_tick.is_contiguous()
+    ):
+        raise PhysicalQuestionError(
+            f"reveal_tick must be contiguous int64 on {device} with shape {shape}"
+        )
+
+    # The ballistic prefix is a duration relative to this question's reveal,
+    # not an absolute episode-clock budget.  Keep the strict portable/Mu
+    # contract ``ttc_ticks > launch_horizon_ticks``: an admitted launch is at
+    # least one tick after reveal and can therefore never be scheduled in the
+    # past.  Invalid/overflow-prone chronology is reduced to a zero horizon;
+    # exact finalization below rejects that row without a host synchronization.
+    has_strict_remaining_tick = reveal_tick.ge(0) & contact_tick.gt(reveal_tick)
+    safe_reveal_tick = torch.where(
+        has_strict_remaining_tick, reveal_tick, contact_tick
+    )
+    max_launch_horizon = torch.where(
+        has_strict_remaining_tick,
+        contact_tick - safe_reveal_tick - 1,
+        torch.zeros_like(contact_tick),
+    )
     chosen_horizon = torch.minimum(
-        record.max_feasible_motion_ticks, contact_tick.clamp(min=0)
+        record.max_feasible_motion_ticks, max_launch_horizon
     ).contiguous()
     launch_tick = (contact_tick - chosen_horizon).contiguous()
     final = _finalize_exact_ticks(
