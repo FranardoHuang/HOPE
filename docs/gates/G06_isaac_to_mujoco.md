@@ -4,6 +4,22 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 
 ## 2026-08-30 teacher keepout authority复核（仍`Partial`）
 
+最新recent30表明两端仍处在不同失败层：Mu update `7669`已有`3,045 launch / 3,035 R03`，
+但contact/crossing/landing/recovery全0，四项playback paddle误差为
+`.054624 m/.313880 mps/.167925 rad/.306336 rad`；Isaac update `2762`已有`3,027 playback /
+2,983 launch`，却R03/contact/landing/recovery全0，四项误差为
+`.240715/.803624/.382457/.232391`。两端table/fall/hard分别为`217/1/0`与`21/74/0`，
+finite/fact/conservation clean。这不是physics parity证据，而是Mu mimic→physical contact与Isaac
+mimic→R03两个独立阻塞。
+
+新source-hull exact narrow-phase候选`0a817ab7`已修复旧`21310c49`在GPU1的`14/32`
+owner-order fail-closed，并在Pod clean exact
+`/workspace/franco/mktemp/teacher-exact-narrowphase-0a817ab7-QnLAtJ`通过六套
+`211 passed,9 skipped`。32-name authority、62/62 live-float32 eager closure、20 nm guard、frame8 component51
+broad-positive/exact-clear真实witness、heldout 51/55/57、20 mm正控与nonfinite receipt已有回归覆盖。
+但它依然是source convex-hull diagnostic，**不是**Mu/Isaac backend actual-collider authority，真实GPU replay
+尚未测；因此G06不晋级，production keepout与20 mm余量不变。
+
 同一teacher transition 73/substep 17上，Mu GPU/CPU的multi-[OBB](../DEFINITIONS.md#obb) guard逐位一致地报告component57约
 `-1.235 mm` expanded-top margin；但独立读取源STL convex与`runtime.mjb`实际collider union，二者离20 mm
 扩张桌面分别仍有`+13.523/+13.361 mm`净空。因此当前分歧不属于Mu物理碰撞，而是shared single-OBB

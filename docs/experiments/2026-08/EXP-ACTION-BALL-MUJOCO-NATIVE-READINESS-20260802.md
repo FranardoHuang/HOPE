@@ -22,12 +22,15 @@
 
 ## 2026-08-30 teacher replay量具与direct-frame0诊断
 
-现役`8200c4a2`双长期run未热补、未停止、未复用namespace。只读recent30刷新到Isaac/Mu至少
-update `2306/6368`：Isaac `2,966 launch / 0 R03-valid`，Mu
-`3,026 launch / 0 raw / 0 selected / 0 crossing / 0 legal landing`。Mu四项playback paddle误差为
-`.06447 m/.40127 mps/.21761 rad/.26119 rad`，wall p50/p90=`6.332/6.528 s/H48`；Isaac wall
-p50/p90=`18.004/18.271 s/H48`。finite/fact/conservation clean只说明工程健康，不改变两端mimic→hit
-仍失败的学习裁决。
+现役`8200c4a2`双长期run未热补、未停止、未复用namespace。最新recent30中，Mu到
+update `7669`：episode均长`1241.018 tick`，due/launch/R03=`3,113/3,045/3,035`，但
+raw/selected contact、crossing、legal landing和recovery全0；table/fall/hard=`217/1/0`，四项
+playback paddle误差`.054624 m/.313880 mps/.167925 rad/.306336 rad`，wall p50/p90=
+`6.30994/6.50964 s/H48`。Isaac到update `2762`：episode均长`1350.027 tick`，
+due/accepted/deferred/playback/launch=`3,045/3,044/0/3,027/2,983`，R03/contact/landing/recovery全0；
+table/fall/hard=`21/74/0`，四项误差`.240715/.803624/.382457/.232391`，wall p50/p90=
+`17.985/18.270 s/H48`。finite/fact/conservation clean只说明工程健康，不改变两端
+mimic→hit仍失败的学习裁决。
 
 zero-PPO teacher replay先用component55的两个child [OBB](../../DEFINITIONS.md#obb)消除了旧paddle STL winner，但同一
 transition 73/substep 17又出现component57 `right_wrist_yaw_link.stl`。exact CPU geometry证据把它判为
@@ -73,17 +76,22 @@ consumer、20 mm余量、teacher、Reward和Stage均未改。
 
 ### 长窗mimic→hit与exact narrow-phase裁定
 
-- Mu现役`8200c4a2` recent30截至update `7079`已有`2,952 launch`、`2,958 R03-valid`和四项
-  playback paddle误差`.05661 m/.33082 mps/.20845 rad/.27212 rad`，但raw/selected/crossing/landing
-  仍为0；finite与conservation clean。该分母足以否决“只需继续等更久就会自然hit”，但不证明policy永远
-  不可学。
-- teacher zero-PPO回放已证明component51/55/57的single OBB能在实际collider仍有净空时误报。采用
-  `cheap OBB broad phase -> positive pair backend-authoritative exact narrow phase`作为下一可证伪诊断；
-  heldout固定为51/55/57，true-contact与20 mm扩张桌面作正负控制。GPU1结果出来前不改变production
-  termination、Reward、Observation或现役run。
-- 性能旁路`e6958d2a`已在Pod fresh exact tree通过`244 tests`，把exact-quality metric从48次逐stepD2H
-  收成update边界1次；hold/recovery仍有48次，所以已识别command侧只是至少`96→49/update`。真实CUDA
-  fixed tape与matched wall未测，故暂不归因或替换现役source。Reward28已经是每update单次packed D2H，
+- Mu现役`8200c4a2` recent30截至update `7669`已有`3,045 launch`、`3,035 R03-valid`和四项
+  playback paddle误差`.054624 m/.313880 mps/.167925 rad/.306336 rad`，但
+  raw/selected/crossing/landing/recovery仍全为0；finite与conservation clean。该分母足以否决
+  “只需继续等更久就会自然hit”，但不证明policy永远不可学。
+- teacher zero-PPO回放已证明component51/55/57的single OBB能在实际collider仍有净空时误报。
+  前一候选`21310c49`在GPU1对`14/32` owner-body order mismatch正确fail-closed。新
+  `0a817ab7`已收口32-name authority、62/62 live float32 eager closure、20 nm guard、frame8
+  component51 broad-positive/exact-clear真实witness、heldout 51/55/57、20 mm正控与nonfinite receipt；
+  Pod clean exact六套=`211 passed,9 skipped`。但这仍是source-authoritative convex-hull diagnostic，
+  不是backend actual-collider authority，GPU replay未测；此前不改production termination、Reward、
+  Observation或现役run。
+- 性能候选`0200b2c8c`已在Pod CPU通过`272 tests`，再将hold/recovery收到update边界
+  单次D2H；独立审查与103项复跑PASS，确认已识别command同步数为`8200c4a2`
+  steady `96→2`、first update `98→2`、相对`e6958d2a` `49→2`，因而可进入CUDA canary。
+  真实CUDA sync、fixed-tape/finite parity与matched wall未测，不宣称wall收益或替换现役source；
+  formal合并前还须删除两个旧单包private flush helper。Reward28已是每update单次packed D2H，
   不在没有新profile证据时继续堆微优化。
 
 ## 2026-08-29 current correction

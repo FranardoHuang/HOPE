@@ -20,12 +20,15 @@ exact source和证据root继续只读，不hot-patch、不resume、不复用。R
 
 ### 2026-08-30 teacher replay：先修量具，再判断动态老师
 
-- 现役`8200c4a2`双长期run继续只读运行。`observed_at=2026-08-30T05:31Z`时Isaac/Mu分别至少到
-  update `2306/6368`；recent30中Isaac为`0 R03-valid / 2,966 launch`，Mu为
-  `0 raw / 0 selected / 3,026 launch`，两端仍未打开hit入口。Mu recent30四项playback paddle误差为
-  `.06447 m/.40127 mps/.21761 rad/.26119 rad`，wall p50/p90=`6.332/6.528 s/H48`；Isaac wall
-  p50/p90=`18.004/18.271 s/H48`。两端finite/fact/conservation保持clean，故继续运行只积累学习反例，
-  不把健康ACK或checkpoint解释成课程成功。
+- 现役`8200c4a2`双长期run继续只读运行。最新recent30中，Mu到update `7669`，episode均长
+  `1241.018 tick`，`3,113 due / 3,045 launch / 3,035 R03-valid`，但raw/selected contact、crossing、
+  legal landing和recovery全为0；table/fall/hard=`217/1/0`，四项playback paddle误差为
+  `.054624 m/.313880 mps/.167925 rad/.306336 rad`，wall p50/p90=`6.30994/6.50964 s/H48`。
+  Isaac到update `2762`，episode均长`1350.027 tick`，`3,045 due / 3,044 accepted / 0 deferred /
+  3,027 playback / 2,983 launch`，R03、contact、landing和recovery全为0；table/fall/hard=`21/74/0`，
+  四项误差为`.240715 m/.803624 mps/.382457 rad/.232391 rad`，wall p50/p90=
+  `17.985/18.270 s/H48`。两端保持finite/fact/conservation clean；现有大分母继续加强
+  mimic→hit反例，不把健康ACK或checkpoint解释成课程成功。
 - zero-PPO teacher replay已证明旧single-[OBB](../DEFINITIONS.md#obb)量具会把自由空间填成碰桌。component55的paddle STL拆成两个
   child OBB后，旧winner消失；但同一transition 73/substep 17又由component57
   `right_wrist_yaw_link.stl`的single OBB误报。精确诊断显示CUDA/CPU对20 mm扩张桌面的proxy margin为
@@ -59,17 +62,30 @@ exact source和证据root继续只读，不hot-patch、不resume、不复用。R
   `0 R03 / 0 raw / 3,016 launch`。两端nonfinite/conservation仍为0；Mu/Isaac wall p50/p90分别为
   `6.259/6.478`与`16.464/16.848 s/H48`。因此Mu已经有足够mimic分母和较小拍误差却没有物理接触，
   Isaac仍堵在R03以前；后续优先闭合teacher exact narrow phase和mimic→ball几何，不再用更多update粉饰0格。
-- command metric的数学等价性能候选已收口到
-  `Franco_codex/fullmdp-commandmetric-batch-20260830@e6958d2a`，其tree `06692e4c`与Pod fresh exact
+- command metric的后续数学等价性能候选已收口到
+  `Franco_codex/fullmdp-commandmetric-hold-batch-20260830@0200b2c8c`；它基于
+  `Franco_codex/fullmdp-commandmetric-batch-20260830@e6958d2a`。旧候选tree `06692e4c`与Pod fresh exact
   checkout逐树一致。它把exact-quality metric从48次逐stepD2H收成optimizer边界1次，净减
   `47 D2H/update`；Pod四文件聚焦=`244 passed in 11.63 s`，包含独立fixed tape、H/H+1、顺序、poison与
-  save边界。调用图同时确认hold/recovery仍有48次逐stepD2H，故已识别command侧总数只是从至少96降到
-  至少49，不是全部收敛。真实CUDA fixed tape和profiler-off wall尚未跑，所以尚不替换现役source；下一刀
-  应把hold/recovery复用已有device telemetry并入同一update边界。Reward28审计确认两端已经各自每update
+  save边界。`0200b2c8c`再把hold/recovery五个scalar从48次逐step D2H收到update边界1次，
+  Pod CPU组合回归=`272 passed`；因此把command侧**已识别**同步从旧版至少`96`降到
+  `2/update`。独立审查及103项复跑PASS，确认相对`8200c4a2` steady为`96→2/update`、
+  首轮`98→2`，相对`e6958d2a`为`49→2`，因而允许进入CUDA canary。真实CUDA sync计数、
+  fixed-tape/finite parity和profiler-off matched wall尚未测，所以它仍是候选，不宣称wall收益、
+  不替换现役source；formal合并前还须删除两个旧单包private flush helper。Reward28审计确认两端已经各自每update
   一次packed D2H，在新profile重新把它指为主项前不继续做低收益dispatcher微优化。
-- 当前下一步只有两项：在GPU1 fresh zero-PPO diagnostic中用OBB作为broad phase、只对positive pair调用
-  pinned Mu runtime的backend-authoritative exact narrow phase；并对`e6958d2a`做真实CUDA parity与
-  matched wall。两者都不修改现役run、Observation、Reward、Stage或安全真值。
+- teacher exact narrow-phase候选已从前一版`21310c49`在GPU1对`14/32` owner-body order
+  mismatch的正确fail-closed中收口。新`0a817ab7`的Pod clean exact目录为
+  `/workspace/franco/mktemp/teacher-exact-narrowphase-0a817ab7-QnLAtJ`，六套聚焦回归=
+  `211 passed,9 skipped`：已改为32-name authority，对62/62 source hull在live float32 owner-frame
+  OBB上做eager closure，数值guard=`20 nm`；actual frame8 component51保留broad-positive/exact-clear
+  真实witness，51/55/57作heldout，20 mm真阳性作正控，nonfinite/failure写receipt。这是
+  **source-authoritative convex-hull diagnostic**，不是Mu/Isaac backend actual-collider authority；真实GPU replay
+  尚未测，不改production consumer、teacher、20 mm余量或现役run。
+- 当前下一步只有两项：在fresh GPU上重放`0a817ab7`的source-hull exact narrow-phase
+  diagnostic，核对identity、witness、heldout和20 mm正控；并对已过独立审查的`0200b2c8c`做
+  真实CUDA sync/fixed-tape/finite parity与matched wall。两者都不修改现役run、Observation、Reward、
+  Stage或安全真值。
 
 ### 已证根因，不再归为“Pod整体装坏”
 

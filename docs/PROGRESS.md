@@ -1,5 +1,21 @@
 # 简短进度记录
 
+## 2026-08-30 — r35长窗、command D2H候选与teacher exact诊断收口
+
+- 现役`8200c4a2`只读recent30刷新到Mu/Isaac update `7669/2762`。Mu在`3,045 launch /
+  3,035 R03`下contact/crossing/landing/recovery全0，拍误差已到`.054624 m/.313880 mps/
+  .167925 rad/.306336 rad`；Isaac在`3,027 playback / 2,983 launch`下R03/contact/landing/recovery全0。
+  wall p50/p90分别为`6.30994/6.50964`与`17.985/18.270 s/H48`，两端finite/fact/conservation
+  clean，但mimic→hit仍未闭合。
+- `0200b2c8c`的Pod CPU组合回归=`272 passed`，独立审查及103项复跑PASS；已识别
+  command D2H相对`8200c4a2` steady/first-update为`96→2 / 98→2`，相对`e6958d2a`为
+  `49→2`，可进入CUDA canary。CUDA sync、fixed-tape/finite与matched wall仍未测，不宣称wall收益；
+  formal合并前须删除两个旧单包private flush helper。
+- teacher exact候选`0a817ab7`修复旧`21310c49`在GPU1的`14/32` owner-order
+  fail-closed，Pod clean exact六套=`211 passed,9 skipped`。它已覆盖32-name authority、62/62 live-float32
+  eager closure、20 nm guard、frame8 component51真实witness、heldout 51/55/57、20 mm正控与
+  nonfinite receipt；仍只是source convex-hull diagnostic，不是backend actual-collider authority，GPU replay未测。
+
 ## 2026-08-30 — 长窗mimic→hit反例与command-metric窄切口Pod闭合
 
 - `8200c4a2`双端继续健康运行，但recent30已形成更强的行为结论：Mu在`2,952 launch`和约

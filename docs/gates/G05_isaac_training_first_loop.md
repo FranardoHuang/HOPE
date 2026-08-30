@@ -4,6 +4,26 @@ Status: Partial (the base training-loop mechanics are proven; the current-fresh 
 
 ## 2026-08-30 teacher replay量具复核（仍`Partial`）
 
+最新recent30已替代本节后文的较早数字。Mu到update `7669`：episode均长`1241.018 tick`，
+due/launch/R03=`3,113/3,045/3,035`，但contact/crossing/landing/recovery全0；table/fall/hard=
+`217/1/0`，四项playback paddle误差`.054624 m/.313880 mps/.167925 rad/.306336 rad`，
+wall p50/p90=`6.30994/6.50964 s/H48`。Isaac到update `2762`：episode均长`1350.027 tick`，
+due/accepted/deferred/playback/launch=`3,045/3,044/0/3,027/2,983`，R03/contact/landing/recovery全0；
+table/fall/hard=`21/74/0`，四项误差`.240715/.803624/.382457/.232391`，wall p50/p90=
+`17.985/18.270 s/H48`。两端finite/fact/conservation clean，但不改变mimic→hit未闭合的裁决。
+
+实现侧有两个候选，都尚未改变Gate。`0a817ab7`修复了旧`21310c49`在GPU1对
+`14/32` owner-body order的正确fail-closed，并在Pod clean exact
+`/workspace/franco/mktemp/teacher-exact-narrowphase-0a817ab7-QnLAtJ`完成六套
+`211 passed,9 skipped`：32-name authority、62/62 live-float32 eager closure、20 nm guard、frame8 component51
+broad-positive/exact-clear真实witness、heldout 51/55/57、20 mm正控和nonfinite receipt均有覆盖。
+它仍只是source-authoritative convex-hull diagnostic，不是backend actual-collider authority，GPU replay也尚未测。
+`0200b2c8c`在Pod CPU通过`272 tests`，把command侧已识别D2H从旧版至少
+`96→2/update`；独立审查与103项复跑PASS，确认steady/first-update/relative-to-e695为
+`96→2 / 98→2 / 49→2`，允许进入CUDA canary。真实CUDA sync计数、fixed-tape/finite parity和
+matched wall均尚未测，不宣称wall收益、不替换现役source；formal合并前还须删除两个
+旧单包private flush helper。
+
 现役`8200c4a2` Isaac/Mu长期run继续finite、fault/conservation clean，但截至至少update `2306/6368`的
 recent30仍分别为`0 R03-valid / 2,966 launch`与`0 raw / 0 selected / 3,026 launch`；这继续证明
 mimic→hit未打开，不能由模型文件、episode length或total return晋级。
