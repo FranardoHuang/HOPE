@@ -382,8 +382,15 @@ def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypat
         contact_tick=legacy_contact_tick,
         launch_tick=legacy_launch_tick,
     )
+    numeric_admitted = result.admitted
+    assert bool(numeric_admitted.any())
     assert torch.equal(
-        legacy.physical_state_f32.reshape(-1, 13), result.physical_state_f32
+        legacy.physical_state_f32.reshape(-1, 13)[numeric_admitted],
+        result.physical_state_f32[numeric_admitted],
+    )
+    assert torch.equal(
+        result.physical_state_f32[~numeric_admitted],
+        torch.zeros_like(result.physical_state_f32[~numeric_admitted]),
     )
     assert torch.equal(
         legacy.construction_reason.reshape(-1), result.physical_reason
