@@ -1371,6 +1371,7 @@ def _run_teacher_replay(
     *, env, root: Path, identity: dict, ready_pose_payload: bytes,
     steps: int, handoff_mode: str, torch_module, physical_root_xy_m=None,
     preserve_boundary_root_pose: bool = False,
+    hybrid_ready_teacher_bridge: bool = False,
 ) -> dict:
     """Drive the live FullMDP owner with its own frozen measured teacher."""
 
@@ -1405,6 +1406,7 @@ def _run_teacher_replay(
         env.enable_diagnostic_direct_frame0_playback(
             physical_root_xy_m=physical_root_xy_m,
             preserve_boundary_root_pose=preserve_boundary_root_pose,
+            hybrid_ready_teacher_bridge=hybrid_ready_teacher_bridge,
         )
     elif physical_root_xy_m is not None or preserve_boundary_root_pose:
         raise ValueError(
@@ -1412,6 +1414,14 @@ def _run_teacher_replay(
         )
     previous_qdes = env._full_a_policy_bootstrap_qdes.unsqueeze(0).clone()
     hold_qdes = previous_qdes.clone()
+    hybrid_prep_steps = 30
+    hybrid_ready_qdes = None
+    hybrid_fk_root_qpos = None
+    hybrid_fk_previous_site = None
+    hybrid_fk_data = None
+    if hybrid_ready_teacher_bridge:
+        import mujoco
+        hybrid_fk_data = mujoco.MjData(env.mj_model)
     rows = {name: [] for name in (
         "common_step", "phase", "pre_task_valid", "pre_teacher_frame",
         "pre_motion_phase", "pre_teacher_qdes", "pre_reveal_tick",
@@ -1424,6 +1434,8 @@ def _run_teacher_replay(
         "tau_clamped_abs_max",
         "teacher_racket_site_w", "teacher_racket_velocity_w",
         "teacher_racket_normal_w",
+        "hybrid_teacher_racket_site_w", "hybrid_teacher_racket_velocity_w",
+        "hybrid_teacher_racket_normal_w",
         "ball_center_w", "ball_lin_vel_w", "racket_site_w",
         "racket_velocity_w", "racket_normal_w", "scheduled_due", "reveal",
         "launch", "r03", "generic_contact", "selected_contact",
@@ -1484,6 +1496,31 @@ def _run_teacher_replay(
             )
             direct_receipt = None
             if direct_frame0:
+                hybrid_teacher_qdes = None
+                if hybrid_ready_teacher_bridge:
+                    remaining = int(frozen[0].detach().cpu().item())
+                    if (
+                        hybrid_ready_qdes is None
+                        and bool(pre.task_valid[0])
+                        and remaining <= hybrid_prep_steps
+                    ):
+                        hybrid_teacher_qdes = env.diagnostic_hybrid_teacher_qdes(
+                            pre.teacher_qdes, capture_ready=True
+                        )
+                        hybrid_ready_qdes = env._diagnostic_hybrid_ready_q.clone()
+                        hybrid_fk_root_qpos = env.sim.data.qpos[
+                            :, env.root_qadr : env.root_qadr + 7
+                        ].detach().cpu().numpy().copy()[0]
+                        if physical_root_xy_m is not None:
+                            hybrid_fk_root_qpos[:2] = (
+                                np.asarray(physical_root_xy_m, dtype=np.float32)
+                                + env.env.scene.env_origins[:, :2]
+                                .detach().cpu().numpy().copy()[0]
+                            )
+                    elif hybrid_ready_qdes is not None:
+                        hybrid_teacher_qdes = env.diagnostic_hybrid_teacher_qdes(
+                            pre.teacher_qdes
+                        )
                 handoff_due = helper.direct_frame0_handoff_due(
                     torch=torch_module,
                     task_valid=pre.task_valid,
@@ -1509,13 +1546,27 @@ def _run_teacher_replay(
                         "physical_root_pose_source"
                     ]
                     direct_frame0_applied |= handoff_due
-                requested = helper.direct_frame0_teacher_qdes(
-                    torch=torch_module,
-                    task_valid=pre.task_valid,
-                    hold_qdes=hold_qdes,
-                    teacher_qdes=pre.teacher_qdes,
-                    frozen_steps=frozen,
-                )
+                if hybrid_ready_teacher_bridge and hybrid_ready_qdes is not None:
+                    if remaining > 0:
+                        progress = float(
+                            hybrid_prep_steps - min(remaining, hybrid_prep_steps)
+                        ) / float(hybrid_prep_steps)
+                        blend = progress ** 3 * (
+                            10.0 - 15.0 * progress + 6.0 * progress ** 2
+                        )
+                        requested = hybrid_ready_qdes + blend * (
+                            hybrid_teacher_qdes - hybrid_ready_qdes
+                        )
+                    else:
+                        requested = hybrid_teacher_qdes
+                else:
+                    requested = helper.direct_frame0_teacher_qdes(
+                        torch=torch_module,
+                        task_valid=pre.task_valid,
+                        hold_qdes=hold_qdes,
+                        teacher_qdes=pre.teacher_qdes,
+                        frozen_steps=frozen,
+                    )
             else:
                 requested = helper.frozen_teacher_qdes(
                     torch=torch_module,
@@ -1564,7 +1615,12 @@ def _run_teacher_replay(
             rows["pre_task_valid"].append(host(pre.task_valid))
             rows["pre_teacher_frame"].append(host(pre.teacher_frame))
             rows["pre_motion_phase"].append(host(pre.motion_phase))
-            rows["pre_teacher_qdes"].append(host(pre.teacher_qdes))
+            rows["pre_teacher_qdes"].append(host(
+                hybrid_teacher_qdes
+                if direct_frame0 and hybrid_ready_teacher_bridge
+                and hybrid_teacher_qdes is not None
+                else pre.teacher_qdes
+            ))
             rows["pre_reveal_tick"].append(host(pre.reveal_tick))
             rows["pre_swing_wait_s"].append(host(pre.pre_swing_wait_s))
             rows["post_task_valid"].append(host(env._epoch_task_valid))
@@ -1609,6 +1665,52 @@ def _run_teacher_replay(
             rows["teacher_racket_normal_w"].append(host(
                 env._aligned_teacher_racket_signed_normal_w
             ))
+            if hybrid_ready_teacher_bridge and hybrid_ready_qdes is not None:
+                import mujoco
+                frame = int(env._full_a_teacher_frame[0].detach().cpu().item())
+                frame = min(frame, int(env._full_a_teacher.joint_pos.shape[0]) - 1)
+                hybrid_post_qdes = env.diagnostic_hybrid_teacher_qdes(
+                    env._full_a_teacher.joint_pos[frame].unsqueeze(0)
+                )
+                hybrid_fk_data.qpos[:] = 0.0
+                hybrid_fk_data.qpos[
+                    env.root_qadr : env.root_qadr + 7
+                ] = hybrid_fk_root_qpos
+                if env._q_slice is not None:
+                    hybrid_fk_data.qpos[env._q_slice] = host(hybrid_post_qdes)[0]
+                else:
+                    hybrid_fk_data.qpos[host(env.q_adr_act)] = host(
+                        hybrid_post_qdes
+                    )[0]
+                hybrid_fk_data.qvel[:] = 0.0
+                mujoco.mj_forward(env.mj_model, hybrid_fk_data)
+                hybrid_site = np.asarray(
+                    hybrid_fk_data.site_xpos[env.racket_sid], dtype=np.float32
+                ).copy()
+                hybrid_normal = np.asarray(
+                    hybrid_fk_data.site_xmat[env.racket_sid], dtype=np.float32
+                ).reshape(3, 3)[:, 1].copy()
+                hybrid_normal /= max(float(np.linalg.norm(hybrid_normal)), 1e-6)
+                hybrid_velocity = (
+                    np.zeros(3, dtype=np.float32)
+                    if hybrid_fk_previous_site is None
+                    else (hybrid_site - hybrid_fk_previous_site) / float(env.step_dt)
+                )
+                hybrid_fk_previous_site = hybrid_site.copy()
+                rows["hybrid_teacher_racket_site_w"].append(
+                    hybrid_site.reshape(1, 3)
+                )
+                rows["hybrid_teacher_racket_velocity_w"].append(
+                    hybrid_velocity.reshape(1, 3)
+                )
+                rows["hybrid_teacher_racket_normal_w"].append(
+                    hybrid_normal.reshape(1, 3)
+                )
+            else:
+                nan_row = np.full((1, 3), np.nan, dtype=np.float32)
+                rows["hybrid_teacher_racket_site_w"].append(nan_row.copy())
+                rows["hybrid_teacher_racket_velocity_w"].append(nan_row.copy())
+                rows["hybrid_teacher_racket_normal_w"].append(nan_row.copy())
             rows["ball_center_w"].append(host(env.sim.data.qpos[:, env.b_q:env.b_q + 3]))
             rows["ball_lin_vel_w"].append(host(env.sim.data.qvel[:, env.b_v:env.b_v + 3]))
             rows["racket_site_w"].append(host(racket[0] + env.env.scene.env_origins))
@@ -1885,6 +1987,18 @@ def _run_teacher_replay(
             ],
             "physical_root_pose_source": (
                 installed_physical_root_pose_source
+            ),
+            "hybrid_ready_teacher_bridge": hybrid_ready_teacher_bridge,
+            "hybrid_preparation_steps": (
+                hybrid_prep_steps if hybrid_ready_teacher_bridge else None
+            ),
+            "hybrid_preparation_seconds": (
+                hybrid_prep_steps * float(env.step_dt)
+                if hybrid_ready_teacher_bridge else None
+            ),
+            "hybrid_waist_envelope_rad": (
+                list(env._diagnostic_hybrid_waist_envelope_rad)
+                if hybrid_ready_teacher_bridge else None
             ),
             "ppo_update_calls": 0,
             "applied": True,
@@ -2344,6 +2458,7 @@ def main(
     diagnostic_teacher_replay_handoff_mode: str = "split_ready_bridge",
     diagnostic_teacher_replay_physical_root_xy_m=None,
     diagnostic_teacher_replay_preserve_boundary_root_pose: bool = False,
+    diagnostic_teacher_replay_hybrid_ready_teacher_bridge: bool = False,
     _test_allow_small_full_a: bool = False,
 ) -> int:
     num_steps_per_env = NUM_STEPS_PER_ENV
@@ -2365,6 +2480,7 @@ def main(
         or type(diagnostic_controller_trace_steps) is not int
         or type(diagnostic_teacher_replay) is not bool
         or type(diagnostic_teacher_replay_preserve_boundary_root_pose) is not bool
+        or type(diagnostic_teacher_replay_hybrid_ready_teacher_bridge) is not bool
         or type(diagnostic_teacher_replay_steps) is not int
         or type(diagnostic_teacher_replay_handoff_mode) is not str
         or diagnostic_teacher_replay_handoff_mode
@@ -2568,6 +2684,9 @@ def main(
             physical_root_xy_m=diagnostic_teacher_replay_physical_root_xy_m,
             preserve_boundary_root_pose=(
                 diagnostic_teacher_replay_preserve_boundary_root_pose
+            ),
+            hybrid_ready_teacher_bridge=(
+                diagnostic_teacher_replay_hybrid_ready_teacher_bridge
             ),
             torch_module=torch,
         )
@@ -2891,6 +3010,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--diagnostic-teacher-replay-preserve-boundary-root-pose",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--diagnostic-teacher-replay-hybrid-ready-teacher-bridge",
         action="store_true",
     )
     parser.add_argument("--evidence-jsonl")

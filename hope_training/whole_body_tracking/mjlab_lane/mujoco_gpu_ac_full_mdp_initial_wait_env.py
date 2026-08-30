@@ -2213,7 +2213,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
 
     def enable_diagnostic_direct_frame0_playback(
-        self, *, physical_root_xy_m=None, preserve_boundary_root_pose=False
+        self, *, physical_root_xy_m=None, preserve_boundary_root_pose=False,
+        hybrid_ready_teacher_bridge=False,
     ) -> None:
         """Enable one N=1 replay-only frame-zero plant intervention.
 
@@ -2238,6 +2239,15 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._diagnostic_direct_frame0_preserve_boundary_root_pose = (
             preserve_boundary_root_pose
         )
+        if type(hybrid_ready_teacher_bridge) is not bool:
+            raise ValueError("direct frame-zero hybrid bridge mode differs")
+        if hybrid_ready_teacher_bridge and not preserve_boundary_root_pose:
+            raise ValueError("hybrid bridge requires preserved ready root")
+        self._diagnostic_hybrid_ready_teacher_bridge = (
+            hybrid_ready_teacher_bridge
+        )
+        self._diagnostic_hybrid_ready_q = None
+        self._diagnostic_hybrid_waist_envelope_rad = (0.10, 0.08, 0.08)
         if physical_root_xy_m is None:
             self._diagnostic_direct_frame0_root_xy_m = None
         else:
@@ -2254,6 +2264,37 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._diagnostic_direct_frame0_root_xy_m = tuple(
                 float(value) for value in physical_root_xy_m
             )
+
+    def diagnostic_hybrid_teacher_qdes(
+        self, teacher_qdes, *, capture_ready=False
+    ):
+        """Build the N=1 ready-supported teacher used only by replay."""
+
+        if not getattr(self, "_diagnostic_hybrid_ready_teacher_bridge", False):
+            raise RuntimeError("hybrid teacher bridge is not enabled")
+        if capture_ready:
+            if self._diagnostic_hybrid_ready_q is not None:
+                raise RuntimeError("hybrid ready state already captured")
+            self._diagnostic_hybrid_ready_q = self._qpos_act().clone()
+        ready = self._diagnostic_hybrid_ready_q
+        if ready is None or teacher_qdes.shape != ready.shape:
+            raise RuntimeError("hybrid ready state is unavailable")
+        hybrid = teacher_qdes.clone()
+        lower_indices = (0, 1, 3, 4, 6, 7, 9, 10, 14, 15, 19, 20)
+        hybrid[:, lower_indices] = ready[:, lower_indices]
+        waist_indices = (2, 5, 8)
+        envelope = self._torch.tensor(
+            self._diagnostic_hybrid_waist_envelope_rad,
+            dtype=teacher_qdes.dtype,
+            device=teacher_qdes.device,
+        ).unsqueeze(0)
+        residual = self._torch.clamp(
+            teacher_qdes[:, waist_indices] - ready[:, waist_indices],
+            min=-envelope,
+            max=envelope,
+        )
+        hybrid[:, waist_indices] = ready[:, waist_indices] + residual
+        return hybrid
 
     def _diagnostic_direct_frame0_preserved_state(self, ids):
         """Clone the ball, accepted task, and lifecycle around one intervention."""
@@ -2475,6 +2516,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         pelvis_index = FULLMDP_TRACKED_BODY_NAMES.index("pelvis_link")
         joint_q0 = self._full_a_teacher.joint_pos[0].unsqueeze(0)
+        if self._diagnostic_hybrid_ready_teacher_bridge:
+            joint_q0 = self.diagnostic_hybrid_teacher_qdes(joint_q0)
         root_pos_q0 = (
             self._full_a_teacher.body_pos_w[0, pelvis_index].unsqueeze(0)
             + self.env.scene.env_origins[ids]
@@ -2734,6 +2777,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 "preserved_boundary_with_optional_xy_override"
                 if self._diagnostic_direct_frame0_preserve_boundary_root_pose
                 else "teacher_frame0_with_optional_xy_override"
+            ),
+            "hybrid_ready_teacher_bridge": (
+                self._diagnostic_hybrid_ready_teacher_bridge
+            ),
+            "hybrid_waist_envelope_rad": (
+                self._diagnostic_hybrid_waist_envelope_rad
             ),
             "installed_frame0_table_keepout": installed_table_keepout,
             "installed_frame0_backend_resolved_table_contact": (

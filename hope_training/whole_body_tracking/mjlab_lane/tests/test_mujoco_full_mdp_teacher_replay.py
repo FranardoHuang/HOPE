@@ -326,6 +326,30 @@ def test_direct_frame0_can_preserve_boundary_root_state_and_recenter_xy():
     )
 
 
+def test_hybrid_teacher_keeps_ready_lower_and_bounds_waist():
+    env, _joint_q0, _forward_calls = _direct_frame0_install_rig()
+    ready = env._qpos_act().clone()
+    teacher = ready + 1.0
+    env.enable_diagnostic_direct_frame0_playback(
+        preserve_boundary_root_pose=True,
+        hybrid_ready_teacher_bridge=True,
+    )
+    hybrid = env.diagnostic_hybrid_teacher_qdes(
+        teacher, capture_ready=True
+    )
+    lower = (0, 1, 3, 4, 6, 7, 9, 10, 14, 15, 19, 20)
+    waist = (2, 5, 8)
+    upper = tuple(index for index in range(31) if index not in lower + waist)
+    assert torch.equal(hybrid[:, lower], ready[:, lower])
+    torch.testing.assert_close(
+        hybrid[:, waist] - ready[:, waist],
+        torch.tensor([[0.10, 0.08, 0.08]]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    assert torch.equal(hybrid[:, upper], teacher[:, upper])
+
+
 @pytest.mark.parametrize("value", ((float("nan"), 0.0), (0.0,), "bad"))
 def test_direct_frame0_diagnostic_root_xy_is_finite_pair(value):
     env, _joint_q0, _forward_calls = _direct_frame0_install_rig()
