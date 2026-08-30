@@ -343,6 +343,13 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
         qd = _finite(archive["qdot"], (57, 31), "qdot")
         site = _finite(archive["racket_site"], (57, 3), "racket_site")
         site_vel = _finite(archive["racket_velocity"], (57, 3), "racket_velocity")
+        npz_ball = _finite(archive["ball_center_w_m"], (3,), "NPZ ball center")
+        npz_site_target = _finite(
+            archive["exact_racket_site_target_w_m"], (3,), "NPZ exact site target"
+        )
+        npz_site_velocity = _finite(
+            archive["exact_racket_site_velocity_w_mps"], (3,), "NPZ exact site velocity"
+        )
     physical = ready.get("physical_ready")
     if not isinstance(physical, Mapping):
         raise BundleError("dynamic ready lacks physical_ready")
@@ -361,6 +368,18 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     exact = report["exact_face"]
     action_ball = report["action_ball"]
     ball_w = _finite(exact["ball_center_w_m"], (3,), "ball center")
+    if not np.allclose(npz_ball, ball_w, rtol=0.0, atol=1.0e-7):
+        raise BundleError("Phase4 report and NPZ ball center disagree")
+    position_error = float(np.linalg.norm(npz_site_target - site[HIT_FRAME]))
+    velocity_error = float(np.linalg.norm(npz_site_velocity - site_vel[HIT_FRAME]))
+    if abs(position_error - float(exact["site_position_error_m"])) > 1.0e-6:
+        raise BundleError("Phase4 exact-site position witness does not recompute")
+    if abs(velocity_error - float(exact["site_velocity_error_mps"])) > 1.0e-6:
+        raise BundleError("Phase4 exact-site velocity witness does not recompute")
+    if (action_ball.get("analytic_landing_valid") is not True
+            or action_ball.get("analytic_net_crossing_valid") is not True
+            or float(action_ball.get("analytic_landing_error_m", math.inf)) >= 0.02):
+        raise BundleError("Phase4 analytic contact continuation entrance is not valid")
     ball_b = _world_to_heading(ball_w - root0, yaw)
     incoming_w = _finite(action_ball["incoming_velocity_w_mps"], (3,), "incoming velocity")
     incoming_b = _world_to_heading(incoming_w, yaw)
@@ -447,8 +466,9 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
         "construction_checks": {"phase4_robust": True,
             "analytic_landing_valid": action_ball["analytic_landing_valid"],
             "analytic_net_crossing_valid": action_ball["analytic_net_crossing_valid"],
-            "exact_site_position_error_m": exact["site_position_error_m"],
-            "exact_site_velocity_error_mps": exact["site_velocity_error_mps"],
+            "exact_site_position_error_m": position_error,
+            "exact_site_velocity_error_mps": velocity_error,
+            "analytic_landing_error_m": action_ball["analytic_landing_error_m"],
             "fk": fk},
         "inputs": {"phase4_report": {"path": str(report_path), "sha256": _sha256_file(report_path)},
             "phase4_npz": {"path": str(npz_path), "sha256": _sha256_file(npz_path)},
