@@ -293,7 +293,9 @@ def test_full_mdp_exact_rows_replay_python_ema_in_chronological_order(monkeypatc
 
     assert command._exact_n_acc == 0.0
     assert calls == []
-    assert command._flush_action_ball_full_mdp_exact_metric_rows()
+    command.materialize_action_ball_diagnostic_metrics_for_report(
+        expected_full_mdp_exact_row_counts=(2,)
+    )
     assert calls == [2]
     expected = tuple(0.8 * (0.9 * 0.0 + float(a)) + float(b) for a, b in zip(first, second))
     globals_in_order = (
@@ -310,7 +312,8 @@ def test_full_mdp_exact_rows_replay_python_ema_in_chronological_order(monkeypatc
     )
     assert globals_in_order == pytest.approx(expected[:10], abs=0.0)
     assert command._exact_n_acc_c[0] == pytest.approx(expected[10], abs=0.0)
-    assert not command._flush_action_ball_full_mdp_exact_metric_rows()
+    command.materialize_action_ball_diagnostic_metrics_for_report()
+    assert calls == [2]
 
 
 def test_full_mdp_exact_rows_preserve_every_global_and_bucket_float_transition():
@@ -940,3 +943,10 @@ def test_full_mdp_hold_hotpath_skips_python_decay_and_threads_step_decay():
     )
     assert "hold_recovery_decay=decay" in update_source
     assert "decay=hold_recovery_decay" in footwork_source
+    assert not hasattr(
+        command_type, "_flush_action_ball_full_mdp_exact_metric_rows"
+    )
+    assert not hasattr(
+        command_type,
+        "_flush_action_ball_full_mdp_hold_recovery_metric_rows",
+    )

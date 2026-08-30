@@ -27560,22 +27560,6 @@ class RacketTargetCommand(CommandTerm):
             )
         return pending, host_rows
 
-    def _flush_action_ball_full_mdp_hold_recovery_metric_rows(self) -> bool:
-        """Transfer the rollout's five-scalar rows once, then replay them."""
-
-        pending, host_rows = (
-            self._read_action_ball_full_mdp_hold_recovery_metric_rows()
-        )
-        if not pending:
-            return False
-        for (decay, _), row in zip(pending, host_rows):
-            self._apply_action_ball_full_mdp_hold_recovery_metric_host_row(
-                row,
-                decay=decay,
-            )
-        self._action_ball_full_mdp_pending_hold_recovery_metric_rows = []
-        return True
-
     def _action_ball_diagnostic_device_telemetry_enabled(self) -> bool:
         """Whether pure telemetry may stay device-resident until the PPO boundary."""
 
@@ -27729,21 +27713,6 @@ class RacketTargetCommand(CommandTerm):
         if len(host_rows) != len(pending):
             raise RuntimeError("full-MDP exact metric row count drifted")
         return pending, order, host_rows
-
-    def _flush_action_ball_full_mdp_exact_metric_rows(self) -> bool:
-        """Transfer all rollout rows once and replay them chronologically."""
-
-        pending, order, host_rows = (
-            self._read_action_ball_full_mdp_exact_metric_rows()
-        )
-        if not pending:
-            return False
-        for (decay, _), row in zip(pending, host_rows):
-            self._apply_action_ball_full_mdp_exact_metric_host_row(
-                row, decay=decay, bucket_order=order
-            )
-        self._action_ball_full_mdp_pending_exact_metric_rows = []
-        return True
 
     def _refresh_action_ball_exact_public_metrics(self) -> None:
         """Publish the final exact-quality EMA state after a deferred drain."""
