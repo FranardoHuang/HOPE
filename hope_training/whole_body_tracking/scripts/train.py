@@ -15109,6 +15109,9 @@ _ACTION_BALL_FULL_MDP_PROFILE_PROBE_FLAG = "action_ball_full_mdp_profile_probe"
 _ACTION_BALL_FULL_MDP_FIXED_ACTION_PROBE_OUTPUT_FLAG = (
     "action_ball_full_mdp_fixed_action_probe_output_path"
 )
+_ACTION_BALL_FULL_MDP_CONTACT_TICK_TRACE_OUTPUT_FLAG = (
+    "action_ball_full_mdp_contact_tick_trace_output_path"
+)
 _ACTION_BALL_FULL_MDP_RATE_PROBE_UPDATES = 61
 _ACTION_BALL_FULL_MDP_RATE_PROBE_WARMUP_UPDATES = 10
 _ACTION_BALL_FULL_MDP_RATE_PROBE_MEASURED_UPDATES = 50
@@ -16259,6 +16262,56 @@ def _action_ball_full_mdp_fixed_action_probe_output(task):
     return output
 
 
+def _action_ball_full_mdp_contact_tick_trace_output(task):
+    """Resolve the one-env, no-PPO Isaac contact-clock diagnostic artifact."""
+
+    flag = _ACTION_BALL_FULL_MDP_CONTACT_TICK_TRACE_OUTPUT_FLAG
+    if not _contains_key(task, flag):
+        return None
+    raw = _get(task, flag)
+    if raw is None:
+        return None
+    if type(raw) is not str or not raw:
+        raise _OverrideError(
+            "task.action_ball_full_mdp_contact_tick_trace_output_path must "
+            "be one explicit absolute path"
+        )
+    output = pathlib.Path(raw)
+    if (
+        not output.is_absolute()
+        or output.name in ("", ".", "..")
+        or os.path.lexists(output)
+    ):
+        raise _OverrideError(
+            "FullMDP contact-tick trace output must be one absent absolute path"
+        )
+    try:
+        parent = output.parent.resolve(strict=True)
+    except OSError as exc:
+        raise _OverrideError(
+            "FullMDP contact-tick trace output parent does not exist"
+        ) from exc
+    if parent != output.parent:
+        raise _OverrideError(
+            "FullMDP contact-tick trace output parent is not canonical"
+        )
+    if not _action_ball_full_mdp_runtime_requested(task):
+        raise _OverrideError(
+            "FullMDP contact-tick trace requires the fresh full-MDP runtime"
+        )
+    competing = (
+        _get(task, _ACTION_BALL_FULL_MDP_RATE_PROBE_FLAG, False) is True
+        or _get(task, _ACTION_BALL_FULL_MDP_PROFILE_PROBE_FLAG, False) is True
+        or _get(task, _ACTION_BALL_FULL_MDP_FIXED_ACTION_PROBE_OUTPUT_FLAG)
+        is not None
+    )
+    if competing:
+        raise _OverrideError(
+            "FullMDP contact-tick trace is mutually exclusive with other probes"
+        )
+    return output
+
+
 def _load_action_ball_full_mdp_cross_engine_tape_module():
     path = pathlib.Path(__file__).resolve().parents[3] / (
         "scripts/action_ball_full_mdp_cross_engine_tape.py"
@@ -16401,6 +16454,256 @@ def _run_action_ball_full_mdp_isaac_fixed_action_probe(
     return summary
 
 
+def _run_action_ball_full_mdp_isaac_contact_tick_trace(
+    env, runtime_env, output_path
+):
+    """Trace the exact contact boundary with a teacher-forced one-env plant.
+
+    This is a chronology diagnostic only.  It writes teacher state before each
+    transition and suppresses native resets after retaining their raw term
+    truth.  Neither operation is evidence that the A3 plant can track the
+    teacher; the runner exists only to expose the production clock ordering.
+    """
+
+    import torch
+
+    if int(runtime_env.num_envs) != 1 or int(env.num_actions) != 31:
+        raise RuntimeError("Isaac contact-tick trace requires exactly 1x31")
+    components = runtime_env._action_ball_full_mdp_components
+    epoch_owner = components.epoch_owner
+    physical = components.physical_owner
+    r03 = components.r03_owner
+    motion = runtime_env.command_manager.get_term("motion")
+    racket = runtime_env.command_manager.get_term("racket_target")
+    robot = runtime_env.scene["robot"]
+    action_term = runtime_env.action_manager.get_term("joint_pos")
+    scene_port = physical.scene_port
+    fact_owner = getattr(scene_port, "_physx_fact_owner", None)
+    if fact_owner is None:
+        raise RuntimeError("Isaac contact-tick trace lacks the live PhysX fact owner")
+
+    # Capture callback truth before the production owner clears its one-step
+    # candidate tensors.  This wrapper delegates exactly once and changes no
+    # returned value.
+    raw_contact_by_step = {}
+    original_capture = fact_owner.capture
+
+    def capture_trace(*, request, live_state, facts_type, stamp_type):
+        exact = request.exact_stamp
+        raw = fact_owner._contact_candidate_event.detach().clone()
+        invalid = fact_owner._racket_invalid_contact_candidate_event.detach().clone()
+        result = original_capture(
+            request=request,
+            live_state=live_state,
+            facts_type=facts_type,
+            stamp_type=stamp_type,
+        )
+        raw_contact_by_step[int(exact[0])] = {
+            "raw_rubber_candidate": bool(raw.any().item()),
+            "raw_invalid_racket_candidate": bool(invalid.any().item()),
+            "selected_contact": bool(result.selected_contact_event.any().item()),
+        }
+        return result
+
+    fact_owner.capture = capture_trace
+
+    # Keep the raw termination truth, but do not let a collision/fall reset the
+    # diagnostic before the contact boundary.  Production env code and config
+    # remain untouched; this instance-local replacement is restored in finally.
+    termination = runtime_env.termination_manager
+    original_termination_compute = termination.compute
+    raw_termination_by_step = {}
+
+    def compute_without_reset():
+        raw = original_termination_compute()
+        step = int(runtime_env.common_step_counter)
+        raw_termination_by_step[step] = {
+            name: bool(termination.get_term(name)[0].item())
+            for name in termination.active_terms
+        }
+        termination._truncated_buf.zero_()
+        termination._terminated_buf.zero_()
+        return torch.zeros_like(raw)
+
+    termination.compute = compute_without_reset
+
+    def one(value, index=0):
+        if value is None:
+            return None
+        if torch.is_tensor(value):
+            value = value.detach()
+            if value.ndim:
+                value = value[index]
+            if value.ndim == 0:
+                item = value.item()
+                return bool(item) if value.dtype == torch.bool else item
+            return value.cpu().tolist()
+        return value
+
+    def current_slot(record):
+        slot = int(record.current_task_slot[0].item())
+        return slot if 0 <= slot < record.phase.shape[1] else None
+
+    def slot_value(record, value):
+        slot = current_slot(record)
+        return None if slot is None else one(value[0, slot])
+
+    from whole_body_tracking.tasks.tracking.mdp import hope_rewards
+
+    def snapshot(boundary, transition):
+        record = epoch_owner.current()
+        slot = current_slot(record)
+        teacher_pos, teacher_normal, teacher_vel, teacher_long = (
+            hope_rewards.stage1_aligned_clip_racket_target_now(racket)
+        )
+        state = scene_port.read_state_env()
+        active_slot = int(physical._action_epoch_active_flight_slot[0].item())
+        ball_pos = (
+            state[0, active_slot, :3]
+            if 0 <= active_slot < state.shape[1]
+            else state[0, :, :3]
+        )
+        racket_env = racket.racket_pos_w[0] - runtime_env.scene.env_origins[0]
+        if ball_pos.ndim == 1:
+            min_distance = torch.linalg.vector_norm(ball_pos - racket_env)
+        else:
+            min_distance = torch.linalg.vector_norm(
+                ball_pos - racket_env[None, :], dim=-1
+            ).min()
+        r03_slot = record.fact_valid_bits.shape[2] - 2
+        # Owner order is public and fixed; avoid guessing if it ever changes.
+        epoch_module = importlib.import_module(type(epoch_owner).__module__)
+        r03_slot = epoch_module.OWNER_ORDER.index("r03_strike_fact")
+        armed_source = getattr(r03, "_epoch_arm_source_step", None)
+        armed_mask = getattr(r03, "_epoch_arm_mask", None)
+        pending = physical._action_epoch_pending_launch
+        row = {
+            "boundary": boundary,
+            "transition": transition,
+            "common_step_counter": int(runtime_env.common_step_counter),
+            "task_public_valid": one(motion._action_ball_public_task_valid),
+            "task_age_s": one(motion._action_ball_task_age_s),
+            "time_to_contact_s": one(
+                motion.action_ball_time_to_contact_remaining_s
+            ),
+            "pre_swing_wait_s": one(
+                motion.action_ball_pre_swing_wait_remaining_s
+            ),
+            "teacher_frame_f": one(motion.time_steps_f),
+            "teacher_frame_i": one(motion.time_steps),
+            "epoch_phase": None if slot is None else one(record.phase[0, slot]),
+            "epoch_reveal_tick": slot_value(record, record.clocks.reveal_tick),
+            "epoch_launch_tick": slot_value(record, record.clocks.launch_tick),
+            "epoch_contact_tick": slot_value(record, record.clocks.contact_tick),
+            "epoch_deadline_tick": slot_value(record, record.clocks.deadline_tick),
+            "pending_launch_motion_tick": (
+                None if pending is None else one(pending.launch_motion_tick)
+            ),
+            "pending_deadline_motion_tick": (
+                None
+                if pending is None
+                else one(pending.contact_deadline_motion_tick)
+            ),
+            "active_flight_slot": active_slot,
+            "ball_position_env_m": one(ball_pos),
+            "ball_racket_center_distance_m": float(min_distance.item()),
+            "racket_exact_eligibility": one(
+                racket._action_ball_strike_fact_exact_eligibility
+            ),
+            "racket_expected_publish_step": one(
+                racket._action_ball_strike_fact_expected_publish_step
+            ),
+            "r03_armed": None if armed_mask is None else one(armed_mask),
+            "r03_arm_source_step": (
+                None if armed_source is None else one(armed_source)
+            ),
+            "r03_fact_valid_bits": (
+                None
+                if slot is None
+                else one(record.fact_valid_bits[0, slot, r03_slot])
+            ),
+            "r03_fact_source_step": (
+                None
+                if slot is None
+                else one(record.fact_source_step[0, slot, r03_slot])
+            ),
+            "teacher_racket_position_w_m": one(teacher_pos),
+            "teacher_racket_velocity_w_mps": one(teacher_vel),
+            "teacher_racket_signed_normal_w": one(teacher_normal),
+            "teacher_racket_long_axis_w": one(teacher_long),
+            "task_racket_position_w_m": one(racket.racket_target_pos_w),
+            "task_racket_velocity_w_mps": one(racket.racket_target_vel_w),
+            "task_racket_normal_w": one(racket.target_normal_cmd),
+            "actual_racket_position_w_m": one(racket.racket_pos_w),
+            "actual_racket_velocity_w_mps": one(racket.racket_lin_vel_w),
+            "actual_racket_normal_w": one(racket.racket_normal_raw_w),
+            "raw_contact": raw_contact_by_step.get(transition),
+            "raw_termination": raw_termination_by_step.get(transition),
+        }
+        if slot is not None:
+            facts = record.fact_f32[0, slot, r03_slot]
+            row["r03_target_position_w_m"] = one(facts[0:3])
+            row["r03_achieved_position_w_m"] = one(facts[15:18])
+        return row
+
+    def force_teacher_state():
+        root = torch.cat(
+            (
+                motion.anchor_pos_w,
+                motion.anchor_quat_w,
+                motion.anchor_lin_vel_w,
+                motion.anchor_ang_vel_w,
+            ),
+            dim=1,
+        )
+        robot.write_root_state_to_sim(root)
+        robot.write_joint_state_to_sim(motion.joint_pos, motion.joint_vel)
+        scale = action_term._scale
+        offset = action_term._offset
+        return ((motion.joint_pos - offset) / scale).to(device=env.device)
+
+    rows = []
+    try:
+        for transition in range(1, 144):
+            action = force_teacher_state()
+            if 138 <= transition <= 142:
+                rows.append(snapshot("pre", transition))
+            env.step(action)
+            if 138 <= transition <= 142:
+                rows.append(snapshot("post", transition))
+    finally:
+        fact_owner.capture = original_capture
+        termination.compute = original_termination_compute
+
+    document = {
+        "schema_version": 1,
+        "kind": "isaac_full_mdp_teacher_forced_contact_tick_trace_v1",
+        "diagnostic_unauthorized": True,
+        "ppo_update_count": 0,
+        "plant_trackability_proven": False,
+        "forcing": (
+            "teacher root/joint state before every transition; native "
+            "termination truth retained but reset suppressed"
+        ),
+        "trace_transition_range": [138, 142],
+        "rows": rows,
+    }
+    payload = (
+        json.dumps(document, allow_nan=False, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    ).encode("utf-8")
+    descriptor = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return {
+        "path": str(output_path),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "row_count": len(rows),
+    }
+
+
 def _resolve_action_ball_full_mdp_policy_bootstrap_config(
     task, *, requested: bool
 ) -> dict | None:
@@ -16497,6 +16800,7 @@ def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
     _action_ball_full_mdp_rate_probe_requested(task)
     _action_ball_full_mdp_profile_probe_updates(task)
     _action_ball_full_mdp_fixed_action_probe_output(task)
+    _action_ball_full_mdp_contact_tick_trace_output(task)
     requested = _get(task, "action_ball_full_mdp_runtime")
     if requested is None or requested is False:
         return
@@ -20552,6 +20856,9 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     action_ball_full_mdp_fixed_action_probe_output = (
         _action_ball_full_mdp_fixed_action_probe_output(cfg.task)
     )
+    action_ball_full_mdp_contact_tick_trace_output = (
+        _action_ball_full_mdp_contact_tick_trace_output(cfg.task)
+    )
     raw_num_envs = (
         cfg.num_envs
         if cfg.num_envs is not None
@@ -20561,13 +20868,16 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         raw_num_envs,
         action_ball_full_mdp_requested=action_ball_full_mdp_requested,
     )
-    oracle_shape_requested = any(
+    oracle_shape_requested = (
+        action_ball_full_mdp_contact_tick_trace_output is not None
+        or any(
         _get(cfg, field) is not None
         for field in (
             "action_ball_teacher_qdes_oracle_output_path",
             "action_ball_teacher_qdes_oracle_episodes",
             "action_ball_c211_oracle_bundle_output_path",
             "action_ball_c211_oracle_episodes",
+        )
         )
     )
     if oracle_shape_requested:
@@ -21734,6 +22044,28 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         environment_close_owner.close()
         print(
             "FULLMDP_ISAAC_FIXED_ACTION_PROBE_JSON="
+            + json.dumps(
+                summary,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return
+
+    if action_ball_full_mdp_contact_tick_trace_output is not None:
+        if _get(cfg, "checkpoint_path") is not None:
+            raise RuntimeError("FullMDP contact-tick trace is fresh-only")
+        print("FULLMDP_ISAAC_CONTACT_TICK_TRACE_STARTED", flush=True)
+        summary = _run_action_ball_full_mdp_isaac_contact_tick_trace(
+            env,
+            runtime_env,
+            action_ball_full_mdp_contact_tick_trace_output,
+        )
+        environment_close_owner.close()
+        print(
+            "FULLMDP_ISAAC_CONTACT_TICK_TRACE_JSON="
             + json.dumps(
                 summary,
                 allow_nan=False,
