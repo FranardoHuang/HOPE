@@ -103,6 +103,20 @@ def solve(args):
         teacher_rate_min=args.teacher_rate_min,
         teacher_rate_max=args.teacher_rate_max,
     )
+    import torch
+    cq, vb = P3.P2._load_fixed_solver_math()
+    prm = vb.load_venue_params(str(args.ball_physics))
+    v_plus, w_plus = cq.predict_paddle_contact(
+        torch.tensor([incoming], dtype=torch.float32),
+        torch.tensor([replay["racket_velocity_w_mps"]], dtype=torch.float32),
+        torch.tensor([replay["signed_face_w"]], dtype=torch.float32)
+        * float(args.mount_normal_sign),
+        torch.zeros(1, 3, dtype=torch.float32), prm,
+    )
+    landing = vb.coarse_landing(
+        torch.tensor([ball_center], dtype=torch.float32), v_plus, w_plus, prm,
+        surface_z=args.surface_z, net_x=args.net_x, h=0.01, n_steps=100,
+    )
     position_error = float(np.linalg.norm(np.asarray(exact.racket_site_target_w_m) - site))
     velocity_error = float(np.linalg.norm(np.asarray(exact.racket_site_velocity_w_mps) - site_velocity))
     runtime = ready["document"]["runtime_plant"]
@@ -137,6 +151,9 @@ def solve(args):
         and plant["table_distance_min_m"] >= args.table_clearance_m
         and plant["torque_margin_min"] > 0.0
         and plant["bilateral_support_frame_fraction"] >= 1.0
+        and bool(landing["land_valid"][0])
+        and bool(landing["net_valid"][0])
+        and float(landing["net_z"][0]) > args.net_top_z
     )
     arrays.update({
         "q_ref": q_ref.astype(np.float32),
@@ -163,6 +180,18 @@ def solve(args):
         "exact_face_admitted": True, "robust_curriculum_center": robust,
         "typed_reject_reasons": [] if robust else ["ROBUST_MARGIN_TARGETS_NOT_MET"],
         "continuous_solver": replay,
+        "action_ball": {
+            "incoming_velocity_w_mps": incoming.tolist(),
+            "incoming_spin_w_radps": [0.0, 0.0, 0.0],
+            "landing_aim_w_xy_m": aim.tolist(),
+            "analytic_landing_w_xy_m": landing["land_xy"][0].tolist(),
+            "analytic_landing_valid": bool(landing["land_valid"][0]),
+            "analytic_net_crossing_valid": bool(landing["net_valid"][0]),
+            "analytic_net_crossing_z_m": float(landing["net_z"][0]),
+            "analytic_landing_error_m": float(np.linalg.norm(
+                np.asarray(landing["land_xy"][0].tolist()) - aim
+            )),
+        },
         "exact_face": {
             "geometry_source_sha256": exact.geometry_source_sha256,
             "ball_radius_m": GEOMETRY.BALL_RADIUS_M,
