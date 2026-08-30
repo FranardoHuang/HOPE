@@ -1602,7 +1602,7 @@ COLLISION_PROXY_PATH = (
     "a3_table_collision_components.v2.json"
 )
 COLLISION_PROXY_SHA256 = (
-    "7f26e55b2f24b02f751c7b078f94426ec2524c810b0ff6cb5cfea58e884e07cc"
+    "c15b132c86de9b06dfc8b6e8838ddc2848b8b9246d1f4d34ebc0ca070ea2f033"
 )
 EXACT_SENSOR_NAMES = [
     "table_top_robot_contact",

@@ -421,8 +421,8 @@ v2 工件与身份（分支候选，不代表现役 run 已替换）：
 | 项 | 值 |
 | --- | --- |
 | schema / artifact type | `2` / `a3_table_collision_component_multi_obb_v2` |
-| artifact file SHA-256 | `7f26e55b2f24b02f751c7b078f94426ec2524c810b0ff6cb5cfea58e884e07cc` |
-| artifact `content_sha256` | `249030faeabce9a99908cbb441e00baddca2d8fcc1bbe5a4bfe81e16b591f17d` |
+| artifact file SHA-256 | `c15b132c86de9b06dfc8b6e8838ddc2848b8b9246d1f4d34ebc0ca070ea2f033` |
+| artifact `content_sha256` | `1a5e6f22f1933d2f2d8bdf87b77397b8f006b815e421bea9dfa3ed6710458a78` |
 | plant identity | `a3_collision_proxy_plant_identity_v2` |
 | target hull geometry SHA-256 | `96b05900b79150be2546423adf8a4f2e9db700ed9870e1c9148a57a72ee288a0` |
 | MuJoCo MJCF SHA-256 | `70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a` |
