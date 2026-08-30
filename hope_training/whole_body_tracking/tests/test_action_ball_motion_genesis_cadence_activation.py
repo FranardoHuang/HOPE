@@ -117,7 +117,7 @@ def test_catalog_broker_identity_drift_rejects_before_schedule_bind() -> None:
     ):
         parent.bind_exact_parent_schedule(command, receipt)
     assert command._action_ball_continuous_schedule_projection is None
-    assert parent._schedule.cadence_steps == 185
+    assert parent._schedule.cadence_steps == 388
     assert (
         parent._schedule.cadence_steps
         == cadence._portable_catalog.derive_portable_fresh_cadence(
@@ -343,7 +343,7 @@ def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -
         command._advance_action_ball_continuous_motion_cadence()
 
     assert command._action_ball_continuous_current_deadline_step.tolist() == [50, 50]
-    assert command._action_ball_continuous_next_reveal_step.tolist() == [233, 233]
+    assert command._action_ball_continuous_next_reveal_step.tolist() == [436, 436]
     command._action_ball_continuous_motion_active.fill_(True)
     command._action_ball_continuous_current_policy_opportunity.fill_(True)
     command._action_ball_continuous_canonical_task_valid.fill_(True)
