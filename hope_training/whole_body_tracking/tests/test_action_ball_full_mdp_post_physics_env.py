@@ -1290,33 +1290,35 @@ def _reset_event_env():
     return env, components
 
 
-def test_selected_reset_projects_real_mask_clock_reason_and_overflow_once():
+def test_selected_reset_transaction_holds_mask_clock_reason_and_overflow_once():
     env, components = _reset_event_env()
     env_ids = torch.tensor([1], dtype=torch.int64)
     env._authorize_action_ball_full_mdp_reset_callpoint(
         env_ids, source="step_nonzero"
     )
-    event = env._mint_action_ball_full_mdp_selected_reset_event(env_ids)
-    projection = env._project_action_ball_full_mdp_lean_selected_reset_event(
-        event
+    transaction = env._mint_action_ball_full_mdp_selected_reset_transaction(
+        env_ids
     )
 
     assert type(components) is M.FullMdpLeanRuntimeComponents
-    assert projection.selected_env_index.tolist() == [1]
-    assert projection.selected_mask.tolist() == [False, True]
-    assert projection.generation_before.tolist() == [4, 2**63 - 1]
-    assert projection.generation_after.tolist() == [4, 2**63 - 1]
-    assert projection.generation_overflow_fault.tolist() == [False, True]
-    assert projection.terminal_reset_facts_i64[:, :2].tolist() == [
+    assert type(transaction) is M.FullMdpSelectedResetTransaction
+    assert env._action_ball_full_mdp_active_reset_record is transaction
+    assert transaction.selected_env_index is env_ids
+    assert (
+        transaction.generation_before
+        is env._action_ball_full_mdp_reset_generation
+    )
+    assert transaction.selected_env_index.tolist() == [1]
+    assert transaction.selected_mask.tolist() == [False, True]
+    assert transaction.generation_before.tolist() == [4, 2**63 - 1]
+    assert transaction.generation_after.tolist() == [4, 2**63 - 1]
+    assert transaction.generation_overflow_fault.tolist() == [False, True]
+    assert transaction.terminal_reset_facts_i64[:, :2].tolist() == [
         [-1, -1],
         [17, 9],
     ]
-    assert projection.terminal_reset_facts_i64[0, 2].item() == 0
-    assert projection.terminal_reset_facts_i64[1, 2].item() != 0
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="stale, foreign, or replayed"
-    ):
-        env._project_action_ball_full_mdp_lean_selected_reset_event(event)
+    assert transaction.terminal_reset_facts_i64[0, 2].item() == 0
+    assert transaction.terminal_reset_facts_i64[1, 2].item() != 0
 
 
 def test_selected_reset_requires_the_exact_authorized_tensor_identity():
@@ -1328,7 +1330,7 @@ def test_selected_reset_requires_the_exact_authorized_tensor_identity():
     with pytest.raises(
         M.FullMdpPostPhysicsProtocolError, match="callpoint authority"
     ):
-        env._mint_action_ball_full_mdp_selected_reset_event(
+        env._mint_action_ball_full_mdp_selected_reset_transaction(
             authorized.clone()
         )
 

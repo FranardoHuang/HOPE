@@ -1949,8 +1949,7 @@ class _RealSelectedResetHarness:
         generation_overflow_fault: torch.Tensor,
         terminal_reset_facts_i64: torch.Tensor,
     ) -> object:
-        preflight = object.__new__(LEAN._SelectedResetPackedPreflight)
-        self.owner._selected_reset_projection = types.SimpleNamespace(
+        transaction = types.SimpleNamespace(
             selected_env_index=selected_env_index,
             selected_mask=selected_mask,
             generation_before=generation_before,
@@ -1958,10 +1957,10 @@ class _RealSelectedResetHarness:
             generation_overflow_fault=generation_overflow_fault,
             terminal_reset_facts_i64=terminal_reset_facts_i64,
         )
+        self.owner._selected_reset_transaction = transaction
         self.owner._selected_reset_prepared = object()
         self.owner._selected_reset_epoch_prepared = None
-        self.owner._selected_reset_packed_preflight = preflight
-        return preflight
+        return transaction
 
     def arm_commit(self, lease: object) -> None:
         self.owner._selected_reset_epoch_prepared = lease
@@ -1971,7 +1970,7 @@ class _RealSelectedResetHarness:
 
 
 class _ForeignResetComposite:
-    def selected_true_reset(self, _event, _projection):
+    def selected_true_reset(self, _transaction):
         return None
 
     def require_owned_epoch_selected_reset_preflight(self, value, **_kwargs):
