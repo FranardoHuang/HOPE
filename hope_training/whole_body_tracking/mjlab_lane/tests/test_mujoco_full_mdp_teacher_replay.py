@@ -318,6 +318,184 @@ def test_direct_frame0_production_reparks_before_advancing_waiting_rows():
         < runner_source.index("env.step(action)")
 
 
+def _valid_direct_frame0_validation_arrays():
+    arrays = {
+        "common_step": np.asarray([93, 94], dtype=np.int64),
+        "direct_frame0_intervention": np.asarray(
+            [[True], [False]], dtype=np.bool_
+        ),
+        "qdes_guard_intervention": np.zeros((2, 1), dtype=np.bool_),
+        "direct_frame0_installed_table_keepout": np.zeros(
+            (2, 1), dtype=np.bool_
+        ),
+        "direct_frame0_installed_backend_resolved_table_contact": np.zeros(
+            (2, 1), dtype=np.bool_
+        ),
+        "post_teacher_frame": np.asarray([[1], [2]], dtype=np.int64),
+        "pre_teacher_frame": np.asarray([[0], [1]], dtype=np.int64),
+    }
+    for name in (
+        "direct_frame0_ball_unchanged",
+        "direct_frame0_task_unchanged",
+        "direct_frame0_lifecycle_unchanged",
+        "direct_frame0_frame0_pose_exact",
+        "direct_frame0_robot_velocity_zero",
+        "direct_frame0_robot_qacc_warmstart_zero",
+        "direct_frame0_ctrl_zero",
+        "direct_frame0_controller_history_exact",
+        "direct_frame0_teacher_cache_refreshed",
+        "direct_frame0_actuator_state_absent",
+    ):
+        arrays[name] = np.asarray([[True], [False]], dtype=np.bool_)
+    for name in (
+        "direct_frame0_requested_q0_error_max_rad",
+        "direct_frame0_executable_q0_error_max_rad",
+        "direct_frame0_joint_q0_error_max_after_rad",
+        "direct_frame0_root_position_q0_error_after_m",
+        "direct_frame0_root_quaternion_q0_error_after",
+    ):
+        arrays[name] = np.zeros((2, 1), dtype=np.float32)
+    teacher = np.arange(62, dtype=np.float32).reshape(2, 31)
+    arrays["pre_teacher_qdes"] = teacher.copy()
+    arrays["requested_qdes"] = teacher.copy()
+    arrays["executable_qdes"] = teacher.copy()
+    return arrays
+
+
+def test_direct_frame0_validation_names_and_isolates_every_predicate():
+    valid = runner._direct_frame0_validation_report(
+        _valid_direct_frame0_validation_arrays()
+    )
+    assert valid["all_passed"]
+    assert len(valid["predicates"]) == 26
+    assert valid["failed_predicates"] == []
+    assert valid["not_evaluated_predicates"] == []
+
+    def set_value(field, row, value):
+        return lambda arrays: arrays[field].__setitem__((row, 0), value)
+
+    mutations = {
+        "intervention_count_exactly_one": set_value(
+            "direct_frame0_intervention", 0, False
+        ),
+        "direct_frame0_ball_unchanged": set_value(
+            "direct_frame0_ball_unchanged", 0, False
+        ),
+        "direct_frame0_task_unchanged": set_value(
+            "direct_frame0_task_unchanged", 0, False
+        ),
+        "direct_frame0_lifecycle_unchanged": set_value(
+            "direct_frame0_lifecycle_unchanged", 0, False
+        ),
+        "direct_frame0_frame0_pose_exact": set_value(
+            "direct_frame0_frame0_pose_exact", 0, False
+        ),
+        "direct_frame0_robot_velocity_zero": set_value(
+            "direct_frame0_robot_velocity_zero", 0, False
+        ),
+        "direct_frame0_robot_qacc_warmstart_zero": set_value(
+            "direct_frame0_robot_qacc_warmstart_zero", 0, False
+        ),
+        "direct_frame0_ctrl_zero": set_value(
+            "direct_frame0_ctrl_zero", 0, False
+        ),
+        "direct_frame0_controller_history_exact": set_value(
+            "direct_frame0_controller_history_exact", 0, False
+        ),
+        "direct_frame0_teacher_cache_refreshed": set_value(
+            "direct_frame0_teacher_cache_refreshed", 0, False
+        ),
+        "direct_frame0_actuator_state_absent": set_value(
+            "direct_frame0_actuator_state_absent", 0, False
+        ),
+        "same_step_requested_q0_error_zero": set_value(
+            "direct_frame0_requested_q0_error_max_rad", 0, 0.125
+        ),
+        "same_step_executable_q0_error_zero": set_value(
+            "direct_frame0_executable_q0_error_max_rad", 0, 0.125
+        ),
+        "same_step_qdes_guard_clear": set_value(
+            "qdes_guard_intervention", 0, True
+        ),
+        "installed_frame0_table_keepout_clear": set_value(
+            "direct_frame0_installed_table_keepout", 0, True
+        ),
+        "installed_frame0_resolved_table_contact_clear": set_value(
+            "direct_frame0_installed_backend_resolved_table_contact", 0, True
+        ),
+        "joint_q0_error_after_zero": set_value(
+            "direct_frame0_joint_q0_error_max_after_rad", 0, 0.125
+        ),
+        "root_position_q0_error_after_zero": set_value(
+            "direct_frame0_root_position_q0_error_after_m", 0, 0.125
+        ),
+        "root_quaternion_q0_error_after_zero": set_value(
+            "direct_frame0_root_quaternion_q0_error_after", 0, 0.125
+        ),
+        "post_transition_teacher_frame_one": set_value(
+            "post_teacher_frame", 0, 0
+        ),
+        "next_trace_row_exists": lambda arrays: arrays.update({
+            name: value[:1] for name, value in arrays.items()
+        }),
+        "next_pre_teacher_frame_one": set_value(
+            "pre_teacher_frame", 1, 0
+        ),
+        "next_intervention_clear": set_value(
+            "direct_frame0_intervention", 1, True
+        ),
+        "next_requested_natural_teacher_exact": lambda arrays: arrays[
+            "requested_qdes"
+        ].__setitem__((1, 0), 0.125),
+        "next_executable_natural_teacher_exact": lambda arrays: arrays[
+            "executable_qdes"
+        ].__setitem__((1, 0), 0.125),
+        "next_qdes_guard_clear": set_value(
+            "qdes_guard_intervention", 1, True
+        ),
+    }
+    assert set(mutations) == set(valid["predicates"])
+    for target, mutate in mutations.items():
+        arrays = _valid_direct_frame0_validation_arrays()
+        mutate(arrays)
+        report = runner._direct_frame0_validation_report(arrays)
+        assert target in report["failed_predicates"], target
+        assert report["predicates"][target]["passed"] is False
+
+
+def test_direct_frame0_validation_failure_artifact_is_json_safe_and_no_clobber(
+    tmp_path,
+):
+    arrays = _valid_direct_frame0_validation_arrays()
+    arrays["direct_frame0_requested_q0_error_max_rad"][0, 0] = np.nan
+    report = runner._direct_frame0_validation_report(arrays)
+    predicate = report["predicates"][
+        "same_step_requested_q0_error_zero"
+    ]
+    assert predicate["actual"] is None
+    assert predicate["delta"] is None
+    path = runner._write_direct_frame0_validation_failure(tmp_path, report)
+    payload = path.read_bytes()
+    assert b"NaN" not in payload
+    restored = json.loads(payload)
+    assert restored["failed_predicates"] == [
+        "same_step_requested_q0_error_zero"
+    ]
+    with pytest.raises(FileExistsError):
+        runner._write_direct_frame0_validation_failure(tmp_path, report)
+
+
+def test_direct_frame0_failure_artifact_precedes_trace_and_summary_writes():
+    source = inspect.getsource(runner._run_teacher_replay)
+    validation = source.index("_direct_frame0_validation_report(arrays)")
+    failure_write = source.index(
+        "_write_direct_frame0_validation_failure", validation
+    )
+    trace_write = source.index('root / "teacher_replay.npz"')
+    summary_write = source.index('root / "summary.json"')
+    assert validation < failure_write < trace_write < summary_write
+
+
 def test_direct_frame0_install_rejects_an_early_or_live_ball_boundary():
     ids = torch.tensor([0], dtype=torch.long)
     early, _joint_q0, early_calls = _direct_frame0_install_rig()

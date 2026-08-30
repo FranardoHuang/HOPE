@@ -942,6 +942,260 @@ def _run_controller_trace(
     return summary
 
 
+def _direct_frame0_validation_report(arrays: dict) -> dict:
+    """Evaluate every direct-frame0 post-run contract without hiding a field.
+
+    The report is JSON-safe even when a measured float is non-finite.  Exact
+    array predicates retain dtype/shape/content fingerprints and expose a
+    finite max-absolute delta plus mismatch count instead of dumping a 31-DOF
+    vector into an exception.
+    """
+
+    import numpy as np
+
+    required_bits = (
+        "direct_frame0_ball_unchanged",
+        "direct_frame0_task_unchanged",
+        "direct_frame0_lifecycle_unchanged",
+        "direct_frame0_frame0_pose_exact",
+        "direct_frame0_robot_velocity_zero",
+        "direct_frame0_robot_qacc_warmstart_zero",
+        "direct_frame0_ctrl_zero",
+        "direct_frame0_controller_history_exact",
+        "direct_frame0_teacher_cache_refreshed",
+        "direct_frame0_actuator_state_absent",
+    )
+    predicates: dict[str, dict[str, object]] = {}
+
+    def add_exact(name, actual, expected) -> None:
+        if isinstance(expected, bool):
+            actual_value = bool(actual)
+            expected_value = bool(expected)
+            delta = int(actual_value) - int(expected_value)
+        else:
+            actual_value = int(actual)
+            expected_value = int(expected)
+            delta = actual_value - expected_value
+        predicates[name] = {
+            "evaluated": True,
+            "actual": actual_value,
+            "expected": expected_value,
+            "delta": delta,
+            "passed": actual_value == expected_value,
+        }
+
+    def add_float(name, actual, expected=0.0) -> None:
+        value = float(actual)
+        finite = bool(np.isfinite(value))
+        expected_value = float(expected)
+        predicates[name] = {
+            "evaluated": True,
+            "actual": value if finite else None,
+            "expected": expected_value,
+            "delta": value - expected_value if finite else None,
+            "passed": finite and value == expected_value,
+        }
+
+    def fingerprint(value) -> dict[str, object]:
+        row = np.ascontiguousarray(value)
+        return {
+            "dtype": str(row.dtype),
+            "shape": [int(size) for size in row.shape],
+            "sha256": hashlib.sha256(row.tobytes(order="C")).hexdigest(),
+        }
+
+    def add_array(name, actual, expected) -> None:
+        left = np.asarray(actual)
+        right = np.asarray(expected)
+        same_shape = left.shape == right.shape
+        mismatch_count = (
+            int(np.count_nonzero(left != right)) if same_shape else None
+        )
+        finite = bool(
+            same_shape
+            and np.issubdtype(left.dtype, np.number)
+            and np.issubdtype(right.dtype, np.number)
+            and np.isfinite(left).all()
+            and np.isfinite(right).all()
+        )
+        max_abs = (
+            float(np.max(np.abs(left - right)))
+            if finite and left.size > 0
+            else (0.0 if finite else None)
+        )
+        predicates[name] = {
+            "evaluated": True,
+            "actual": fingerprint(left),
+            "expected": fingerprint(right),
+            "delta": {
+                "mismatch_count": mismatch_count,
+                "max_abs": max_abs if max_abs is None or np.isfinite(max_abs)
+                else None,
+            },
+            "passed": same_shape and bool(np.array_equal(left, right)),
+        }
+
+    def add_not_evaluated(name, expected) -> None:
+        predicates[name] = {
+            "evaluated": False,
+            "actual": None,
+            "expected": expected,
+            "delta": None,
+            "passed": None,
+        }
+
+    intervention_rows = np.flatnonzero(
+        np.asarray(arrays["direct_frame0_intervention"])[:, 0]
+    )
+    add_exact(
+        "intervention_count_exactly_one", int(intervention_rows.size), 1
+    )
+    index = int(intervention_rows[0]) if intervention_rows.size > 0 else None
+    if index is None:
+        for name in required_bits:
+            add_not_evaluated(name, True)
+        for name in (
+            "same_step_requested_q0_error_zero",
+            "same_step_executable_q0_error_zero",
+            "same_step_qdes_guard_clear",
+            "installed_frame0_table_keepout_clear",
+            "installed_frame0_resolved_table_contact_clear",
+            "joint_q0_error_after_zero",
+            "root_position_q0_error_after_zero",
+            "root_quaternion_q0_error_after_zero",
+            "post_transition_teacher_frame_one",
+            "next_trace_row_exists",
+            "next_pre_teacher_frame_one",
+            "next_intervention_clear",
+            "next_requested_natural_teacher_exact",
+            "next_executable_natural_teacher_exact",
+            "next_qdes_guard_clear",
+        ):
+            add_not_evaluated(name, "requires an intervention row")
+        next_index = None
+    else:
+        for name in required_bits:
+            add_exact(name, arrays[name][index, 0], True)
+        add_float(
+            "same_step_requested_q0_error_zero",
+            arrays["direct_frame0_requested_q0_error_max_rad"][index, 0],
+        )
+        add_float(
+            "same_step_executable_q0_error_zero",
+            arrays["direct_frame0_executable_q0_error_max_rad"][index, 0],
+        )
+        add_exact(
+            "same_step_qdes_guard_clear",
+            arrays["qdes_guard_intervention"][index, 0],
+            False,
+        )
+        add_exact(
+            "installed_frame0_table_keepout_clear",
+            arrays["direct_frame0_installed_table_keepout"][index, 0],
+            False,
+        )
+        add_exact(
+            "installed_frame0_resolved_table_contact_clear",
+            arrays[
+                "direct_frame0_installed_backend_resolved_table_contact"
+            ][index, 0],
+            False,
+        )
+        add_float(
+            "joint_q0_error_after_zero",
+            arrays["direct_frame0_joint_q0_error_max_after_rad"][index, 0],
+        )
+        add_float(
+            "root_position_q0_error_after_zero",
+            arrays["direct_frame0_root_position_q0_error_after_m"][index, 0],
+        )
+        add_float(
+            "root_quaternion_q0_error_after_zero",
+            arrays["direct_frame0_root_quaternion_q0_error_after"][index, 0],
+        )
+        add_exact(
+            "post_transition_teacher_frame_one",
+            arrays["post_teacher_frame"][index, 0],
+            1,
+        )
+        next_index = index + 1
+        next_exists = next_index < int(arrays["common_step"].shape[0])
+        add_exact("next_trace_row_exists", next_exists, True)
+        if next_exists:
+            add_exact(
+                "next_pre_teacher_frame_one",
+                arrays["pre_teacher_frame"][next_index, 0],
+                1,
+            )
+            add_exact(
+                "next_intervention_clear",
+                arrays["direct_frame0_intervention"][next_index, 0],
+                False,
+            )
+            add_array(
+                "next_requested_natural_teacher_exact",
+                arrays["requested_qdes"][next_index],
+                arrays["pre_teacher_qdes"][next_index],
+            )
+            add_array(
+                "next_executable_natural_teacher_exact",
+                arrays["executable_qdes"][next_index],
+                arrays["pre_teacher_qdes"][next_index],
+            )
+            add_exact(
+                "next_qdes_guard_clear",
+                arrays["qdes_guard_intervention"][next_index, 0],
+                False,
+            )
+        else:
+            for name, expected in (
+                ("next_pre_teacher_frame_one", 1),
+                ("next_intervention_clear", False),
+                ("next_requested_natural_teacher_exact", "teacher qdes bytes"),
+                ("next_executable_natural_teacher_exact", "teacher qdes bytes"),
+                ("next_qdes_guard_clear", False),
+            ):
+                add_not_evaluated(name, expected)
+
+    failed = [
+        name for name, row in predicates.items() if row["passed"] is False
+    ]
+    not_evaluated = [
+        name for name, row in predicates.items() if not row["evaluated"]
+    ]
+    return {
+        "schema_version": 1,
+        "kind": "action_ball_mujoco_direct_frame0_validation_v1",
+        "diagnostic_unauthorized": True,
+        "training_authorized": False,
+        "ppo_update_calls": 0,
+        "trace_rows": int(arrays["common_step"].shape[0]),
+        "intervention_rows": [int(value) for value in intervention_rows],
+        "trace_row": index,
+        "next_trace_row": next_index,
+        "predicates": predicates,
+        "failed_predicates": failed,
+        "not_evaluated_predicates": not_evaluated,
+        "all_passed": not failed and not not_evaluated,
+    }
+
+
+def _write_direct_frame0_validation_failure(root: Path, report: dict) -> Path:
+    """Persist one no-clobber failure report before raising the GPU result."""
+
+    if report.get("all_passed") is not False:
+        raise ValueError("direct frame-zero validation failure report differs")
+    payload = json.dumps(
+        report,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8") + b"\n"
+    path = root / "direct_frame0_validation_failure.json"
+    _write_fresh_bytes(path, payload)
+    return path
+
+
 def _run_teacher_replay(
     *, env, root: Path, identity: dict, ready_pose_payload: bytes,
     steps: int, handoff_mode: str, torch_module,
@@ -1309,71 +1563,22 @@ def _run_teacher_replay(
     }
     direct_frame0_receipt = None
     if direct_frame0:
-        intervention_rows = np.flatnonzero(
-            arrays["direct_frame0_intervention"][:, 0]
-        )
-        if intervention_rows.size != 1:
+        validation = _direct_frame0_validation_report(arrays)
+        if not validation["all_passed"]:
+            failure_path = _write_direct_frame0_validation_failure(
+                root, validation
+            )
+            failed = ",".join(validation["failed_predicates"]) or "none"
+            not_evaluated = (
+                ",".join(validation["not_evaluated_predicates"]) or "none"
+            )
             raise RuntimeError(
-                "direct frame-zero diagnostic requires exactly one intervention"
+                "direct frame-zero validation differs: "
+                f"artifact={failure_path.name} failed={failed} "
+                f"not_evaluated={not_evaluated}"
             )
-        index = int(intervention_rows[0])
-        required_bits = (
-            "direct_frame0_ball_unchanged",
-            "direct_frame0_task_unchanged",
-            "direct_frame0_lifecycle_unchanged",
-            "direct_frame0_frame0_pose_exact",
-            "direct_frame0_robot_velocity_zero",
-            "direct_frame0_robot_qacc_warmstart_zero",
-            "direct_frame0_ctrl_zero",
-            "direct_frame0_controller_history_exact",
-            "direct_frame0_teacher_cache_refreshed",
-            "direct_frame0_actuator_state_absent",
-        )
-        if (
-            any(not bool(arrays[name][index, 0]) for name in required_bits)
-            or float(arrays[
-                "direct_frame0_requested_q0_error_max_rad"
-            ][index, 0]) != 0.0
-            or float(arrays[
-                "direct_frame0_executable_q0_error_max_rad"
-            ][index, 0]) != 0.0
-            or bool(arrays["qdes_guard_intervention"][index, 0])
-            or bool(arrays[
-                "direct_frame0_installed_table_keepout"
-            ][index, 0])
-            or bool(arrays[
-                "direct_frame0_installed_backend_resolved_table_contact"
-            ][index, 0])
-            or float(arrays[
-                "direct_frame0_joint_q0_error_max_after_rad"
-            ][index, 0]) != 0.0
-            or float(arrays[
-                "direct_frame0_root_position_q0_error_after_m"
-            ][index, 0]) != 0.0
-            or float(arrays[
-                "direct_frame0_root_quaternion_q0_error_after"
-            ][index, 0]) != 0.0
-            or int(arrays["post_teacher_frame"][index, 0]) != 1
-        ):
-            raise RuntimeError("direct frame-zero intervention receipt differs")
-        next_index = index + 1
-        if (
-            next_index >= arrays["common_step"].shape[0]
-            or int(arrays["pre_teacher_frame"][next_index, 0]) != 1
-            or bool(arrays["direct_frame0_intervention"][next_index, 0])
-            or not np.array_equal(
-                arrays["requested_qdes"][next_index],
-                arrays["pre_teacher_qdes"][next_index],
-            )
-            or not np.array_equal(
-                arrays["executable_qdes"][next_index],
-                arrays["pre_teacher_qdes"][next_index],
-            )
-            or bool(arrays["qdes_guard_intervention"][next_index, 0])
-        ):
-            raise RuntimeError(
-                "direct frame-zero next action did not use natural frame one"
-            )
+        index = int(validation["trace_row"])
+        next_index = int(validation["next_trace_row"])
         direct_frame0_receipt = {
             "schema_version": 1,
             "kind": "action_ball_mujoco_direct_frame0_intervention_v1",
@@ -1381,6 +1586,7 @@ def _run_teacher_replay(
             "training_authorized": False,
             "ppo_update_calls": 0,
             "applied": True,
+            "validation": validation,
             "trace_row": index,
             "common_step_after_transition": int(arrays["common_step"][index]),
             "requested_frame0_same_step": bool(
