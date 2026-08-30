@@ -485,7 +485,8 @@ def test_command_metric_boundary_runs_after_epoch_prepare_and_counts_genesis(
 
 
 def test_command_metric_boundary_failure_aborts_then_poison_is_sticky(runner_module):
-    owner, _env, _lean, epoch = _lean_owner(runner_module, [])
+    owner, _env, _lean, _epoch_module = _lean_owner(runner_module, [])
+    epoch = owner.epoch_owner
     probe = owner._racket
     probe.failure = RuntimeError("metric failure")
     milestone_before = tuple(value.clone() for value in epoch.milestone.pack_views())
@@ -523,7 +524,8 @@ def test_command_metric_boundary_failure_aborts_then_poison_is_sticky(runner_mod
 def test_command_metric_enabled_binding_drift_aborts_without_calling(
     runner_module, monkeypatch, drift
 ):
-    owner, _env, _lean, epoch = _lean_owner(runner_module, [])
+    owner, _env, _lean, _epoch_module = _lean_owner(runner_module, [])
+    epoch = owner.epoch_owner
     probe = owner._racket
     if drift == "missing":
         monkeypatch.delattr(
@@ -550,7 +552,8 @@ def test_command_metric_enabled_binding_drift_aborts_without_calling(
 def test_command_metric_pre_materialization_rejection_aborts_frozen_epoch(
     runner_module, failure
 ):
-    owner, _env, _lean, epoch = _lean_owner(runner_module, [])
+    owner, _env, _lean, _epoch_module = _lean_owner(runner_module, [])
+    epoch = owner.epoch_owner
     probe = owner._racket
     completed = 4
     expected = "returned a value"
@@ -573,7 +576,8 @@ def test_command_metric_pre_materialization_rejection_aborts_frozen_epoch(
 def test_command_metric_materializer_binding_drift_aborts_without_calling(
     runner_module,
 ):
-    owner, _env, _lean, epoch = _lean_owner(runner_module, [])
+    owner, _env, _lean, _epoch_module = _lean_owner(runner_module, [])
+    epoch = owner.epoch_owner
     probe = owner._racket
     probe.materialize_action_ball_diagnostic_metrics_for_report = lambda **_kwargs: None
 
