@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Materialize exact AgiBot A3 collision-component OBBs for the table guard.
+"""Materialize exact AgiBot A3 collision-mesh multi-OBBs for the table guard.
 
 The Isaac A3 asset is prepared from the tracked vendor URDF by copying every
 mesh byte and rewriting only its path.  This tool therefore reads that tracked
 source directly, folds fixed-joint collision children into their runtime rigid
-body, and emits one conservative local OBB per collision component.
+body, and emits one or more conservative local OBBs per collision component.
 
-The resulting artifact is data, not a hand-tuned safety margin.  Each component
-OBB contains every vertex of the collision mesh from which it was derived.
+The resulting artifact is data, not a hand-tuned safety margin.  Every source
+triangle is assigned intact to exactly one proxy box, and that box contains all
+three triangle vertices.  Splitting a non-convex mesh this way removes empty
+corner volume without ever deleting any source-mesh geometry.
 Runtime may conservatively broaden the rotated OBB to a world AABB, but must
 never shrink these materialized half axes.
 
@@ -55,10 +57,10 @@ DEFAULT_OUTPUT = (
     REPO_ROOT
     / "configs"
     / "a3_table_collision_proxy_a3p0807_20260808"
-    / "a3_table_collision_components.v1.json"
+    / "a3_table_collision_components.v2.json"
 )
-SCHEMA_VERSION = 1
-ARTIFACT_TYPE = "a3_table_collision_component_obb_v1"
+SCHEMA_VERSION = 2
+ARTIFACT_TYPE = "a3_table_collision_component_multi_obb_v2"
 PINNED_RUNTIME_USD_BUNDLE_TREE_SHA256 = (
     "365ba37edd5e5e1d4fac22f2cbb3ec871ead7bb49aeadb50161ef523a9ae6747"
 )
@@ -116,7 +118,17 @@ PINNED_ISAACLAB_ASSET_HASH = "676efde5febed3c0fde0f2ad59650cdf"
 # isaaclab/sim/converters/asset_converter_base.py::_config_to_hash drops these
 # three path keys before hashing the converter configuration.
 ASSET_HASH_EXCLUDED_CONFIG_KEYS = ("asset_path", "usd_dir", "usd_file_name")
-PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v1"
+PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v2"
+# The hand+racket support mesh is non-convex.  Its old single AABB contained a
+# large empty corner that crossed the 20 mm table keep-out even though the raw
+# mesh was 72 mm clear.  A deterministic two-way triangle partition is the
+# smallest split that removes that measured false positive with >5 mm reserve
+# (15.67 mm in the frozen 2026-08-30 witness).  Every other source component
+# deliberately stays one box, keeping the runtime row count at 63.
+MULTI_OBB_LEAF_COUNTS = {"right_hand_pingpang_link.stl": 2}
+TRIANGLE_PARTITION_ALGORITHM = (
+    "recursive_largest_centroid_span_stable_median_v1"
+)
 # The 20 OmniPicker3 left-gripper collision links.  They enter the table guard
 # for the first time with the 0807 plant, and a later "cleanup" that quietly
 # drops them would silently re-open the volume they occupy.  Naming them here
@@ -292,30 +304,117 @@ def _body_order(path: Path) -> tuple[str, ...]:
     raise ValueError("TABLE_CONTACT_BODY_NAMES assignment not found")
 
 
-def _stl_vertices(path: Path) -> list[tuple[float, float, float]]:
+def _stl_triangles(
+    path: Path,
+) -> list[tuple[tuple[float, float, float], ...]]:
     payload = path.read_bytes()
-    vertices: list[tuple[float, float, float]] = []
+    triangles: list[tuple[tuple[float, float, float], ...]] = []
     if len(payload) >= 84:
         triangle_count = struct.unpack_from("<I", payload, 80)[0]
         if 84 + triangle_count * 50 == len(payload):
             for triangle in range(triangle_count):
                 base = 84 + triangle * 50 + 12
+                vertices = []
                 for vertex in range(3):
                     values = struct.unpack_from(
                         "<fff", payload, base + vertex * 12
                     )
                     vertices.append(tuple(float(value) for value in values))
-    if not vertices:
+                triangles.append(tuple(vertices))
+    if not triangles:
         text = payload.decode("ascii")
+        vertices = []
         for line in text.splitlines():
             fields = line.strip().split()
             if len(fields) == 4 and fields[0].lower() == "vertex":
                 vertices.append(tuple(float(value) for value in fields[1:]))
-    if not vertices or not all(
-        math.isfinite(value) for vertex in vertices for value in vertex
+        if len(vertices) % 3:
+            raise ValueError(f"ASCII STL has incomplete triangle: {path}")
+        triangles = [
+            tuple(vertices[index : index + 3])
+            for index in range(0, len(vertices), 3)
+        ]
+    if not triangles or not all(
+        math.isfinite(value)
+        for triangle in triangles
+        for vertex in triangle
+        for value in vertex
     ):
-        raise ValueError(f"STL has no finite vertices: {path}")
-    return vertices
+        raise ValueError(f"STL has no finite triangles: {path}")
+    return triangles
+
+
+def _partition_triangles(
+    triangles: Sequence[Sequence[Sequence[float]]], leaf_count: int
+) -> list[tuple[int, ...]]:
+    """Partition complete triangles by a deterministic spatial median tree."""
+
+    if (
+        isinstance(leaf_count, bool)
+        or not isinstance(leaf_count, int)
+        or leaf_count <= 0
+        or leaf_count > len(triangles)
+    ):
+        raise ValueError("multi-OBB leaf count must fit the triangle count")
+    centroids = tuple(
+        tuple(
+            sum(float(triangle[vertex][axis]) for vertex in range(3)) / 3.0
+            for axis in range(3)
+        )
+        for triangle in triangles
+    )
+
+    def split(indices: tuple[int, ...], leaves: int) -> list[tuple[int, ...]]:
+        if leaves == 1:
+            return [indices]
+        if len(indices) < leaves:
+            raise ValueError("triangle partition would create an empty leaf")
+        spans = tuple(
+            max(centroids[index][axis] for index in indices)
+            - min(centroids[index][axis] for index in indices)
+            for axis in range(3)
+        )
+        # ``max`` returns the first equal item, making X/Y/Z tie-breaking part
+        # of the versioned algorithm rather than a platform accident.
+        axis = max(range(3), key=lambda candidate: spans[candidate])
+        ordered = tuple(
+            sorted(indices, key=lambda index: (centroids[index][axis], index))
+        )
+        left_leaves = leaves // 2
+        right_leaves = leaves - left_leaves
+        midpoint = (len(ordered) * left_leaves) // leaves
+        midpoint = max(left_leaves, min(midpoint, len(ordered) - right_leaves))
+        return split(ordered[:midpoint], left_leaves) + split(
+            ordered[midpoint:], right_leaves
+        )
+
+    leaves = split(tuple(range(len(triangles))), leaf_count)
+    flattened = [index for leaf in leaves for index in leaf]
+    if sorted(flattened) != list(range(len(triangles))):
+        raise ValueError("triangle partition does not cover each triangle exactly once")
+    return leaves
+
+
+def _partition_bounds(
+    triangles: Sequence[Sequence[Sequence[float]]],
+    leaves: Sequence[Sequence[int]],
+) -> list[tuple[tuple[float, float, float], tuple[float, float, float]]]:
+    """Bound each complete-triangle leaf and verify every source vertex."""
+
+    result = []
+    for leaf in leaves:
+        vertices = [
+            triangles[index][vertex]
+            for index in leaf
+            for vertex in range(3)
+        ]
+        center, half = _bounds(vertices)
+        for vertex in vertices:
+            for axis in range(3):
+                if abs(float(vertex[axis]) - center[axis]) > half[axis]:
+                    raise ValueError("multi-OBB leaf failed full-triangle coverage")
+        result.append((center, half))
+    return result
 
 
 def _bounds(
@@ -614,6 +713,8 @@ def _artifact(
         return owner, rotation, translation
 
     components: list[dict[str, object]] = []
+    source_component_count = 0
+    partition_receipts: list[dict[str, object]] = []
     mesh_receipts: dict[str, str] = {}
     owner_counts = {name: 0 for name in order}
     seen_links: set[str] = set()
@@ -646,12 +747,19 @@ def _artifact(
             )
             if not all(value > 0.0 for value in scale):
                 raise ValueError("A3 collision mesh scale must be positive")
-            mesh_center, mesh_half = _bounds(
+            triangles = [
                 tuple(
-                    float(vertex[axis]) * scale[axis] for axis in range(3)
+                    tuple(
+                        float(vertex[axis]) * scale[axis]
+                        for axis in range(3)
+                    )
+                    for vertex in triangle
                 )
-                for vertex in _stl_vertices(mesh_path)
-            )
+                for triangle in _stl_triangles(mesh_path)
+            ]
+            leaf_count = MULTI_OBB_LEAF_COUNTS.get(relative_mesh.lower(), 1)
+            triangle_leaves = _partition_triangles(triangles, leaf_count)
+            leaf_bounds = _partition_bounds(triangles, triangle_leaves)
             link_from_mesh_rotation, link_from_mesh_translation = (
                 _origin_transform(collision.find("origin"))
             )
@@ -661,40 +769,68 @@ def _artifact(
                 link_from_mesh_rotation,
                 link_from_mesh_translation,
             )
-            center_owner = _vector_add(
-                _matrix_vector(owner_from_mesh_rotation, mesh_center),
-                owner_from_mesh_translation,
-            )
-            # The outer axis dimension contains the three transformed half-axis
-            # vectors.  Runtime rotates each vector by the live body quaternion
-            # and sums absolute components.
-            half_axes_owner = tuple(
-                tuple(
-                    float(owner_from_mesh_rotation[row][axis])
-                    * float(mesh_half[axis])
-                    for row in range(3)
-                )
-                for axis in range(3)
-            )
             repo_relative_mesh = mesh_path.relative_to(REPO_ROOT).as_posix()
             mesh_sha = _sha256_bytes(mesh_path.read_bytes())
             mesh_receipts[repo_relative_mesh] = mesh_sha
-            component_id = (
+            source_component_id = (
                 f"{owner}:{link_name}:{collision_index}:{relative_mesh}"
             )
-            components.append(
+            source_component_count += 1
+            partition_sha256 = _sha256_bytes(
+                _canonical_json_bytes([list(leaf) for leaf in triangle_leaves])
+            )
+            partition_receipts.append(
                 {
-                    "component_id": component_id,
-                    "local_center_owner_m": list(center_owner),
-                    "local_half_axes_owner_m": [
-                        list(axis) for axis in half_axes_owner
-                    ],
+                    "leaf_count": leaf_count,
                     "mesh_path": repo_relative_mesh,
-                    "mesh_sha256": mesh_sha,
-                    "owner_body_name": owner,
-                    "source_link_name": link_name,
+                    "partition_sha256": partition_sha256,
+                    "source_component_id": source_component_id,
+                    "triangle_count": len(triangles),
                 }
             )
+            for leaf_index, ((mesh_center, mesh_half), triangle_leaf) in enumerate(
+                zip(leaf_bounds, triangle_leaves)
+            ):
+                center_owner = _vector_add(
+                    _matrix_vector(owner_from_mesh_rotation, mesh_center),
+                    owner_from_mesh_translation,
+                )
+                # The outer axis dimension contains the three transformed
+                # half-axis vectors. Runtime rotates each vector by the live
+                # body quaternion and sums absolute components.
+                half_axes_owner = tuple(
+                    tuple(
+                        float(owner_from_mesh_rotation[row][axis])
+                        * float(mesh_half[axis])
+                        for row in range(3)
+                    )
+                    for axis in range(3)
+                )
+                component_id = source_component_id
+                if leaf_count > 1:
+                    component_id += f"#obb{leaf_index:04d}"
+                components.append(
+                    {
+                        "component_id": component_id,
+                        "local_center_owner_m": list(center_owner),
+                        "local_half_axes_owner_m": [
+                            list(axis) for axis in half_axes_owner
+                        ],
+                        "mesh_path": repo_relative_mesh,
+                        "mesh_sha256": mesh_sha,
+                        "owner_body_name": owner,
+                        "partition_sha256": partition_sha256,
+                        "proxy_box_count": leaf_count,
+                        "proxy_box_index": leaf_index,
+                        "source_component_id": source_component_id,
+                        "source_link_name": link_name,
+                        "source_triangle_count": len(triangles),
+                        "triangle_count": len(triangle_leaf),
+                        "triangle_indices_sha256": _sha256_bytes(
+                            _canonical_json_bytes(list(triangle_leaf))
+                        ),
+                    }
+                )
             owner_counts[owner] += 1
 
     if any(count <= 0 for count in owner_counts.values()):
@@ -721,6 +857,17 @@ def _artifact(
         "body_order": list(order),
         "component_count": len(components),
         "components": components,
+        "decomposition": {
+            "algorithm": TRIANGLE_PARTITION_ALGORITHM,
+            "coverage_contract": (
+                "each source triangle belongs to exactly one proxy box and "
+                "all three vertices are contained by that box"
+            ),
+            "leaf_count_overrides": dict(sorted(MULTI_OBB_LEAF_COUNTS.items())),
+            "partition_receipts": sorted(
+                partition_receipts, key=lambda row: str(row["source_component_id"])
+            ),
+        },
         "left_gripper_source_links": list(LEFT_GRIPPER_SOURCE_LINKS),
         "mesh_receipts": [
             {"path": path, "sha256": mesh_receipts[path]}
@@ -733,6 +880,7 @@ def _artifact(
             runtime_usd_bundle_root
         ),
         "schema_version": SCHEMA_VERSION,
+        "source_component_count": source_component_count,
         "source_urdf": {
             "path": source_urdf.relative_to(REPO_ROOT).as_posix(),
             "sha256": source_urdf_sha256,
