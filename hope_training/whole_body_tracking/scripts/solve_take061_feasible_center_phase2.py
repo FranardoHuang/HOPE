@@ -133,6 +133,35 @@ def _fixed_solver_inverse_grid(center, args):
     }
 
 
+def _solver_seed_valid(solver_inverse):
+    """Return whether Phase3 has one finite, solver-admitted retarget seed.
+
+    A seed need not already match the Phase2 racket centre: Phase3 exists to
+    retarget that mechanically executable centre toward this solver solution.
+    """
+    if not isinstance(solver_inverse, dict):
+        return False
+    try:
+        if int(solver_inverse["admitted_count"]) <= 0:
+            return False
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+    expected_shapes = {
+        "solver_racket_velocity_w_mps": (3,),
+        "solver_signed_face_w": (3,),
+        "incoming_velocity_w_mps": (3,),
+        "landing_aim_w_xy_m": (2,),
+    }
+    for name, shape in expected_shapes.items():
+        try:
+            value = np.asarray(solver_inverse[name], np.float64)
+        except (KeyError, TypeError, ValueError):
+            return False
+        if value.shape != shape or not bool(np.all(np.isfinite(value))):
+            return False
+    return True
+
+
 def _smooth_with_contact_taper(q, ready, hit, window, savgol_filter):
     smooth = savgol_filter(q, window_length=window, polyorder=3, axis=0, mode="interp")
     # Far from contact, favour the dynamically stable ready posture.  At the
@@ -276,6 +305,9 @@ def solve(args):
         reject.append("NO_MECHANICALLY_EXECUTABLE_CENTER")
     elif not solver_inverse["matched"]:
         reject.append("FIXED_ACTION_SOLVER_HAS_NO_MATCH_IN_REGISTERED_SEARCH")
+    seed_valid = bool(
+        chosen["mechanically_admitted"] and _solver_seed_valid(solver_inverse)
+    )
 
     def plant_summary(plant):
         return {
@@ -287,6 +319,13 @@ def solve(args):
         "schema_version": 1,
         "kind": KIND,
         "diagnostic_unauthorized": True,
+        "seed_valid": seed_valid,
+        "seed_typed_reject_reasons": [] if seed_valid else [
+            "NO_MECHANICALLY_EXECUTABLE_SOLVER_ADMITTED_RETARGET_SEED"
+        ],
+        "matched": bool(
+            solver_inverse is not None and solver_inverse.get("matched", False)
+        ),
         "admitted": bool(
             chosen["mechanically_admitted"]
             and solver_inverse is not None
