@@ -37,14 +37,12 @@ def solve(args):
     from scipy.spatial.transform import Rotation
 
     source = json.loads(args.phase3_report.read_text())
-    if not source.get("admitted"):
-        raise P1.ProducerError("Phase-3 source must be continuous-solver admitted")
     with np.load(args.phase3_npz, allow_pickle=False) as payload:
         arrays = {key: np.asarray(payload[key]) for key in payload.files}
     ready = P1._HIT._load_ready(args.dynamic_ready)
     model = P1._load_model(mujoco, args.model)
     data = mujoco.MjData(model)
-    _jids, qadr, _dadr, root_qadr, _root_dadr = P1._runtime_mapping(
+    _jids, qadr, dadr, root_qadr, root_dadr = P1._runtime_mapping(
         mujoco, model, ready["names"]
     )
     site_id = P1._resolve_name(mujoco, model, mujoco.mjtObj.mjOBJ_SITE, P1.SITE_NAME)
@@ -52,11 +50,20 @@ def solve(args):
     qbase[root_qadr : root_qadr + 3] = ready["root_pos"]
     qbase[root_qadr + 3 : root_qadr + 7] = ready["root_wxyz"]
     qbase[qadr] = ready["ready"]
-    rotations = []
-    for q in np.asarray(arrays["q_ref"], np.float64):
-        _site, rotation = P1._fk(mujoco, model, data, qbase, qadr, q, site_id)
+    q_ref = np.asarray(arrays["q_ref"], np.float64).copy()
+    yaw_index = ready["names"].index("waist_yaw_joint")
+    taper = np.clip(
+        1.0 - np.abs(np.arange(len(q_ref)) - int(args.hit_frame))
+        / float(args.contact_bias_window_frames), 0.0, 1.0
+    )
+    q_ref[:, yaw_index] += float(args.waist_yaw_contact_bias_rad) * taper
+    rotations, sites = [], []
+    for q in q_ref:
+        site_value, rotation = P1._fk(mujoco, model, data, qbase, qadr, q, site_id)
+        sites.append(site_value)
         rotations.append(rotation)
     rotations = np.asarray(rotations)
+    sites = np.asarray(sites)
     hit = int(args.hit_frame)
     xyzw = Rotation.from_matrix(rotations[hit]).as_quat()
     reference_quat = tuple(float(v) for v in (xyzw[3], xyzw[0], xyzw[1], xyzw[2]))
@@ -65,9 +72,11 @@ def solve(args):
     reference_omega = tuple(float(v) for v in Rotation.from_matrix(
         rotations[hit + 1] @ rotations[hit - 1].T
     ).as_rotvec() / (2.0 * dt))
-    site = np.asarray(arrays["racket_site"][hit], np.float64)
-    site_velocity = np.asarray(arrays["racket_velocity"][hit], np.float64)
-    raw_face = np.asarray(arrays["racket_face"][hit], np.float64)
+    site_velocity_path = np.gradient(sites, dt, axis=0)
+    raw_face_path = rotations[:, :, 1]
+    site = sites[hit]
+    site_velocity = site_velocity_path[hit]
+    raw_face = raw_face_path[hit]
     ball_center = site + np.asarray(GEOMETRY.quat_rotate_wxyz(
         reference_quat, GEOMETRY.ball_center_from_site_local(args.mount_normal_sign)
     ))
@@ -96,7 +105,29 @@ def solve(args):
     )
     position_error = float(np.linalg.norm(np.asarray(exact.racket_site_target_w_m) - site))
     velocity_error = float(np.linalg.norm(np.asarray(exact.racket_site_velocity_w_mps) - site_velocity))
-    plant = source["selected"]["plant"]
+    runtime = ready["document"]["runtime_plant"]
+    table_ids = np.asarray([
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
+        for name in ("court_table_top", "court_net")
+    ], np.int64)
+    robot_ids = [
+        gid for gid in range(model.ngeom)
+        if not (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, gid) or "").startswith("court_")
+        and "ball" not in (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, gid) or "").lower()
+        and int(model.geom_bodyid[gid]) != 0
+    ]
+    plant_full = P1._plant_eval(
+        mujoco=mujoco, model=model, qbase=qbase, qadr=qadr, dadr=dadr,
+        root_dadr=root_dadr, q_ref=q_ref, fps=float(args.fps),
+        timewarp=float(source["selected"]["timewarp"]),
+        kp=np.asarray(runtime["joint_stiffness"], np.float64),
+        kd=np.asarray(runtime["joint_damping"], np.float64),
+        effort=np.asarray(runtime["joint_effort_limits"], np.float64),
+        qdes_lower=np.asarray(runtime["executed_qdes_lower_rad"], np.float64) + P1.STRICT_EPS_RAD,
+        qdes_upper=np.asarray(runtime["executed_qdes_upper_rad"], np.float64) - P1.STRICT_EPS_RAD,
+        table_geom_ids=table_ids, robot_geom_ids=robot_ids,
+    )
+    plant = {key: value for key, value in plant_full.items() if key not in ("qdot", "qdd", "tau", "qdes_ff")}
     robust = bool(
         plant["qdes_margin_min"] >= args.robust_qdes_margin_rad
         and replay["velocity_error_mps"] <= args.robust_velocity_error_mps
@@ -106,6 +137,14 @@ def solve(args):
         and plant["bilateral_support_frame_fraction"] >= 1.0
     )
     arrays.update({
+        "q_ref": q_ref.astype(np.float32),
+        "qdot": plant_full["qdot"].astype(np.float32),
+        "qdd": plant_full["qdd"].astype(np.float32),
+        "tau": plant_full["tau"].astype(np.float32),
+        "qdes_ff": plant_full["qdes_ff"].astype(np.float32),
+        "racket_site": sites.astype(np.float32),
+        "racket_velocity": site_velocity_path.astype(np.float32),
+        "racket_face": raw_face_path.astype(np.float32),
         "racket_quat_wxyz": np.asarray(reference_quat, np.float32),
         "racket_omega_w_radps": np.asarray(reference_omega, np.float32),
         "racket_long_axis_w": np.asarray(reference_long_axis, np.float32),
@@ -144,6 +183,10 @@ def solve(args):
             "site_velocity_error_mps": velocity_error,
         },
         "plant": plant,
+        "retarget": {
+            "waist_yaw_contact_bias_rad": float(args.waist_yaw_contact_bias_rad),
+            "contact_bias_window_frames": int(args.contact_bias_window_frames),
+        },
         "timing": source["timing"],
         "artifact_payloads": {"npz_sha256": identity},
         "inputs": {name: {"path": str(path), "sha256": P1._sha256(path)} for name, path in (
@@ -168,6 +211,8 @@ def parser():
     p.add_argument("--ball-physics", type=Path, default=Path("configs/ball_physics_venue.yaml"))
     p.add_argument("--hit-frame", type=int, default=48); p.add_argument("--fps", type=float, default=50.0)
     p.add_argument("--mount-normal-sign", type=int, default=1)
+    p.add_argument("--waist-yaw-contact-bias-rad", type=float, default=0.0)
+    p.add_argument("--contact-bias-window-frames", type=int, default=21)
     p.add_argument("--teacher-rate-min", type=float, default=0.6); p.add_argument("--teacher-rate-max", type=float, default=1.0)
     p.add_argument("--velocity-tolerance-mps", type=float, default=0.10); p.add_argument("--face-tolerance-deg", type=float, default=10.0)
     p.add_argument("--robust-qdes-margin-rad", type=float, default=0.02)
