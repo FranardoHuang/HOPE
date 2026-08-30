@@ -3326,7 +3326,7 @@ class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
             self.events = fresh_events
 
         # N1 exposes one exact slow-centre shot per episode.  Its reveal at 48,
-        # derived close at 357, and retirement at 436 all fit the existing
+        # launch at 50, derived close at 359, and retirement at 436 fit the
         # 10 s / 500-tick horizon; no six-shot contract is silently imposed.
         self.episode_length_s = 10.0
         racket = self.commands.racket_target
