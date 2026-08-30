@@ -20,6 +20,33 @@
 > 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
 
+## 2026-08-30 teacher replay量具与direct-frame0诊断
+
+现役`8200c4a2`双长期run未热补、未停止、未复用namespace。只读recent30刷新到Isaac/Mu至少
+update `2306/6368`：Isaac `2,966 launch / 0 R03-valid`，Mu
+`3,026 launch / 0 raw / 0 selected / 0 crossing / 0 legal landing`。Mu四项playback paddle误差为
+`.06447 m/.40127 mps/.21761 rad/.26119 rad`，wall p50/p90=`6.332/6.528 s/H48`；Isaac wall
+p50/p90=`18.004/18.271 s/H48`。finite/fact/conservation clean只说明工程健康，不改变两端mimic→hit
+仍失败的学习裁决。
+
+zero-PPO teacher replay先用component55的两个child [OBB](../../DEFINITIONS.md#obb)消除了旧paddle STL winner，但同一
+transition 73/substep 17又出现component57 `right_wrist_yaw_link.stl`。exact CPU geometry证据把它判为
+量具假阳性：proxy对20 mm扩张桌面margin为`-1.234658 mm`，原始STL convex与Mu实际collider union却分别
+有`+13.522844/+13.361006 mm`净空。原始桌面margin更大；所以不能据此改teacher、降20 mm或调Reward。
+Isaac actual collider因缺ignored USD字节保持`未测`。采用方向是通用、离线、确定性的adaptive multi-OBB，
+按完整actual/source solid coverage与最终owner-frame float32证书选择满足empty-space excess `<=5 mm`的
+最小`k<=8`；当前帧只作heldout回归，不驱动leaf数量。
+
+direct-frame0诊断另将上一GPU失败定位为validator口径，而非plant：production affine decode使
+`right_shoulder_roll`相对teacher变化`1 ULP=5.96e-8 rad`，旧门却要求bitwise teacher。新候选保持
+requested qdes exact teacher，同时要求executed qdes逐位等于production decode+guard expected、相对teacher
+不超过既有`2e-7 rad` ABI且guard零介入；失败收据用O_EXCL、0600、file/parent-dir fsync并绑定完整identity和
+payload SHA。Pod CPU union=`174 passed,8 skipped`；独立复审与fresh GPU尚未完成，因此它不证明dynamic
+teacher可行、也不授权改训练。随后只读终审给出`P0=0/P1=1`：atomic install八项聚合以及runner的
+same-step done/frame检查会在统一writer前直接raise，现有mutation又只覆盖人造arrays；因此“28个谓词任一
+失败都产生typed durable artifact”尚不成立。same-step teacher delta还应直接消费已有executable-q0 scalar，
+并把`2e-7`与生产ready ABI钉成同一常量。上述窄修、真实failure-path mutation与Pod复验完成前不发GPU。
+
 ## 2026-08-29 current correction
 
 ### 重新判读：学习阶段、R06热路与部署边界

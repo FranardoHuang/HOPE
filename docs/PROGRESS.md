@@ -1,5 +1,20 @@
 # 简短进度记录
 
+## 2026-08-30 — teacher replay量具拆因与direct-frame0 validator修正
+
+- multi-[OBB](DEFINITIONS.md#obb) v2已在Pod CUDA direct guard通过，并在zero-PPO replay消除旧paddle STL false positive；但
+  component57 wrist single OBB在同一transition再次误报。exact geometry证明Mu实际collider离20 mm扩张桌面
+  仍有`13.361 mm`净空，故保留20 mm并改做通用adaptive decomposition，不再按winner文件名打补丁；Isaac
+  actual collider明确未测。
+- direct-frame0首个GPU失败由`1 ULP=5.96e-8 rad` production decode舍入触发错误bitwise-teacher门。
+  候选已改为requested exact teacher、executed exact production expected、`<=2e-7 rad` teacher delta与
+  guard零介入，并把失败证据升级为identity-bound、payload-SHA、O_EXCL、file/dir fsync。Pod CPU=
+  `174 passed,8 skipped`。独立复审无P0，但发现atomic install八项与same-step done/frame仍可early raise而
+  绕过统一writer；真实failure-path mutation、teacher-delta scalar与`2e-7` ABI pin正在收口，完成前不发GPU。
+- `8200c4a2`双长期run继续只读：Isaac/Mu recent30截至至少update `2306/6368`仍为
+  `0/2,966 R03-valid/launch`与`0/3,026 raw-contact/launch`。两端finite clean但hit入口未开，不将继续产出
+  checkpoint写成课程成功。
+
 ## 2026-08-30 — D05节拍纠正、双fixed-action与fresh H48重启
 
 - `8200c4a2`把D05 task发布与Motion/Physical playback readiness解耦：不ready合法题仍发布，

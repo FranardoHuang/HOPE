@@ -18,6 +18,32 @@
 exact source和证据root继续只读，不hot-patch、不resume、不复用。R8只有在下列独立事实闭合后才替换它们；
 有限probe、nominal hold、rate或文档状态均不单独授权长跑、promotion、physics parity、部署或真机。
 
+### 2026-08-30 teacher replay：先修量具，再判断动态老师
+
+- 现役`8200c4a2`双长期run继续只读运行。`observed_at=2026-08-30T05:31Z`时Isaac/Mu分别至少到
+  update `2306/6368`；recent30中Isaac为`0 R03-valid / 2,966 launch`，Mu为
+  `0 raw / 0 selected / 3,026 launch`，两端仍未打开hit入口。Mu recent30四项playback paddle误差为
+  `.06447 m/.40127 mps/.21761 rad/.26119 rad`，wall p50/p90=`6.332/6.528 s/H48`；Isaac wall
+  p50/p90=`18.004/18.271 s/H48`。两端finite/fact/conservation保持clean，故继续运行只积累学习反例，
+  不把健康ACK或checkpoint解释成课程成功。
+- zero-PPO teacher replay已证明旧single-[OBB](../DEFINITIONS.md#obb)量具会把自由空间填成碰桌。component55的paddle STL拆成两个
+  child OBB后，旧winner消失；但同一transition 73/substep 17又由component57
+  `right_wrist_yaw_link.stl`的single OBB误报。精确诊断显示CUDA/CPU对20 mm扩张桌面的proxy margin为
+  `-1.234677/-1.234658 mm`，而原始STL convex与Mu实际collider union离扩张桌面仍分别有
+  `+13.522844/+13.361006 mm`净空，故这不是实际碰桌。Isaac live collider因缺对应ignored USD字节明确
+  `未测`，不得由Mu结果代签。
+- 不再按文件名逐个加特例。下一guard候选必须是离线、确定性的通用adaptive multi-OBB：保留20 mm安全
+  余量、完整actual/source solid coverage、component级ledger与双端同artifact；按最终float32几何选择满足
+  可证明empty-space excess不高于5 mm的最小leaf数，`k<=8`仍不满足则fail closed。已知replay只作
+  heldout反例，不参与挑leaf数。
+- direct-frame0诊断分支的CPU闭合为`174 passed,8 skipped`；它只在diagnostic actor boundary请求exact
+  teacher frame0，executed qdes按生产affine decode+guard真值验证，并允许生产ABI内`2e-7 rad`的decode
+  舍入。此前GPU失败已定位为`right_shoulder_roll`仅`1 ULP=5.96e-8 rad`却被错误要求与teacher逐位相等；
+  新实现同时钉requested exact、executed production-expected、guard零介入及O_EXCL+file/dir fsync失败收据。
+  独立复审仍找到一项P1：atomic install八项聚合与runner的same-step done/frame检查会在统一writer前early
+  raise，故尚不能声称28个谓词任一失败都有typed durable artifact；现有mutation只测了人造arrays。该旁路与
+  teacher-delta字段已进入修复，fresh GPU replay须等复验后再发；动态teacher是否可追踪仍为`未测`。
+
 ### 已证根因，不再归为“Pod整体装坏”
 
 - V9 MuJoCo实际选择的是legacy `a3_pingpong/a3_pingpong.xml`（SHA-256 `70c4fd65…36c0a`），而本轮

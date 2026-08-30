@@ -2,6 +2,15 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+## 2026-08-30 teacher keepout authority复核（仍`Partial`）
+
+同一teacher transition 73/substep 17上，Mu GPU/CPU的multi-[OBB](../DEFINITIONS.md#obb) guard逐位一致地报告component57约
+`-1.235 mm` expanded-top margin；但独立读取源STL convex与`runtime.mjb`实际collider union，二者离20 mm
+扩张桌面分别仍有`+13.523/+13.361 mm`净空。因此当前分歧不属于Mu物理碰撞，而是shared single-OBB
+proxy把空角填实。Isaac实际collider union因对应ignored USD未在该诊断checkout中恢复，明确为`未测`；
+不能把Mu净空外推成Isaac parity。下一候选保留20 mm余量并要求双端消费同一通用adaptive multi-OBB artifact、
+完整solid coverage与float32 outward证书；在Isaac live collider与fresh replay闭合前，G06不晋级。
+
 ## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
 
 新机可复现边界现已具体化：Mu的Python3.12.3基础venv有133项tracked lock，Pod fresh resolver精确闭合；
