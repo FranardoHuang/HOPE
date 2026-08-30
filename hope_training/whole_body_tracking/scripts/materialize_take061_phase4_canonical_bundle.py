@@ -219,7 +219,7 @@ def _prototype(*, motion_sha: str, frames: int, fps: float,
         "racket_face_center_v_dir_tol_deg": 0.0,
         "racket_face_center_cos_normal_velocity": float(velocity_hat @ face_b),
     }
-    geometry_sha = _sha256_file(MDP / "racket_contact_geometry.py")
+    geometry_sha = manifest_contract._exact_face_geometry_source_sha256()
     document = {
         "schema_version": 2,
         "prototype_set_id": "take061_phase4_canonical_n1_v1",
