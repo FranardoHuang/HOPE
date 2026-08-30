@@ -75,6 +75,16 @@ def test_phase3_finite_solver_target_is_phase4_seed_before_mechanical_admission(
     assert phase3._phase4_seed_valid(**kwargs) is False
 
 
+def test_phase3_post_contact_hold_preserves_contact_witness_and_input():
+    phase3 = _load("take061_phase3_hold_test", "solve_take061_joint_ball_phase3.py")
+    original = np.arange(57 * 3, dtype=np.float64).reshape(57, 3)
+    held, anchor = phase3._apply_post_contact_hold(original, 48)
+    assert anchor == 50
+    assert np.array_equal(held[:51], original[:51])
+    assert np.array_equal(held[51:], np.repeat(original[50:51], 6, axis=0))
+    assert np.array_equal(original, np.arange(57 * 3, dtype=np.float64).reshape(57, 3))
+
+
 def test_phase4_exit_code_requires_final_robust_admission(monkeypatch):
     phase4 = _load("take061_phase4_seed_test", "materialize_take061_exact_face_phase4.py")
     monkeypatch.setattr(phase4, "parser", lambda: type("P", (), {"parse_args": lambda self: object()})())

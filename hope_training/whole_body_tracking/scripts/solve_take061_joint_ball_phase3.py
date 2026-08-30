@@ -27,6 +27,7 @@ def _module(label, filename):
 P1 = _module("_take061_phase1", "solve_take061_stable_support_plant_feasible.py")
 P2 = _module("_take061_phase2", "solve_take061_feasible_center_phase2.py")
 KIND = "take061_joint_ball_feasible_center_phase3_v1"
+POST_CONTACT_HOLD_OFFSET_FRAMES = P1.CONTACT_RADIUS + 1
 
 
 def _require_seed_valid(label, report):
@@ -57,6 +58,23 @@ def _phase4_seed_valid(*, q_ref, site, velocity, face, solver):
         if value.shape != (3,) or not bool(np.all(np.isfinite(value))):
             return False
     return True
+
+
+def _apply_post_contact_hold(q_ref, hit_frame):
+    """Remove unconstrained follow-through motion after the contact witness.
+
+    The hit +/-1 frames and one following buffer frame remain byte-identical;
+    later frames hold that buffer posture.  This cannot change the centered
+    hit-site velocity or hit face, and the plant evaluator still judges the
+    resulting transition over the complete trajectory.
+    """
+    value = np.asarray(q_ref, np.float64)
+    anchor = int(hit_frame) + POST_CONTACT_HOLD_OFFSET_FRAMES
+    if value.ndim != 2 or anchor < 0 or anchor >= len(value) - 1:
+        raise P1.ProducerError("Phase3 trajectory is too short for post-contact hold")
+    result = value.copy()
+    result[anchor + 1 :] = result[anchor]
+    return result, anchor
 
 
 def _require_ball_physics_lineage(label, solver_report, ball_physics):
@@ -220,6 +238,7 @@ def solve(args):
             q[:, wrist_index] = np.clip(
                 q[:, wrist_index], ready["lower"][wrist_index], ready["upper"][wrist_index]
             )
+            q, hold_anchor = _apply_post_contact_hold(q, args.hit_frame)
             for timewarp in args.timewarps:
                 plant = P1._plant_eval(
                     mujoco=mujoco, model=model, qbase=qbase, qadr=qadr, dadr=dadr,
@@ -251,6 +270,7 @@ def solve(args):
                 candidates.append({
                     "alpha": float(alpha), "timewarp": float(timewarp),
                     "wrist_inward_bias_rad": float(wrist_bias),
+                    "post_contact_hold_anchor_frame": hold_anchor,
                     "q_ref": q, "site": path_site, "face": path_face,
                     "velocity": velocity, "long": path_long, "plant": plant,
                     "center": center, "solver": replay,
@@ -287,6 +307,14 @@ def solve(args):
         "selected": {
             "alpha": chosen["alpha"], "timewarp": chosen["timewarp"],
             "wrist_inward_bias_rad": chosen["wrist_inward_bias_rad"],
+            "post_contact_hold": {
+                "anchor_frame": chosen["post_contact_hold_anchor_frame"],
+                "first_held_frame": chosen["post_contact_hold_anchor_frame"] + 1,
+                "preserved_contact_frames": [
+                    args.hit_frame - 1, args.hit_frame, args.hit_frame + 1,
+                ],
+                "semantics": "hold_after_contact_plus_one_buffer_frame",
+            },
             "center": chosen["center"], "plant": plant_summary(chosen["plant"]),
             "solver": chosen["solver"],
             "incoming_ball_center": {
@@ -316,6 +344,7 @@ def solve(args):
             {
                 "alpha": row["alpha"], "timewarp": row["timewarp"],
                 "wrist_inward_bias_rad": row["wrist_inward_bias_rad"],
+                "post_contact_hold_anchor_frame": row["post_contact_hold_anchor_frame"],
                 "qdes_margin_min_rad": row["plant"]["qdes_margin_min"],
                 "torque_margin_min_nm": row["plant"]["torque_margin_min"],
                 "table_distance_min_m": row["plant"]["table_distance_min_m"],
