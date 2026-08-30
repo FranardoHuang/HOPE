@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import torch
 
-from action_ball_qdes_guard import action_ball_qdes_guard
+from action_ball_qdes_guard import (
+    action_ball_qdes_guard,
+    action_ball_qdes_guard_with_envelope,
+    derive_action_ball_qdes_envelope,
+)
 
 
 def _guard(pre, *, previous=None, valid=None, q=None, qd=None):
@@ -178,3 +182,100 @@ def test_first_step_uses_default_when_previous_target_is_invalid():
     )
     assert torch.equal(result.finite_fallback_qdes, torch.zeros((1, 1)))
     assert torch.isfinite(result.executable_qdes).all()
+
+
+def test_frozen_envelope_hot_path_is_bitwise_equal_to_legacy_wrapper_fixed_tape():
+    generator = torch.Generator().manual_seed(20260830)
+    shape = (17, 7)
+    pre = 1.6 * torch.randn(shape, generator=generator)
+    previous = 0.5 * torch.randn(shape, generator=generator)
+    valid = torch.rand(shape[0], generator=generator).gt(0.25)
+    default = 0.1 * torch.randn(shape, generator=generator)
+    joint_pos = 1.3 * torch.randn(shape, generator=generator)
+    joint_vel = 4.0 * torch.randn(shape, generator=generator)
+    pre[0, 0] = float("nan")
+    pre[1, 1] = float("inf")
+    previous[2, 2] = float("nan")
+    joint_pos[3, 3] = float("nan")
+    joint_vel[4, 4] = float("inf")
+    soft_lower = torch.full(shape, -0.9)
+    soft_upper = torch.full(shape, 0.9)
+    hard_lower = torch.full(shape, -1.0)
+    hard_upper = torch.full(shape, 1.0)
+
+    legacy = action_ball_qdes_guard(
+        pre_clamp_qdes=pre,
+        previous_executable_qdes=previous,
+        previous_executable_valid=valid,
+        default_qdes=default,
+        soft_lower=soft_lower,
+        soft_upper=soft_upper,
+        hard_lower=hard_lower,
+        hard_upper=hard_upper,
+        joint_pos=joint_pos,
+        joint_vel=joint_vel,
+        policy_dt_s=0.02,
+        hard_margin_rad=0.01,
+        hard_margin_fraction=0.05,
+        project_finite_without_termination=True,
+        projection_soft_inset_fraction=0.05,
+    )
+    envelope = derive_action_ball_qdes_envelope(
+        soft_lower=soft_lower,
+        soft_upper=soft_upper,
+        hard_lower=hard_lower,
+        hard_upper=hard_upper,
+        hard_margin_rad=0.01,
+        hard_margin_fraction=0.05,
+        project_finite_without_termination=True,
+        projection_soft_inset_fraction=0.05,
+        freeze=True,
+        validate_values=True,
+    )
+    hot = action_ball_qdes_guard_with_envelope(
+        pre_clamp_qdes=pre,
+        previous_executable_qdes=previous,
+        previous_executable_valid=valid,
+        default_qdes=default,
+        envelope=envelope,
+        joint_pos=joint_pos,
+        joint_vel=joint_vel,
+        policy_dt_s=0.02,
+    )
+
+    for field in legacy.__dataclass_fields__:
+        assert torch.equal(getattr(legacy, field), getattr(hot, field)), field
+    assert torch.equal(legacy.hard_violation_env, hot.hard_violation_env)
+
+    soft_lower.zero_()
+    soft_upper.zero_()
+    hard_lower.zero_()
+    hard_upper.zero_()
+    assert envelope.soft_lower.eq(-0.9).all()
+    assert envelope.soft_upper.eq(0.9).all()
+    assert envelope.hard_lower.eq(-1.0).all()
+    assert envelope.hard_upper.eq(1.0).all()
+
+
+def test_envelope_validation_rejects_invalid_static_contract_at_construction():
+    soft_lower = torch.full((2, 3), -1.0)
+    soft_upper = torch.full((2, 3), 1.0)
+    hard_lower = torch.full((2, 3), -0.5)
+    hard_upper = torch.full((2, 3), 0.5)
+    try:
+        derive_action_ball_qdes_envelope(
+            soft_lower=soft_lower,
+            soft_upper=soft_upper,
+            hard_lower=hard_lower,
+            hard_upper=hard_upper,
+            hard_margin_rad=0.0,
+            hard_margin_fraction=0.0,
+            project_finite_without_termination=True,
+            projection_soft_inset_fraction=0.05,
+            freeze=True,
+            validate_values=True,
+        )
+    except ValueError as exc:
+        assert "q_des envelope" in str(exc)
+    else:
+        raise AssertionError("invalid static envelope was accepted")

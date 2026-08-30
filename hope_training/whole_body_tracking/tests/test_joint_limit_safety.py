@@ -230,6 +230,10 @@ def _action_and_env(
     diagnostic_compact_evidence: bool = False,
     target_mode: str = "action_ball",
     joint_names: list[str] | None = None,
+    soft_lo: float = -1.0,
+    soft_hi: float = 1.0,
+    hard_lo: float = -1.2,
+    hard_hi: float = 1.2,
 ):
     names = (
         [f"j{index}" for index in range(joint_count)]
@@ -242,8 +246,8 @@ def _action_and_env(
         if offset is None
         else offset.clone()
     )
-    limits = _limits(num_envs, joint_count)
-    hard_limits = _limits(num_envs, joint_count, lo=-1.2, hi=1.2)
+    limits = _limits(num_envs, joint_count, lo=soft_lo, hi=soft_hi)
+    hard_limits = _limits(num_envs, joint_count, lo=hard_lo, hi=hard_hi)
     root_physx_view = _FakeRootPhysxView(hard_limits)
     asset = types.SimpleNamespace(
         data=types.SimpleNamespace(
@@ -1431,10 +1435,52 @@ def test_pre_apply_guard_requires_explicit_runtime_matched_contract(kwargs):
 
 
 def test_pre_apply_guard_rejects_soft_envelope_outside_physical_hard_limits():
-    action, _, asset = _action_and_env(guard=True)
-    asset.data.joint_pos_limits[:] = _limits(2, 2, lo=-0.5, hi=0.5)
     with pytest.raises(RuntimeError, match="soft deploy envelope"):
-        action.process_actions(torch.zeros(2, 2))
+        _action_and_env(guard=True, hard_lo=-0.5, hard_hi=0.5)
+
+
+def test_pre_apply_guard_freezes_config_envelope_out_of_policy_hot_path():
+    action, _, asset = _action_and_env(
+        guard=True,
+        guard_margin_fraction=0.02,
+        project_finite_qdes=True,
+    )
+    envelope = action._static_qdes_envelope
+    assert envelope is not None
+    frozen = tuple(
+        value.clone()
+        for value in (
+            envelope.soft_lower,
+            envelope.soft_upper,
+            envelope.hard_lower,
+            envelope.hard_upper,
+            envelope.hard_inner_lower,
+            envelope.hard_inner_upper,
+            envelope.target_lower,
+            envelope.target_upper,
+            envelope.target_span,
+        )
+    )
+
+    # These articulation buffers are configuration sources, not episode state.
+    # A late mutation cannot silently redefine the trained action contract.
+    asset.data.soft_joint_pos_limits.fill_(123.0)
+    asset.data.joint_pos_limits.fill_(-456.0)
+    action.process_actions(torch.tensor([[2.0, 0.0], [-2.0, 0.0]]))
+
+    current = (
+        envelope.soft_lower,
+        envelope.soft_upper,
+        envelope.hard_lower,
+        envelope.hard_upper,
+        envelope.hard_inner_lower,
+        envelope.hard_inner_upper,
+        envelope.target_lower,
+        envelope.target_upper,
+        envelope.target_span,
+    )
+    assert all(torch.equal(before, after) for before, after in zip(frozen, current))
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([0.9, -0.9])
 
 
 def test_physics_substep_ledger_records_exact_decimation_and_fresh_timestamps():
