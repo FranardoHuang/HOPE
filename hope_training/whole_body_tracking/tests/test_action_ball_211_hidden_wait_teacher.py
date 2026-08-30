@@ -986,6 +986,10 @@ def _load_reward_helpers():
         ),
     }
     exec(compile(module, str(REWARDS_PATH), "exec"), namespace)
+    namespace["stage1_aligned_clip_racket_target_now"] = lambda cmd: (
+        *namespace["_stage1_aligned_clip_site_target"](cmd),
+        namespace["_stage1_aligned_clip_long_axis_target"](cmd),
+    )
     return namespace
 
 

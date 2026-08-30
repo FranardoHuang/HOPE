@@ -748,6 +748,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_frozen_root_valid = torch.zeros(
             n, dtype=torch.bool, device=self.device
         )
+        self._full_a_teacher_source_to_task_yaw_wxyz = torch.zeros(
+            (n, 4), dtype=dtype, device=self.device
+        )
+        self._full_a_teacher_source_to_task_yaw_wxyz[:, 0] = 1.0
+        self._full_a_teacher_source_to_task_translation_scene = torch.zeros(
+            (n, 3), dtype=dtype, device=self.device
+        )
         self._full_a_teacher_frame = torch.zeros(
             n, dtype=torch.long, device=self.device
         )
@@ -850,6 +857,29 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         task = question["task_f32"]
         if tuple(task.shape) != (n, observation_contract.TASK_F32_WIDTH):
             raise RuntimeError("portable centre question task width differs")
+        task_yaw = question["teacher_source_to_task_yaw_wxyz"]
+        task_translation = question[
+            "teacher_source_to_task_translation_scene"
+        ]
+        if (
+            tuple(task_yaw.shape) != (n, 4)
+            or tuple(task_translation.shape) != (n, 3)
+            or not bool(torch.isfinite(task_yaw).all())
+            or not bool(torch.isfinite(task_translation).all())
+            or not bool(
+                torch.isclose(
+                    torch.linalg.vector_norm(task_yaw, dim=1),
+                    torch.ones(n, dtype=task.dtype, device=task.device),
+                    rtol=0.0,
+                    atol=1.0e-5,
+                ).all()
+            )
+        ):
+            raise RuntimeError("portable centre teacher task frame differs")
+        self._full_a_teacher_source_to_task_yaw_wxyz[ids] = task_yaw
+        self._full_a_teacher_source_to_task_translation_scene[ids] = (
+            task_translation
+        )
         self._epoch_task_f32[ids] = task
         self._full_a_launch_state_f32[ids] = question[
             "launch_state_f32"
@@ -1427,10 +1457,24 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 tracked_body_kinematics
             )
         root_pos = body_pos[:, 0]
-        reference_body_pos = (
-            self._full_a_teacher.body_pos_w[0].unsqueeze(0) + origins[:, None, :]
+        source_body_pos = self._full_a_teacher.body_pos_w[0].unsqueeze(0).expand(
+            self.num_envs, -1, -1
         )
-        reference_body_quat = self._full_a_teacher.body_quat_w[0].unsqueeze(0)
+        source_body_quat = self._full_a_teacher.body_quat_w[0].unsqueeze(0).expand(
+            self.num_envs, -1, -1
+        )
+        task_yaw = self._full_a_teacher_source_to_task_yaw_wxyz
+        expanded_task_yaw = task_yaw[:, None, :].expand_as(source_body_quat)
+        reference_body_pos = (
+            FullMdpInitialWaitVecEnv._quat_apply_wxyz(
+                torch, expanded_task_yaw, source_body_pos
+            )
+            + self._full_a_teacher_source_to_task_translation_scene[:, None, :]
+            + origins[:, None, :]
+        )
+        reference_body_quat = FullMdpInitialWaitVecEnv._quat_mul_wxyz(
+            torch, expanded_task_yaw, source_body_quat
+        )
         reference_joint = self._full_a_teacher.joint_pos[0].unsqueeze(0)
         upper = (7, 8, 9, 10, 11, 12, 13)
         foot_support, foot_slip, support_valid = self._full_a_recovery_foot_support(
@@ -1451,10 +1495,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         safe_current_quat = current_quat / current_norm.clamp_min(tiny).unsqueeze(2)
         safe_reference_quat = reference_quat / reference_norm.clamp_min(tiny).unsqueeze(2)
 
-        root_angle_sq = self._quat_error_sq(
+        root_angle_sq = FullMdpInitialWaitVecEnv._quat_error_sq(
             torch, safe_reference_quat[:, 0], safe_current_quat[:, 0]
         )
-        body_angle_sq = self._quat_error_sq(
+        body_angle_sq = FullMdpInitialWaitVecEnv._quat_error_sq(
             torch, safe_reference_quat[:, 1:], safe_current_quat[:, 1:]
         )
         errors = portable_outcome.recovery_errors(
@@ -1839,6 +1883,19 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         measured_body_quat = torch.where(
             completed[:, None, None], frame0_body_quat, sampled["body_quat_w"]
         )
+        task_yaw = self._full_a_teacher_source_to_task_yaw_wxyz
+        task_translation = (
+            self._full_a_teacher_source_to_task_translation_scene
+        )
+        expanded_task_yaw = task_yaw[:, None, :].expand_as(
+            measured_body_quat
+        )
+        task_body_pos_scene = FullMdpInitialWaitVecEnv._quat_apply_wxyz(
+            torch, expanded_task_yaw, measured_body_pos
+        ) + task_translation[:, None, :]
+        task_body_quat = FullMdpInitialWaitVecEnv._quat_mul_wxyz(
+            torch, expanded_task_yaw, measured_body_quat
+        )
         self._full_a_teacher_frame.copy_(
             torch.where(
                 valid & ~completed & ~in_hold,
@@ -1871,28 +1928,18 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 torch.zeros_like(self._full_a_teacher_joint_vel),
             )
         )
-        inactive_body_pos = torch.where(
-            completed[:, None, None],
-            frame0_body_pos + origins,
-            self._ready_teacher_body_pos,
-        )
-        inactive_body_quat = torch.where(
-            completed[:, None, None],
-            frame0_body_quat.expand_as(self._teacher_body_quat),
-            self._ready_teacher_body_quat,
-        )
         self._teacher_body_pos.copy_(
             torch.where(
-                (valid & ~completed)[:, None, None],
-                measured_body_pos + origins,
-                inactive_body_pos,
+                valid[:, None, None],
+                task_body_pos_scene + origins,
+                self._ready_teacher_body_pos,
             )
         )
         self._teacher_body_quat.copy_(
             torch.where(
-                (valid & ~completed)[:, None, None],
-                measured_body_quat,
-                inactive_body_quat,
+                valid[:, None, None],
+                task_body_quat,
+                self._ready_teacher_body_quat,
             )
         )
         measured_body_lin_vel = torch.where(
@@ -1902,8 +1949,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._teacher_body_lin_vel.copy_(
             torch.where(
-                (valid & ~completed)[:, None, None],
-                measured_body_lin_vel,
+                valid[:, None, None],
+                FullMdpInitialWaitVecEnv._quat_apply_wxyz(
+                    torch, expanded_task_yaw, measured_body_lin_vel
+                ),
                 torch.zeros_like(self._teacher_body_lin_vel),
             )
         )
@@ -1914,8 +1963,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._teacher_body_ang_vel.copy_(
             torch.where(
-                (valid & ~completed)[:, None, None],
-                measured_body_ang_vel,
+                valid[:, None, None],
+                FullMdpInitialWaitVecEnv._quat_apply_wxyz(
+                    torch, expanded_task_yaw, measured_body_ang_vel
+                ),
                 torch.zeros_like(self._teacher_body_ang_vel),
             )
         )
@@ -1937,7 +1988,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._teacher_racket_site_pos_w.copy_(
             torch.where(
                 valid[:, None],
-                selected_racket_pos + origins[:, 0],
+                FullMdpInitialWaitVecEnv._quat_apply_wxyz(
+                    torch, task_yaw, selected_racket_pos
+                )
+                + task_translation
+                + origins[:, 0],
                 self._ready_teacher_racket_site_pos_w,
             )
         )
@@ -1949,21 +2004,27 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._teacher_racket_site_lin_vel_w.copy_(
             torch.where(
                 valid[:, None],
-                measured_racket_velocity,
+                FullMdpInitialWaitVecEnv._quat_apply_wxyz(
+                    torch, task_yaw, measured_racket_velocity
+                ),
                 torch.zeros_like(self._teacher_racket_site_lin_vel_w),
             )
         )
         self._teacher_racket_signed_normal_w.copy_(
             torch.where(
                 valid[:, None],
-                selected_racket_normal,
+                FullMdpInitialWaitVecEnv._quat_apply_wxyz(
+                    torch, task_yaw, selected_racket_normal
+                ),
                 self._ready_teacher_racket_signed_normal_w,
             )
         )
         self._teacher_racket_long_axis_w.copy_(
             torch.where(
                 valid[:, None],
-                selected_racket_long_axis,
+                FullMdpInitialWaitVecEnv._quat_apply_wxyz(
+                    torch, task_yaw, selected_racket_long_axis
+                ),
                 self._ready_teacher_racket_long_axis_w,
             )
         )
@@ -1980,6 +2041,26 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
 
     def _refresh_aligned_teacher_body_pose(self) -> None:
         """Publish body and measured-paddle caches under one alignment rule."""
+
+        if getattr(self, "full_a_mode", False):
+            # FullMDP targets already live in the accepted question's frozen
+            # task frame.  The policy-moved torso is achieved state only; it
+            # must never redefine the teacher between reveal and contact.
+            self._aligned_teacher_body_pos = self._teacher_body_pos.detach().clone()
+            self._aligned_teacher_body_quat = self._teacher_body_quat.detach().clone()
+            self._aligned_teacher_racket_site_pos_w = (
+                self._teacher_racket_site_pos_w.detach().clone()
+            )
+            self._aligned_teacher_racket_site_lin_vel_w = (
+                self._teacher_racket_site_lin_vel_w.detach().clone()
+            )
+            self._aligned_teacher_racket_signed_normal_w = (
+                self._teacher_racket_signed_normal_w.detach().clone()
+            )
+            self._aligned_teacher_racket_long_axis_w = (
+                self._teacher_racket_long_axis_w.detach().clone()
+            )
+            return
 
         data = self.sim.data
         ids = self._fullmdp_body_ids
@@ -2938,6 +3019,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_scaled_t_hit_s[ids] = 0.0
             self._full_a_scaled_t_cycle_s[ids] = 0.0
             self._full_a_pre_swing_wait_s[ids] = 0.0
+            self._full_a_teacher_source_to_task_yaw_wxyz[ids] = 0.0
+            self._full_a_teacher_source_to_task_yaw_wxyz[ids, 0] = 1.0
+            self._full_a_teacher_source_to_task_translation_scene[ids] = 0.0
             self._full_a_teacher_frame[ids] = 0
             self._full_a_motion_phase_code[ids] = RECOVER_HIDDEN_PHASE_INDEX
             self._full_a_teacher_joint_pos[ids] = self.q_ready
