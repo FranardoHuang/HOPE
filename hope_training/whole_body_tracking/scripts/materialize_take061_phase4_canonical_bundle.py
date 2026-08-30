@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 import hashlib
+import io
 import json
 import math
 import os
@@ -31,6 +32,7 @@ sys.path.insert(0, str(MDP))
 
 import canonical_schema2_builder as schema2
 import action_ball_manifest as manifest_contract
+import racket_contact_geometry as racket_geometry
 
 
 KIND = "take061_phase4_canonical_action_bundle_v1"
@@ -189,6 +191,62 @@ def _rebuild_noncyclic_schema2(*, q: np.ndarray, qd: np.ndarray,
         "root_twist_error_max": twist_error, "quaternion_sign_flips": flips,
         "cyclic_endpoint_required": False,
     }
+
+
+def _quat_apply_wxyz(quaternion: np.ndarray, vector: np.ndarray) -> np.ndarray:
+    xyz = quaternion[1:]
+    return vector + 2.0 * (
+        quaternion[0] * np.cross(xyz, vector)
+        + np.cross(xyz, np.cross(xyz, vector))
+    )
+
+
+def _policy_grid_racket_reference(
+    motion_bytes: bytes, hit_frame: int
+) -> Mapping[str, np.ndarray]:
+    """Read the exact robot-FK reference that FullMDP consumes at contact."""
+
+    with np.load(io.BytesIO(motion_bytes), allow_pickle=False) as archive:
+        names = tuple(str(value) for value in archive["body_names"].tolist())
+        wrist_name = racket_geometry.GEOMETRY_SOURCE_PAYLOAD[
+            "official_wrist_body_name"
+        ]
+        if names.count(wrist_name) != 1:
+            raise BundleError("policy-grid motion lacks the official wrist body")
+        wrist = names.index(wrist_name)
+        position = np.asarray(archive["body_pos_w"], dtype=np.float64)
+        quaternion = np.asarray(archive["body_quat_w"], dtype=np.float64)
+        angular = np.asarray(archive["body_ang_vel_w"], dtype=np.float64)
+        fps = float(np.asarray(archive["fps"]).reshape(-1)[0])
+    if (
+        position.ndim != 3
+        or quaternion.shape != (*position.shape[:2], 4)
+        or angular.shape != position.shape
+        or fps != 1.0 / POLICY_STEP_S
+        or not 2 <= hit_frame < len(position) - 2
+    ):
+        raise BundleError("policy-grid racket-reference arrays differ")
+    offset = np.asarray(racket_geometry.RACKET_SITE_OFFSET_WRIST_M, dtype=np.float64)
+
+    def site_at(frame: int) -> np.ndarray:
+        return position[frame, wrist] + _quat_apply_wxyz(
+            quaternion[frame, wrist], offset
+        )
+
+    half_window = 2
+    site_position = site_at(hit_frame)
+    site_velocity = (
+        site_at(hit_frame + half_window) - site_at(hit_frame - half_window)
+    ) / (2 * half_window * POLICY_STEP_S)
+    result = {
+        "site_position_w_m": site_position,
+        "site_velocity_w_mps": site_velocity,
+        "racket_quat_wxyz": quaternion[hit_frame, wrist],
+        "racket_angular_velocity_w_radps": angular[hit_frame, wrist],
+    }
+    if any(not np.isfinite(value).all() for value in result.values()):
+        raise BundleError("policy-grid racket reference contains non-finite values")
+    return result
 
 
 def _policy_grid_index(seconds: float, label: str) -> int:
@@ -439,8 +497,10 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     with np.load(npz_path, allow_pickle=False) as archive:
         q = _finite(archive["q_ref"], (57, 31), "q_ref")
         qd = _finite(archive["qdot"], (57, 31), "qdot")
-        site = _finite(archive["racket_site"], (57, 3), "racket_site")
-        site_vel = _finite(archive["racket_velocity"], (57, 3), "racket_velocity")
+        source_site = _finite(archive["racket_site"], (57, 3), "racket_site")
+        source_site_vel = _finite(
+            archive["racket_velocity"], (57, 3), "racket_velocity"
+        )
         npz_ball = _finite(archive["ball_center_w_m"], (3,), "NPZ ball center")
         npz_site_target = _finite(
             archive["exact_racket_site_target_w_m"], (3,), "NPZ exact site target"
@@ -474,6 +534,7 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
         root_quat=root_quat_grid, fps=effective_fps,
         mjcf=args.mjcf, body_order=args.body_order,
     )
+    grid_reference = _policy_grid_racket_reference(motion_bytes, hit_frame)
     motion_sha = _sha256_bytes(motion_bytes)
     yaw = _yaw_from_wxyz(quat0)
     exact = report["exact_face"]
@@ -481,12 +542,25 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     ball_w = _finite(exact["ball_center_w_m"], (3,), "ball center")
     if not np.allclose(npz_ball, ball_w, rtol=0.0, atol=1.0e-7):
         raise BundleError("Phase4 report and NPZ ball center disagree")
-    position_error = float(np.linalg.norm(npz_site_target - site[HIT_FRAME]))
-    velocity_error = float(np.linalg.norm(npz_site_velocity - site_vel[HIT_FRAME]))
+    # Phase4's producer witness remains on its original 57-frame seam.
+    position_error = float(
+        np.linalg.norm(npz_site_target - source_site[HIT_FRAME])
+    )
+    velocity_error = float(
+        np.linalg.norm(npz_site_velocity - source_site_vel[HIT_FRAME])
+    )
     if abs(position_error - float(exact["site_position_error_m"])) > 1.0e-6:
         raise BundleError("Phase4 exact-site position witness does not recompute")
     if abs(velocity_error - float(exact["site_velocity_error_mps"])) > 1.0e-6:
         raise BundleError("Phase4 exact-site velocity witness does not recompute")
+    grid_position_error = float(
+        np.linalg.norm(npz_site_target - grid_reference["site_position_w_m"])
+    )
+    grid_velocity_error = float(
+        np.linalg.norm(npz_site_velocity - grid_reference["site_velocity_w_mps"])
+    )
+    if grid_position_error >= 0.005 or grid_velocity_error >= 0.08:
+        raise BundleError("policy-grid robot-FK contact exceeds Phase4 strict bounds")
     if (action_ball.get("analytic_landing_valid") is not True
             or action_ball.get("analytic_net_crossing_valid") is not True
             or float(action_ball.get("analytic_landing_error_m", math.inf)) >= 0.02):
@@ -496,9 +570,11 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     incoming_b = _world_to_heading(incoming_w, yaw)
     face_w = _unit(report["continuous_solver"]["signed_face_w"], "solver signed face")
     face_b = _world_to_heading(face_w, yaw)
-    omega_w = _finite(exact["reference_racket_angular_velocity_w_radps"], (3,), "racket omega")
+    omega_w = grid_reference["racket_angular_velocity_w_radps"]
     offset_w = _finite(exact["face_center_from_site_w_m"], (3,), "face offset")
-    face_velocity_w = site_vel[HIT_FRAME] + np.cross(omega_w, offset_w)
+    face_velocity_w = grid_reference["site_velocity_w_mps"] + np.cross(
+        omega_w, offset_w
+    )
     face_velocity_b = _world_to_heading(face_velocity_w, yaw)
     prototype = _prototype(motion_sha=motion_sha, frames=frames, fps=effective_fps,
                            hit_frame=hit_frame,
@@ -543,7 +619,9 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
             "motion_path": motion_rel.as_posix(), "motion_sha256": motion_sha,
             "strike_phase": hit_frame / (frames - 1), "reference_t_hit_s": t_hit,
             "reference_t_cycle_s": t_cycle,
-            "reference_racket_site_speed_mps": float(np.linalg.norm(site_vel[HIT_FRAME])),
+            "reference_racket_site_speed_mps": float(
+                np.linalg.norm(grid_reference["site_velocity_w_mps"])
+            ),
             "reaction_margin_s": reaction, "teacher_rate_min": teacher_rate_min,
             "teacher_rate_max": 1.0,
             "family": FAMILY, "mount_normal_sign": int(exact["mount_normal_sign"]),
@@ -586,6 +664,9 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
             "analytic_net_crossing_valid": action_ball["analytic_net_crossing_valid"],
             "exact_site_position_error_m": position_error,
             "exact_site_velocity_error_mps": velocity_error,
+            "policy_grid_robot_fk_site_position_error_m": grid_position_error,
+            "policy_grid_robot_fk_site_velocity_error_mps": grid_velocity_error,
+            "policy_grid_robot_fk_contact_frame": hit_frame,
             "analytic_landing_error_m": action_ball["analytic_landing_error_m"],
             "fk": fk},
         "inputs": {"phase4_report": {"path": str(report_path), "sha256": _sha256_file(report_path)},

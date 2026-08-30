@@ -65,6 +65,7 @@ def test_grid_retime_preserves_exact_contact_and_emits_one_row_per_policy_tick()
     assert root_grid.shape == (295, 3)
     assert quat_grid.shape == (295, 4)
     assert np.array_equal(q_grid[hit], q[M.HIT_FRAME])
+    assert not np.array_equal(q_grid[M.HIT_FRAME], q[M.HIT_FRAME])
     assert np.array_equal(root_grid[hit], root_pos[M.HIT_FRAME])
     assert np.array_equal(q_grid[-1], q[-1])
 
@@ -81,6 +82,24 @@ def test_grid_retime_rejects_non_policy_aligned_phase4_timing():
             t_hit_s=5.088,
             t_cycle_s=5.936,
         )
+
+
+def test_prototype_pins_retimed_contact_frame_not_source_frame():
+    prototype = M._prototype(
+        motion_sha="a" * 64,
+        frames=295,
+        fps=50.0,
+        hit_frame=252,
+        ball_b=np.asarray([0.7, -0.2, 0.1]),
+        face_b=np.asarray([1.0, 0.0, 0.0]),
+        face_velocity_b=np.asarray([0.5, 0.0, 0.0]),
+        mount_sign=1,
+    )
+    row = prototype["scopes"][M.SCOPE][0]
+    assert row["contact_frame"] == 252
+    assert row["contact_window_frames"] == [252, 252]
+    assert row["strike_phase"] == pytest.approx(252 / 294)
+    assert row["contact_frame"] != M.HIT_FRAME
 
 
 def test_output_path_rejects_parent_escape(tmp_path):
