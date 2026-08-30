@@ -226,6 +226,9 @@ def _compose_recurring_question_projection(
         from whole_body_tracking.tasks.tracking.mdp import (
             action_ball_fixed_action_question_device as fixed_question,
         )
+        from whole_body_tracking.tasks.tracking.mdp import (
+            continuous_questions as questions,
+        )
     except ImportError as exc:
         raise CanaryQuestionConstructionHold(
             "recurring question numeric kernels are unavailable"
@@ -447,8 +450,12 @@ def _compose_recurring_question_projection(
         active_candidate_identity = compact(candidate_identity)
         active_contact_tick = compact(contact_tick)
 
+        # Sampling remains the Isaac adapter's cadence/RNG responsibility.
+        # Preserve the established canonical draw box exactly; the per-run
+        # question config below still owns solver tolerances and budgets.
+        defaults = questions.ContinuousQuestionCfg()
         velocity_box = torch.tensor(
-            bundle._question_cfg.vel_range,
+            defaults.vel_range,
             dtype=torch.float32,
             device=device,
         )
@@ -456,7 +463,7 @@ def _compose_recurring_question_projection(
             velocity_box[:, 1] - velocity_box[:, 0]
         )
         spin = (active_draw_u01[:, :, 3:6] * 2.0 - 1.0) * float(
-            bundle._question_cfg.spin_abs_max
+            defaults.spin_abs_max
         )
         target = (
             profile.targets_xy_m.unsqueeze(0)
