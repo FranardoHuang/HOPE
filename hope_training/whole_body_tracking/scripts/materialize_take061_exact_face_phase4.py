@@ -132,6 +132,8 @@ def solve(args):
         plant["qdes_margin_min"] >= args.robust_qdes_margin_rad
         and replay["velocity_error_mps"] <= args.robust_velocity_error_mps
         and replay["face_error_deg"] <= args.robust_face_error_deg
+        and position_error <= args.robust_exact_site_position_error_m
+        and velocity_error <= args.robust_exact_site_velocity_error_mps
         and plant["table_distance_min_m"] >= args.table_clearance_m
         and plant["torque_margin_min"] > 0.0
         and plant["bilateral_support_frame_fraction"] >= 1.0
@@ -218,6 +220,8 @@ def parser():
     p.add_argument("--robust-qdes-margin-rad", type=float, default=0.02)
     p.add_argument("--robust-velocity-error-mps", type=float, default=0.08)
     p.add_argument("--robust-face-error-deg", type=float, default=8.0)
+    p.add_argument("--robust-exact-site-position-error-m", type=float, default=0.005)
+    p.add_argument("--robust-exact-site-velocity-error-mps", type=float, default=0.08)
     p.add_argument("--table-clearance-m", type=float, default=0.02)
     p.add_argument("--surface-z", type=float, default=0.78); p.add_argument("--net-x", type=float, default=1.87); p.add_argument("--net-top-z", type=float, default=0.9325)
     return p
