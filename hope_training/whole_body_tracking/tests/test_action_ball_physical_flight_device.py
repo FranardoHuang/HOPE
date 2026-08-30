@@ -29,7 +29,10 @@ if str(_SOURCE_ROOT) not in sys.path:
 import action_ball_full_mdp_diagnostic_capacity as Q  # noqa: E402
 import action_ball_full_mdp_reset_genesis as G  # noqa: E402
 from test_action_ball_physical_flight_contract import (  # noqa: E402
+    _global_boundary_receipt_pin,
+    _global_boundary_receipt_mapping,
     _prepare,
+    _r05_terminal_evidence,
     _sha,
 )
 
@@ -166,6 +169,97 @@ def _facts(shape, *, control: int):
         producer_contract_fault=zeros.clone(),
         engine_overflow=zeros.clone(),
     )
+
+
+class _BoundaryReceiptFixture:
+    def __init__(self, sealed_mapping: dict[str, object]):
+        mapping = dict(sealed_mapping)
+        self.canonical_sha256 = mapping.pop("canonical_sha256")
+        self._mapping = mapping
+
+    def to_mapping(self) -> dict[str, object]:
+        return dict(self._mapping)
+
+
+class _ExplodingBoundaryReceipt:
+    @property
+    def canonical_sha256(self):
+        raise AssertionError("CUDA must not hash portable boundary JSON")
+
+    def to_mapping(self):
+        raise AssertionError("CUDA must not materialize portable boundary JSON")
+
+
+class _MappingSource:
+    def __init__(self, mapping: dict[str, object]):
+        self._mapping = mapping
+
+    def to_mapping(self) -> dict[str, object]:
+        return dict(self._mapping)
+
+
+def _pin_test_owner(device: str):
+    owner = object.__new__(D.ActionBallPhysicalFlightDeviceOwner)
+    owner.device = torch.device(device)
+    return owner
+
+
+def test_cuda_terminal_evidence_skips_portable_json_pins():
+    owner = _pin_test_owner("cuda")
+    assert owner._portable_global_boundary_pin(_ExplodingBoundaryReceipt()) is None
+    assert owner._r05_terminal_evidence_pins(object()) == (None, None)
+
+
+def test_cpu_global_boundary_archive_bytes_remain_exact():
+    prepare = _prepare()
+    sealed = _global_boundary_receipt_mapping(
+        prepare,
+        decision=D._flight.FULL_MDP_REVEAL_DECISION_ACCEPT,
+    )
+    receipt = _BoundaryReceiptFixture(sealed)
+    actual = _pin_test_owner("cpu")._portable_global_boundary_pin(receipt)
+    expected = D._flight.CanonicalJsonContentPin.from_sealed_mapping(
+        sealed,
+        expected_source_kind=(
+            D._flight.FULL_MDP_REVEAL_BOUNDARY_RECEIPT_KIND
+        ),
+        source_schema_sha256=(
+            D._flight.FULL_MDP_REVEAL_BOUNDARY_RECEIPT_SCHEMA_SHA256
+        ),
+    )
+    assert actual == expected
+
+
+def test_cpu_terminal_evidence_archive_bytes_remain_exact(monkeypatch):
+    prepare = _prepare()
+    boundary = _global_boundary_receipt_pin(
+        prepare,
+        decision=D._flight.FULL_MDP_REVEAL_DECISION_ACCEPT,
+    )
+    _, expected_projection, expected_content = _r05_terminal_evidence(
+        prepare,
+        boundary,
+        decision=D._flight.FULL_MDP_REVEAL_DECISION_ACCEPT,
+    )
+
+    class _ClaimFixture:
+        terminal_boundary_projection = _MappingSource(
+            dict(expected_projection.decoded_mapping)
+        )
+        terminal_content_pin = _MappingSource(
+            dict(expected_content.decoded_mapping)
+        )
+        terminal_boundary_projection_sha256 = (
+            expected_projection.source_canonical_sha256
+        )
+        terminal_content_pin_sha256 = expected_content.source_canonical_sha256
+
+    monkeypatch.setattr(D._r05, "PreparedRevealTerminalClaim", _ClaimFixture)
+    actual_projection, actual_content = _pin_test_owner(
+        "cpu"
+    )._r05_terminal_evidence_pins(_ClaimFixture())
+    assert actual_projection == expected_projection
+    assert actual_content == expected_content
 
 
 def test_legacy_hot_binder_remains_explicit_hold_without_mutation():
