@@ -498,6 +498,30 @@ def test_shared_fixed_question_cuda_fixed_tape_is_deterministic_and_causal(
         first.racket_task_f32[both], speed_result.racket_task_f32[both]
     )
 
+    invalid = dict(cuda_kwargs)
+    invalid["landing_aim_xy_m"] = cuda_kwargs["landing_aim_xy_m"].clone()
+    invalid["landing_aim_xy_m"][0, 0] = float("nan")
+    invalid_result = solve(**invalid)
+    assert int(invalid_result.construction_reason[0].item()) == 12
+    assert int(invalid_result.producer_fault[0].item()) != 0
+    assert not bool(invalid_result.admitted[0])
+    assert torch.equal(
+        invalid_result.motion_task_f32[0],
+        torch.zeros_like(invalid_result.motion_task_f32[0]),
+    )
+    assert torch.equal(
+        invalid_result.racket_task_f32[0],
+        torch.zeros_like(invalid_result.racket_task_f32[0]),
+    )
+    assert torch.equal(
+        invalid_result.physical_state_f32[0],
+        torch.zeros_like(invalid_result.physical_state_f32[0]),
+    )
+    attempted = int(invalid_result.construction_reason.numel())
+    admitted = int(invalid_result.admitted.sum().item())
+    rejected = int(invalid_result.construction_reason.ge(0).sum().item())
+    assert attempted == admitted + rejected
+
 
 @pytest.mark.parametrize("num_envs", (1, 2, 64))
 def test_recurring_question_bundle_is_cardinality_generic(num_envs):
