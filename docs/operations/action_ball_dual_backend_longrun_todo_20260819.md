@@ -308,6 +308,9 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    metric逐位语义已闭合。Reward28没有并入该候选。item 14仍开放：CPU调用计数不等于CUDA
    wall证据，仍须固定CUDA tape/RNG/reason/counter/safety/payment parity、finite snapshot和profiler-off
    matched-strata wall-time才能采纳。
+   P2边界审查已于`ec04a7c8c`删除exact-only/hold-only两个无生产caller的private flush旁路；
+   调用者和fixture都只能走paired统一materializer。Pod CPU关键集=`103 passed`、原四模块集=
+   `272 passed`；item 14的CUDA/wall验收项不因此关闭。
 15. [ ] 修复direct-paddle经济轴并fresh双端验证。无条件`4/4/4/2` Mu到ACK623后已最终判负：matched
    ACK0..623相对旧baseline，raw/selected/crossing=`56/5/2` vs `1,665/334/281`；ACK614..623新run的
    position/velocity/face/long-axis误差=`.50920/1.31197/.74428/.61476`，四项都坏于旧baseline的

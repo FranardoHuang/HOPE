@@ -34,6 +34,11 @@ Pod1 exact=`/workspace/franco/mktemp/fullmdp-commandmetric-hold-0200b2c8c-U9xVcX
 收成`exact1 + hold1`。这是CPU语义与调用计数证据；真实CUDA同步数、fixed-action parity、
 finite snapshot及matched profiler-off wall-time仍`未测`，不得写成性能或学习结论。
 
+P2审查发现原候选仍保留exact-only与hold-only两个无生产caller的private flush helper，测试可借它们
+绕过paired preflight。`ec04a7c8c`直接删除两旁路，fixture改经统一materializer，不改任何
+materialize/replay/publication语义。Pod1 fresh exact=
+`/workspace/franco/mktemp/fullmdp-commandmetric-p2-ec04a7c8c-AeOpQi.exact`通过审查关键`103`与原集`272`项。
+
 ## 2026-08-29 current correction
 
 ### 重新判读：学习阶段、R06热路与部署边界

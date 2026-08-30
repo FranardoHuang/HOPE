@@ -11,6 +11,10 @@
   `161 passed`，四模块同进程=`272 passed`。H/H+1计数测试确认steady command metric边界只调用
   `exact1 + hold1`两次row transfer，不再是exact合批后仍剩的至少`49/update`。这是CPU调用计数与
   语义证据；真实CUDA同步计数、fixed-action parity、finite snapshot和profiler-off wall-time仍`未测`。
+- 独立审查P2又于`ec04a7c8c`删除两个无生产调用、可绕过paired联检的private flush入口；
+  所有fixture现在也只能走统一materializer。Pod1 fresh exact
+  `/workspace/franco/mktemp/fullmdp-commandmetric-p2-ec04a7c8c-AeOpQi.exact`的审查关键集=`103 passed`，
+  原四模块集=`272 passed`；该净减法不改materializer语义，CUDA/wall仍`未测`。
 
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 

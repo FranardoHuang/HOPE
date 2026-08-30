@@ -15,6 +15,11 @@ Pod1 fresh exact=`/workspace/franco/mktemp/fullmdp-commandmetric-hold-0200b2c8c-
 H/H+1、public metric exact、materialize计数、pending/poison/save/order边界；真实CUDA同步计数、
 fixed-action/finite与profiler-off wall-time仍`未测`，所以不改变本Gate状态。
 
+独立审查P2在`ec04a7c8c`删掉了两个无生产caller的unpaired private flush旁路，并把旧fixture
+改为只走统一materializer。Pod1 fresh exact=
+`/workspace/franco/mktemp/fullmdp-commandmetric-p2-ec04a7c8c-AeOpQi.exact`关键集=`103 passed`、原四模块
+合并集=`272 passed`。这是边界收口，不是新性能证据；Gate仍`Partial`。
+
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
 validated code source=`b0d7d562`保留`255df4a1`的每control一次R06 finalize与每substep Scene capture、terminal
