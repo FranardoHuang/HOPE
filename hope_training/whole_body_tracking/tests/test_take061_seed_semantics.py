@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 
@@ -44,6 +45,25 @@ def test_phase3_requires_explicit_seed_valid_without_requiring_admitted():
         phase3._require_seed_valid("phase2", {"seed_valid": False, "admitted": True})
     with pytest.raises(phase3.P1.ProducerError, match="seed_valid=true"):
         phase3._require_seed_valid("phase2", {})
+
+
+def test_phase3_finite_solver_target_is_phase4_seed_before_mechanical_admission():
+    phase3 = _load("take061_phase3_joint_seed_test", "solve_take061_joint_ball_phase3.py")
+    kwargs = {
+        "q_ref": np.zeros((57, 31)),
+        "site": np.zeros((57, 3)),
+        "velocity": np.zeros((57, 3)),
+        "face": np.zeros((57, 3)),
+        "solver": {
+            "solver_admitted": True,
+            "matched": False,
+            "racket_velocity_w_mps": [0.1, 0.2, 0.3],
+            "signed_face_w": [1.0, 0.0, 0.0],
+        },
+    }
+    assert phase3._phase4_seed_valid(**kwargs) is True
+    kwargs["q_ref"][0, 0] = np.nan
+    assert phase3._phase4_seed_valid(**kwargs) is False
 
 
 def test_phase4_exit_code_requires_final_robust_admission(monkeypatch):
