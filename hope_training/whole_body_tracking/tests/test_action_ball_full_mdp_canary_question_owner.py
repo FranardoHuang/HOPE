@@ -20,6 +20,14 @@ from test_reward_flags_mdp import _PKG, _load  # noqa: E402
 sys.modules[_PKG].__path__ = [str(_MDP)]
 _load(f"{_PKG}.virtual_ball", "virtual_ball.py")
 _load(f"{_PKG}.continuous_questions", "continuous_questions.py")
+_load(
+    f"{_PKG}.action_ball_exact_face_timing_device",
+    "action_ball_exact_face_timing_device.py",
+)
+fixed_question = _load(
+    f"{_PKG}.action_ball_fixed_action_question_device",
+    "action_ball_fixed_action_question_device.py",
+)
 
 import action_ball_device_profile_authority as profile  # noqa: E402
 import action_ball_full_mdp_canary_question_owner as owner_mod  # noqa: E402
@@ -290,6 +298,133 @@ def test_recurring_question_no_move_goal_is_the_installed_physical_spawn():
     assert harness.physical_owner._pending == {}
 
 
+def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypatch):
+    captured = {}
+    solve = fixed_question.solve_fixed_action_question_device
+
+    def capture(**kwargs):
+        result = solve(**kwargs)
+        captured["kwargs"] = kwargs
+        captured["result"] = result
+        return result
+
+    monkeypatch.setattr(
+        fixed_question, "solve_fixed_action_question_device", capture
+    )
+    projection, harness, _cadence = _direct_projection(
+        num_envs=1,
+        source_rows=(0,),
+        selected_env_index=torch.tensor([0], dtype=torch.int64),
+    )
+    result = captured["result"]
+    bank = projection.round_bank
+    torch.testing.assert_close(
+        bank.motion_task_f32.reshape(-1, 5),
+        result.motion_task_f32,
+        rtol=0.0,
+        atol=0.0,
+    )
+    torch.testing.assert_close(
+        bank.racket_task_f32.reshape(-1, 27),
+        result.racket_task_f32,
+        rtol=0.0,
+        atol=0.0,
+    )
+    torch.testing.assert_close(
+        bank.physical_state_f32.reshape(-1, 13),
+        result.physical_state_f32,
+        rtol=0.0,
+        atol=0.0,
+    )
+    assert torch.equal(
+        bank.construction_reason.reshape(-1), result.construction_reason
+    )
+    assert torch.equal(
+        projection.round_chronology.contact_tick.reshape(-1),
+        result.contact_tick,
+    )
+    assert torch.equal(
+        projection.round_chronology.launch_tick.reshape(-1),
+        result.launch_tick,
+    )
+    assert torch.equal(
+        projection.round_chronology.chosen_horizon_ticks.reshape(-1),
+        result.chosen_horizon_ticks,
+    )
+    assert result.producer_fault.count_nonzero().item() == 0
+
+    # The shared flat batch must retain the previous owner's numerical bytes,
+    # even though lifecycle receipts no longer exist in the hot adapter.
+    original_kwargs = captured["kwargs"]
+    legacy_batch = physical.PhysicalQuestionCandidateBatch(
+        candidate_identity=original_kwargs["candidate_identity"].reshape(1, 3, 3),
+        contact_position_env_m=original_kwargs[
+            "contact_position_env_m"
+        ].reshape(1, 3, 3, 3),
+        incoming_linear_velocity_world_mps=original_kwargs[
+            "incoming_linear_velocity_world_mps"
+        ].reshape(1, 3, 3, 3),
+        incoming_angular_velocity_world_radps=original_kwargs[
+            "incoming_angular_velocity_world_radps"
+        ].reshape(1, 3, 3, 3),
+    )
+    receipt = harness.physical_owner.issue_horizon_for_test(legacy_batch)
+    horizon = harness.physical_owner.project_horizon_for_test(receipt)
+    legacy_contact_tick = original_kwargs["contact_tick"].reshape(1, 3, 3)
+    legacy_horizon = torch.minimum(
+        horizon.max_feasible_motion_ticks,
+        legacy_contact_tick.clamp(min=0),
+    ).contiguous()
+    legacy_launch_tick = (legacy_contact_tick - legacy_horizon).contiguous()
+    legacy = harness.physical_owner.finalize_exact_ticks_for_test(
+        receipt,
+        candidate_identity=legacy_batch.candidate_identity,
+        contact_tick=legacy_contact_tick,
+        launch_tick=legacy_launch_tick,
+    )
+    assert torch.equal(
+        legacy.physical_state_f32.reshape(-1, 13), result.physical_state_f32
+    )
+    assert torch.equal(
+        legacy.construction_reason.reshape(-1), result.physical_reason
+    )
+    assert torch.equal(
+        horizon.construction_reason.reshape(-1), result.physical_horizon_reason
+    )
+    assert harness.physical_owner._pending == {}
+
+    attempted = result.construction_reason.numel()
+    admitted = int(result.admitted.sum().item())
+    rejected = int(result.construction_reason.ge(0).sum().item())
+    assert attempted == admitted + rejected
+    assert torch.equal(result.admitted, result.construction_reason.eq(-1))
+
+    # Landing aim and incoming speed are numerical inputs, not decorative
+    # metadata.  Small in-domain mutations must move an admitted task.
+    changed_aim = dict(original_kwargs)
+    changed_aim["landing_aim_xy_m"] = (
+        original_kwargs["landing_aim_xy_m"]
+        + torch.tensor((0.04, -0.03), dtype=torch.float32)
+    ).contiguous()
+    aim_result = solve(**changed_aim)
+    both = result.admitted & aim_result.admitted
+    assert bool(both.any())
+    assert not torch.equal(
+        result.racket_task_f32[both], aim_result.racket_task_f32[both]
+    )
+
+    changed_speed = dict(original_kwargs)
+    changed_speed["incoming_linear_velocity_world_mps"] = (
+        original_kwargs["incoming_linear_velocity_world_mps"] * 1.02
+    ).contiguous()
+    speed_result = solve(**changed_speed)
+    both = result.admitted & speed_result.admitted
+    assert bool(both.any())
+    assert not torch.equal(
+        result.racket_task_f32[both], speed_result.racket_task_f32[both]
+    )
+
+
 @pytest.mark.parametrize("num_envs", (1, 2, 64))
 def test_recurring_question_bundle_is_cardinality_generic(num_envs):
     harness = _bundle_harness(num_envs=num_envs)
@@ -512,13 +647,11 @@ def test_mask_first_dense_parity_includes_invalid_rows_slots_and_faults():
 def test_mask_first_numeric_owners_see_only_active_cells(monkeypatch, mask_values):
     questions = sys.modules[f"{_PKG}.continuous_questions"]
     exact_face = sys.modules[f"{_PKG}.action_ball_exact_face_timing_device"]
-    calls = {"solver": [], "exact": [], "issue": [], "project": [], "final": []}
+    calls = {"solver": [], "exact": [], "physical": []}
 
     original_solver = questions.solve_proposals_device
     original_exact = exact_face.solve_exact_face_timing_device
-    original_issue = physical.PhysicalQuestionNumericCore.issue_horizon_for_test
-    original_project = physical.PhysicalQuestionNumericCore.project_horizon_for_test
-    original_final = physical.PhysicalQuestionNumericCore.finalize_exact_ticks_for_test
+    original_physical = physical.solve_max_final_segment_device
 
     def spy_solver(*args, **kwargs):
         calls["solver"].append(args[0].shape[0])
@@ -528,31 +661,13 @@ def test_mask_first_numeric_owners_see_only_active_cells(monkeypatch, mask_value
         calls["exact"].append(kwargs["ball_contact_w_m"].shape[0])
         return original_exact(*args, **kwargs)
 
-    def spy_issue(self, batch):
-        calls["issue"].append(batch.candidate_identity.numel())
-        return original_issue(self, batch)
-
-    def spy_project(self, receipt):
-        calls["project"].append(1)
-        return original_project(self, receipt)
-
-    def spy_final(self, receipt, **kwargs):
-        calls["final"].append(kwargs["candidate_identity"].numel())
-        return original_final(self, receipt, **kwargs)
+    def spy_physical(batch, **kwargs):
+        calls["physical"].append(batch.candidate_identity.numel())
+        return original_physical(batch, **kwargs)
 
     monkeypatch.setattr(questions, "solve_proposals_device", spy_solver)
     monkeypatch.setattr(exact_face, "solve_exact_face_timing_device", spy_exact)
-    monkeypatch.setattr(
-        physical.PhysicalQuestionNumericCore, "issue_horizon_for_test", spy_issue
-    )
-    monkeypatch.setattr(
-        physical.PhysicalQuestionNumericCore, "project_horizon_for_test", spy_project
-    )
-    monkeypatch.setattr(
-        physical.PhysicalQuestionNumericCore,
-        "finalize_exact_ticks_for_test",
-        spy_final,
-    )
+    monkeypatch.setattr(physical, "solve_max_final_segment_device", spy_physical)
 
     mask = torch.tensor(mask_values, dtype=torch.bool)
     projection, harness, _ = _direct_projection(
@@ -566,9 +681,7 @@ def test_mask_first_numeric_owners_see_only_active_cells(monkeypatch, mask_value
     assert calls == {
         "solver": expected_batch,
         "exact": expected_batch,
-        "issue": expected_batch,
-        "project": [] if numeric_cells == 0 else [1],
-        "final": expected_batch,
+        "physical": expected_batch,
     }
     assert projection.round_bank.candidate_identity.shape == (4, 3, 3)
     assert harness.physical_owner._pending == {}
