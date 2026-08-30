@@ -259,10 +259,10 @@ class _ExactEnv:
     def _assert_step_may_start(self):
         return None
 
-    def _protected_manager_state(self):
-        return (1,)
+    def _manager_clock_token(self):
+        return (1, 1)
 
-    def _assert_protected_manager_state_unchanged(self, _state):
+    def _assert_manager_clock_token_unchanged(self, _token):
         return None
 
     def _publish_post_physics_substep(self):
@@ -279,7 +279,7 @@ class _ExactEnv:
         self.recorder_manager.record_pre_step()
         self._before_policy_step()
         self._assert_step_may_start()
-        protected = self._protected_manager_state()
+        manager_clock = self._manager_clock_token()
         self.action_manager.process_action(action)
         self.action_manager.apply_action()
         self.scene.write_data_to_sim()
@@ -287,7 +287,7 @@ class _ExactEnv:
         self._publish_post_physics_substep()
         self.recorder_manager.record_post_physics_decimation_step()
         self.scene.update(0.005)
-        self._assert_protected_manager_state_unchanged(protected)
+        self._assert_manager_clock_token_unchanged(manager_clock)
         self.termination_manager.compute()
         self.reward_manager.compute(0.02)
         self._after_reward_close()
@@ -380,7 +380,7 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     )
 
     assert payload["update"] == 7
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["observed_env_step_calls"] == 1
     assert payload["rollout_call_count_exact"] is True
     assert payload["auto_close_after_emit"] is True

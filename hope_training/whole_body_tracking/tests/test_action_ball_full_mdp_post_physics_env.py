@@ -215,8 +215,8 @@ def test_local_step_has_the_real_lean_callpoints_in_causal_order():
         ".randint",
     )
     for method_name in (
-        "_protected_manager_state",
-        "_assert_protected_manager_state_unchanged",
+        "_manager_clock_token",
+        "_assert_manager_clock_token_unchanged",
         "_publish_post_physics_substep",
         "step",
     ):
@@ -603,6 +603,7 @@ class _Physical:
         self.trace = trace
         self.fail_publish = False
         self.mutate_clock = False
+        self.mutate_manager_tensor_via_data = False
         self.transport_work = True
         self.recovery_epoch_work = True
 
@@ -625,6 +626,8 @@ class _Physical:
         self.trace.append(("physical_publish", stamp.exact_tuple()))
         if self.mutate_clock:
             self.env.common_step_counter += 1
+        if self.mutate_manager_tensor_via_data:
+            self.env.episode_length_buf.data.add_(7)
         if self.fail_publish:
             raise ValueError("physical publish counterexample")
         return None
@@ -745,6 +748,27 @@ def test_exact_lean_owner_binding_and_lease_identity(monkeypatch):
         M.FullMdpPostPhysicsProtocolError, match="lease identity changed"
     ):
         _ = env.action_ball_full_mdp_runtime_lease
+
+
+def test_construction_binding_rejects_debug_method_shadow_mutation(monkeypatch):
+    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
+    env.step_dt = 0.02
+    env._action_ball_full_mdp_manager_construction_state = "sealed"
+    owner, _components, _physical = _install_exact_lean_graph(env, [])
+    lease = env._action_ball_full_mdp_runtime_lease
+    monkeypatch.setattr(
+        M, "FULL_MDP_DIAGNOSTIC_RUNTIME_OWNER_MODULE", LEAN.__name__
+    )
+
+    owner.publish_post_physics_substep = types.MethodType(
+        lambda _self, _stamp: None,
+        owner,
+    )
+    with pytest.raises(
+        M.FullMdpPostPhysicsProtocolError,
+        match="API is shadowed or foreign",
+    ):
+        env._validate_lean_owner_install(owner, expected_lease=lease)
 
 
 def test_stamp_and_dispatch_enforce_exact_integer_chronology():
@@ -1172,7 +1196,7 @@ def test_transport_work_outside_recovery_keeps_r03_but_skips_r07_writes():
 @pytest.mark.parametrize(
     "failure, expected",
     [
-        ("mutate_clock", "mutated a protected manager clock"),
+        ("mutate_clock", "mutated an IsaacLab manager clock"),
         ("publish", "post-physics owner failed"),
         ("reward", "reward failure counterexample"),
     ],
@@ -1198,6 +1222,62 @@ def test_partial_step_failure_is_sticky_before_any_retry(failure, expected):
     assert trace == trace_before_retry
     if failure == "publish":
         assert owner.poisoned is True
+
+
+def test_tensor_version_scan_is_not_misrepresented_as_runtime_isolation():
+    # The retired full-manager scan compared tensor identity, metadata and
+    # ``_version`` before/after each owner callback.  PyTorch deliberately lets
+    # ``.data`` bypass autograd versioning, so that scan could not be a safety
+    # authority even though it traversed every manager tensor twice per physics
+    # substep.
+    probe = torch.zeros(1)
+    version_before = int(probe._version)
+    probe.data.add_(1)
+    assert int(probe._version) == version_before
+    assert torch.equal(probe, torch.ones(1))
+
+    # Production now promises only exact clock/lease/poison/dispatch facts at
+    # this seam.  A same-writer tensor mutation is intentionally not presented
+    # as independently detected; true business invariants remain owned at their
+    # cross-writer consumers.
+    env, _owner, physical, _trace = _fake_env(decimation=2)
+    physical.mutate_manager_tensor_via_data = True
+    env.step(torch.zeros(2, 4))
+    assert env._full_mdp_post_physics_poison is None
+    assert env.episode_length_buf.tolist() == [15, 15]
+
+
+def test_production_step_has_no_per_substep_manager_tensor_scan():
+    tree = ast.parse(MODULE_PATH.read_text(encoding="utf-8"))
+    owner = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "ActionBallFullMdpManagerBasedRLEnv"
+    )
+    methods = {
+        node.name: node
+        for node in owner.body
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert "_protected_manager_values" not in methods
+    assert "_protected_manager_state" not in methods
+    assert "_assert_protected_manager_state_unchanged" not in methods
+
+    for method_name in ("step", "_publish_post_physics_substep"):
+        names = {
+            _call_name(node)
+            for node in ast.walk(methods[method_name])
+            if isinstance(node, ast.Call)
+        }
+        assert not any(name.endswith(".get_term") for name in names)
+        assert not any(
+            name.endswith("._protected_manager_state") for name in names
+        )
+        assert not any(
+            name.endswith("._assert_protected_manager_state_unchanged")
+            for name in names
+        )
 
 
 def _reset_event_env():

@@ -1042,90 +1042,6 @@ def _require_standalone_simulation_app() -> None:
 _ABSENT = object()
 
 
-@dataclass(slots=True)
-class _ProtectedValueSnapshot:
-    """Host-visible identity/metadata/version snapshot of a manager tensor.
-
-    This is a scoped accidental-mutation guard, not the authority for arbitrary
-    owner behavior.  Inference tensors have no version counter and ``.data`` or
-    raw-storage writes can bypass it.  Construction-time executable binding and
-    the independent manager seam checks are the trust boundary; no asynchronous
-    CUDA content assert is used here.
-    """
-
-    name: str
-    present: bool
-    reference: torch.Tensor | None
-    metadata: tuple[object, ...]
-    version: int | None
-
-    @classmethod
-    def capture(cls, name: str, value: object) -> "_ProtectedValueSnapshot":
-        if value is _ABSENT:
-            return cls(
-                name=name,
-                present=False,
-                reference=None,
-                metadata=(),
-                version=None,
-            )
-        if not isinstance(value, torch.Tensor):
-            raise FullMdpPostPhysicsProtocolError(
-                f"protected manager value {name!r} must be a tensor or absent"
-            )
-        metadata = (
-            tuple(value.shape),
-            tuple(value.stride()),
-            str(value.dtype),
-            str(value.device),
-            str(value.layout),
-            bool(value.requires_grad),
-        )
-        version = None if torch.is_inference(value) else int(value._version)
-        return cls(
-            name=name,
-            present=True,
-            reference=value,
-            metadata=metadata,
-            version=version,
-        )
-
-    def assert_unchanged(self, value: object) -> None:
-        if not self.present:
-            if value is not _ABSENT:
-                raise FullMdpPostPhysicsProtocolError(
-                    f"protected manager value {self.name!r} was installed by owner"
-                )
-            return
-        if not isinstance(value, torch.Tensor) or value is not self.reference:
-            raise FullMdpPostPhysicsProtocolError(
-                f"protected manager tensor {self.name!r} changed identity"
-            )
-        metadata = (
-            tuple(value.shape),
-            tuple(value.stride()),
-            str(value.dtype),
-            str(value.device),
-            str(value.layout),
-            bool(value.requires_grad),
-        )
-        if metadata != self.metadata:
-            raise FullMdpPostPhysicsProtocolError(
-                f"protected manager tensor {self.name!r} changed metadata"
-            )
-        if self.version is not None and int(value._version) != self.version:
-            raise FullMdpPostPhysicsProtocolError(
-                f"protected manager tensor {self.name!r} changed version"
-            )
-
-
-@dataclass(slots=True)
-class _ProtectedManagerState:
-    common_step_counter: int
-    sim_step_counter: int
-    values: tuple[_ProtectedValueSnapshot, ...]
-
-
 class _ControlStepDispatch:
     """Single-control-step sequence guard with no tensor or simulator access."""
 
@@ -2241,73 +2157,37 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             selected_true_reset_function=functions[5],
         )
 
-    def _protected_manager_values(self) -> tuple[tuple[str, object], ...]:
-        termination_manager = self.termination_manager
-        values: list[tuple[str, object]] = [
-            ("episode_length_buf", self.episode_length_buf),
-            ("reset_buf", getattr(self, "reset_buf", _ABSENT)),
-            (
-                "reset_terminated",
-                getattr(self, "reset_terminated", _ABSENT),
-            ),
-            ("reset_time_outs", getattr(self, "reset_time_outs", _ABSENT)),
-            ("termination_manager.terminated", termination_manager.terminated),
-            ("termination_manager.time_outs", termination_manager.time_outs),
-        ]
-        command_names = tuple(self.command_manager.active_terms)
-        if len(command_names) != len(set(command_names)) or any(
-            type(name) is not str for name in command_names
-        ):
-            raise FullMdpPostPhysicsProtocolError(
-                "command manager active term names are not unique strings"
-            )
-        for name in command_names:
-            term = self.command_manager.get_term(name)
-            values.extend(
-                (
-                    (f"command.{name}.time_left", term.time_left),
-                    (f"command.{name}.command_counter", term.command_counter),
-                )
-            )
-        return tuple(values)
+    def _manager_clock_token(self) -> tuple[int, int]:
+        """Capture the two exact host clocks owned by IsaacLab's step loop.
 
-    def _protected_manager_state(self) -> _ProtectedManagerState:
-        if type(self.common_step_counter) is not int:
+        This O(1) token is an actual chronology boundary.  It deliberately does
+        not inspect manager tensors: version/identity scans cannot establish
+        isolation (``Tensor.data`` and raw-storage writes bypass them), while
+        traversing every command and termination buffer twice per physics
+        substep taxes every rollout.  The exact runtime owner and its methods are
+        fixed once at construction; business facts are checked at their real
+        cross-writer boundaries.
+        """
+
+        common_step_counter = self.common_step_counter
+        sim_step_counter = self._sim_step_counter
+        if type(common_step_counter) is not int:
             raise FullMdpPostPhysicsProtocolError(
                 "common_step_counter stopped being a plain integer"
             )
-        if type(self._sim_step_counter) is not int:
+        if type(sim_step_counter) is not int:
             raise FullMdpPostPhysicsProtocolError(
                 "_sim_step_counter stopped being a plain integer"
             )
-        return _ProtectedManagerState(
-            common_step_counter=self.common_step_counter,
-            sim_step_counter=self._sim_step_counter,
-            values=tuple(
-                _ProtectedValueSnapshot.capture(name, value)
-                for name, value in self._protected_manager_values()
-            ),
-        )
+        return common_step_counter, sim_step_counter
 
-    def _assert_protected_manager_state_unchanged(
-        self, protected: _ProtectedManagerState
+    def _assert_manager_clock_token_unchanged(
+        self, expected: tuple[int, int]
     ) -> None:
-        if (
-            self.common_step_counter != protected.common_step_counter
-            or self._sim_step_counter != protected.sim_step_counter
-        ):
+        if self._manager_clock_token() != expected:
             raise FullMdpPostPhysicsProtocolError(
-                "post-physics owner mutated a protected manager clock"
+                "full-MDP runtime owner mutated an IsaacLab manager clock"
             )
-        current = self._protected_manager_values()
-        if tuple(name for name, _ in current) != tuple(
-            snapshot.name for snapshot in protected.values
-        ):
-            raise FullMdpPostPhysicsProtocolError(
-                "post-physics owner changed the protected manager topology"
-            )
-        for snapshot, (_, value) in zip(protected.values, current):
-            snapshot.assert_unchanged(value)
 
     def _poison(
         self,
@@ -2389,13 +2269,13 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 sim_step=self._sim_step_counter,
             )
             expected_exact = dispatch.pending_exact_tuple
-            protected = self._protected_manager_state()
+            manager_clock = self._manager_clock_token()
             result = self._full_mdp_post_physics_publish(stamp)
             if result is not None:
                 raise FullMdpPostPhysicsProtocolError(
                     "post-physics owner must return None"
                 )
-            self._assert_protected_manager_state_unchanged(protected)
+            self._assert_manager_clock_token_unchanged(manager_clock)
             if self._full_mdp_post_physics_poison is not None:
                 raise FullMdpPostPhysicsProtocolError(
                     "post-physics owner attempted a reentrant or poisoned step"
@@ -2933,7 +2813,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                     # set actions into buffers
                     self.action_manager.apply_action()
                     before_physics = self._full_mdp_before_physics_substep
-                    protected = self._protected_manager_state()
+                    manager_clock = self._manager_clock_token()
                     pre_stamp = FullMdpPrePhysicsSubstepStamp(
                         control_step=dispatch.control_step,
                         physics_substep=physics_substep,
@@ -2945,7 +2825,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                         raise FullMdpPostPhysicsProtocolError(
                             "lean pre-physics boundary must return None"
                         )
-                    self._assert_protected_manager_state_unchanged(protected)
+                    self._assert_manager_clock_token_unchanged(manager_clock)
                     # set actions into simulator
                     self.scene.write_data_to_sim()
                     # simulate
