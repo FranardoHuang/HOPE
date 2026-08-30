@@ -1,15 +1,15 @@
 # 简短进度记录
 
-## 2026-08-30 — direct-frame0 GPU闭合与第三个single-OBB反例
+## 2026-08-30 — direct-frame0 GPU闭合与第三个single-OBB分歧候选
 
 - `643f03b5`消除了atomic-install和same-step done/frame的failure-artifact旁路；Pod三模块CPU=
   `103 passed,2 skipped`，独立复审`P0/P1=0`。fresh GPU1 zero-PPO replay的29个typed谓词全部通过：
   requested teacher frame0逐位一致，production executable的`1 ULP=5.96e-8 rad`落在共享`2e-7 rad` ABI内，
-  guard零介入，下一行自然进入teacher frame1，`ppo_update_calls=0`。
-- 同一GPU replay随后在frame1后的physics substep18由component51 `right_wrist_roll_link.stl`的single OBB
-  报`-1.236878 mm` keepout，而backend resolved contact=false。它不证明动态老师失败，只证明旧proxy量具
-  仍不能用于判老师撞桌。component51/55/57只作heldout；全62 component的身份盲`k=1..8` census正在跑，
-  consumer和20 mm余量未改。
+  guard零介入，随后自然消费teacher frame1、frame2并推进到frame8，`ppo_update_calls=0`。
+- 同一GPU replay随后由component51 `right_wrist_roll_link.stl`的single OBB报`-1.236878 mm` keepout，而
+  backend resolved contact、resolved substep与generic contact均为false。它是proxy假阳性的强候选，不是
+  动态老师不可行证据，但仍须exact geometry正式裁决。component51/55/57只作heldout；全62 component的
+  身份盲`k=1..8` census正在跑，consumer和20 mm余量未改。
 
 ## 2026-08-30 — teacher replay量具拆因与direct-frame0 validator修正（此前状态）
 

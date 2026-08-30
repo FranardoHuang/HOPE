@@ -48,11 +48,13 @@ fresh GPU1 root
 `/workspace/franco/runs/fullmdp-direct-frame0-643f03b5-gpu1-20260830T060903Z-r4`为zero-PPO、N=1、
 180-step预算；实际在first done时保存101行。29/29谓词通过：介入仅行92，requested frame0误差0，executed
 teacher误差`5.960464e-8 rad`且等于production expected，qdes guard false；行93自然请求teacher frame1，
-球/task/lifecycle/controller state均未偷改，`ppo_update_calls=0`。因此frame0 handoff合同已实证闭合。
+下一行继续frame2，随后推进到frame8。球/task/lifecycle/controller state均未偷改，`ppo_update_calls=0`。
+因此frame0 handoff合同已实证闭合。
 
-该结果仍不证明整段dynamic teacher：frame1开始后的physics substep18，旧single-OBB guard以component51
-`right_wrist_roll_link.stl`、SAT margin `-1.236878 mm`触发first done，但Mu backend resolved contact=false。
-component51与既有55/57一样只作为heldout反例；全62 component身份盲`k=1..8` census完成前，不据此改teacher、
+该结果仍不证明整段dynamic teacher：旧single-OBB guard在physics substep18以component51
+`right_wrist_roll_link.stl`、SAT margin `-1.236878 mm`触发first done，但Mu backend resolved contact、
+resolved substep与generic contact均为false。component51是proxy假阳性的强候选，仍需exact geometry正式
+裁决；它与既有55/57一样只作为heldout。全62 component身份盲`k=1..8` census完成前，不据此改teacher、
 Reward、20 mm余量或训练Stage，也不宣称Isaac collider parity。
 
 ## 2026-08-29 current correction

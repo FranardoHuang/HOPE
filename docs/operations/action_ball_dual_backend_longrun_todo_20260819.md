@@ -40,12 +40,12 @@ exact source和证据root继续只读，不hot-patch、不resume、不复用。R
   fresh GPU1 zero-PPO root
   `/workspace/franco/runs/fullmdp-direct-frame0-643f03b5-gpu1-20260830T060903Z-r4`完成：29个typed谓词全部
   通过，唯一介入行92的requested teacher frame0误差为0，production executable只差
-  `5.960464e-8 rad <= 2e-7 rad`，qdes guard零介入，下一行自然请求teacher frame1；球、task、lifecycle、
-  controller history均保持，`ppo_update_calls=0`。这闭合了frame0 handoff量具，不等于整段动态老师可行。
-  回放在进入frame1后的第18个physics substep被旧single-OBB keepout终止：component51
-  `right_wrist_roll_link.stl`给出`-1.236878 mm`，而backend resolved contact仍为false。它是第三个需要由
-  全局census复核的proxy假阳性候选；multi-OBB/exact narrow-phase闭合前，frame1之后的动态可追踪性仍为
-  `未测`。
+  `5.960464e-8 rad <= 2e-7 rad`，qdes guard零介入，随后自然消费teacher frame1、frame2并推进到frame8；
+  球、task、lifecycle、controller history均保持，`ppo_update_calls=0`。这闭合了frame0 handoff量具，不等于
+  整段动态老师可行。回放随后被旧single-OBB keepout终止：component51 `right_wrist_roll_link.stl`在
+  physics substep18给出`-1.236878 mm`，而backend resolved contact、resolved substep与generic contact均为
+  false。它是第三个需要由全局census和exact geometry复核的proxy假阳性强候选，尚未被正式判定；
+  multi-OBB/exact narrow-phase闭合前，frame8之后的动态可追踪性仍为`未测`。
 
 ### 已证根因，不再归为“Pod整体装坏”
 
