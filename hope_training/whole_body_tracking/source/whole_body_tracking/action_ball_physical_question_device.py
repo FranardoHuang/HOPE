@@ -243,6 +243,28 @@ class PhysicalQuestionFinalBatch:
 
 
 @dataclass(frozen=True)
+class PhysicalQuestionExactTicksSolve:
+    """Pure numeric discovery plus exact-tick launch result.
+
+    Unlike :class:`PhysicalQuestionHorizonReceipt`, this value carries no
+    ownership or one-shot lifecycle semantics.  It exists so both simulator
+    adapters can consume the same deterministic numerical kernel while their
+    respective lifecycle owners remain outside this module.
+    """
+
+    max_feasible_motion_ticks: torch.Tensor
+    contact_tick: torch.Tensor
+    launch_tick: torch.Tensor
+    chosen_horizon_ticks: torch.Tensor
+    horizon_construction_reason: torch.Tensor
+    horizon_producer_fault: torch.Tensor
+    construction_reason: torch.Tensor
+    physical_state_f32: torch.Tensor
+    effective_contact_horizon_s: torch.Tensor
+    producer_fault: torch.Tensor
+
+
+@dataclass(frozen=True)
 class _DiscoveryRecord:
     candidate_identity: torch.Tensor
     contact_position_env_m: torch.Tensor
@@ -1023,6 +1045,53 @@ def _finalize_exact_ticks(
     )
 
 
+@torch.no_grad()
+def solve_max_final_segment_device(
+    batch: PhysicalQuestionCandidateBatch,
+    *,
+    candidate_identity: torch.Tensor,
+    contact_tick: torch.Tensor,
+    params: PhysicalQuestionFlightParams,
+    config: PhysicalQuestionNumericConfig,
+) -> PhysicalQuestionExactTicksSolve:
+    """Discover and finalize the longest complete segment without a receipt.
+
+    This is a pure adapter over the same discovery/finalization functions used
+    by :class:`PhysicalQuestionNumericCore`.  It deliberately creates no
+    receipt, identity, pending record, or lifecycle authority.
+    """
+
+    if type(params) is not PhysicalQuestionFlightParams:
+        raise PhysicalQuestionError("flight params type differs")
+    if type(config) is not PhysicalQuestionNumericConfig:
+        raise PhysicalQuestionError("numeric config type differs")
+    record = _discover_horizon(batch, params=params, config=config)
+    chosen_horizon = torch.minimum(
+        record.max_feasible_motion_ticks, contact_tick.clamp(min=0)
+    ).contiguous()
+    launch_tick = (contact_tick - chosen_horizon).contiguous()
+    final = _finalize_exact_ticks(
+        record,
+        candidate_identity=candidate_identity,
+        contact_tick=contact_tick,
+        launch_tick=launch_tick,
+        params=params,
+        config=config,
+    )
+    return PhysicalQuestionExactTicksSolve(
+        max_feasible_motion_ticks=record.max_feasible_motion_ticks.clone(),
+        contact_tick=contact_tick.clone(),
+        launch_tick=launch_tick,
+        chosen_horizon_ticks=chosen_horizon,
+        horizon_construction_reason=record.construction_reason.clone(),
+        horizon_producer_fault=record.producer_fault.clone(),
+        construction_reason=final.construction_reason,
+        physical_state_f32=final.physical_state_f32,
+        effective_contact_horizon_s=final.effective_contact_horizon_s,
+        producer_fault=final.producer_fault,
+    )
+
+
 class PhysicalQuestionNumericCore:
     """Diagnostic-only owner of immutable inputs, horizon and one-shot receipt."""
 
@@ -1045,6 +1114,18 @@ class PhysicalQuestionNumericCore:
         self._config = config
         self._pending: dict[PhysicalQuestionHorizonReceipt, _DiscoveryRecord] = {}
         self._consumed: weakref.WeakSet[PhysicalQuestionHorizonReceipt] = weakref.WeakSet()
+
+    @property
+    def flight_params(self) -> PhysicalQuestionFlightParams:
+        """Return the frozen immutable parameters used by the numeric core."""
+
+        return self._params
+
+    @property
+    def numeric_config(self) -> PhysicalQuestionNumericConfig:
+        """Return the frozen immutable tick geometry used by the core."""
+
+        return self._config
 
     def issue_horizon_for_test(
         self, batch: PhysicalQuestionCandidateBatch
@@ -1399,6 +1480,7 @@ __all__ = (
     "PhysicalQuestionCandidateBatch",
     "PhysicalQuestionConflictError",
     "PhysicalQuestionError",
+    "PhysicalQuestionExactTicksSolve",
     "PhysicalQuestionFinalBatch",
     "PhysicalQuestionFlightParams",
     "PhysicalQuestionHorizonReceipt",
@@ -1406,6 +1488,7 @@ __all__ = (
     "PhysicalQuestionNumericConfig",
     "PhysicalQuestionNumericCore",
     "PhysicalQuestionProductionHold",
+    "solve_max_final_segment_device",
     "RUNTIME_INTEGRATED",
     "construct_production_physical_question_producer",
     "construct_diagnostic_n2_no_save_physical_question_numeric_core",
