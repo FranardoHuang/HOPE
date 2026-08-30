@@ -1,45 +1,43 @@
 # T1 Post-Strike Event Training Contract
 
-Status: **FullMDP V7 negative evidence, V8 PPO replacement candidate, plus historical T1 scheduler**
-(2026-08-27).
+Status: **R36 FullMDP natural-overlap event seam, plus historical T1 scheduler**
+(2026-08-30).
 
 This note defines the runtime seam added after the frozen T0/T1 preregistration at commit
 `1913861`. It does not mutate that preregistration or fill any of its null launch bindings.
 Materialized schedules, continuous Isaac/MuJoCo judges, self-hit instrumentation, a fresh exact
 baseline, and the semantics-correct plant contract remain blockers.
 
-## Current FullMDP four-opportunity cadence
+## Current FullMDP natural-overlap event seam
 
-The current single-action FullMDP candidate does not invent a fifth opportunity to fill the episode.
-Its four real scheduled due ticks are exactly:
+当前 single-action FullMDP 仍只使用四个真实 due tick：
 
 ```text
 295, 588, 881, 1174
 ```
 
-Tick `1467` is the settlement boundary for the fourth shot, not another reveal. Observation V3 actor
-column `[208]` (`[196]` in historical V2) is a countdown only while one of those four due events remains;
-after tick1174 is consumed it publishes raw `-1` as an exhausted sentinel. This keeps Isaac and
-MuJoCo from exposing different fictitious futures without adding an observation column.
+tick `1467`只是第四球 settlement boundary，不是第五次 reveal。课程是
+`balance → mimic → hit → landing/recovery`的自然重叠，不增加“上一层成功才开放下一层”的硬 Stage 或 Gate。
 
-A scheduled due and a public reveal are different facts. The schedule is frozen before physics; a
-row that terminates while crossing a due contributes to `scheduled_due` and `due_terminal_overlap`,
-but never to actor-visible `public_due`. MuJoCo can retain that pre-physics schedule fact directly.
-On Isaac, reset and D05 are independent writers: the existing CPU pre-optimizer drain computes the
-intersection of `ResetTelemetry` terminal rows and D05 scheduled-due rows. This is a cross-writer
-evidence join, not a per-step safety Gate. It adds no D2H, owner, actor field, receipt or task-success
-dependency, and healthy peers remain trainable.
+D05 scheduled due、public reveal、Motion readiness 与 physical launch 是不同事实：
 
-Isaac milestone schema8 adds named paddle kernel and true-error telemetry beside the episode/reset block. Consumers must use
-the named episode slice, never a positional `[-7:]` suffix. Predecessor `9d333b0b` includes the
-fresh-due terminal counterexample. V7 subsequently supplied exact Pod evidence for Observation V3,
-PPO V5 and Reward28, but more than 2.17 million launches still produced zero contact while both
-optimizers had decayed to their `1e-5` floor. V8 therefore changes only the PPO update geometry and
-learning-rate schedule; this event/observation contract remains unchanged. V8 exact Pod validation
-and fresh runtime evidence remain `未测`; schema correctness is not launch or promotion authority.
+- scheduled due 在 physics 前冻结；合法 due 到达时必须发布 frozen `ActionEpoch`，不能因 Motion/Physical
+  尚未 ready 而吞掉题目。
+- 尚未请求 physical launch 的题以 typed `UNPLAYED`退休，不产生 launch 债。
+- 一旦 ready 且已经请求 launch，缺失 launch 才是 contract fault；不得用 `UNPLAYED`掩盖。
+- physical launch 的 TTC 和 deadline 相对 public reveal；Mu playback 只有在 teacher 真正离开 frame 0
+  时才开始，frame-0 hold 不计作 playback-active mimic。
+- R03 只读该 frozen ActionEpoch 的 position/velocity/signed-face target，不允许 caller 或 backend
+  依据当前 frame 重算 target。
 
-The older materialized T1 scheduler below remains a separate historical design track. It must not
-override the current FullMDP four-opportunity cadence or be cited as V7 launch readiness.
+Observation V3 actor countdown 在仍有 due event 时发布剩余时间，第四次 due 消费后发布 raw `-1`
+exhausted sentinel；本轮不增加 actor column、oracle 或 backend-specific future。terminal 与 scheduled-due
+overlap 仍在独立 writer 的 optimizer-boundary join 归因，不是 per-step safety Gate。
+
+R36 source 已实现上述 seam；final exact Pod 的 bundle consumer、双端 fixed-action 与 fresh runtime 仍为
+`未测`。接口文本和 host 测试不授权 launch、promotion 或 deployment。
+
+下方 materialized T1 scheduler 是独立历史设计轨，不能覆盖当前四机会 cadence 或被引用为 R36 readiness。
 
 ## Materialized schedule bytes
 

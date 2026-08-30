@@ -1,5 +1,18 @@
 # 简短进度记录
 
+## 2026-08-30 — R36 时钟、单一 target 与最终 plant 合同收口
+
+- R35 最终窗已冻结为分层负例：Isaac 在充分 launch 后仍无 R03/contact，Mu 在 launch 前因 tilt 失败；
+  详细数字只保留在
+  [MuJoCo native readiness 实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+- R36 已合入 reveal-relative launch、frozen ActionEpoch 单一 R03 target、Reward 同写者自证减法、
+  filtered-net MJB repin，以及 Phase4 seed/admission 分层、safe follow-through、exact physics 绑定和
+  policy-grid deadline；Observation V3 `215/231`与自然重叠课程不变。
+- final Phase4 bundle consumer、Pod focused tests、双端 CUDA fixed-action、热路 parity/rate 和 fresh ACK
+  仍全部为`未测`；当前阻断与停止规则只认
+  [双端 TODO §0.6](operations/action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)，
+  Gate G05/G06继续`Partial / diagnostic_unauthorized`。
+
 ## 2026-08-30 — FullMDP Reward bundle构造后自证减法
 
 - 删除factory对刚由同一producer构造的Reward bundle的逐项postcondition阻断；`profile_kind`与

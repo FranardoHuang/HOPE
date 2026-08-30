@@ -197,6 +197,18 @@ solver 不得内部重采样、改 action、翻转 physical face 或覆盖 propo
 contact/flight 参数重放，明确校验 approach、动作速度 envelope、有符号拍面、过网、网高余量、
 首落点和 flight horizon。失败行保持不可安装，并进入具名 reject ledger。
 
+每次被采用的题必须先原子冻结为 `ActionEpoch`。该 Epoch 中的 contact position、racket velocity、
+signed face、ball state、action identity、TTC 与 physics/geometry pins 是 R03 和下游 attempt 的唯一
+target authority；caller、Reward 或 backend 不得从相邻 motion frame、当前球状态或自身缓存重算一份
+“等价 target”再自证。physical launch 的 TTC 与 deadline 一律相对该题的 public reveal；绝对 episode
+clock 只用于 chronology，不得再解释为来球飞行时间。
+
+Phase1/2 的确定性几何可行性必须由输入直接计算，不运行 policy rollout，也不要求候选 face 与某个
+不同意图的 teacher face 相等。Phase3 只在已合法 seed 中排序；face distance 或其他 seed quality 不是
+admission。Phase4 必须独立重算最终 A3 plant 的 qdes/torque/support、racket-site、table/net/ball 与
+recovery 可行性。它的 contact deadline 必须向上对齐到 exact policy grid，并满足
+`deadline + recovery <= episode/cadence horizon`；对齐后的值才可写入 Epoch。
+
 task normal 是 runtime raw +Y/A-frame 命令；接触重放必须再用 manifest 的 `mount_normal_sign`
 得到 physical striking face。physical face 的 normal closing speed 必须在 venue fit
 `[1.4, 7.2] m/s`，fixed-action 拍速上界取
@@ -232,6 +244,10 @@ recovery，额外一个 exact policy control tick 用于闭合 attempt。否则�
 ball、base plan、task、action、domain epoch、sample ID 和所有 digest 只有在全部校验通过后才一次性
 写入 command/ball buffers。solver 完成前不得先写一半 target，也不得用 reset 前缓存的
 `base_pos_w/base_quat_w` 补 receipt。
+
+canonical bundle 还必须内容绑定 exact ball-physics YAML、compiled backend plant bytes、policy
+clock/decimation 与 Phase4 producer schema。materialize 后必须 reopen 复核；训练 consumer 未证明实际读取
+这些 bytes 前，bundle 只算 source candidate，不得作为 fixed-action 或 long-run evidence。
 
 ## 5. Attempt 账本
 

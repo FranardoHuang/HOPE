@@ -2,43 +2,33 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
-## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
+## 2026-08-30 R36 当前双端边界（仍 `Partial`）
 
-新机可复现边界现已具体化：Mu的Python3.12.3基础venv有133项tracked lock，Pod fresh resolver精确闭合；
-实际run继续由EPA48/RSL3 run-local site掌权。Isaac launcher只接受machine provisioning给出的EULA=`Y`与
-privacy=`Y|N`，不替人选择。合法Isaac二进制、split USD、Mu的92个ignored mesh和private凭据仍须外部恢复，
-所以这是可执行安装路径而非“纯clone自包含”，G06仍`Partial`。
+R35 两端是不同的学习负例，不是 physics parity：Isaac 已跨过 balance 并产生充分 launch，却没有 R03/contact；
+Mu 则在 launch 前因 tilt 失败。详细学习分母只在
+[当前实验记录](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)维护，
+G06 不用 policy 曲线代签 plant/controller/contact 对齐。
 
-`255df4a1`的Physical/R06收敛候选已在Pod clean exact CPU套件通过，但真实GPU fixed tape、journal/WAL
-逐字对拍与matched profile尚未运行；三卡当前均由只读训练占用，不能同卡混跑或停止旧run换结果。该候选仍
-保留每个backend的Scene/plant事实和per-substep事件，只减少同一R06 owner的重复finalize，故通过后也只会
-改善实现成本，不会把任务成功变成sim2sim或安全证据。
+当前 Mu filtered-net runtime MJB 已从 source MJCF 重编译并 pin 为
+`d9c88297d4a687815c347a064792c66d99b61965ecea3576d235c8b13c286685`
+（`113,765,788` bytes）；canonical bundle 还必须同时绑定 exact ball-physics YAML。该 source 身份修复
+不等于 loader、fixed-action 或跨端 response PASS。
 
-`observed_at=2026-08-29T11:52:28Z`时，现役Mu已产生`663/294,108` selected contact和597次net crossing
-但0 legal landing；Isaac为`0 R03 / 78,072 physical launch`。二者处在不同学习阶段，不能把曲线差异直接
-当physics parity。
-fixed tape仍把shared initial state、joint order、action decoder与qdes对齐，current Pod runtime身份也通过
-独立检查；所以没有“Pod整体装坏”的证据。剩余first-divergence仍属于implicit PhysX drive与显式Mu PD、
-friction/contact/integrator响应，需同tape plant字段对签，不能用policy或额外Gate掩盖。
+本 Gate 继续 `Partial`，只在以下跨事实源边界闭合后推进：
 
-`12:19:19Z`的同分母刷新最终把4× Mu判负：ACK0..623新/旧selected contact=`5/334`，最近10轮四项mimic
-也全部更差；但这是同一Mu
-backend内的Reward经济反例，不是sim2sim差异。后继只在playback-active行增强paddle kernel，先分别在两端
-做exact fixed-action与fresh learning；三卡未自然空闲前保持`未测`。现有snapshot无resume authority，不能
-用旧checkpoint跳过fresh对照或把Build4 warm-start混进跨引擎判定。
-静态cross-backend消费审计发现`8a57a522`只让Isaac读取playback scale、Mu没有读取，故此前双dry-run不能让它
-成为训练源。final exact source=`b0d7d562`已在Mu reward/ledger镜像同一Motion playback事实，且没有扩大reward
-ABI；Pod exact Mu=`354 passed,7 skipped`、共享十文件同进程=`367 passed,25 skipped`、launcher/setup=
-`98 passed`。final exact目录恢复Mu ignored资产后，两端完整launcher dry-run仍RC0；这关闭代码语义和启动输入
-组合，不是双引擎CUDA fixed-action或physics parity。真实双端fixed-action与fresh matched仍等自然空闲GPU，
-继续写`未测`。
+- [ ] final exact Pod checkout 恢复并核双端外部资产、EPA48/RSL3、current MJB 与 physics YAML。
+- [ ] final bundle materialize/reopen，且两端 consumer 读取同一 action/physics/geometry identity。
+- [ ] Isaac 与 Mu 各自真实 CUDA `512×48×31` fixed-action；同 tape 下
+  identity/RNG/reason/counter/safety/payment 对拍。
+- [ ] 记录 contact-free 与 standing-contact 的 plant/controller first-divergence；不以相近 policy return
+  代替 torque/contact/integrator 事实。
+- [ ] fresh 双端 run 各自取得 finite durable ACK；两端可独立发射，但任一端不能代签另一端。
 
-当前repo部署合同也不等于跨机parity：一次性EULA/隐私setup事实不再被错做成per-run Gate；setup已删除
-环境path discovery，GL由caller显式绑定、核SONAME并记录观察SHA。最新`bb0be1a2`从全新exact checkout完成
-真实Kit fixed-action：0 done/timeout，action/state SHA与既有基线逐字一致，checkout clean且GPU/lock释放；
-但空白机private资产可获得性仍`PARTIAL`。G06不从历史fresh-clone receipt推导跨机器逐位曲线一致。
+`4fe23765`后的功能源与 `bf941777`热路候选尚未完成上述 final Pod 证据，均写`未测`。
+Observation V3 仍为 `215/231`，本轮没有新增 Stage、Gate 或 oracle；所有结果保持
+`diagnostic_unauthorized=true`。
 
-## 2026-08-29 R8 matched first-divergence（仍`Partial`）
+## HISTORICAL / SUPERSEDED — 2026-08-29 R8 matched first-divergence
 
 controller修复后的Mu有限学习窗把hard-edge降到`19,816/1,499,136=1.322%`，说明旧约87%主要是实现错误；
 但该窗仍为`0/6,594 launch` raw/selected contact、0 legal landing，且后段hard-edge回升，不能称parity或学习
