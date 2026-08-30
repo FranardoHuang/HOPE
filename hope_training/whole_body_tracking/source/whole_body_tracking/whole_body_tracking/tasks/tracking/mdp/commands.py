@@ -6229,7 +6229,7 @@ class MotionCommand(CommandTerm):
         row_identity = _ACTION_BALL_ROW_IDENTITY
         if (
             type(epoch_owner) is not epoch.ActionEpochOwner
-            or type(projection) is not epoch.ActionEpochMotionPlaybackProjection
+            or type(projection) is not epoch.ActionEpochCurrentShotProjection
             or type(kind) is not str
             or kind != epoch.MOTION_PLAYBACK_STARTED
         ):
@@ -6239,57 +6239,40 @@ class MotionCommand(CommandTerm):
         s = epoch_owner.shot_slot_capacity
         if s != 1:
             raise RuntimeError("Motion playback requires the exact single action slot")
-        slots = self._action_ball_full_mdp_motion_exact_tensor(
-            projection.current_task_slot,
-            name="playback.current_task_slot",
+        row_slot_active = self._action_ball_full_mdp_motion_exact_tensor(
+            projection.slot_valid,
+            name="playback.slot_valid",
             device=device,
-            dtype=torch.int64,
+            dtype=torch.bool,
             shape=(n,),
         )
-        # The accepted single-action ABI has exactly one slot.  Read that
-        # fixed column directly: clamping a damaged task slot back to zero
-        # would turn corruption into apparent authority, and a per-tick
-        # full-N arange would add allocation without representing semantics.
-        row_slot_active = slots.eq(0)
         phase = self._action_ball_full_mdp_motion_exact_tensor(
             projection.phase,
             name="playback.phase",
             device=device,
             dtype=torch.int64,
-            shape=(n, s),
-        )[:, 0]
-        selected = self._action_ball_full_mdp_motion_exact_tensor(
-            projection.selected_mask,
-            name="playback.selected_mask",
-            device=device,
-            dtype=torch.bool,
-            shape=(n, s),
-        )[:, 0]
+            shape=(n,),
+        )
+        selected = ~phase.eq(epoch.PHASE_IDLE)
         retained_key = row_identity.ActionEpochShotKey(
-            reset_generation=self._action_ball_reset_generation[:, None],
-            ball_generation=self._action_ball_swing_generation[:, None],
-            action_uid=self._action_ball_continuous_canonical_action_uid[:, None],
-            action_slot=self.clip_id[:, None],
-            shot_index=self._action_ball_continuous_canonical_shot_index[:, None],
-            task_identity=(
-                self._action_ball_continuous_canonical_task_identity[:, None]
-            ),
-            outcome_identity=(
-                self._action_ball_continuous_canonical_outcome_identity[:, None]
-            ),
-            ball_identity=(
-                self._action_ball_continuous_canonical_cadence_identity[:, None]
-            ),
+            reset_generation=self._action_ball_reset_generation,
+            ball_generation=self._action_ball_swing_generation,
+            action_uid=self._action_ball_continuous_canonical_action_uid,
+            action_slot=self.clip_id,
+            shot_index=self._action_ball_continuous_canonical_shot_index,
+            task_identity=self._action_ball_continuous_canonical_task_identity,
+            outcome_identity=self._action_ball_continuous_canonical_outcome_identity,
+            ball_identity=self._action_ball_continuous_canonical_cadence_identity,
         )
         public_key = row_identity.require_action_epoch_shot_key(
             projection.shot_key,
-            shape=(n, s),
+            shape=(n,),
             device=device,
             label="Motion playback public shot_key",
         )
         retained_key = row_identity.require_action_epoch_shot_key(
             retained_key,
-            shape=(n, s),
+            shape=(n,),
             device=device,
             label="Motion playback retained shot_key",
         )
@@ -6297,7 +6280,7 @@ class MotionCommand(CommandTerm):
             row_identity.action_epoch_shot_key_valid(public_key)
             & row_identity.action_epoch_shot_key_valid(retained_key)
             & row_identity.action_epoch_shot_key_equal(public_key, retained_key)
-        )[:, 0]
+        )
         teacher_left_frame0 = self.time_steps.gt(
             self.motion.seg_start[self.clip_id]
         )

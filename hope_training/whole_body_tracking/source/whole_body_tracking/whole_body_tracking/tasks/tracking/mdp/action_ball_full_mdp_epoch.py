@@ -440,19 +440,9 @@ class ActionEpochCurrentShotProjection:
     publication_ordinal: torch.Tensor
 
 
-@dataclass(frozen=True)
-class ActionEpochMotionPlaybackProjection:
-    """Narrow public Epoch facts needed by Motion's full-key playback join.
-
-    The projection is consumed synchronously while Epoch owns the publication
-    operation.  It carries no publication version or mutable owner authority:
-    freshness comes from Epoch constructing it from the locked current record.
-    """
-
-    current_task_slot: torch.Tensor
-    phase: torch.Tensor
-    selected_mask: torch.Tensor
-    shot_key: ActionEpochShotKey
+ActionEpochMotionPlaybackProjection = ActionEpochCurrentShotProjection
+# Compatibility spelling only.  Motion and Racket now consume the same
+# ActionEpoch-owned value projection; this name does not define a second ABI.
 
 
 @dataclass(frozen=True)
@@ -1035,6 +1025,38 @@ class ActionEpochOwner:
                 raise ActionEpochError("no ActionEpoch record exists")
             return self._publication.current.clone()
 
+    def _project_current_shot_locked(
+        self, record: ActionEpochRecord
+    ) -> ActionEpochCurrentShotProjection:
+        """Build the sole current-shot value while this owner holds its lock."""
+
+        slot = record.current_task_slot
+        slot_valid = slot.ge(0) & slot.lt(self.shot_slot_capacity)
+        safe_slot = slot.clamp(0, self.shot_slot_capacity - 1)
+        index = safe_slot[:, None]
+
+        def selected(value: torch.Tensor) -> torch.Tensor:
+            gathered = torch.gather(value, 1, index).squeeze(1)
+            return torch.where(
+                slot_valid,
+                gathered,
+                torch.full_like(gathered, -1),
+            ).detach()
+
+        return ActionEpochCurrentShotProjection(
+            slot_valid=slot_valid.detach(),
+            phase=selected(record.phase),
+            shot_key=ActionEpochShotKey(
+                **{
+                    field.name: selected(
+                        getattr(record.identity.shot_key, field.name)
+                    )
+                    for field in fields(ActionEpochShotKey)
+                }
+            ),
+            publication_ordinal=selected(record.publication_ordinal),
+        )
+
     def project_current_shot(self) -> ActionEpochCurrentShotProjection:
         """Gather the current device row without cloning the full record.
 
@@ -1048,32 +1070,7 @@ class ActionEpochOwner:
             record = self._publication.current
             if record is None:
                 raise ActionEpochError("no ActionEpoch record exists")
-            slot = record.current_task_slot
-            slot_valid = slot.ge(0) & slot.lt(self.shot_slot_capacity)
-            safe_slot = slot.clamp(0, self.shot_slot_capacity - 1)
-            index = safe_slot[:, None]
-
-            def selected(value: torch.Tensor) -> torch.Tensor:
-                gathered = torch.gather(value, 1, index).squeeze(1)
-                return torch.where(
-                    slot_valid,
-                    gathered,
-                    torch.full_like(gathered, -1),
-                ).detach()
-
-            return ActionEpochCurrentShotProjection(
-                slot_valid=slot_valid.detach(),
-                phase=selected(record.phase),
-                shot_key=ActionEpochShotKey(
-                    **{
-                        field.name: selected(
-                            getattr(record.identity.shot_key, field.name)
-                        )
-                        for field in fields(ActionEpochShotKey)
-                    }
-                ),
-                publication_ordinal=selected(record.publication_ordinal),
-            )
+            return self._project_current_shot_locked(record)
 
     def project_recovery_postphysics_activity_mask(
         self,
@@ -2680,14 +2677,7 @@ class ActionEpochOwner:
             if getattr(self._motion_playback, "__self__", None) is not owner:
                 raise ActionEpochError("Motion playback caller differs")
             try:
-                projection = ActionEpochMotionPlaybackProjection(
-                    current_task_slot=record.current_task_slot.detach().clone(),
-                    phase=record.phase.detach().clone(),
-                    # ``selected_mask`` is derived from ``phase`` and already
-                    # owns fresh storage; detach without a redundant copy.
-                    selected_mask=record.selected_mask.detach(),
-                    shot_key=record.identity.shot_key.clone(),
-                )
+                projection = self._project_current_shot_locked(record)
                 mask = self._tensor(
                     self._motion_playback(MOTION_PLAYBACK_STARTED, projection),
                     label="Motion playback mask",

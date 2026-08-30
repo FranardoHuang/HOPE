@@ -1376,9 +1376,10 @@ def test_playback_path_cold_pins_the_epoch_row_identity_module() -> None:
     assert "import action_ball_full_mdp_row_identity" not in source
     assert "torch.arange" not in source
     assert "torch.clamp" not in source
+    assert "projection.slot_valid," in source
     assert "projection.phase," in source
-    assert "projection.selected_mask," in source
-    assert "slots.eq(0)" in source
+    assert "projection.selected_mask," not in source
+    assert "projection.current_task_slot," not in source
     assert "epoch_owner.current(" not in source
     assert ".version" not in source
     assert "action_epoch_shot_key_valid(public_key)" in source
