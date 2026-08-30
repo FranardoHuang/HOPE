@@ -1,3 +1,4 @@
+import ast
 from copy import deepcopy
 import hashlib
 import importlib.util
@@ -613,58 +614,6 @@ class EvidenceFactory:
         return capability
 
 
-def _ring_len(curriculum, key, arm):
-    progress = curriculum._progress[key]
-    return len(
-        curriculum._new_band_ring_rows(progress, C.ARM_KEYS.index(arm))
-    )
-
-
-def _ring_failures(curriculum, key, arm):
-    progress = curriculum._progress[key]
-    rows = curriculum._new_band_ring_rows(
-        progress, C.ARM_KEYS.index(arm)
-    )
-    return sum(
-        1
-        for row in rows
-        if row["terminal_outcome"] == "safe_nonreturn"
-    )
-
-
-def _fill_ring(curriculum, authority, factory, key, *, ring_failures=0):
-    """Feed scheduler windows until the selected arm's ring is full with the
-    requested failure count.
-
-    Each window carries exactly ring-size new-band safe-closed rows, and the
-    ring keeps only the newest ring-size rows, so one window per arm decides
-    that arm's ring content; the loop ends when the currently selected arm
-    matches the request.
-    """
-
-    ring_size = curriculum.scheduler_config.new_band_ring_size
-    for _ in range(6 * len(C.ARM_KEYS)):
-        arm = curriculum.selected_arm(key)
-        assert arm
-        if (
-            _ring_len(curriculum, key, arm) >= ring_size
-            and _ring_failures(curriculum, key, arm) == ring_failures
-        ):
-            return arm
-        capability = factory.issue(
-            curriculum,
-            authority,
-            key,
-            role="scheduler",
-            count=ring_size,
-            stratum=f"marginal:{arm}",
-            failures=ring_failures,
-            new_band=ring_size,
-        )
-        curriculum._observe_scheduler_legacy_for_test({key: capability})
-    raise AssertionError("selected arm ring never filled")
-
-
 def _certify(
     curriculum,
     authority,
@@ -724,13 +673,6 @@ def _completed_no_move_state():
     factory = EvidenceFactory()
     _certify(curriculum, authority, factory, key)
     while curriculum.phase(key) == "marginal":
-        _fill_ring(
-            curriculum,
-            authority,
-            factory,
-            key,
-            ring_failures=3,
-        )
         _certify(
             curriculum,
             authority,
@@ -967,10 +909,48 @@ def test_manifest_config_stays_separate_from_code_frozen_scheduler_and_heldout()
     with pytest.raises(ValueError, match="fixed at 100"):
         C.ArmSchedulerConfig(rolling_window=99)
     scheduler = C.ArmSchedulerConfig()
-    assert scheduler.new_band_ring_size == 30
-    assert scheduler.as_dict()["new_band_ring_size"] == 30
-    with pytest.raises(ValueError, match="fixed at 30"):
-        C.ArmSchedulerConfig(new_band_ring_size=29)
+    assert scheduler.as_dict() == {
+        "rolling_window": 100,
+        "min_history": 20,
+        "forced_every": 5,
+        "max_gap_factor": 2,
+    }
+    # Removing a field from the frozen scheduler document is an intentional
+    # identity boundary: old checkpoints and launch artifacts must repin
+    # instead of silently claiming the obsolete rolling-30 authority.
+    assert scheduler.contract_sha256 != (
+        "729a705473bba805335635a99af89c16d"
+        "aa3cd8daff759c6526471a48ef94d68"
+    )
+
+
+def test_production_has_no_dead_rolling_30_scheduler_authority():
+    source = (MDP / "action_ball_curriculum.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    identifiers = {
+        value
+        for node in ast.walk(tree)
+        for value in (
+            getattr(node, "id", None),
+            getattr(node, "attr", None),
+            getattr(node, "name", None),
+        )
+        if isinstance(value, str)
+    }
+    strings = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+    }
+    assert {
+        "_new_band_ring_rows",
+        "new_band_ring_size",
+    }.isdisjoint(identifiers)
+    assert "new_band_ring" not in strings
+    assert not any("rolling-30" in value for value in strings)
 
 
 def test_release_api_has_no_caller_counts_and_production_is_fail_closed():
@@ -1546,7 +1526,7 @@ def test_single_pass_scheduler_ledger_matches_reference_reduction():
         terminal = row["terminal_outcome"]
         if terminal is not None:
             terminals[terminal] += 1
-        if C._ring_eligible(row):
+        if C._new_band_safe_closed_eligible(row):
             new_band += 1
             new_band_failures += terminal == "safe_nonreturn"
 
@@ -1638,54 +1618,60 @@ def test_center_then_signed_marginals_expand_independently():
     assert curriculum.frontiers(key)[upper_arm] in (0.25, 0.5)
 
 
-def test_marginal_release_does_not_require_scheduler_ring():
+def test_marginal_release_does_not_require_scheduler_history():
     key = _key()
     curriculum, authority = _system((key,))
     factory = EvidenceFactory()
     _certify(curriculum, authority, factory, key)
     assert curriculum.phase(key) == "marginal"
     arm = curriculum.selected_arm(key)
-    assert _ring_len(curriculum, key, arm) == 0
+    progress = curriculum._progress[key]
+    assert progress.scheduler_receipts == ()
+    assert curriculum._recent_ledger(
+        progress, C.ARM_KEYS.index(arm)
+    ).P == 0
     _, decision = _certify(curriculum, authority, factory, key)
     assert decision.kind == "expand_marginal"
     assert curriculum.frontiers(key)[arm] == 0.25
 
 
-@pytest.mark.parametrize(
-    ("scheduler_failures", "heldout_failures", "expected_kind", "frontier"),
-    (
-        (30, 0, "expand_marginal", 0.25),
-        (0, 768, "bound_marginal", 0.0),
-    ),
-)
-def test_scheduler_ring_has_no_formal_release_authority(
-    scheduler_failures,
-    heldout_failures,
-    expected_kind,
-    frontier,
-):
-    # Deliberately contradict the scheduler ring with the frozen heldout.
-    # Only the heldout verdict may move or bind the formal frontier.
+def test_recent_100_scheduler_has_no_formal_release_authority():
+    # Make arm zero look easiest in every scheduler-visible row, then give
+    # that exact selected arm an all-failure frozen heldout.  Scheduling may
+    # choose the candidate; only the heldout new-band verdict may bind it.
     key = _key()
     curriculum, authority = _system((key,))
     factory = EvidenceFactory()
     _certify(curriculum, authority, factory, key)
-    arm = _fill_ring(
-        curriculum,
-        authority,
-        factory,
-        key,
-        ring_failures=scheduler_failures,
+    for index, arm in enumerate(C.ARM_KEYS):
+        capability = factory.issue(
+            curriculum,
+            authority,
+            key,
+            role="scheduler",
+            count=100,
+            stratum=f"marginal:{arm}",
+            failures=0 if index == 0 else 100,
+        )
+        curriculum._observe_scheduler_legacy_for_test({key: capability})
+
+    progress = curriculum._progress[key]
+    progress.selection_round = len(C.ARM_KEYS)
+    progress.last_selected_round = (progress.selection_round,) * len(
+        C.ARM_KEYS
     )
+    curriculum._reselect_arm(key, progress)
+    assert curriculum.selected_arm(key) == C.ARM_KEYS[0]
+
     _, decision = _certify(
         curriculum,
         authority,
         factory,
         key,
-        failures=heldout_failures,
+        failures=768,
     )
-    assert decision.kind == expected_kind
-    assert curriculum.frontiers(key)[arm] == frontier
+    assert decision.kind == "bound_marginal"
+    assert curriculum.frontiers(key)[C.ARM_KEYS[0]] == 0.0
 
 
 @pytest.mark.parametrize(
@@ -1796,20 +1782,6 @@ def test_marginal_requires_minimum_frozen_heldout_new_band_rows(
         "new_band_safe_closed_below_gate" in decision.blockers
     ) is blocked
     assert curriculum.frontiers(key)[arm] == expected_frontier
-
-
-def test_scheduler_ring_is_retained_for_candidate_scheduling_only():
-    for failures in (0, 30):
-        key = _key()
-        curriculum, authority = _system((key,))
-        factory = EvidenceFactory()
-        _certify(curriculum, authority, factory, key)
-        arm = _fill_ring(
-            curriculum, authority, factory, key, ring_failures=failures
-        )
-        assert _ring_len(curriculum, key, arm) == 30
-        assert _ring_failures(curriculum, key, arm) == failures
-        assert curriculum.frontiers(key)[arm] == 0.0
 
 
 def test_no_move_never_schedules_or_certifies_base_travel():
@@ -2387,12 +2359,10 @@ def test_compact_full_course_n1_and_n93_size_and_latency_gates():
     assert all(
         row["ordered_attempts"] is None for row in formal_rows
     )
-    # Franco 2026-07-28 new-band ring: scheduler windows retain their exact
-    # attempt rows (the ring state), one full 30-row window per enabled arm.
-    assert len(scheduler_rows) == 28
-    assert all(
-        len(row["ordered_attempts"]) == 30 for row in scheduler_rows
-    )
+    # Completing the formal course does not manufacture scheduler telemetry.
+    # Real recent-100 scheduler windows are still retained and round-tripped
+    # by the dedicated scheduler tests above.
+    assert scheduler_rows == []
     assert len(template_raw) < 2 * 1024 * 1024
     projected_n93_bytes = len(template_raw) * 93
     assert projected_n93_bytes < 128 * 1024 * 1024
@@ -2424,9 +2394,9 @@ def test_compact_full_course_n1_and_n93_size_and_latency_gates():
     round_trip = resumed.state_dict()
     save_seconds = time.perf_counter() - save_started
     assert round_trip == state
-    # The ring course replays 93 x 28 scheduler windows (30 attempt rows
-    # each) on load; measured ~13-16 s on a busy pod, so the gate carries
-    # honest headroom instead of flaking on machine load.
+    # Formal replay remains bounded for the full N=93 course.  Scheduler
+    # transcript replay has its own recent-100 tests and is not fabricated by
+    # this formal-course fixture.
     assert load_seconds < 30.0
     assert save_seconds < 5.0
 

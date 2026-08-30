@@ -678,7 +678,6 @@ class ArmSchedulerConfig:
     min_history: int = 20
     forced_every: int = 5
     max_gap_factor: int = 2
-    new_band_ring_size: int = 30
 
     def __post_init__(self) -> None:
         rolling = _plain_int(
@@ -693,19 +692,6 @@ class ArmSchedulerConfig:
             raise ValueError("min_history cannot exceed rolling_window")
         _plain_int(self.forced_every, name="forced_every", minimum=1)
         _plain_int(self.max_gap_factor, name="max_gap_factor", minimum=1)
-        ring = _plain_int(
-            self.new_band_ring_size,
-            name="new_band_ring_size",
-            minimum=1,
-        )
-        if ring != 30:
-            raise ValueError(
-                "new_band_ring_size is contractually fixed at 30"
-            )
-        if ring > rolling:
-            raise ValueError(
-                "new_band_ring_size cannot exceed rolling_window"
-            )
 
     def as_dict(self) -> Dict[str, int]:
         return {
@@ -713,14 +699,13 @@ class ArmSchedulerConfig:
             "min_history": self.min_history,
             "forced_every": self.forced_every,
             "max_gap_factor": self.max_gap_factor,
-            "new_band_ring_size": self.new_band_ring_size,
         }
 
     @property
     def contract_sha256(self) -> str:
         return _canonical_sha256(
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "kind": "action_ball_arm_scheduler",
                 "arm_catalog_sha256": ARM_CATALOG_SHA256,
                 "config": self.as_dict(),
@@ -735,28 +720,6 @@ class ArmSchedulerConfig:
                     ),
                     "objective": "minimize Wilson UCB of F/(L+F)",
                     "window": "latest 100 matching arm-epoch rows only",
-                },
-                "new_band_ring": {
-                    # The adaptive training stream may use a short new-band
-                    # history to choose which candidate arm to explore next.
-                    # It is deliberately outside release authority: only the
-                    # frozen heldout window may change a frontier.
-                    "ring_size": 30,
-                    "membership": (
-                        "attempt drawn value inside the candidate-minus-"
-                        "frontier new band, closed, safe terminal (L or F), "
-                        "not infrastructure-invalid, and derived by the V4 "
-                        "exact attempt source from the issued sample/birth "
-                        "receipts; base_spawn membership requires "
-                        "BaseBirthReceipt.sampling rather than an unused "
-                        "latent spawn field; newest ring_size rows of the "
-                        "matching arm-epoch strata"
-                    ),
-                    "authority": (
-                        "scheduler-only candidate ranking telemetry; never "
-                        "authorizes, blocks, bounds, locks, or expands a "
-                        "formal frontier"
-                    ),
                 },
                 "formal_new_band_gate": {
                     "scope": (
@@ -774,8 +737,8 @@ class ArmSchedulerConfig:
                         "unsafe, table, joint-limit, and attribution blockers"
                     ),
                     "scheduler_authority": (
-                        "the recent-100 and rolling-30 streams only schedule "
-                        "candidate collection and never release a frontier"
+                        "the recent-100 stream only schedules candidate "
+                        "collection and never releases a frontier"
                     ),
                 },
                 "forced": (
@@ -2518,7 +2481,7 @@ _TERMINALS = (
     "joint_qdes_limit",
     "joint_actual_limit",
 )
-_RING_SAFE_TERMINALS = ("legal_return", "safe_nonreturn")
+_NEW_BAND_SAFE_TERMINALS = ("legal_return", "safe_nonreturn")
 _TERMINAL_SIGNAL_KEYS = (
     "infrastructure_invalid",
     "joint_actual_limit",
@@ -2530,14 +2493,16 @@ _TERMINAL_SIGNAL_KEYS = (
 )
 
 
-def _ring_eligible(row: Mapping[str, object]) -> bool:
-    """One new-band ring member: drawn in the new band and safely closed."""
+def _new_band_safe_closed_eligible(
+    row: Mapping[str, object],
+) -> bool:
+    """Whether one attempt is safe-closed evidence in the new band."""
 
     return bool(
         row["in_new_band"]
         and row["closed"]
         and not row["infrastructure_invalid"]
-        and row["terminal_outcome"] in _RING_SAFE_TERMINALS
+        and row["terminal_outcome"] in _NEW_BAND_SAFE_TERMINALS
     )
 
 
@@ -2711,7 +2676,7 @@ def _ledger_from_attempt_rows(
         else:
             for signal in raw_signals:
                 raw_signals[signal] += bool(signals[signal])
-        if _ring_eligible(attempt):
+        if _new_band_safe_closed_eligible(attempt):
             new_band += 1
             if terminal == "safe_nonreturn":
                 new_band_failures += 1
@@ -3785,36 +3750,6 @@ class ActionBallCurriculum:
             index: _ledger_from_attempt_rows(rows[-window:])
             for index, rows in rows_by_index.items()
         }
-
-    def _new_band_ring_rows(
-        self, progress: _Progress, arm_index: int
-    ) -> Tuple[Mapping[str, object], ...]:
-        """Newest ring-size new-band safe-closed rows for the arm candidate.
-
-        The ring is a pure function of the retained scheduler receipts, so it
-        rides the existing deterministic checkpoint replay: the persisted
-        attempt rows (which now declare ``in_new_band``) are the ring state,
-        and every contributing window is identified by its window SHA.
-        """
-
-        arm = ARM_KEYS[arm_index]
-        stratum = f"marginal:{arm}"
-        epoch = progress.arm_epochs[arm_index]
-        level = LEVELS[progress.arm_probe_indices[arm_index]]
-        rows = []
-        for receipt in progress.scheduler_receipts:
-            evidence = receipt.evidence
-            if (
-                evidence.stratum == stratum
-                and evidence.domain_epoch == epoch
-                and evidence.arm_levels[arm_index] == level
-            ):
-                for row in receipt.attempts:
-                    if _ring_eligible(row):
-                        rows.append(row)
-        return tuple(
-            rows[-self._scheduler_config.new_band_ring_size :]
-        )
 
     def _scheduler_eligible(
         self, ledger: BallOutcomeLedger
