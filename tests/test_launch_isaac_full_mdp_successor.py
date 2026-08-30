@@ -23,6 +23,7 @@ PPO_RECIPE = Path(
 KIT_LAUNCHER = Path(
     "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
 )
+BALL_PHYSICS = Path("configs/ball_physics_optitrack_20260730.yaml")
 NAMESPACE = "isaac-full-a-h48-test-0001"
 UUID = "GPU-exact-0000"
 
@@ -77,6 +78,9 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     recipe = repo / PPO_RECIPE
     recipe.parent.mkdir(parents=True)
     shutil.copy2(PROJECT / PPO_RECIPE, recipe)
+    ball_physics = repo / BALL_PHYSICS
+    ball_physics.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(PROJECT / BALL_PHYSICS, ball_physics)
     record = base / "kit-record.json"
     kit = repo / KIT_LAUNCHER
     kit.parent.mkdir(parents=True, exist_ok=True)
@@ -268,6 +272,9 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     }
     assert payload["runtime_env"]["HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT"] == str(
         rig.root / "training"
+    )
+    assert payload["runtime_env"]["HOPE_BALL_PHYSICS_YAML"] == str(
+        rig.repo / BALL_PHYSICS
     )
     assert payload["runtime_env"]["HOME"] == str(rig.root / "home")
     assert payload["runtime_env"]["CUDA_CACHE_PATH"] == str(

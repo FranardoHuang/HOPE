@@ -3226,7 +3226,10 @@ def _attach_action_ball_full_mdp_diagnostic_motion_catalog(env_cfg):
     racket.clip_names_per_clip = table.action_order
     racket.strike_phase_per_clip = table.strike_phase_per_clip
     racket.mount_normal_sign_per_clip = table.mount_normal_sign_per_clip
-    racket.motion_teacher_racket_source = "measured_channel"
+    # This Phase4 artifact is an admitted solved robot trajectory.  Its exact
+    # racket reference is the sealed schema-2 wrist FK, not a raw mocap paddle
+    # channel; requiring measured_racket_* here would mislabel its authority.
+    racket.motion_teacher_racket_source = "robot_fk"
     motion.action_ball_full_mdp_diagnostic_catalog = (
         _commands.ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND
     )
@@ -3322,12 +3325,10 @@ class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
         finally:
             self.events = fresh_events
 
-        # One fresh episode must retain the same Motion cadence through the
-        # first deferred reveal, six accepted shots, and the sixth shot's
-        # retirement at the following reveal.  The inherited 10 s / 500-tick
-        # horizon resets that state before the sequence can exist; 30 s is the
-        # narrow whole-second horizon above the 1405-tick retirement boundary.
-        self.episode_length_s = 30.0
+        # N1 exposes one exact slow-centre shot per episode.  Its reveal at 48,
+        # derived close at 357, and retirement at 436 all fit the existing
+        # 10 s / 500-tick horizon; no six-shot contract is silently imposed.
+        self.episode_length_s = 10.0
         racket = self.commands.racket_target
         motion = self.commands.motion
 

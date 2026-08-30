@@ -36,6 +36,7 @@ PLANT_CONTRACT = Path("hope_training/whole_body_tracking/mjlab_lane/"
 PLANT_MANIFEST = Path(
     "configs/a3p_p1_0807_mujoco_identity_v1_20260828.json"
 )
+BALL_PHYSICS = Path("configs/ball_physics_optitrack_20260730.yaml")
 UUID = "GPU-exact-0002"
 NAMESPACE = "mujoco-full-a-h48-test-0001"
 
@@ -83,6 +84,7 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     manifest = repo / PLANT_MANIFEST
     manifest.parent.mkdir(parents=True)
     shutil.copy2(PROJECT / PLANT_MANIFEST, manifest)
+    shutil.copy2(PROJECT / BALL_PHYSICS, repo / BALL_PHYSICS)
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "test@example.invalid")
     _git(repo, "config", "user.name", "Launcher Test")
@@ -129,6 +131,7 @@ finally:
     os.close(fd)
 names = ["CUDA_DEVICE_ORDER", "CUDA_VISIBLE_DEVICES", "PYTHONNOUSERSITE", "PYTHONDONTWRITEBYTECODE",
          "ACTIONBALL_READY_POSE", "A3_PINGPONG_XML", "WARP_CACHE_PATH", "CUDA_CACHE_PATH",
+         "HOPE_BALL_PHYSICS_YAML",
          "TMPDIR", "PYTHONPYCACHEPREFIX", "PATH", "HOME", "XDG_CACHE_HOME",
          "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "LANG", "LC_ALL", "LC_CTYPE",
          "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "HOPE_GEOMETRY_PY",
@@ -406,6 +409,7 @@ def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
                     "LC_CTYPE": rig.module.CHILD_LOCALE,
                     "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": UUID, "PYTHONNOUSERSITE": "1",
                     "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
+                    "HOPE_BALL_PHYSICS_YAML": str(rig.repo / BALL_PHYSICS),
                     "A3_PINGPONG_XML": str(rig.plant_xml),
                     "CUDA_CACHE_PATH": str(rig.root / "cuda_cache"),
                     "TMPDIR": str(rig.root / "tmp"),
@@ -952,6 +956,7 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
         "LC_CTYPE": rig.module.CHILD_LOCALE,
         "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": UUID, "PYTHONNOUSERSITE": "1",
         "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
+        "HOPE_BALL_PHYSICS_YAML": str(rig.repo / BALL_PHYSICS),
         "A3_PINGPONG_XML": str(rig.plant_xml),
         "WARP_CACHE_PATH": str(rig.root / "warp_cache"),
         "CUDA_CACHE_PATH": str(rig.root / "cuda_cache"),

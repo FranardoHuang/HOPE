@@ -54,6 +54,10 @@ DYNAMIC_READY_RECEIPT_RELATIVE = Path(
 DYNAMIC_READY_RECEIPT_SHA256 = (
     "b861e09db8482ecec2ceb5cea2c794d1c1afb23d92295b414078ce50e9b14c6c"
 )
+BALL_PHYSICS_RELATIVE = Path("configs/ball_physics_optitrack_20260730.yaml")
+BALL_PHYSICS_SHA256 = (
+    "3afb1c9a00f975d924169503d7dafab92ea6c0b96263336e27edcd1d6257ea14"
+)
 RATE_PROBE_COMPLETION_TIMEOUT_S = 7200
 FIXED_ACTION_PROBE_BOOT_MARKER = "FULLMDP_ISAAC_FIXED_ACTION_PROBE_STARTED"
 RATE_PROBE_WARMUP_UPDATES = 10
@@ -633,6 +637,11 @@ def _runtime_env(
         or operator_runtime["PRIVACY_CONSENT"] not in {"Y", "N"}
     ):
         raise LaunchError("operator runtime authority differs")
+    ball_physics = _canonical_regular(
+        (REPO_ROOT / BALL_PHYSICS_RELATIVE).resolve(), "OptiTrack ball physics"
+    )
+    if _sha256(ball_physics) != BALL_PHYSICS_SHA256:
+        raise LaunchError("OptiTrack ball-physics digest differs")
     result = {
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
         # Kit/Omniverse, NVIDIA JIT and Python caches must be owned by this
@@ -656,6 +665,7 @@ def _runtime_env(
         "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256": rsl_sha256,
         "HOPE_ACTION_BALL_RUNTIME_VENV_SITE": str(venv_site),
         "HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT": str(paths["training"]),
+        "HOPE_BALL_PHYSICS_YAML": str(ball_physics),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONNOUSERSITE": "1",
         "PYTHONPYCACHEPREFIX": str(paths["pycache"]),

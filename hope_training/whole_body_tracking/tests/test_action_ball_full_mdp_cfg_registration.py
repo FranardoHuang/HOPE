@@ -596,7 +596,7 @@ def test_env_cfg_leaves_are_exact_role_projection_with_truthful_hold():
     )
 
 
-def test_fresh_a_c_episode_horizon_carries_six_shots_through_retirement():
+def test_fresh_a_c_episode_horizon_carries_one_slow_shot_through_retirement():
     _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
 
@@ -604,21 +604,18 @@ def test_fresh_a_c_episode_horizon_carries_six_shots_through_retirement():
     # control schedule.  It is not copied from a source-code receipt or an AST
     # fingerprint: a changed cfg must still satisfy these physical ticks.
     first_reveal_tick = 48
-    max_task_close_ticks = 106
+    max_task_close_ticks = 309
     recovery_ticks = 77
     deadline_offset_ticks = 2
     cadence_ticks = (
         max_task_close_ticks + recovery_ticks + deadline_offset_ticks
     )
-    accept_reveal_ticks = tuple(
-        first_reveal_tick + cadence_ticks * index
-        for index in range(6)
-    )
-    sixth_shot_retirement_tick = accept_reveal_ticks[-1] + cadence_ticks
+    accept_reveal_ticks = (first_reveal_tick,)
+    shot_retirement_tick = accept_reveal_ticks[-1] + cadence_ticks
 
-    assert cadence_ticks == 185
-    assert accept_reveal_ticks == (48, 233, 418, 603, 788, 973)
-    assert sixth_shot_retirement_tick == 1158
+    assert cadence_ticks == 388
+    assert accept_reveal_ticks == (48,)
+    assert shot_retirement_tick == 436
 
     for cfg in _fresh_cfgs(H):
         step_dt_s = float(cfg.sim.dt) * int(cfg.decimation)
@@ -626,17 +623,15 @@ def test_fresh_a_c_episode_horizon_carries_six_shots_through_retirement():
         inherited_ten_second_ticks = round(10.0 / step_dt_s)
 
         assert step_dt_s == pytest.approx(0.02)
-        assert cfg.episode_length_s == pytest.approx(30.0)
-        assert horizon_ticks == 1500
-        assert horizon_ticks > sixth_shot_retirement_tick
-        assert horizon_ticks - sixth_shot_retirement_tick == 95
+        assert cfg.episode_length_s == pytest.approx(10.0)
+        assert horizon_ticks == 500
+        assert horizon_ticks > shot_retirement_tick
+        assert horizon_ticks - shot_retirement_tick == 64
 
-        # The inherited horizon is a real counterexample: it resets before the
-        # second accepted reveal and therefore cannot carry six shots or
-        # observe the sixth retirement in one episode.
+        # N1 intentionally trains one exact slow-centre question per episode;
+        # the inherited horizon is sufficient and no six-shot claim is made.
         assert inherited_ten_second_ticks == 500
-        assert inherited_ten_second_ticks < accept_reveal_ticks[1]
-        assert inherited_ten_second_ticks < sixth_shot_retirement_tick
+        assert inherited_ten_second_ticks > shot_retirement_tick
 
 
 def test_fresh_a_c_alone_install_exact_deterministic_robot_reset_event():
@@ -801,7 +796,7 @@ def test_fresh_cfg_installs_exact_code_owned_active_n1_motion_catalog():
             cfg.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence
             is False
         )
-        assert racket.motion_teacher_racket_source == "measured_channel"
+        assert racket.motion_teacher_racket_source == "robot_fk"
 
     import action_ball_full_mdp_diagnostic_action_timing as timing
 
