@@ -27,7 +27,7 @@ def _sha(label: str) -> str:
 
 def test_full_mdp_reveal_boundary_v4_pins_are_exact():
     assert C.FULL_MDP_REVEAL_BOUNDARY_SOURCE_SHA256 == (
-        "a5762b2e4838a3bdc58c2a30822467d27e4fb1006a37fcc3faf3948f7c2c24fe"
+        "ec9db7ca2475bc8d4de474aeca9ce425feaeaef617fea7371f23d0ee5f8e25ab"
     )
     assert C.FULL_MDP_REVEAL_BOUNDARY_PACKET_SCHEMA_VERSION == 4
     assert C.FULL_MDP_REVEAL_BOUNDARY_ROW_INTEGRITY_SCHEMA_SHA256 == (
