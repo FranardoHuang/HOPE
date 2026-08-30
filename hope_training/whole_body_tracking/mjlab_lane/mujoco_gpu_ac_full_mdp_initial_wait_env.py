@@ -49,7 +49,6 @@ if str(_MDP) not in sys.path:
     sys.path.insert(0, str(_MDP))
 
 import action_ball_full_mdp_portable_observation as observation_contract
-from action_ball_frozen_task_frame_se2 import FrozenTaskFrameSE2
 import action_ball_full_mdp_portable_reward as portable_reward
 import action_ball_full_mdp_portable_catalog as portable_catalog
 import action_ball_full_mdp_reward_contract as reward_contract
@@ -100,6 +99,9 @@ class _FullAStagedReveal:
     pre_swing_wait_s: object
     ttc_ticks: object
     launch_horizon_ticks: object
+    r03_fact_f32: object
+    r03_physically_valid: object
+    epoch_clock_ticks: object
 FULLMDP_TRACKED_BODY_NAMES = (
     "pelvis_link",
     "left_hip_roll_Link",
@@ -891,18 +893,41 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             table_surface_z_scene=float(self.hope_to_scene[2]),
         )
         task = question["task_f32"]
-        if tuple(task.shape) != (n, observation_contract.TASK_F32_WIDTH):
+        if (
+            type(task) is not torch.Tensor
+            or tuple(task.shape) != (n, observation_contract.TASK_F32_WIDTH)
+            or task.dtype != torch.float32
+        ):
             raise RuntimeError("portable centre question task width differs")
         task_yaw = question["teacher_source_to_task_yaw_wxyz"]
         task_translation = question[
             "teacher_source_to_task_translation_scene"
         ]
-        if tuple(task_yaw.shape) != (n, 4) or tuple(task_translation.shape) != (n, 3):
+        if (
+            type(task_yaw) is not torch.Tensor
+            or type(task_translation) is not torch.Tensor
+            or tuple(task_yaw.shape) != (n, 4)
+            or tuple(task_translation.shape) != (n, 3)
+        ):
             raise RuntimeError("portable centre teacher task frame differs")
         # Device assertions preserve fail-closed construction semantics without
         # forcing a CUDA stream synchronization on every reveal.
         torch._assert_async(self._full_a_frozen_root_valid[ids].all())
-        FrozenTaskFrameSE2(task_yaw, task_translation).validate_async(torch)
+        if (
+            task_yaw.device != task.device or task_translation.device != task.device
+            or task_yaw.dtype != task.dtype or task_translation.dtype != task.dtype
+            or not bool(torch.isfinite(task).all())
+            or not bool(torch.isfinite(task_yaw).all())
+            or not bool(torch.isfinite(task_translation).all())
+            or not bool(torch.isclose(
+                torch.linalg.vector_norm(task_yaw, dim=1),
+                torch.ones(n, dtype=task.dtype, device=task.device),
+                rtol=0.0, atol=1.0e-5,
+            ).all())
+            or not bool(task_yaw[:, 1:3].abs().le(1.0e-6).all())
+            or not bool(task_translation[:, 2].abs().le(1.0e-6).all())
+        ):
+            raise RuntimeError("portable centre staged task frame semantics differ")
         required = {
             "launch_state_f32", "teacher_rate", "scaled_t_hit_s",
             "scaled_t_cycle_s", "pre_swing_wait_s", "ttc_ticks",
@@ -910,18 +935,55 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         }
         if not required.issubset(question):
             raise RuntimeError("portable centre question staged fields differ")
-        launch_state = question["launch_state_f32"]
-        if tuple(launch_state.shape) != (n, 13):
-            raise RuntimeError("portable centre launch state shape differs")
-        for name in required - {"launch_state_f32"}:
+        def exact(name, shape, dtype, *, finite=True, positive=False):
             value = question[name]
-            if not hasattr(value, "shape") or tuple(value.shape) != (n,):
-                raise RuntimeError(f"portable centre {name} shape differs")
+            if (
+                type(value) is not torch.Tensor
+                or tuple(value.shape) != shape
+                or value.device != task.device
+                or value.dtype != dtype
+            ):
+                raise RuntimeError(f"portable centre {name} type/device/dtype/shape differs")
+            if finite and not bool(torch.isfinite(value).all()):
+                raise RuntimeError(f"portable centre {name} is nonfinite")
+            if positive and not bool(value.gt(0).all()):
+                raise RuntimeError(f"portable centre {name} must be positive")
+            return value.detach().clone().contiguous()
+        launch_state = exact("launch_state_f32", (n, 13), task.dtype)
+        teacher_rate = exact("teacher_rate", (n,), task.dtype, positive=True)
+        scaled_t_hit = exact("scaled_t_hit_s", (n,), task.dtype, positive=True)
+        scaled_t_cycle = exact("scaled_t_cycle_s", (n,), task.dtype, positive=True)
+        pre_wait = exact("pre_swing_wait_s", (n,), task.dtype)
+        if not bool(pre_wait.ge(0).all()):
+            raise RuntimeError("portable centre pre_swing_wait_s must be nonnegative")
+        ttc_ticks = exact("ttc_ticks", (n,), torch.long, finite=False, positive=True)
+        launch_horizon = exact("launch_horizon_ticks", (n,), torch.long, finite=False, positive=True)
+        if not bool(ttc_ticks.gt(launch_horizon).all()):
+            raise RuntimeError("portable centre launch horizon must precede contact")
+        task = task.detach().clone().contiguous()
+        task_yaw = task_yaw.detach().clone().contiguous()
+        task_translation = task_translation.detach().clone().contiguous()
+        r03 = torch.zeros(
+            (n, self._full_a_r03_fact_f32.shape[1]),
+            dtype=task.dtype, device=task.device,
+        )
+        r03[:, :15] = task[:, 5:20]
+        r03_valid = torch.isfinite(r03[:, :15]).all(dim=1) & torch.isclose(
+            torch.linalg.vector_norm(r03[:, 6:9], dim=1),
+            torch.ones(n, dtype=task.dtype, device=task.device), rtol=0.0, atol=1.0e-4,
+        )
+        reveal = int(self.common_step_counter)
+        contact_tick = reveal + ttc_ticks
+        launch_tick = contact_tick - launch_horizon
+        close_tick = reveal + torch.ceil((pre_wait + scaled_t_cycle) / float(self.step_dt) - 1.0e-12).long()
+        clocks = torch.stack((
+            torch.full_like(ttc_ticks, reveal), contact_tick, launch_tick,
+            close_tick, torch.full_like(ttc_ticks, reveal + int(self._full_a_cadence.cadence_ticks)),
+        ), dim=1).contiguous()
         return _FullAStagedReveal(
             task, task_yaw, task_translation, launch_state,
-            question["teacher_rate"], question["scaled_t_hit_s"],
-            question["scaled_t_cycle_s"], question["pre_swing_wait_s"],
-            question["ttc_ticks"], question["launch_horizon_ticks"],
+            teacher_rate, scaled_t_hit, scaled_t_cycle, pre_wait,
+            ttc_ticks, launch_horizon, r03, r03_valid.clone().contiguous(), clocks,
         )
 
     def _full_a_commit_reveal_rows(self, ids, question) -> None:
@@ -945,51 +1007,24 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_scaled_t_cycle_s[ids] = question.scaled_t_cycle_s
         self._full_a_pre_swing_wait_s[ids] = question.pre_swing_wait_s
 
-        racket = task[:, 5:32]
-        r03 = self._full_a_r03_fact_f32[ids]
-        r03.zero_()
-        r03[:, 0:3] = racket[:, 0:3]
-        r03[:, 3:6] = racket[:, 3:6]
-        r03[:, 6:9] = racket[:, 6:9]
-        r03[:, 9:12] = racket[:, 9:12]
-        r03[:, 12:15] = racket[:, 12:15]
-        target_finite = torch.isfinite(r03[:, :15]).all(dim=1)
-        normal_unit = torch.isclose(
-            torch.linalg.vector_norm(r03[:, 6:9], dim=1),
-            torch.ones(n, dtype=r03.dtype, device=r03.device),
-            rtol=0.0,
-            atol=1.0e-4,
+        self._full_a_r03_fact_f32.index_copy_(
+            0, ids, question.r03_fact_f32
         )
         self._full_a_r03_armed[ids] = True
-        self._full_a_r03_physically_valid[ids] = target_finite & normal_unit
+        self._full_a_r03_physically_valid[ids] = question.r03_physically_valid
 
         # This callpoint runs after the preceding transition's reward and
         # termination have settled, but before the returned observation.  The
         # accepted question therefore belongs to the current post-transition
         # boundary and is visible to the next policy action that can earn its
         # first imitation reward.
-        reveal = int(self.common_step_counter)
-        contact_tick = reveal + question.ttc_ticks
-        launch_tick = contact_tick - question.launch_horizon_ticks
-        task_close_offset = torch.ceil(
-            (
-                question.pre_swing_wait_s
-                + question.scaled_t_cycle_s
-            )
-            / float(self.step_dt)
-            - 1.0e-12
-        ).to(dtype=torch.long)
-        task_close_tick = reveal + task_close_offset
         # Epoch clocks are monotonic common-step boundaries.  The scheduler may
         # park its episode-relative pointer at horizon+1 after the final due;
         # that does not change this accepted shot's fixed cadence boundary.
-        next_reveal_tick = reveal + int(self._full_a_cadence.cadence_ticks)
-        self._epoch_clock_ticks[ids, 0] = reveal
-        self._epoch_clock_ticks[ids, 1] = contact_tick
-        self._epoch_clock_ticks[ids, 2] = launch_tick
-        self._epoch_clock_ticks[ids, 3] = task_close_tick
-        self._epoch_clock_ticks[ids, 4] = next_reveal_tick
-        self._full_a_r03_expected_source_step[ids] = contact_tick
+        self._epoch_clock_ticks.index_copy_(
+            0, ids, question.epoch_clock_ticks
+        )
+        self._full_a_r03_expected_source_step[ids] = question.epoch_clock_ticks[:, 1]
         self._epoch_phase[ids] = FULL_A_PHASE_REVEAL_COMMITTED
         self._epoch_task_valid[ids] = True
         self._epoch_selected[ids] = True
