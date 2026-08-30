@@ -48,6 +48,7 @@ if str(_MDP) not in sys.path:
     sys.path.insert(0, str(_MDP))
 
 import action_ball_full_mdp_portable_observation as observation_contract
+from action_ball_frozen_task_frame_se2 import FrozenTaskFrameSE2
 import action_ball_full_mdp_portable_reward as portable_reward
 import action_ball_full_mdp_portable_catalog as portable_catalog
 import action_ball_full_mdp_reward_contract as reward_contract
@@ -886,18 +887,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # Device assertions preserve fail-closed construction semantics without
         # forcing a CUDA stream synchronization on every reveal.
         torch._assert_async(self._full_a_frozen_root_valid[ids].all())
-        torch._assert_async(torch.isfinite(task_yaw).all())
-        torch._assert_async(torch.isfinite(task_translation).all())
-        torch._assert_async(
-            torch.isclose(
-                torch.linalg.vector_norm(task_yaw, dim=1),
-                torch.ones(n, dtype=task.dtype, device=task.device),
-                rtol=0.0,
-                atol=1.0e-5,
-            ).all()
-        )
-        torch._assert_async(task_yaw[:, 1:3].abs().le(1.0e-6).all())
-        torch._assert_async(task_translation[:, 2].abs().le(1.0e-6).all())
+        FrozenTaskFrameSE2(task_yaw, task_translation).validate_async(torch)
         return question
 
     def _full_a_commit_reveal_rows(self, ids, question) -> None:
@@ -978,9 +968,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
     def _full_a_reveal_rows(self, ids) -> None:
         """Compatibility entry point: stage first, then commit."""
 
-        staged = self._full_a_stage_reveal_rows(ids)
+        staged = FullMdpInitialWaitVecEnv._full_a_stage_reveal_rows(self, ids)
         if staged is not None:
-            self._full_a_commit_reveal_rows(ids, staged)
+            FullMdpInitialWaitVecEnv._full_a_commit_reveal_rows(
+                self, ids, staged
+            )
 
     def _full_a_launch_rows(self, ids) -> None:
         state = self._full_a_launch_state_f32[ids]
@@ -1064,6 +1056,17 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         reveal = due & available
         deferred = due & ~available
         due_terminal_overlap = scheduled_due & dones
+        reveal_ids = reveal.nonzero(as_tuple=False).squeeze(-1)
+        # Stage every value that can fail before touching cadence or lifecycle.
+        staged = None
+        if reveal_ids.numel() > 0:
+            stage = getattr(self, "_full_a_stage_reveal_rows", None)
+            if stage is None and hasattr(self, "_full_a_question_builder"):
+                stage = lambda row_ids: FullMdpInitialWaitVecEnv._full_a_stage_reveal_rows(
+                    self, row_ids
+                )
+            if stage is not None:
+                staged = stage(reveal_ids)
         last_scheduled_ordinal = (
             len(self._full_a_cadence.reference_due_ticks) - 1
         )
@@ -1084,13 +1087,20 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 torch.where(due, future_tick, self._full_a_next_reveal_tick),
             )
         )
-        reveal_ids = reveal.nonzero(as_tuple=False).squeeze(-1)
         if reveal_ids.numel() > 0:
             # ACCEPT atomically replaces an IDLE/RETIRED row.  DEFER and a
             # terminal overlap are zero-write with respect to task/lifecycle.
-            staged = self._full_a_stage_reveal_rows(reveal_ids)
             self._clear_lifecycle(reveal_ids)
-            self._full_a_commit_reveal_rows(reveal_ids, staged)
+            if staged is None:  # dependency-light legacy fixture only
+                self._full_a_reveal_rows(reveal_ids)
+            else:
+                commit = getattr(self, "_full_a_commit_reveal_rows", None)
+                if commit is None:
+                    FullMdpInitialWaitVecEnv._full_a_commit_reveal_rows(
+                        self, reveal_ids, staged
+                    )
+                else:
+                    commit(reveal_ids, staged)
         return reveal, due, deferred, due_terminal_overlap
 
     def _full_a_latch_ball_contacts(self, contact_census=None) -> None:
