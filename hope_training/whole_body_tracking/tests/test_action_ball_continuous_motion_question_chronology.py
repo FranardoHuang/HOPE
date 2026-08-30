@@ -417,6 +417,14 @@ def _motion(device: torch.device = torch.device("cpu")) -> tuple[object, tuple]:
     command._action_ball_full_mdp_task_translation_w = torch.zeros(
         command.num_envs, 3, dtype=torch.float32, device=device
     )
+    action_count = len(command._action_ball_action_uids)
+    command._action_ball_full_mdp_source_strike_root_xy = torch.zeros(
+        action_count, 2, dtype=torch.float32, device=device
+    )
+    command._action_ball_full_mdp_source_strike_yaw_wxyz = torch.zeros(
+        action_count, 4, dtype=torch.float32, device=device
+    )
+    command._action_ball_full_mdp_source_strike_yaw_wxyz[:, 0] = 1.0
     command._action_ball_continuous_episode_step.copy_(
         torch.tensor([10, 20], dtype=torch.int64, device=device)
     )
