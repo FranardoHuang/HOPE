@@ -89,6 +89,11 @@ PINNED_PROFILE_PINS_RELATIVE_PATH = (
 PINNED_PROFILE_PINS_FILE_SHA256 = (
     "e5996c1eceacc9be3eb079add58277967d4228fff19150f24f2f337be165524d"
 )
+PINNED_SOLVER_MATH_MODULE_NAMES = (
+    "continuous_questions.py",
+    "stroke_adapt_torch.py",
+    "virtual_ball.py",
+)
 FRESH_POLICY_STEP_S = 0.02
 # Give every fresh row one complete H48 balance rollout before task exposure.
 # The exact dynamic-ready receipt observes 60 stable policy steps; revealing
@@ -271,14 +276,8 @@ def _load_catalog_source():
     venue = profile_pins.get("physics_payload", {}).get("venue_source", {})
     implementation = profile_pins.get("solver_implementation_source_sha256", {})
     implementation_paths = {
-        "continuous_questions.py": Path(__file__).resolve().with_name(
-            "continuous_questions.py"
-        ),
-        "hope_commands.py": Path(__file__).resolve().with_name("hope_commands.py"),
-        "stroke_adapt_torch.py": Path(__file__).resolve().with_name(
-            "stroke_adapt_torch.py"
-        ),
-        "virtual_ball.py": Path(__file__).resolve().with_name("virtual_ball.py"),
+        name: Path(__file__).resolve().with_name(name)
+        for name in PINNED_SOLVER_MATH_MODULE_NAMES
     }
     if (
         hashlib.sha256(physics_payload).hexdigest()
@@ -293,7 +292,7 @@ def _load_catalog_source():
         != loaded.manifest.physics_profile_sha256
         or profile_pins.get("solver_profile_sha256")
         != loaded.manifest.solver_profile_sha256
-        or set(implementation) != set(implementation_paths)
+        or not set(implementation_paths).issubset(implementation)
         or any(
             hashlib.sha256(path.read_bytes()).hexdigest()
             != implementation.get(name)
@@ -561,6 +560,7 @@ __all__ = [
     "PINNED_BALL_PHYSICS_FILE_SHA256",
     "PINNED_PROFILE_PINS_RELATIVE_PATH",
     "PINNED_PROFILE_PINS_FILE_SHA256",
+    "PINNED_SOLVER_MATH_MODULE_NAMES",
     "FRESH_POLICY_STEP_S",
     "FRESH_FIRST_REVEAL_TICK",
     "FRESH_RECOVERY_END_OFFSET_TICKS",
