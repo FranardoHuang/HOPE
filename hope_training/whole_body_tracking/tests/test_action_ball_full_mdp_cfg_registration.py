@@ -1189,6 +1189,54 @@ def test_termination_cfg_is_exact_five_live_terminal_graph():
     assert all(materialized[name] is not getattr(cfg, name) for name in materialized)
 
 
+def test_full_mdp_top_only_table_hit_is_sticky_across_four_substeps():
+    _require_live_isaac_import_surface()
+    import torch
+
+    from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
+    from whole_body_tracking.tasks.tracking.mdp.hope_actions import (
+        _PhysicsSubstepTableContactLatch,
+    )
+
+    cfg = H.HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg()
+    action_cfg = cfg.actions.joint_pos
+    term_cfg = cfg.terminations.robot_hit_table
+    assert cfg.table_robot_keepout is False
+    assert action_cfg.table_contact_substep_guard is True
+    assert action_cfg.table_contact_guard_termination_term == "robot_hit_table"
+    assert action_cfg.table_contact_guard_expected_decimation == 4
+    assert term_cfg.params["full_table_assembly"] is False
+    assert term_cfg.params["require_substep_latch"] is True
+
+    latch = _PhysicsSubstepTableContactLatch(
+        num_envs=1,
+        expected_apply_calls=4,
+        device="cpu",
+        quarantine_stale_sensor_after_reset=False,
+    )
+    latch.begin_policy_step()
+    latch.record_apply(None)  # pre-substep-1 write has no current sample
+    latch.record_apply(torch.tensor([True]))  # substep 1: robot hit table
+    latch.record_apply(torch.tensor([False]))
+    latch.record_apply(torch.tensor([False]))
+    clean_final_sample = torch.tensor([False])
+    action = SimpleNamespace(
+        finalize_table_contact_substep_readback=lambda: latch.finalize(
+            clean_final_sample
+        )
+    )
+    env = SimpleNamespace(
+        num_envs=1,
+        action_manager=SimpleNamespace(
+            get_term=lambda name: action if name == "joint_pos" else None
+        ),
+    )
+
+    terminated = term_cfg.func(env, **term_cfg.params)
+    assert terminated.tolist() == [True]
+    assert latch.finalized is True
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     (

@@ -3448,6 +3448,16 @@ class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
         # Manager-construction boundary.
         self.terminations = HOPEActionBallFullMdpTerminationsCfg()
         apply_table_obstacle(self)
+        # FullMDP keeps the real top-only table so balls can cross below the
+        # slab, but robot/table safety still needs all four physics samples.
+        # The action latch observes substeps 1..3 and this DoneTerm finalizes
+        # substep 4; a clean final pose must not erase an earlier table hit.
+        self.actions.joint_pos.table_contact_substep_guard = True
+        self.actions.joint_pos.table_contact_guard_termination_term = (
+            "robot_hit_table"
+        )
+        self.actions.joint_pos.table_contact_guard_expected_decimation = 4
+        self.terminations.robot_hit_table.params["require_substep_latch"] = True
         self.rewards = HOPEActionBallFullMdpRewardsCfg()
         blockers = action_ball_full_mdp_reward_template_blockers(self.rewards)
         if blockers:
