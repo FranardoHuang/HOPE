@@ -7037,7 +7037,8 @@ runtime row，预期 SAT row 增量约 `1.6%`。冻结 owner pose 上新 reserve
 
 Isaac 与 MuJoCo 的 actual collider 不同；不得再写成“双端都是整个
 hand STL hull”。v2 artifact/schema/plant identity 及 exact MuJoCo MJCF/inventory 已版本化，
-loader 只读物化字节。它尚是 branch candidate，不改 active run；clean Pod
-materializer/check、聚焦回归和合入后同带 replay 前，不能将这一几何修复写成
+loader 只读物化字节。Pod exact `44011beb` 的 materializer/check 已逐字节通过，
+聚焦联合回归为 `152 passed`，Isaac split 四个 collider 的完整三角形子集覆盖也已
+入测。它仍是 branch candidate，不改 active run；合入后同带 replay 前，不能将这一几何修复写成
 teacher/Reward/训练通过。详见
 [collision proxy 实验 §9](../experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#9-2026-08-30-v2从-single-obb-空角改为双端-actual-collider-union)。

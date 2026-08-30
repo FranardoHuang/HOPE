@@ -436,3 +436,20 @@ Pod exact checkout 执行，命令见
 [Build And Test](../../operations/build_and_test.md#a3-table-collision-proxy-v2)。通过回归只能将
 v2 称为 merge candidate；未在 clean adopted source 上重放真实双端的同一
 teacher tape 前，不能把它写成新的训练/物理结果。
+
+Pod1 final exact checkout
+`/workspace/franco/mktemp/multiobb-44011beb.exact` 已给出：
+
+- 钉死系统 Python 的 `--check` 逐字节通过：`63 components`，file SHA
+  `7f26e55b…07cc`；
+- materializer + Isaac/Mu loader + plant identity + table SAT + live-constant 联合回归
+  `152 passed in 13.64 s`；其中新回归又将 Isaac split producer 的
+  `2806/178/178/9654` 个完整三角形逐项证明为已覆盖 source mesh 的子集；
+- MJLab keepout 依赖回归 `16 passed, 1 skipped in 2.93 s`；唯一 skip 是显式
+  opt-in 的 CUDA direct 用例。GPU0/2 当时有 active run，GPU1 与 GPU2 共享
+  NUMA，故本轮按算力纪律不为了一条 device test 污染现役训练窗口。
+
+在首次联合回归中另发现一个本分支造成的旧 fixture 假红：tensor shape 仍写死
+`62`，已改为读 production count。live-constant 的另一个文本 mutation anchor
+在基线 `3f0b80d3` 上也因两处相同配置而失败；后继只将变异限制在具名
+`HOPEActionBallTerminationsCfg` 内，不改 production code，因此 final 152 条全绿。

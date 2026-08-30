@@ -12,7 +12,9 @@
   schema/plant/artifact/MJCF/binding identity，运行时不重算 hull。
 - 冻结 witness 在标准 20 mm guard 下的新 reserve 为 `+24.884 mm`，同一桌盒
   额外扩 5 mm 后仍 `+19.884 mm`。当前只是功能分支候选，未触碰
-  active run；Pod exact materializer/check、回归与合入后双端 replay 未完成前，
+  active run。Pod exact `44011beb` 已通过 materializer/check 逐字节复现与 `152 passed`
+  聚焦联合回归；MJLab 为 `16 passed, 1` 个显式 CUDA opt-in skip，本轮不污染有
+  active run 的共享 NUMA 窗口。合入后双端 replay 未完成前，
   不写成 teacher/Reward/训练通过。详见
   [collision proxy 实验 §9](experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#9-2026-08-30-v2从-single-obb-空角改为双端-actual-collider-union)。
 

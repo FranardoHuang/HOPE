@@ -2722,7 +2722,9 @@ SHA=`70c4fd65…36c0a`、6 个 target collider 的 exact inventory/geometry 与�
 SHA；双 loader 都拒绝 schema/plant/MJCF/inventory 漂移。冻结 witness 在标准 20 mm
 下有 `+24.884 mm` reserve，额外 5 mm 压力下仍 `+19.884 mm`。
 
-此项是共享 guard 几何/身份修复，不是双端 physics parity 或训练结果；Pod exact
-回归与合入后同带 replay 仍需分别给出。G06 不晋级，不授权 resume/export/
+此项是共享 guard 几何/身份修复，不是双端 physics parity 或训练结果。Pod exact
+`44011beb` 已通过物化逐字节复现和 `152` 条聚焦联合回归；MJLab CPU 为
+`16 passed, 1` 个显式 CUDA opt-in skip，因 GPU0/2 active 且 GPU1 与 GPU2 共享
+NUMA，本轮没有污染现役窗口。合入后同带 replay 仍需分别给出。G06 不晋级，不授权 resume/export/
 deployment。细节见
 [collision proxy 实验 §9](../experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#9-2026-08-30-v2从-single-obb-空角改为双端-actual-collider-union)。

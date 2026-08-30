@@ -114,6 +114,10 @@ MJLab device SAT 回归只能在确认无 owner 冲突的空闲 GPU 上跑；不
 signal/停掉或污染 active run。任意 pass count 只证明 materializer/loader/SAT 合同，
 不代表 teacher 轨迹、Reward 或训练通过。
 
+2026-08-30 final exact `44011beb` 的上述 materializer/check 通过，CPU 联合回归
+`152 passed in 13.64 s`；MJLab keepout 依赖回归 `16 passed, 1 skipped in 2.93 s`。
+该 skip 是显式 CUDA direct 用例，当时不为了它污染 GPU2 现役训练窗口。
+
 ## Planner Unit Tests
 
 Run from the package directory:
