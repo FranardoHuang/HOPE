@@ -42,6 +42,13 @@ def test_singleton_profile_has_exact_independent_sides():
                 assert profile[f"{prefix}_tangent_{axis}_{side}_max_deg"] == 0.0
 
 
+def test_contact_deadline_rounds_up_to_policy_grid_without_losing_reaction_margin():
+    raw = 5.088 / 0.9816630367871384 + 0.1
+    assert raw == pytest.approx(5.283041236484155)
+    assert M._ceil_to_policy_tick(raw) == 5.3
+    assert M._ceil_to_policy_tick(raw) - 5.088 / 0.9816630367871384 >= 0.1
+
+
 def test_output_path_rejects_parent_escape(tmp_path):
     args = M.parser().parse_args([
         "--phase4-report", "x", "--phase4-npz", "y", "--dynamic-ready", "z",
