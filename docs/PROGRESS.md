@@ -1,5 +1,12 @@
 # 简短进度记录
 
+## 2026-08-30 — 双后端 TODO 收为唯一当前清单
+
+- `action_ball_dual_backend_longrun_todo_20260819.md` 只保留 R36 当前合同、反例结论、未闭阻断、停止规则与
+  执行顺序；原来 858 行 superseded 流水移入
+  [只读历史归档](archive/action_ball_dual_backend_longrun_todo_20260819_history.md)。旧显式 anchor 在当前页保留
+  短兼容入口，既有链接仍可解析；本次不改变运行事实、Gate、`NOW` 或 `TIMELINE`。
+
 ## 2026-08-30 — R36 时钟、单一 target 与最终 plant 合同收口
 
 - R35 最终窗已冻结为分层负例：Isaac 在充分 launch 后仍无 R03/contact，Mu 在 launch 前因 tilt 失败；

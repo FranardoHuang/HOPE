@@ -10,5 +10,6 @@
 | `PHASE1_FRESH_LINEAGE_2026-07-11.md` | fresh 谱系流水（一次性） | [EXP-P1-FRESH-SZ-STABILITY](../experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) |
 | `RUNPOD_TRAINING_AUDIT_2026-07-10.md` | RunPod 训练审计（一次性） | [`run_on_runpod.md`](../operations/run_on_runpod.md) |
 | `A3_DEPLOYMENT_ACTUATOR_AUDIT.md` | A3 部署作动器审计（一次性） | [G07](../gates/G07_mujoco_to_real.md) |
+| `action_ball_dual_backend_longrun_todo_20260819_history.md` | 双后端 FullMDP 已被取代的 TODO 与运行流水 | [当前双后端 TODO](../operations/action_ball_dual_backend_longrun_todo_20260819.md) |
 
 更早的流水归档另见 [`../experiments/archive/`](../experiments/archive/README.md)。
