@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 import sys
 
@@ -85,6 +86,20 @@ FULL_A_FACT_INTEGRITY_R03_NONFINITE = 1 << 0
 FULL_A_FACT_INTEGRITY_R06_SOURCE_INVALID = 1 << 1
 FULL_A_FACT_INTEGRITY_R07_SEQUENCE = 1 << 2
 FULL_A_FACT_INTEGRITY_R07_NONFINITE = 1 << 3
+
+
+@dataclass(frozen=True)
+class _FullAStagedReveal:
+    task_f32: object
+    task_yaw_wxyz: object
+    task_translation_scene: object
+    launch_state_f32: object
+    teacher_rate: object
+    scaled_t_hit_s: object
+    scaled_t_cycle_s: object
+    pre_swing_wait_s: object
+    ttc_ticks: object
+    launch_horizon_ticks: object
 FULLMDP_TRACKED_BODY_NAMES = (
     "pelvis_link",
     "left_hip_roll_Link",
@@ -888,7 +903,26 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # forcing a CUDA stream synchronization on every reveal.
         torch._assert_async(self._full_a_frozen_root_valid[ids].all())
         FrozenTaskFrameSE2(task_yaw, task_translation).validate_async(torch)
-        return question
+        required = {
+            "launch_state_f32", "teacher_rate", "scaled_t_hit_s",
+            "scaled_t_cycle_s", "pre_swing_wait_s", "ttc_ticks",
+            "launch_horizon_ticks",
+        }
+        if not required.issubset(question):
+            raise RuntimeError("portable centre question staged fields differ")
+        launch_state = question["launch_state_f32"]
+        if tuple(launch_state.shape) != (n, 13):
+            raise RuntimeError("portable centre launch state shape differs")
+        for name in required - {"launch_state_f32"}:
+            value = question[name]
+            if not hasattr(value, "shape") or tuple(value.shape) != (n,):
+                raise RuntimeError(f"portable centre {name} shape differs")
+        return _FullAStagedReveal(
+            task, task_yaw, task_translation, launch_state,
+            question["teacher_rate"], question["scaled_t_hit_s"],
+            question["scaled_t_cycle_s"], question["pre_swing_wait_s"],
+            question["ttc_ticks"], question["launch_horizon_ticks"],
+        )
 
     def _full_a_commit_reveal_rows(self, ids, question) -> None:
         """Commit one fully staged slot-zero centre question."""
@@ -897,23 +931,19 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         n = int(ids.numel())
         if n == 0:
             return
-        task = question["task_f32"]
-        task_yaw = question["teacher_source_to_task_yaw_wxyz"]
-        task_translation = question[
-            "teacher_source_to_task_translation_scene"
-        ]
+        task = question.task_f32
+        task_yaw = question.task_yaw_wxyz
+        task_translation = question.task_translation_scene
         self._full_a_teacher_source_to_task_yaw_wxyz[ids] = task_yaw
         self._full_a_teacher_source_to_task_translation_scene[ids] = (
             task_translation
         )
         self._epoch_task_f32[ids] = task
-        self._full_a_launch_state_f32[ids] = question[
-            "launch_state_f32"
-        ]
-        self._full_a_teacher_rate[ids] = question["teacher_rate"]
-        self._full_a_scaled_t_hit_s[ids] = question["scaled_t_hit_s"]
-        self._full_a_scaled_t_cycle_s[ids] = question["scaled_t_cycle_s"]
-        self._full_a_pre_swing_wait_s[ids] = question["pre_swing_wait_s"]
+        self._full_a_launch_state_f32[ids] = question.launch_state_f32
+        self._full_a_teacher_rate[ids] = question.teacher_rate
+        self._full_a_scaled_t_hit_s[ids] = question.scaled_t_hit_s
+        self._full_a_scaled_t_cycle_s[ids] = question.scaled_t_cycle_s
+        self._full_a_pre_swing_wait_s[ids] = question.pre_swing_wait_s
 
         racket = task[:, 5:32]
         r03 = self._full_a_r03_fact_f32[ids]
@@ -939,12 +969,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # boundary and is visible to the next policy action that can earn its
         # first imitation reward.
         reveal = int(self.common_step_counter)
-        contact_tick = reveal + question["ttc_ticks"]
-        launch_tick = contact_tick - question["launch_horizon_ticks"]
+        contact_tick = reveal + question.ttc_ticks
+        launch_tick = contact_tick - question.launch_horizon_ticks
         task_close_offset = torch.ceil(
             (
-                question["pre_swing_wait_s"]
-                + question["scaled_t_cycle_s"]
+                question.pre_swing_wait_s
+                + question.scaled_t_cycle_s
             )
             / float(self.step_dt)
             - 1.0e-12
