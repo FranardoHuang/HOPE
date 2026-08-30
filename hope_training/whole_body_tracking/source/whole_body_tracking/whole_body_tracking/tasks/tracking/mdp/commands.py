@@ -6952,25 +6952,22 @@ class MotionCommand(CommandTerm):
             task_translation = torch.zeros_like(root_position)
         completed_yaw = task_yaw
         completed_translation = task_translation
-        transformed_root_position = (
-            quat_apply(completed_yaw, root_position - self._env.scene.env_origins)
-            + completed_translation
-            + self._env.scene.env_origins
+        root_frame = FrozenTaskFrameSE2(completed_yaw, completed_translation)
+        transformed_root_position = root_frame.apply_point(
+            torch, root_position - self._env.scene.env_origins, quat_apply
+        ) + self._env.scene.env_origins
+        transformed_root_orientation = root_frame.apply_quat(
+            torch, root_orientation, quat_mul
         )
-        transformed_root_orientation = quat_mul(
-            completed_yaw, root_orientation
-        )
-        transformed_body_position = (
-            quat_apply(
-                completed_yaw[:, None, :].expand_as(body_orientation),
-                body_position - self._env.scene.env_origins[:, None, :],
-            )
-            + completed_translation[:, None, :]
-            + self._env.scene.env_origins[:, None, :]
-        )
-        transformed_body_orientation = quat_mul(
+        body_frame = FrozenTaskFrameSE2(
             completed_yaw[:, None, :].expand_as(body_orientation),
-            body_orientation,
+            completed_translation[:, None, :].expand_as(body_position),
+        )
+        transformed_body_position = body_frame.apply_point(
+            torch, body_position - self._env.scene.env_origins[:, None, :], quat_apply
+        ) + self._env.scene.env_origins[:, None, :]
+        transformed_body_orientation = body_frame.apply_quat(
+            torch, body_orientation, quat_mul
         )
         root_position = torch.where(
             completed_reference[:, None], transformed_root_position, root_position
