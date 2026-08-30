@@ -4950,15 +4950,37 @@ class ActionBallPhysicalFlightDeviceOwner:
             )
         return projection
 
-    @staticmethod
+    def _portable_global_boundary_pin(
+        self,
+        receipt: _reveal_boundary.ActionBallFullMdpRevealBoundaryReceipt,
+    ) -> Optional[_flight.CanonicalJsonContentPin]:
+        """Seal full boundary bytes only for the portable CPU receipt."""
+
+        if self.device.type != "cpu":
+            return None
+        boundary_mapping = receipt.to_mapping()
+        boundary_mapping["canonical_sha256"] = receipt.canonical_sha256
+        return _flight.CanonicalJsonContentPin.from_sealed_mapping(
+            boundary_mapping,
+            expected_source_kind=(
+                _flight.FULL_MDP_REVEAL_BOUNDARY_RECEIPT_KIND
+            ),
+            source_schema_sha256=(
+                _flight.FULL_MDP_REVEAL_BOUNDARY_RECEIPT_SCHEMA_SHA256
+            ),
+        )
+
     def _r05_terminal_evidence_pins(
+        self,
         claim: _r05.PreparedRevealTerminalClaim,
     ) -> tuple[
-        _flight.CanonicalJsonContentPin,
-        _flight.CanonicalJsonContentPin,
+        Optional[_flight.CanonicalJsonContentPin],
+        Optional[_flight.CanonicalJsonContentPin],
     ]:
-        """Seal detached full claim evidence without treating it as authority."""
+        """Seal detached full claim evidence only for the portable CPU receipt."""
 
+        if self.device.type != "cpu":
+            return None, None
         if type(claim) is not _r05.PreparedRevealTerminalClaim:
             raise PhysicalFlightDeviceError("R05 terminal claim type differs")
         try:
@@ -6413,18 +6435,8 @@ class ActionBallPhysicalFlightDeviceOwner:
                 raise PhysicalFlightDeviceError(
                     "R05 terminal claim identity differs"
                 )
-            boundary_mapping = global_boundary_receipt.to_mapping()
-            boundary_mapping["canonical_sha256"] = (
-                global_boundary_receipt.canonical_sha256
-            )
-            boundary_pin = _flight.CanonicalJsonContentPin.from_sealed_mapping(
-                boundary_mapping,
-                expected_source_kind=(
-                    _flight.FULL_MDP_REVEAL_BOUNDARY_RECEIPT_KIND
-                ),
-                source_schema_sha256=(
-                    _flight.FULL_MDP_REVEAL_BOUNDARY_RECEIPT_SCHEMA_SHA256
-                ),
+            boundary_pin = self._portable_global_boundary_pin(
+                global_boundary_receipt
             )
             claim_projection = self._r05_terminal_claim_projection(
                 r05_terminal_claim
