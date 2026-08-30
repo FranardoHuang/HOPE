@@ -711,6 +711,56 @@ class ActionBallFullMdpLeanRuntimeOwner:
                         "Reward graph has unfinished actual-buffer accounting"
                     )
 
+                if getattr(
+                    self._racket,
+                    "_action_ball_full_mdp_enabled",
+                    False,
+                ) is True:
+                    num_envs = self._epoch.num_envs
+                    completed_delta = (
+                        completed - self._last_completed_environment_steps
+                    )
+                    if (
+                        type(num_envs) is not int
+                        or num_envs < 1
+                        or completed_delta % num_envs != 0
+                    ):
+                        self._poison_locked(
+                            "command metric PPO span is not whole policy steps"
+                        )
+                        raise ActionBallFullMdpLeanRuntimeError(
+                            "command metric PPO span is not whole policy steps"
+                        )
+                    policy_steps = completed_delta // num_envs
+                    expected_metric_steps = (
+                        (policy_steps, policy_steps + 1)
+                        if update == 0
+                        else (policy_steps,)
+                    )
+                    materialize_command_metrics = self._bound_plain_method(
+                        self._racket,
+                        "materialize_action_ball_diagnostic_metrics_for_report",
+                    )
+                    try:
+                        result = materialize_command_metrics(
+                            expected_full_mdp_command_metric_step_counts=(
+                                expected_metric_steps
+                            )
+                        )
+                    except BaseException as exc:
+                        self._poison_locked(
+                            "command metric PPO-boundary materialization failed: "
+                            + type(exc).__name__
+                        )
+                        raise
+                    if result is not None:
+                        self._poison_locked(
+                            "command metric PPO-boundary materializer returned a value"
+                        )
+                        raise ActionBallFullMdpLeanRuntimeError(
+                            "command metric PPO-boundary materializer returned a value"
+                        )
+
                 start, end = self._epoch.prepare_drain()
                 if start != self._acked_commit_end:
                     self._poison_locked(
