@@ -35,9 +35,17 @@ from isaaclab.envs.mdp.actions.joint_actions import JointPositionAction
 from isaaclab.utils import configclass
 
 try:
-    from .action_ball_qdes_guard import action_ball_qdes_guard
+    from .action_ball_qdes_guard import (
+        ActionBallQdesEnvelope,
+        action_ball_qdes_guard_with_envelope,
+        derive_action_ball_qdes_envelope,
+    )
 except ImportError:  # Focused source tests load this module without a package.
-    from action_ball_qdes_guard import action_ball_qdes_guard
+    from action_ball_qdes_guard import (
+        ActionBallQdesEnvelope,
+        action_ball_qdes_guard_with_envelope,
+        derive_action_ball_qdes_envelope,
+    )
 
 
 class _PhysicsSubstepJointSafetyLedger:
@@ -1313,9 +1321,12 @@ class ClampedJointPositionAction(JointPositionAction):
                 torch.Tensor,
                 torch.Tensor,
                 torch.Tensor,
+                torch.Tensor,
+                torch.Tensor,
             ]
             | None
         ) = None
+        self._static_qdes_envelope: ActionBallQdesEnvelope | None = None
         self._joint_safety_terminal_archive_capacity = None
         self._table_contact_substep_guard_enabled = bool(
             getattr(cfg, "table_contact_substep_guard", False)
@@ -1496,6 +1507,8 @@ class ClampedJointPositionAction(JointPositionAction):
             )
         if self._physx_control_position_limit_inset_fraction != 0.0:
             self._install_physx_control_position_limits()
+        if self._clamp_enabled:
+            self._bind_static_qdes_envelope()
         self._pre_apply_qdes_violation_latch = torch.zeros_like(
             self._previous_processed_qdes_valid
         )
@@ -3198,6 +3211,8 @@ class ClampedJointPositionAction(JointPositionAction):
             soft_upper,
             hard_lower,
             hard_upper,
+            hard_inner_lower,
+            hard_inner_upper,
             target_lower,
             target_upper,
         ) = envelopes
@@ -3264,15 +3279,6 @@ class ClampedJointPositionAction(JointPositionAction):
             | lower_gap.le(0.0)
             | upper_gap.le(0.0)
         )
-        assert self._pre_apply_guard_margin_rad is not None
-        assert self._pre_apply_guard_margin_fraction is not None
-        hard_travel = hard_upper - hard_lower
-        inset = (
-            self._pre_apply_guard_margin_rad
-            + self._pre_apply_guard_margin_fraction * hard_travel
-        )
-        hard_inner_lower = hard_lower + inset
-        hard_inner_upper = hard_upper - inset
         # Keep the validated control/reaction horizon at every fresh substep readback.  Shrinking
         # the prediction to one physics tick after the policy-step check lets an implicit drive
         # accelerate outward during the first substep, then notices the crossing only when there is
@@ -4457,36 +4463,38 @@ class ClampedJointPositionAction(JointPositionAction):
                 )
         return manager
 
-    def _action_ball_dynamic_ready_target_envelope(
-        self,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return the exact executable q_des envelope for reset rows."""
+    def _bind_static_qdes_envelope(self) -> None:
+        """Validate and freeze the URDF/config target envelope once.
 
-        if not self._clamp_enabled:
-            raise RuntimeError(
-                "action-ball dynamic-ready requires the deploy-parity q_des clamp"
-            )
-        limits = self._asset.data.soft_joint_pos_limits[
+        Isaac's articulation limits and the ActionTerm margin settings are
+        construction-owned configuration.  Re-deriving their full ``[N,J]``
+        intersection on every policy step adds kernels and async assertions but
+        cannot observe a legitimate episode-state change.
+        """
+
+        expected = tuple(self._processed_actions.shape) + (2,)
+        soft_limits = self._asset.data.soft_joint_pos_limits[
             :, self._joint_ids, :
         ]
-        expected = tuple(self._processed_actions.shape) + (2,)
         if (
-            tuple(limits.shape) != expected
-            or limits.device != self._processed_actions.device
-            or limits.dtype != self._processed_actions.dtype
+            tuple(soft_limits.shape) != expected
+            or soft_limits.device != self._processed_actions.device
+            or soft_limits.dtype != self._processed_actions.dtype
         ):
             raise RuntimeError(
-                "action-ball dynamic-ready soft limits differ from q_des"
+                "ClampedJointPositionAction requires soft_joint_pos_limits "
+                "to match q_des shape/device/dtype at construction"
             )
-        lower = limits[..., 0]
-        upper = limits[..., 1]
+        soft_lower = soft_limits[..., 0]
+        soft_upper = soft_limits[..., 1]
+
         if self._pre_apply_limit_guard_enabled:
             if (
                 self._pre_apply_guard_margin_rad is None
                 or self._pre_apply_guard_margin_fraction is None
             ):
                 raise RuntimeError(
-                    "action-ball dynamic-ready found an incomplete pre-apply guard"
+                    "pre_apply_limit_guard has no construction-time margins"
                 )
             hard_limits = self._asset.data.joint_pos_limits[
                 :, self._joint_ids, :
@@ -4497,30 +4505,72 @@ class ClampedJointPositionAction(JointPositionAction):
                 or hard_limits.dtype != self._processed_actions.dtype
             ):
                 raise RuntimeError(
-                    "action-ball dynamic-ready hard limits differ from q_des"
+                    "pre_apply_limit_guard requires joint_pos_limits to match "
+                    "q_des shape/device/dtype at construction"
                 )
             hard_lower = hard_limits[..., 0]
             hard_upper = hard_limits[..., 1]
-            hard_travel = hard_upper - hard_lower
-            inset = (
-                self._pre_apply_guard_margin_rad
-                + self._pre_apply_guard_margin_fraction * hard_travel
+            hard_margin_rad = self._pre_apply_guard_margin_rad
+            hard_margin_fraction = self._pre_apply_guard_margin_fraction
+        else:
+            # Clamp-only tasks have no physical crossing guard.  Reusing the
+            # soft envelope as the inactive hard envelope preserves their exact
+            # historical target while sharing the same immutable representation.
+            hard_lower = soft_lower
+            hard_upper = soft_upper
+            hard_margin_rad = 0.0
+            hard_margin_fraction = 0.0
+
+        try:
+            envelope = derive_action_ball_qdes_envelope(
+                soft_lower=soft_lower,
+                soft_upper=soft_upper,
+                hard_lower=hard_lower,
+                hard_upper=hard_upper,
+                hard_margin_rad=hard_margin_rad,
+                hard_margin_fraction=hard_margin_fraction,
+                project_finite_without_termination=(
+                    self._project_finite_preclamp_qdes_without_termination
+                ),
+                projection_soft_inset_fraction=(
+                    self._finite_projection_soft_envelope_inset_fraction
+                ),
+                freeze=True,
+                validate_values=True,
             )
-            lower = torch.maximum(lower, hard_lower + inset)
-            upper = torch.minimum(upper, hard_upper - inset)
-        if self._project_finite_preclamp_qdes_without_termination:
-            soft_limits = self._asset.data.soft_joint_pos_limits[
-                :, self._joint_ids, :
-            ]
-            soft_lower = soft_limits[..., 0]
-            soft_upper = soft_limits[..., 1]
-            projection_inset = (
-                self._finite_projection_soft_envelope_inset_fraction
-                * (soft_upper - soft_lower)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "q_des static binding found an invalid soft deploy envelope, "
+                "hard envelope, or projected target intersection"
+            ) from exc
+        self._static_qdes_envelope = envelope
+        if self._pre_apply_limit_guard_enabled:
+            self._current_substep_guard_envelopes = (
+                envelope.soft_lower,
+                envelope.soft_upper,
+                envelope.hard_lower,
+                envelope.hard_upper,
+                envelope.hard_inner_lower,
+                envelope.hard_inner_upper,
+                envelope.target_lower,
+                envelope.target_upper,
             )
-            lower = torch.maximum(lower, soft_lower + projection_inset)
-            upper = torch.minimum(upper, soft_upper - projection_inset)
-        return lower, upper
+
+    def _action_ball_dynamic_ready_target_envelope(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the exact executable q_des envelope for reset rows."""
+
+        if not self._clamp_enabled:
+            raise RuntimeError(
+                "action-ball dynamic-ready requires the deploy-parity q_des clamp"
+            )
+        envelope = self._static_qdes_envelope
+        if envelope is None:
+            raise RuntimeError(
+                "action-ball dynamic-ready has no construction-bound q_des envelope"
+            )
+        return envelope.target_lower, envelope.target_upper
 
     def snapshot_action_ball_dynamic_ready_state(
         self, env_ids: Sequence[int] | torch.Tensor
@@ -4959,117 +5009,19 @@ class ClampedJointPositionAction(JointPositionAction):
             finite_fallback,
         )
         if self._clamp_enabled:
-            limits = self._asset.data.soft_joint_pos_limits[:, self._joint_ids, :]
-            expected_limit_shape = tuple(self._processed_actions.shape) + (2,)
-            if (
-                tuple(limits.shape) != expected_limit_shape
-                or limits.device != self._processed_actions.device
-                or limits.dtype != self._processed_actions.dtype
-            ):
+            envelope = self._static_qdes_envelope
+            if envelope is None:
                 raise RuntimeError(
-                    "ClampedJointPositionAction requires soft_joint_pos_limits to match "
-                    "q_des shape/device/dtype"
+                    "ClampedJointPositionAction has no construction-bound "
+                    "q_des envelope"
                 )
-            lower = limits[..., 0]
-            upper = limits[..., 1]
-            travel = upper - lower
-            limits_valid = torch.all(
-                torch.isfinite(lower)
-                & torch.isfinite(upper)
-                & travel.gt(0.0)
-            )
-            if limits_valid.device.type == "cpu":
-                if not bool(limits_valid):
-                    raise RuntimeError(
-                        "ClampedJointPositionAction requires finite soft joint limits "
-                        "with lower < upper"
-                    )
-            else:
-                torch._assert_async(limits_valid)
+            lower = envelope.soft_lower
+            upper = envelope.soft_upper
 
             if self._pre_apply_limit_guard_enabled:
                 assert self._pre_apply_guard_policy_dt_s is not None
-                assert self._pre_apply_guard_margin_rad is not None
-                assert self._pre_apply_guard_margin_fraction is not None
-                hard_limits = self._asset.data.joint_pos_limits[
-                    :, self._joint_ids, :
-                ]
-                if (
-                    tuple(hard_limits.shape) != expected_limit_shape
-                    or hard_limits.device != self._processed_actions.device
-                    or hard_limits.dtype != self._processed_actions.dtype
-                ):
-                    raise RuntimeError(
-                        "pre_apply_limit_guard requires joint_pos_limits to match "
-                        "q_des shape/device/dtype"
-                    )
-                hard_lower = hard_limits[..., 0]
-                hard_upper = hard_limits[..., 1]
-                hard_travel = hard_upper - hard_lower
-                inset = (
-                    self._pre_apply_guard_margin_rad
-                    + self._pre_apply_guard_margin_fraction * hard_travel
-                )
-                hard_inner_lower = hard_lower + inset
-                hard_inner_upper = hard_upper - inset
-                envelope_valid = torch.all(
-                    torch.isfinite(hard_lower)
-                    & torch.isfinite(hard_upper)
-                    & hard_travel.gt(0.0)
-                    & torch.isfinite(hard_inner_lower)
-                    & torch.isfinite(hard_inner_upper)
-                    & hard_inner_lower.lt(hard_inner_upper)
-                    & lower.ge(hard_lower)
-                    & upper.le(hard_upper)
-                )
-                if envelope_valid.device.type == "cpu":
-                    if not bool(envelope_valid):
-                        raise RuntimeError(
-                            "pre_apply_limit_guard margins consume or invalidate the "
-                            "hard joint envelope, or the soft deploy envelope is not "
-                            "contained by the hard envelope"
-                        )
-                else:
-                    torch._assert_async(envelope_valid)
-                # Commands always remain inside the deploy soft envelope.  If an explicitly
-                # configured hard guard inset is narrower still, use the intersection.
-                target_lower = torch.maximum(lower, hard_inner_lower)
-                target_upper = torch.minimum(upper, hard_inner_upper)
-                if self._project_finite_preclamp_qdes_without_termination:
-                    # ActionBall keeps the raw Gaussian proposal and PPO log-probability untouched,
-                    # but executes a nearest-point projection with five percent of the existing
-                    # soft span reserved on each side.  Intersect with the physical guard envelope
-                    # rather than replacing it, so this can only increase safety.
-                    projection_inset = (
-                        self._finite_projection_soft_envelope_inset_fraction * travel
-                    )
-                    target_lower = torch.maximum(
-                        target_lower, lower + projection_inset
-                    )
-                    target_upper = torch.minimum(
-                        target_upper, upper - projection_inset
-                    )
-                target_envelope_valid = torch.all(target_lower.lt(target_upper))
-                if target_envelope_valid.device.type == "cpu":
-                    if not bool(target_envelope_valid):
-                        raise RuntimeError(
-                            "pre_apply_limit_guard hard inset and soft deploy envelope "
-                            "have no interior intersection"
-                        )
-                else:
-                    torch._assert_async(target_envelope_valid)
-                # Freeze one validated receipt for all four physics writes plus the final
-                # readback.  Static URDF/config limits are revalidated once per policy step,
-                # rather than launching the same full-batch checks at every substep.
-                self._current_substep_guard_envelopes = (
-                    lower,
-                    upper,
-                    hard_lower,
-                    hard_upper,
-                    target_lower,
-                    target_upper,
-                )
-
+                target_lower = envelope.target_lower
+                target_upper = envelope.target_upper
                 joint_pos = self._asset.data.joint_pos[:, self._joint_ids]
                 joint_vel = self._asset.data.joint_vel[:, self._joint_ids]
                 for name, value in (
@@ -5085,30 +5037,17 @@ class ClampedJointPositionAction(JointPositionAction):
                             "pre_apply_limit_guard requires runtime "
                             f"{name} to match q_des shape/device/dtype"
                         )
-                guard = action_ball_qdes_guard(
+                guard = action_ball_qdes_guard_with_envelope(
                     pre_clamp_qdes=self._pre_clamp_qdes,
                     previous_executable_qdes=self._previous_processed_qdes,
                     previous_executable_valid=(
                         self._previous_processed_qdes_valid
                     ),
                     default_qdes=default_qdes,
-                    soft_lower=lower,
-                    soft_upper=upper,
-                    hard_lower=hard_lower,
-                    hard_upper=hard_upper,
+                    envelope=envelope,
                     joint_pos=joint_pos,
                     joint_vel=joint_vel,
                     policy_dt_s=self._pre_apply_guard_policy_dt_s,
-                    hard_margin_rad=self._pre_apply_guard_margin_rad,
-                    hard_margin_fraction=(
-                        self._pre_apply_guard_margin_fraction
-                    ),
-                    project_finite_without_termination=(
-                        self._project_finite_preclamp_qdes_without_termination
-                    ),
-                    projection_soft_inset_fraction=(
-                        self._finite_projection_soft_envelope_inset_fraction
-                    ),
                 )
                 qdes_safety_violation = guard.qdes_safety_violation
                 crossing_violation = guard.crossing_violation
@@ -5175,7 +5114,7 @@ class ClampedJointPositionAction(JointPositionAction):
                     self._processed_actions, min=lower, max=upper
                 )
                 self._nominal_projected_qdes.copy_(self._processed_actions)
-                self._nominal_projection_span.copy_(upper - lower)
+                self._nominal_projection_span.copy_(envelope.target_span)
 
             processed_safe = torch.all(
                 torch.isfinite(self._processed_actions)
