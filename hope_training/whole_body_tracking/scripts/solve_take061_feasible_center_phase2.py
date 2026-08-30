@@ -35,8 +35,8 @@ def _phase2_velocity_matched(velocity_error_mps, tolerance_mps):
     """Phase2 matches the executable centre to solver velocity only.
 
     The measured teacher face and the solver face encode different intents and
-    have no specification requiring equality.  Their angle remains a recorded
-    diagnostic; Phase3/4 own solver-face retarget and final admission.
+    have no specification requiring equality.  Their angle may rank solver
+    seeds by retarget distance, but Phase3/4 own face matching and admission.
     """
     return bool(
         np.isfinite(velocity_error_mps)
@@ -114,9 +114,10 @@ def _fixed_solver_inverse_grid(center, args):
     target_face = reference_face / torch.linalg.norm(reference_face, dim=1, keepdim=True)
     face_deg = torch.rad2deg(torch.acos(torch.clamp((unit_face * target_face).sum(1), -1, 1)))
     velocity_error = torch.linalg.norm(solved.v_racket - feasible_velocity, dim=1)
-    # Teacher face and solver face encode different targets.  Do not use their
-    # angle either to select or admit a Phase2 velocity seed.
-    score = velocity_error
+    # Face distance is only a retarget-effort ranking prior.  It is not a
+    # Phase2 match or admission condition because the two faces encode
+    # different intents.
+    score = velocity_error + 0.02 * face_deg
     score[~solved.ok] = float("inf")
     best = int(torch.argmin(score))
     if not bool(torch.isfinite(score[best])):
@@ -149,7 +150,7 @@ def _fixed_solver_inverse_grid(center, args):
         "velocity_tolerance_mps": args.solver_velocity_tolerance_mps,
         "face_tolerance_deg": args.solver_face_tolerance_deg,
         "face_error_admission_gate": False,
-        "face_error_role": "diagnostic_only_teacher_and_solver_faces_need_not_match",
+        "face_error_role": "retarget_ranking_only_not_an_admission_gate",
         "reason_counts": solved.reason_counts,
         "solver_sources": {
             "continuous_questions_sha256": P1._sha256(Path(cq.__file__)),
