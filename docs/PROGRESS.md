@@ -5396,6 +5396,15 @@
   LeanRuntime先完成原有class-bound identity认证，再用可卸载callback包住同一个bound method；没有以诊断
   为由放宽生产方法身份合同。
 
+## 2026-08-30 — teacher replay keepout 首阳性二层归因候选
+
+- `62dcd578…`真实CUDA已把首次table terminal分流为SAT keepout阳性、MuJoCo resolved contact全程阴性；
+  当前候选只在N=1 frozen-teacher replay显式启用后，于首个keepout阳性substep运行一次同序SAT witness，
+  冻结component/blade、owner body、五类桌面role、signed SAT margin及root/owner pose。
+- 默认训练仍只有既有consumer空检查，不分配witness buffer、不D2H、不改变termination或Reward。CPU synthetic
+  覆盖component-major winner、once-only与unknown fail-closed；Pod CPU与真实CUDA复测尚未完成，不能据此
+  决定重定时、站位平移或收窄2 cm guard。
+
 ## HISTORICAL / SUPERSEDED — 2026-08-25 V6候选冻结、尚未Pod重验
 
 - 本段形成时只冻结了PPO V5、Reward24、Observation V3、四due/terminal overlap与native-Warp设计；

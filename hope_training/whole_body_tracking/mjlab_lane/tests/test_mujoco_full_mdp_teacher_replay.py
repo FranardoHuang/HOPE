@@ -22,6 +22,7 @@ if str(LANE) not in sys.path:
 import mujoco_full_mdp_teacher_replay as replay
 import mujoco_gpu_ac_full_mdp_initial_wait_env as wait_env
 import mujoco_gpu_ac_full_mdp_wait_rsl3 as runner
+import mujoco_gpu_ac_table_keepout as keepout
 
 
 def test_teacher_replay_wait_bridge_and_affine_decoder_are_exact():
@@ -335,6 +336,41 @@ def _table_attribution_rig():
     )
 
 
+def _keepout_witness(*, component_id="torso_box"):
+    return {
+        "schema": "action_ball_keepout_first_witness_v1",
+        "selection": "first_production_order_overlap",
+        "component_index": 7,
+        "component_id": component_id,
+        "component_kind": "body_proxy",
+        "owner_body_index": 9,
+        "owner_body_name": "torso_Link",
+        "table_index": 0,
+        "table_role": "top",
+        "sat_signed_margin_m": -0.003,
+        "root_position_env_m": [0.0, 0.0, 1.0],
+        "root_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+        "owner_position_env_m": [0.2, 0.0, 1.1],
+        "owner_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+        "plant_identity": {
+            "root_mjcf_sha256": "a" * 64,
+            "identity_manifest_sha256": "b" * 64,
+            "portable_identity_sha256": "c" * 64,
+            "verification_receipt_sha256": "d" * 64,
+            "owner_local_frame_sha256": "e" * 64,
+        },
+    }
+
+
+def test_keepout_witness_winner_is_component_major_and_unknown_fails_closed():
+    exact = torch.zeros((63, 5), dtype=torch.bool)
+    exact[12, 0] = True
+    exact[3, 4] = True
+    assert keepout._host_test_first_overlap_index(exact) == (3, 4)
+    with pytest.raises(RuntimeError, match="no SAT witness"):
+        keepout._host_test_first_overlap_index(torch.zeros_like(exact))
+
+
 def test_table_attribution_freezes_first_positive_before_reset_once_only():
     env = _table_attribution_rig()
     capture = wait_env.FullMdpInitialWaitVecEnv._capture_diagnostic_table_attribution
@@ -354,6 +390,7 @@ def test_table_attribution_freezes_first_positive_before_reset_once_only():
         resolved_is_final=False,
         substep_index=2,
         capture_boundary="physics_substep_poststate",
+        keepout_witness=_keepout_witness(),
     )
     capture(
         env,
@@ -388,6 +425,7 @@ def test_table_attribution_freezes_first_positive_before_reset_once_only():
         "completed_physics_substeps": 2,
         "keepout_source": True,
         "backend_resolved_table_contact": False,
+        "keepout_witness": _keepout_witness(),
     }
 
     wait_env.FullMdpInitialWaitVecEnv._begin_diagnostic_table_attribution_tick(env)
@@ -398,6 +436,7 @@ def test_table_attribution_freezes_first_positive_before_reset_once_only():
         resolved_is_final=True,
         substep_index=None,
         capture_boundary="post_forward_final",
+        keepout_witness=_keepout_witness() if keepout else None,
     )
     second = finalize(
         env,
@@ -432,6 +471,46 @@ def test_table_attribution_unknown_or_unmatched_source_fails_closed(
     with pytest.raises(RuntimeError, match="source is unknown"):
         wait_env.FullMdpInitialWaitVecEnv.diagnostic_table_attribution_tick(
             env, torch.tensor([bits])
+        )
+
+
+def test_keepout_witness_is_frozen_once_and_unknown_fails_closed():
+    env = _table_attribution_rig()
+    capture = wait_env.FullMdpInitialWaitVecEnv._capture_diagnostic_table_attribution
+    capture(
+        env,
+        keepout=torch.tensor([True]),
+        resolved=torch.tensor([False]),
+        resolved_is_final=False,
+        substep_index=4,
+        capture_boundary="physics_substep_poststate",
+        keepout_witness=_keepout_witness(component_id="first"),
+    )
+    capture(
+        env,
+        keepout=torch.tensor([True]),
+        resolved=torch.tensor([False]),
+        resolved_is_final=False,
+        substep_index=5,
+        capture_boundary="physics_substep_poststate",
+        keepout_witness=_keepout_witness(component_id="second"),
+    )
+    assert env._diagnostic_table_tick_first_positive["keepout_witness"][
+        "component_id"
+    ] == "first"
+
+    unknown = _keepout_witness()
+    unknown["table_role"] = "mystery"
+    fresh = _table_attribution_rig()
+    with pytest.raises(RuntimeError, match="witness is unknown"):
+        capture(
+            fresh,
+            keepout=torch.tensor([True]),
+            resolved=torch.tensor([False]),
+            resolved_is_final=False,
+            substep_index=1,
+            capture_boundary="physics_substep_poststate",
+            keepout_witness=unknown,
         )
 
 

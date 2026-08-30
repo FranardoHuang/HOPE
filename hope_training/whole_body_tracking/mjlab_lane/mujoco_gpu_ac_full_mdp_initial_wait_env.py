@@ -607,6 +607,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 "MuJoCo-Warp generic contact patch tensor bridge differs"
             ) from exc
         self._diagnostic_first_generic_contact_patch = None
+        self._table_keepout.enable_diagnostic_first_positive_witness()
         self._diagnostic_contact_patch_consumer = (
             self._capture_diagnostic_first_generic_contact_patch
         )
@@ -628,7 +629,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
 
     def _capture_diagnostic_table_attribution(
         self, *, keepout, resolved, resolved_is_final,
-        substep_index, capture_boundary,
+        substep_index, capture_boundary, keepout_witness=None,
     ) -> None:
         """Latch the first pre-reset table source in the opt-in N=1 replay."""
 
@@ -636,6 +637,62 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             raise RuntimeError("diagnostic table attribution shape differs")
         keepout_positive = bool(keepout[0].detach().cpu().item())
         resolved_positive = bool(resolved[0].detach().cpu().item())
+        if keepout_positive and self._diagnostic_table_tick_first_positive is None:
+            if keepout_witness is None:
+                keepout_witness = self._table_keepout.diagnostic_first_positive_witness(
+                    self.sim.data
+                )
+            pose_keys = (
+                ("root_position_env_m", 3),
+                ("root_quaternion_wxyz", 4),
+                ("owner_position_env_m", 3),
+                ("owner_quaternion_wxyz", 4),
+            )
+            identity = keepout_witness.get("plant_identity", {})
+            if (
+                not isinstance(keepout_witness, dict)
+                or keepout_witness.get("schema")
+                != "action_ball_keepout_first_witness_v1"
+                or keepout_witness.get("table_role")
+                not in ("top", "keepout", "net", "post_left", "post_right")
+                or keepout_witness.get("component_kind")
+                not in ("body_proxy", "blade")
+                or type(keepout_witness.get("component_index")) is not int
+                or not 0 <= keepout_witness["component_index"] < 63
+                or type(keepout_witness.get("owner_body_name")) is not str
+                or not keepout_witness["owner_body_name"]
+                or type(keepout_witness.get("component_id")) is not str
+                or not keepout_witness["component_id"]
+                or not isinstance(
+                    keepout_witness.get("sat_signed_margin_m"), (int, float)
+                )
+                or not math.isfinite(float(keepout_witness["sat_signed_margin_m"]))
+                or any(
+                    not isinstance(keepout_witness.get(key), list)
+                    or len(keepout_witness[key]) != length
+                    or any(
+                        not isinstance(value, (int, float))
+                        or not math.isfinite(float(value))
+                        for value in keepout_witness[key]
+                    )
+                    for key, length in pose_keys
+                )
+                or not isinstance(identity, dict)
+                or set(identity) != {
+                    "root_mjcf_sha256",
+                    "identity_manifest_sha256",
+                    "portable_identity_sha256",
+                    "verification_receipt_sha256",
+                    "owner_local_frame_sha256",
+                }
+                or any(
+                    type(value) is not str
+                    or len(value) != 64
+                    or any(char not in "0123456789abcdef" for char in value)
+                    for value in identity.values()
+                )
+            ):
+                raise RuntimeError("positive keepout witness is unknown")
         self._diagnostic_table_tick_keepout |= keepout_positive
         if resolved_is_final:
             if capture_boundary != "post_forward_final" or substep_index is not None:
@@ -676,6 +733,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                     resolved_is_final and resolved_positive
                 ),
             }
+            if keepout_positive:
+                self._diagnostic_table_tick_first_positive[
+                    "keepout_witness"
+                ] = dict(keepout_witness)
 
     def diagnostic_table_attribution_tick(self, terminal_bits) -> dict:
         """Finalize one source split only after the terminal bits are known."""

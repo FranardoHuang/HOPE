@@ -8,6 +8,7 @@ host readback; Torch remains only as the dependency-light CPU test oracle.
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
 from types import MappingProxyType
@@ -226,6 +227,27 @@ if _wp is not None:
 
 
     @_wp.func
+    def _warp_sat_axis_signed_gap_f32(
+        delta: _wp.vec3,
+        half_axes: _wp.mat33,
+        box_half: _wp.vec3,
+        axis: _wp.vec3,
+    ) -> float:
+        separation = _wp.abs(_wp.dot(delta, axis))
+        obb_radius = 0.0
+        for index in range(3):
+            obb_radius += _wp.abs(
+                _wp.dot(_warp_mat_row_f32(half_axes, index), axis)
+            )
+        box_radius = (
+            box_half[0] * _wp.abs(axis[0])
+            + box_half[1] * _wp.abs(axis[1])
+            + box_half[2] * _wp.abs(axis[2])
+        )
+        return separation - obb_radius - box_radius
+
+
+    @_wp.func
     def _warp_world_axis_f32(index: int) -> _wp.vec3:
         if index == 0:
             return _wp.vec3(1.0, 0.0, 0.0)
@@ -319,6 +341,60 @@ if _wp is not None:
         return True
 
 
+    @_wp.func
+    def _warp_sat_signed_margin_f32(
+        center: _wp.vec3,
+        half_axes: _wp.mat33,
+        lo: _wp.vec3,
+        hi: _wp.vec3,
+    ) -> float:
+        """Largest SAT gap: positive is clear, zero/tiny negative overlaps."""
+
+        box_center = 0.5 * (lo + hi)
+        box_half = 0.5 * (hi - lo)
+        delta = box_center - center
+        margin = -3.4028234663852886e38
+        for world_index in range(3):
+            margin = _wp.max(
+                margin,
+                _warp_sat_axis_signed_gap_f32(
+                    delta, half_axes, box_half, _warp_world_axis_f32(world_index)
+                ),
+            )
+        for obb_index in range(3):
+            half_axis = _warp_mat_row_f32(half_axes, obb_index)
+            norm = _wp.max(
+                _wp.sqrt(_wp.dot(half_axis, half_axis)),
+                1.1754943508222875e-38,
+            )
+            unit_axis = half_axis / norm
+            margin = _wp.max(
+                margin,
+                _warp_sat_axis_signed_gap_f32(
+                    delta, half_axes, box_half, unit_axis
+                ),
+            )
+            for world_index in range(3):
+                cross_axis = _wp.cross(
+                    unit_axis, _warp_world_axis_f32(world_index)
+                )
+                cross_norm = _wp.sqrt(_wp.dot(cross_axis, cross_axis))
+                # Parallel axes are redundant SAT directions.  The boolean
+                # production kernel accepts their zero gap; omitting them here
+                # prevents a meaningless zero from hiding penetration depth.
+                if cross_norm > 1.0e-7:
+                    margin = _wp.max(
+                        margin,
+                        _warp_sat_axis_signed_gap_f32(
+                            delta,
+                            half_axes,
+                            box_half,
+                            cross_axis / cross_norm,
+                        ),
+                    )
+        return margin
+
+
     @_wp.kernel(enable_backward=False)
     def _warp_table_keepout_f32(
         body_pos_w: _wp.array(dtype=_wp.vec3, ndim=2),
@@ -395,8 +471,91 @@ if _wp is not None:
                     return
         output[env] = False
 
+
+    @_wp.kernel(enable_backward=False)
+    def _warp_table_keepout_first_witness_f32(
+        body_pos_w: _wp.array(dtype=_wp.vec3, ndim=2),
+        body_quat_w: _wp.array(dtype=_wp.quat, ndim=2),
+        env_origins: _wp.array(dtype=_wp.vec3, ndim=1),
+        body_ids: _wp.array(dtype=_wp.int64, ndim=1),
+        component_owner_indices: _wp.array(dtype=_wp.int64, ndim=1),
+        component_local_centers: _wp.array(dtype=_wp.vec3, ndim=1),
+        component_local_half_axes: _wp.array(dtype=_wp.mat33, ndim=1),
+        table_lo: _wp.array(dtype=_wp.vec3, ndim=1),
+        table_hi: _wp.array(dtype=_wp.vec3, ndim=1),
+        racket_body_index: int,
+        blade_center_offset: _wp.array(dtype=_wp.vec3, ndim=1),
+        blade_local_half_axes: _wp.array(dtype=_wp.mat33, ndim=1),
+        winner_i64: _wp.array(dtype=_wp.int64, ndim=1),
+        witness_f32: _wp.array(dtype=_wp.float32, ndim=1),
+    ):
+        """Replay-only witness for the production kernel's first overlap."""
+
+        env = _wp.tid()
+        origin = env_origins[env]
+        winner_i64[0] = -1
+        winner_i64[1] = -1
+        winner_i64[2] = -1
+        for obb in range(63):
+            local_body = racket_body_index
+            local_center = blade_center_offset[0]
+            local_axes = blade_local_half_axes[0]
+            broad_guard = 0.0
+            if obb < 62:
+                local_body = int(component_owner_indices[obb])
+                local_center = component_local_centers[obb]
+                local_axes = component_local_half_axes[obb]
+                broad_guard = 1.0e-6
+            body = int(body_ids[local_body])
+            pos = body_pos_w[env, body] - origin
+            quat = body_quat_w[env, body]
+            quat = quat / _wp.sqrt(
+                _wp.max(_wp.dot(quat, quat), 1.1754943508222875e-38)
+            )
+            center = pos + _warp_quat_rotate_wxyz_f32(quat, local_center)
+            half_axes = _wp.matrix_from_rows(
+                _warp_quat_rotate_wxyz_f32(quat, _warp_mat_row_f32(local_axes, 0)),
+                _warp_quat_rotate_wxyz_f32(quat, _warp_mat_row_f32(local_axes, 1)),
+                _warp_quat_rotate_wxyz_f32(quat, _warp_mat_row_f32(local_axes, 2)),
+            )
+            world_half = _warp_world_half_f32(half_axes, broad_guard)
+            for table in range(5):
+                lo = table_lo[table]
+                hi = table_hi[table]
+                if _warp_broad_overlap_f32(
+                    center, world_half, lo, hi
+                ) and _warp_sat_overlap_f32(center, half_axes, lo, hi):
+                    root_body = int(body_ids[0])
+                    root_pos = body_pos_w[env, root_body] - origin
+                    root_quat = body_quat_w[env, root_body]
+                    root_quat = root_quat / _wp.sqrt(
+                        _wp.max(_wp.dot(root_quat, root_quat), 1.1754943508222875e-38)
+                    )
+                    winner_i64[0] = obb
+                    winner_i64[1] = table
+                    winner_i64[2] = local_body
+                    witness_f32[0] = _warp_sat_signed_margin_f32(
+                        center, half_axes, lo, hi
+                    )
+                    witness_f32[1] = root_pos[0]
+                    witness_f32[2] = root_pos[1]
+                    witness_f32[3] = root_pos[2]
+                    witness_f32[4] = root_quat[0]
+                    witness_f32[5] = root_quat[1]
+                    witness_f32[6] = root_quat[2]
+                    witness_f32[7] = root_quat[3]
+                    witness_f32[8] = pos[0]
+                    witness_f32[9] = pos[1]
+                    witness_f32[10] = pos[2]
+                    witness_f32[11] = quat[0]
+                    witness_f32[12] = quat[1]
+                    witness_f32[13] = quat[2]
+                    witness_f32[14] = quat[3]
+                    return
+
 else:
     _warp_table_keepout_f32 = None
+    _warp_table_keepout_first_witness_f32 = None
 
 
 def _require_warp_table_keepout_kernel() -> None:
@@ -615,6 +774,18 @@ def geometric_robot_table_hit_mask(
     )
 
 
+def _host_test_first_overlap_index(exact: torch.Tensor) -> tuple[int, int]:
+    """CPU-test oracle for the CUDA witness's component-major winner order."""
+
+    if exact.device.type != "cpu" or exact.dtype != torch.bool or exact.shape != (63, 5):
+        raise RuntimeError("keepout witness test matrix differs")
+    positive = torch.nonzero(exact.reshape(-1), as_tuple=False).reshape(-1)
+    if positive.numel() == 0:
+        raise RuntimeError("positive keepout has no SAT witness")
+    flat = int(positive[0].item())
+    return flat // 5, flat % 5
+
+
 class DeviceExactTableKeepout:
     """Construction-bound constants plus one tensor-only live sampler."""
 
@@ -692,6 +863,8 @@ class DeviceExactTableKeepout:
         self._cuda_live_device = None
         self._cuda_live_pos_shape = None
         self._cuda_live_quat_shape = None
+        self._diagnostic_winner_i64 = None
+        self._diagnostic_witness_f32 = None
         if torch.device(device).type == "cuda":
             try:
                 body_count = int(model.nbody)
@@ -757,6 +930,103 @@ class DeviceExactTableKeepout:
             self._cuda_warp_stream = _wp.stream_from_torch(torch_stream)
             self._cuda_torch_stream_handle = handle
         return self._cuda_warp_stream
+
+    def enable_diagnostic_first_positive_witness(self) -> None:
+        """Allocate the N=1 replay-only SAT witness; training never calls this."""
+
+        if self._cuda_kernel_output is None or self.env_origins.shape[0] != 1:
+            raise RuntimeError("keepout witness requires one CUDA environment")
+        if self._diagnostic_winner_i64 is not None:
+            raise RuntimeError("keepout witness is already enabled")
+        payload = json.loads(_authority.COLLISION_PROXY_ARTIFACT.read_text())
+        rows = payload.get("components")
+        component_ids = (
+            tuple(row.get("component_id") for row in rows)
+            if isinstance(rows, list)
+            else ()
+        )
+        if (
+            len(component_ids) != 62
+            or any(type(value) is not str or not value for value in component_ids)
+            or tuple(sorted(component_ids)) != component_ids
+        ):
+            raise RuntimeError("keepout witness component identities differ")
+        self._diagnostic_component_ids = component_ids
+        self._diagnostic_winner_i64 = torch.full(
+            (3,), -1, dtype=torch.int64, device=self._cuda_live_device
+        )
+        self._diagnostic_witness_f32 = torch.full(
+            (15,), float("nan"), dtype=torch.float32, device=self._cuda_live_device
+        )
+        self._diagnostic_warp_winner_i64 = _wp.from_torch(
+            self._diagnostic_winner_i64, requires_grad=False
+        )
+        self._diagnostic_warp_witness_f32 = _wp.from_torch(
+            self._diagnostic_witness_f32, requires_grad=False
+        )
+
+    def diagnostic_first_positive_witness(self, data) -> dict:
+        """Return one typed witness for the production kernel's first SAT hit."""
+
+        if self._diagnostic_winner_i64 is None:
+            raise RuntimeError("keepout witness is not enabled")
+        wp_data = data.struct
+        body_pos_w = wp_data.xpos
+        body_quat_w = wp_data.xquat
+        _validate_cuda_live_warp_arrays(
+            body_pos_w,
+            body_quat_w,
+            device=self._cuda_warp_device,
+            pos_shape=self._cuda_live_pos_shape,
+            quat_shape=self._cuda_live_quat_shape,
+        )
+        self._diagnostic_winner_i64.fill_(-1)
+        self._diagnostic_witness_f32.fill_(float("nan"))
+        _wp.launch(
+            _warp_table_keepout_first_witness_f32,
+            dim=1,
+            inputs=(body_pos_w, body_quat_w, *self._cuda_warp_static_inputs),
+            outputs=(
+                self._diagnostic_warp_winner_i64,
+                self._diagnostic_warp_witness_f32,
+            ),
+            device=self._cuda_warp_device,
+            stream=self._current_warp_stream(),
+            record_tape=False,
+        )
+        winner = self._diagnostic_winner_i64.detach().cpu().tolist()
+        values = self._diagnostic_witness_f32.detach().cpu()
+        component_index, table_index, owner_index = (int(value) for value in winner)
+        if (
+            not 0 <= component_index < 63
+            or not 0 <= table_index < len(_authority.TABLE_ASSEMBLY_ROLES)
+            or not 0 <= owner_index < len(_authority.TABLE_CONTACT_BODY_NAMES)
+            or not bool(torch.isfinite(values).all().item())
+        ):
+            raise RuntimeError("positive keepout has no finite SAT witness")
+        is_blade = component_index == 62
+        component_id = (
+            "racket_blade" if is_blade
+            else self._diagnostic_component_ids[component_index]
+        )
+        owner_body_name = _authority.TABLE_CONTACT_BODY_NAMES[owner_index]
+        return {
+            "schema": "action_ball_keepout_first_witness_v1",
+            "selection": "first_production_order_overlap",
+            "component_index": component_index,
+            "component_id": component_id,
+            "component_kind": "blade" if is_blade else "body_proxy",
+            "owner_body_index": owner_index,
+            "owner_body_name": owner_body_name,
+            "table_index": table_index,
+            "table_role": _authority.TABLE_ASSEMBLY_ROLES[table_index],
+            "sat_signed_margin_m": float(values[0].item()),
+            "root_position_env_m": [float(value) for value in values[1:4].tolist()],
+            "root_quaternion_wxyz": [float(value) for value in values[4:8].tolist()],
+            "owner_position_env_m": [float(value) for value in values[8:11].tolist()],
+            "owner_quaternion_wxyz": [float(value) for value in values[11:15].tolist()],
+            "plant_identity": dict(self.plant_identity_receipt),
+        }
 
     def sample(self, data) -> torch.Tensor:
         if self._cuda_kernel_output is not None:

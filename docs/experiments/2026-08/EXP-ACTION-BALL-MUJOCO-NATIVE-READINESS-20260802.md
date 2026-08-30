@@ -12172,3 +12172,23 @@ transition-test SHA均匹配。首个真实错误是Pod不存在`/usr/bin/numact
 因此Python、pytest、MuJoCo-Warp和GPU callpoint均为0，不能把它计为contact/reset RED或GREEN。result/log
 保留且namespace不复用；本轮fail-stop。下一件在prewrite阶段必须确认`/usr/bin/taskset`存在并把GPU1绑到
 独立CPU集合，避免多GPU训练默认挤在同一CPU/NUMA集合。
+
+## 2026-08-30 frozen-teacher keepout-only 二层归因
+
+### 已有证据与问题
+
+`62dcd578…`的N=1真实CUDA replay首次table阳性发生在transition 73、physics substep 1；canonical SAT
+keepout为true，而final-forward resolved contact与`resolved_any_substep`均为false。因此下一问题不是Reward，
+也不是把substep contact写回canonical truth，而是哪个机器人proxy在何种桌面role上触发了2 cm guard。
+
+### 候选与验收
+
+只在显式teacher replay consumer存在时启用一次性witness。它按生产kernel完全相同的component-major、
+table-minor顺序选择首个精确SAT overlap，输出component id/kind、owner body、桌面role、最大SAT signed gap
+（正为分离、零或负为重叠）以及首阳性substep的root/owner位姿，并绑定plant identity。默认路径不分配buffer、
+不做readback、不改变termination/Reward；unknown/nonfinite fail-closed。
+
+Pod顺序：先跑targeted CPU synthetic（winner、once-only、unknown、既有source split时序）；通过后才允许fresh
+N=1 CUDA replay。CUDA结果用于三选一：blade/body沿sweep侵入则优先重定时；root/owner整体偏置则检查站位
+平移；仅guard壳层浅负margin且真实contact始终阴性，才考虑单独审计2 cm margin。任何一项都不能由本候选
+host测试预先裁决。

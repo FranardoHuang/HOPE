@@ -2693,3 +2693,11 @@ Mu summary的`business_chain_complete`当前只代表producer逐row attestation�
 
 当前仍未闭合自然mimic/hit/landing分母、12500 completion、formal independent playback、keyed chain replay、physics/transfer
 parity以及promotion/deploy。两条fresh run均不授权resume、export、部署或真机，G06保持`Partial`。
+
+### 2026-08-30 keepout-only首阳性归因候选（Gate仍`Partial`）
+
+真实CUDA frozen-teacher replay在`62dcd578…`观测到首次table bit来自keepout，而final-forward与所有substep
+MuJoCo resolved contact均为false。候选新增的二层witness严格为replay opt-in：复用生产SAT的component-major、
+table-minor首重叠顺序，记录owner/body或blade、`top/keepout/net/posts` role、signed SAT margin和该substep
+root/owner pose；unknown或nonfinite具名失败。默认训练终止、Reward和热路径buffer/D2H不变。Pod CPU与下一次
+fresh CUDA尚未验收，故尚不能裁决轨迹需swept-safe重定时/站位平移，或2 cm guard本身过保守。
