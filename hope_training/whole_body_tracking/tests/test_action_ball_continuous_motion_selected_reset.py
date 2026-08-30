@@ -1383,16 +1383,25 @@ def test_schema8_pending_work_cache_cannot_disagree_with_device_mask():
 
 def test_schema8_recomputed_sha_cannot_authorize_wrong_valid_se2():
     command = _checkpointable_fresh_exact_command()
+    boundary_device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    command._env.scene.env_origins = torch.tensor(
+        [[10.0, -7.0, 0.0], [20.0, 3.0, 0.0], [-4.0, 9.0, 0.0]],
+        device=boundary_device,
+    )
     leaf = command._action_ball_continuous_motion_checkpoint_payload()
     leaf["tensors"]["canonical_phase"][0] = 0
     leaf["tensors"]["frozen_root_valid"][0] = True
     leaf["tensors"]["action_slot"][0] = 0
-    leaf["tensors"]["frozen_root_pos_w"][0, :2] = torch.tensor([0.4, -0.3])
+    leaf["tensors"]["frozen_root_pos_w"][0, :2] = torch.tensor([10.4, -7.3])
     leaf["tensors"]["frozen_root_quat_wxyz"][0] = torch.tensor([1.0, 0.0, 0.0, 0.0])
     leaf["tensors"]["accepted_task_yaw_wxyz"][0] = torch.tensor([1.0, 0.0, 0.0, 0.0])
     leaf["tensors"]["accepted_task_translation_w"][0] = torch.tensor([0.1, 0.2, 0.0])
-    command._action_ball_full_mdp_source_strike_root_xy = torch.zeros((1, 2))
-    command._action_ball_full_mdp_source_strike_yaw_wxyz = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    command._action_ball_full_mdp_source_strike_root_xy = torch.zeros(
+        (1, 2), device=boundary_device
+    )
+    command._action_ball_full_mdp_source_strike_yaw_wxyz = torch.tensor(
+        [[1.0, 0.0, 0.0, 0.0]], device=boundary_device
+    )
     payload = {}
     for key, value in leaf.items():
         if key == "canonical_sha256":
