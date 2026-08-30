@@ -1353,6 +1353,13 @@ def test_pre_apply_guard_is_opt_in_and_legacy_finite_target_is_unchanged():
         action.processed_actions,
         torch.tensor([[0.90, 0.0], [1.00, 0.0]]),
     )
+    # The shared static representation must be a bitwise identity for the
+    # legacy clamp-only lane: inactive hard=soft and zero inset may not change
+    # the normalization span consumed by existing diagnostics/rewards.
+    expected_span = torch.full_like(action.nominal_projection_span, 2.0)
+    assert torch.equal(action.nominal_projection_span, expected_span)
+    assert action._static_qdes_envelope is not None
+    assert torch.equal(action._static_qdes_envelope.target_span, expected_span)
     assert action.pre_apply_joint_safety_latch.tolist() == [False, False]
     assert action.pre_apply_qdes_violation_joint_count.sum().item() == 0
     assert action.pre_apply_crossing_violation_joint_count.sum().item() == 0
