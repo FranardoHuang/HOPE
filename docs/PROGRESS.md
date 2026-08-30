@@ -9,7 +9,11 @@
   production prepare/hot path；改核精确phase/task/frame/frozen/no-launch/no-physical/age1与当前
   ball finite/nonzero quaternion，安装前后ball/task/lifecycle仍逐位不变。新typed report列出
   每个predicate和ball delta/velocity/norm；已补真实age1/fallen-state与park-before-advance回归，
-  当前只有静态diff证据，Pod CPU/CUDA待验。
+  实现提交时只有静态diff证据；后续Pod结果如下。
+- Pod首轮`29e3ed29`唯一红项是新测试将私有入口名写成public名（`169 passed / 8 skipped /
+  1 failed`）。test-only修正`3cddf7ce`fresh exact复跑已`170 passed / 8 skipped / 0 failed`，
+  source clean，evidence root=`/workspace/franco/mktemp/direct-frame0-boundary-fix-3cddf7ce-cpu-test-20260830T0454Z-r1`。
+  未重发GPU；真实intervention/q0/frame1仍`unverified`。
 
 ## 2026-08-30 — direct-frame0 frozen-teacher反事实候选
 

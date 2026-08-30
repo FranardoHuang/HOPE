@@ -28,7 +28,15 @@ boundary：`_full_a_prepare_step()`在transition开始park，20个1 ms Euler sub
 boundary安装，只要求phase/task/frame0/frozen/no-launch/no-physical与`ball_age=1`精确，
 当前ball qpos/qvel有限且quaternion非零；安装前后ball qpos/qvel/warmstart、task与
 lifecycle仍逐位相等。下一production prepare自然repark。任何失败现输出具名predicate
-和park delta/velocity/quaternion norm；修复后Pod CPU与CUDA replay待复验，G06仍`Partial`。
+和park delta/velocity/quaternion norm；修复后的Pod验证结果如下，G06仍`Partial`。
+
+Pod首轮`29e3ed29`为`169 passed / 8 skipped / 1 failed`，唯一红项是新source-order
+测试把真实私有入口`_run_teacher_replay`写成不存在的public名，未触发production
+失败。test-only修正`3cddf7ce9e8e6c52055cbd6756226ef92910c83f`在fresh exact
+`/workspace/franco/mktemp/direct-frame0-boundary-fix-3cddf7ce-restored-20260830T044551Z.exact`
+上完成同一四module union=`170 passed / 8 skipped / 0 failed`（6.55 s pytest），source
+前后clean。这关闭CPU构造/时序回归，不关闭真实CUDA intervention、q0/frame1或物理证据；
+G06仍`Partial`。
 
 ## 2026-08-30 frozen-teacher targeted修复候选（仍`Partial`）
 

@@ -51,7 +51,15 @@ park waiting row，再经20×1 ms semi-implicit Euler积分；因此返回actor 
 假设，改为精确核`age=1`与当前ball qpos/qvel finite、quaternion finite/nonzero，并继续
 对install前后ball qpos/qvel/warmstart、task、lifecycle作逐位不变证明。下一真实
 production prepare仍在physics前自然repark。失败信息升为typed v2 report，逐项列出
-predicate及position delta、linear/angular velocity、quaternion norm；新Pod CPU/CUDA证据待补。
+predicate及position delta、linear/angular velocity、quaternion norm；验证结果如下。
+
+Pod CPU首次在`29e3ed29`得到`169 passed / 8 skipped / 1 failed`；唯一失败是新回归
+误引不存在的`runner.run_teacher_replay`，真入口是`_run_teacher_replay`。test-only
+后继`3cddf7ce9e8e6c52055cbd6756226ef92910c83f`在fresh clean exact上的四module union=
+`170 passed / 8 skipped / 0 failed`（6.55 s pytest，wall 8 s），evidence root=
+`/workspace/franco/mktemp/direct-frame0-boundary-fix-3cddf7ce-cpu-test-20260830T0454Z-r1`。
+没有发射GPU；因此现在只能重发fresh CUDA replay验证原子install、q0/frame1和安全证据，
+不能用CPU GREEN越权作物理或训练结论。
 
 ## 2026-08-30 frozen-teacher targeted修复候选
 
