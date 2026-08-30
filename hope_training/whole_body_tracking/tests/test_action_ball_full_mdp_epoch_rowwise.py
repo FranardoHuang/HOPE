@@ -885,7 +885,7 @@ def test_h48_plus_one_after_command_defers_one_device_fault_to_packed_boundary(
     epoch, d05, cadence, _r06, *_ = _ready_epoch()
     baseline_record = epoch.current()
     baseline_i64 = epoch.milestone.i64.clone()
-    baseline_f32 = epoch.milestone.f32.clone()
+    baseline_f64 = epoch.milestone.f64.clone()
     baseline_payment = epoch.project_current_reward_payment_rows()
 
     with _NoHostTensorObservation():
@@ -917,7 +917,7 @@ def test_h48_plus_one_after_command_defers_one_device_fault_to_packed_boundary(
     assert all(not mask.any() for mask in d05.accepted_masks)
     _assert_record_tensors_equal(epoch.current(), baseline_record)
     assert torch.equal(epoch.milestone.i64, baseline_i64)
-    assert torch.equal(epoch.milestone.f32, baseline_f32)
+    assert torch.equal(epoch.milestone.f64, baseline_f64)
     payment = epoch.project_current_reward_payment_rows()
     assert torch.equal(payment.valid, baseline_payment.valid)
     assert torch.equal(payment.payment_step, baseline_payment.payment_step)
