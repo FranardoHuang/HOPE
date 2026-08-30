@@ -1403,6 +1403,9 @@ def _run_teacher_replay(
         "post_motion_phase", "frozen_steps", "requested_qdes", "raw_action",
         "executable_qdes", "guard_expected_executable_qdes",
         "actual_joint_pos", "actual_joint_vel",
+        "actual_root_position_w", "actual_root_quaternion_wxyz",
+        "actual_root_velocity_w", "tau_raw_abs_max",
+        "tau_clamped_abs_max",
         "ball_center_w", "ball_lin_vel_w", "racket_site_w",
         "racket_velocity_w", "racket_normal_w", "scheduled_due", "reveal",
         "launch", "r03", "generic_contact", "selected_contact",
@@ -1550,6 +1553,27 @@ def _run_teacher_replay(
             ))
             rows["actual_joint_pos"].append(host(env._qpos_act()))
             rows["actual_joint_vel"].append(host(env._qvel_act()))
+            rows["actual_root_position_w"].append(host(
+                env.sim.data.qpos[
+                    :, env.root_qadr : env.root_qadr + 3
+                ]
+            ))
+            rows["actual_root_quaternion_wxyz"].append(host(
+                env.sim.data.qpos[
+                    :, env.root_qadr + 3 : env.root_qadr + 7
+                ]
+            ))
+            rows["actual_root_velocity_w"].append(host(
+                env.sim.data.qvel[
+                    :, env.root_vadr : env.root_vadr + 6
+                ]
+            ))
+            rows["tau_raw_abs_max"].append(host(
+                trace["tau_raw_abs_max"]
+            ))
+            rows["tau_clamped_abs_max"].append(host(
+                trace["tau_clamped_abs_max"]
+            ))
             rows["ball_center_w"].append(host(env.sim.data.qpos[:, env.b_q:env.b_q + 3]))
             rows["ball_lin_vel_w"].append(host(env.sim.data.qvel[:, env.b_v:env.b_v + 3]))
             rows["racket_site_w"].append(host(racket[0] + env.env.scene.env_origins))
