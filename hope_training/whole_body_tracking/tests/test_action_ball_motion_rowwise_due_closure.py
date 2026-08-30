@@ -31,12 +31,50 @@ import test_action_ball_motion_genesis_cadence_activation as genesis  # noqa: E4
 C = bridge.C
 
 
+def _install_frozen_task_frame_latch(command) -> tuple[torch.Tensor, torch.Tensor]:
+    """Install the constructor-owned D05 task-frame latch for this harness.
+
+    The focused Motion harness bypasses ``MotionCommand.__init__`` and the
+    FullMDP construction path.  Use a fixed, explicit identity/zero frame:
+    this keeps the fixture independent of the D05 writer that the tests
+    exercise, while matching the production latch ABI.
+    """
+
+    yaw_wxyz = torch.zeros(
+        command.num_envs,
+        4,
+        dtype=command.motion.body_quat_w.dtype,
+        device=command.device,
+    )
+    yaw_wxyz[:, 0] = 1.0
+    translation_w = torch.zeros(
+        command.num_envs,
+        3,
+        dtype=command.motion.body_pos_w.dtype,
+        device=command.device,
+    )
+    command._action_ball_full_mdp_task_yaw_wxyz = yaw_wxyz
+    command._action_ball_full_mdp_task_translation_w = translation_w
+    return yaw_wxyz, translation_w
+
+
+def _refresh_revealed_reference(command, reveal: torch.Tensor) -> None:
+    """Call the fresh-lane API with the fixture-owned frozen task frame."""
+
+    command.refresh_action_ball_revealed_body_reference(
+        reveal,
+        task_yaw_wxyz=command._action_ball_full_mdp_task_yaw_wxyz,
+        task_translation_w=command._action_ball_full_mdp_task_translation_w,
+    )
+
+
 def _fresh_motion(device: torch.device):
     command, cadence_owner, device_owner, epoch_owner = (
         genesis._fresh_command_and_owners(device)
     )
     command.bind_action_ball_continuous_motion_device_r05_reveal(device_owner)
     command.bind_action_ball_full_mdp_motion_epoch_owner(epoch_owner)
+    _install_frozen_task_frame_latch(command)
     for common_step in range(3):
         command._env.common_step_counter = common_step
         command._advance_action_ball_continuous_motion_cadence()
@@ -75,6 +113,7 @@ def _bound_fresh_motion():
     )
     command.bind_action_ball_continuous_motion_device_r05_reveal(device_owner)
     command.bind_action_ball_full_mdp_motion_epoch_owner(epoch_owner)
+    _install_frozen_task_frame_latch(command)
     return command, epoch_owner
 
 
@@ -84,6 +123,12 @@ def _motion_row_snapshot(command, row: int) -> dict[str, torch.Tensor]:
         for field, attr, _nonnegative in (
             C._ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
         )
+        if field
+        not in {
+            "frozen_root_pos_w",
+            "frozen_root_quat_wxyz",
+            "frozen_root_valid",
+        }
     }
 
 
@@ -221,8 +266,8 @@ def _latch_out_of_range_reveal_fault(command, epoch_owner) -> torch.Tensor:
     command._action_ball_continuous_policy_opportunities_created.fill_(1)
     command.time_steps[0] = int(command.motion.time_step_total) + 17
     command.time_steps_f[0] = command.time_steps[0].float()
-    command.refresh_action_ball_revealed_body_reference(
-        torch.tensor([True, False], dtype=torch.bool)
+    _refresh_revealed_reference(
+        command, torch.tensor([True, False], dtype=torch.bool)
     )
     assert epoch_owner._undrained_row_fault_bits.tolist() == [
         genesis.E.ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT,
@@ -238,8 +283,8 @@ def test_named_reveal_reference_fault_masks_cache_and_keeps_peer() -> None:
     bad_quat_before = command.body_quat_relative_w[0].clone()
     peer_pos_before = command.body_pos_relative_w[1].clone()
 
-    command.refresh_action_ball_revealed_body_reference(
-        torch.tensor([True, True], dtype=torch.bool)
+    _refresh_revealed_reference(
+        command, torch.tensor([True, True], dtype=torch.bool)
     )
 
     assert epoch_owner._undrained_row_fault_bits.tolist() == [
@@ -257,6 +302,7 @@ def test_fresh_reveal_fault_without_epoch_owner_fails_closed_before_cache_write(
         genesis._fresh_command_and_owners(torch.device("cpu"))
     )
     command.bind_action_ball_continuous_motion_device_r05_reveal(device_owner)
+    _install_frozen_task_frame_latch(command)
     _configure_reveal_cache(command)
     before_pos = command.body_pos_relative_w.clone()
     before_quat = command.body_quat_relative_w.clone()
@@ -265,8 +311,8 @@ def test_fresh_reveal_fault_without_epoch_owner_fails_closed_before_cache_write(
         RuntimeError,
         match="fresh Motion row fault requires its exact ActionEpoch owner",
     ):
-        command.refresh_action_ball_revealed_body_reference(
-            torch.tensor([True, False], dtype=torch.bool)
+        _refresh_revealed_reference(
+            command, torch.tensor([True, False], dtype=torch.bool)
         )
 
     assert torch.equal(command.body_pos_relative_w, before_pos)
@@ -349,8 +395,8 @@ def test_task_valid_false_alone_is_not_a_reveal_reference_fault() -> None:
     command._action_ball_public_task_valid[0] = False
     before = command.body_pos_relative_w.clone()
 
-    command.refresh_action_ball_revealed_body_reference(
-        torch.tensor([True, False], dtype=torch.bool)
+    _refresh_revealed_reference(
+        command, torch.tensor([True, False], dtype=torch.bool)
     )
 
     assert epoch_owner._undrained_row_fault_bits.tolist() == [0, 0]
