@@ -180,7 +180,6 @@ def _stable_regular_bytes(path: Path, label: str) -> bytes:
         )
         if (
             not stat.S_ISREG(before.st_mode)
-            or before.st_nlink != 1
             or before.st_size <= 0
             or not stable
             or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)

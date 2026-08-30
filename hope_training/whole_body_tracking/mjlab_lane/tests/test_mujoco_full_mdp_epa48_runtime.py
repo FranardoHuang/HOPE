@@ -4,6 +4,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import types
@@ -497,6 +498,21 @@ def test_stable_asset_read_rejects_missing_and_symlink(tmp_path):
     alias.symlink_to(target)
     with pytest.raises(module.RuntimeBindingError, match="missing|regular"):
         module._stable_regular_bytes(alias, "wheel")
+
+
+def test_build_receipt_hardlink_keeps_exact_stable_bytes(tmp_path):
+    module = _load()
+    payload = b"exact EPA48 build receipt\n"
+    receipt = tmp_path / "build_receipt.json"
+    receipt.write_bytes(payload)
+    hardlink = tmp_path / "restored_build_receipt.json"
+    os.link(receipt, hardlink)
+
+    assert hardlink.resolve(strict=True) == hardlink
+    assert hardlink.stat().st_nlink == 2
+    actual = module._stable_regular_bytes(hardlink, "EPA48 build receipt")
+    assert actual == payload
+    assert hashlib.sha256(actual).digest() == hashlib.sha256(payload).digest()
 
 
 @pytest.mark.parametrize(
