@@ -976,12 +976,21 @@ def test_same_slot0_action_uid_accepts_next_shot_with_different_full_key(
         )
     )
     command.commit_action_ball_full_mdp_motion_epoch_rows(first_token)
+    assert command._action_ball_continuous_canonical_task_valid.tolist() == [True]
+    assert command.action_ball_task_timing_active.tolist() == [True]
     first_uid = command._action_ball_continuous_canonical_action_uid.clone()
     first_task = command._action_ball_continuous_canonical_task_identity.clone()
     first_ball = command._action_ball_continuous_canonical_cadence_identity.clone()
     first_candidate = (
         command._action_ball_continuous_canonical_candidate_identity.clone()
     )
+
+    # Natural close owns the prior receipt and timing teardown.  The next D05
+    # must install both facts together for the replacement task.
+    command._action_ball_continuous_canonical_task_valid.zero_()
+    command._action_ball_task_timing_active.zero_()
+    assert command._action_ball_continuous_canonical_task_valid.tolist() == [False]
+    assert command.action_ball_task_timing_active.tolist() == [False]
 
     second = _candidate(
         1,
@@ -1003,6 +1012,8 @@ def test_same_slot0_action_uid_accepts_next_shot_with_different_full_key(
 
     command.commit_action_ball_full_mdp_motion_epoch_rows(second_token)
 
+    assert command._action_ball_continuous_canonical_task_valid.tolist() == [True]
+    assert command.action_ball_task_timing_active.tolist() == [True]
     assert command.clip_id.tolist() == [0]
     assert torch.equal(
         command._action_ball_continuous_canonical_action_uid, first_uid
