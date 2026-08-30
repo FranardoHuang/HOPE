@@ -1006,27 +1006,7 @@ class ActionBallFullMdpRsl3Adapter:
             except RuntimeError:
                 command_mismatches.append("deferred_exact_metrics")
         if deferred_predicate is not None and deferred_predicate() is not True:
-            disabled = {
-                "full_mdp": getattr(command_term, "_action_ball_full_mdp_enabled", None),
-                "target_mode": getattr(getattr(command_term, "cfg", None), "target_mode", None),
-                "action_ball": getattr(command_term, "_action_ball_enabled", None),
-                "task_first": getattr(command_term, "_task_first_enabled", None),
-                "diagnostic": getattr(command_term, "_action_ball_diagnostic_unauthorized", None),
-                "d05_owner": getattr(command_term, "_action_ball_full_mdp_device_r05_owner", None) is not None,
-                "epoch_owner": getattr(command_term, "_action_ball_full_mdp_racket_epoch_owner", None) is not None,
-                "adaptive_sigma": getattr(getattr(command_term, "cfg", None), "adaptive_sigma", None),
-                "adaptive_sigma_monotonic": getattr(getattr(command_term, "cfg", None), "adaptive_sigma_monotonic", None),
-                "adaptive_sigma_normal": getattr(getattr(command_term, "cfg", None), "adaptive_sigma_normal", None),
-                "virtual_ball": getattr(getattr(command_term, "cfg", None), "virtual_ball", None),
-                "vb_metrics_only": getattr(getattr(command_term, "cfg", None), "vb_metrics_only", None),
-                "shadow_ball": getattr(getattr(command_term, "cfg", None), "shadow_ball", None),
-                "physical_ball": getattr(getattr(command_term, "cfg", None), "physical_ball", None),
-                "shadow_runtime": getattr(command_term, "_shadow", None) is not None,
-                "physical_runtime": getattr(command_term, "_physical", None) is not None,
-            }
-            command_mismatches.append(
-                "deferred_exact_metrics_disabled=" + repr(disabled)
-            )
+            command_mismatches.append("deferred_exact_metrics_disabled")
         if command_mismatches:
             raise RuntimeError(
                 "single_action_lean requires the exact deferred-metric command "

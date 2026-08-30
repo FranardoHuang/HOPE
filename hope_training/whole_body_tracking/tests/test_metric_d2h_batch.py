@@ -164,12 +164,12 @@ def _deferred_exact_command(num_buckets: int = 1):
         vb_metrics_only=False,
         shadow_ball=False,
         physical_ball=False,
+        action_ball_diagnostic_unauthorized=True,
         rally_legacy_metrics=False,
     )
     command._action_ball_full_mdp_enabled = True
     command._action_ball_enabled = False
     command._task_first_enabled = False
-    command._action_ball_diagnostic_unauthorized = True
     command._action_ball_full_mdp_device_r05_owner = object()
     command._action_ball_full_mdp_racket_epoch_owner = object()
     command._shadow = None
@@ -492,9 +492,9 @@ def test_full_mdp_exact_deferral_keeps_immediate_consumers_on_old_path():
     command.cfg.virtual_ball = True
     assert not command._action_ball_full_mdp_deferred_exact_metrics_enabled()
     command.cfg.virtual_ball = False
-    command._action_ball_diagnostic_unauthorized = False
+    command.cfg.action_ball_diagnostic_unauthorized = False
     assert not command._action_ball_full_mdp_deferred_exact_metrics_enabled()
-    command._action_ball_diagnostic_unauthorized = True
+    command.cfg.action_ball_diagnostic_unauthorized = True
     command._action_ball_full_mdp_device_r05_owner = None
     assert not command._action_ball_full_mdp_deferred_exact_metrics_enabled()
 

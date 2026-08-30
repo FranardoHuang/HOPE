@@ -27580,8 +27580,13 @@ class RacketTargetCommand(CommandTerm):
             == "action_ball_full_mdp"
             and getattr(self, "_action_ball_enabled", None) is False
             and getattr(self, "_task_first_enabled", None) is False
+            # FullMDP does not enter the legacy ActionBall constructor that
+            # mirrors this cfg field onto an instance attribute.  The live
+            # cfg is already the construction-validated authority, so using
+            # that exact boolean keeps runner construction and the hot path
+            # on the same contract.
             and getattr(
-                self, "_action_ball_diagnostic_unauthorized", None
+                self.cfg, "action_ball_diagnostic_unauthorized", None
             ) is True
             and getattr(self, "_action_ball_full_mdp_device_r05_owner", None)
             is not None
