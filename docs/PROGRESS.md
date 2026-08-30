@@ -1,5 +1,15 @@
 # 简短进度记录
 
+## 2026-08-30 — 长窗mimic→hit反例与command-metric窄切口Pod闭合
+
+- `8200c4a2`双端继续健康运行，但recent30已形成更强的行为结论：Mu在`2,952 launch`和约
+  `5.7 cm/.33 mps`拍心误差下仍0 raw contact；Isaac在`3,016 launch`下仍0 R03/raw contact。
+  finite checkpoint不是课程成功，下一主线改为teacher exact narrow phase和mimic→ball几何。
+- `Franco_codex/fullmdp-commandmetric-batch-20260830@e6958d2a`的Pod fresh exact tree通过
+  `244 tests/11.63 s`，把exact-quality metric的48次逐stepD2H收成update边界1次；hold/recovery仍有
+  48次，因此已识别command侧只是至少`96→49/update`。CUDA parity与profiler-off matched wall仍未测；
+  Reward28确认已经每update一次D2H，暂不继续微优化。
+
 ## 2026-08-30 — direct-frame0 GPU闭合与第三个single-OBB分歧候选
 
 - `643f03b5`消除了atomic-install和same-step done/frame的failure-artifact旁路；Pod三模块CPU=

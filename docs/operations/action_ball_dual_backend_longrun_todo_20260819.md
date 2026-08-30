@@ -52,6 +52,24 @@ exact source和证据root继续只读，不hot-patch、不resume、不复用。R
   physics substep18给出`-1.236878 mm`，而backend resolved contact、resolved substep与generic contact均为
   false。它是第三个需要由全局census和exact geometry复核的proxy假阳性强候选，尚未被正式判定；
   multi-OBB/exact narrow-phase闭合前，frame8之后的动态可追踪性仍为`未测`。
+- `observed_at=2026-08-30T06:55Z`的只读recent30进一步把学习阻塞定位到mimic→hit，而不是继续等长跑。
+  Mu已到update `7079`，episode均长约`1498.80 tick`，四项playback paddle误差为
+  `.05661 m/.33082 mps/.20845 rad/.27212 rad`，却仍是
+  `0 raw / 0 selected / 2,952 launch`；Isaac已到update `2556`，episode均长约`1193.62 tick`，
+  `0 R03 / 0 raw / 3,016 launch`。两端nonfinite/conservation仍为0；Mu/Isaac wall p50/p90分别为
+  `6.259/6.478`与`16.464/16.848 s/H48`。因此Mu已经有足够mimic分母和较小拍误差却没有物理接触，
+  Isaac仍堵在R03以前；后续优先闭合teacher exact narrow phase和mimic→ball几何，不再用更多update粉饰0格。
+- command metric的数学等价性能候选已收口到
+  `Franco_codex/fullmdp-commandmetric-batch-20260830@e6958d2a`，其tree `06692e4c`与Pod fresh exact
+  checkout逐树一致。它把exact-quality metric从48次逐stepD2H收成optimizer边界1次，净减
+  `47 D2H/update`；Pod四文件聚焦=`244 passed in 11.63 s`，包含独立fixed tape、H/H+1、顺序、poison与
+  save边界。调用图同时确认hold/recovery仍有48次逐stepD2H，故已识别command侧总数只是从至少96降到
+  至少49，不是全部收敛。真实CUDA fixed tape和profiler-off wall尚未跑，所以尚不替换现役source；下一刀
+  应把hold/recovery复用已有device telemetry并入同一update边界。Reward28审计确认两端已经各自每update
+  一次packed D2H，在新profile重新把它指为主项前不继续做低收益dispatcher微优化。
+- 当前下一步只有两项：在GPU1 fresh zero-PPO diagnostic中用OBB作为broad phase、只对positive pair调用
+  pinned Mu runtime的backend-authoritative exact narrow phase；并对`e6958d2a`做真实CUDA parity与
+  matched wall。两者都不修改现役run、Observation、Reward、Stage或安全真值。
 
 ### 已证根因，不再归为“Pod整体装坏”
 

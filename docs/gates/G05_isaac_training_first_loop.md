@@ -7058,3 +7058,16 @@ fixed-action root=`/workspace/franco/runs/fullmdp-r35-8200c4a2-isaac-fixedprobe-
 fresh Isaac H48 namespace=`fullmdp-r35-8200c4a2-isaac-h48-20260829T1804Z`已在GPU0启动；首个
 durable ACK已给出`due/selected/accepted=512/512/512`、`deferred/censored/rejected=0/0/0`，证明任务入口开放。
 它不证明balance/mimic/hit/landing成功，也不授权checkpoint resume、promotion、部署或真机；G05保持`Partial`。
+
+### 2026-08-30 长窗mimic→hit反例与command-metric候选（Gate仍`Partial`）
+
+只读recent30截至Isaac update `2556`：episode均长约`1193.62 tick`，playback/launch=
+`3,089/3,016`，但R03/raw/selected均为0；四项playback paddle误差约
+`.24433 m/.80236 mps/.38472 rad/.25441 rad`，nonfinite/conservation为0。长生存和finite checkpoint
+不能代签mimic→hit；当前Isaac入口仍在R03之前失败。
+
+`e6958d2a`把exact-quality command metric从48次逐step D2H收成optimizer边界1次，Pod fresh exact四文件=
+`244 passed in 11.63 s`。调用图同时确认hold/recovery仍有48次逐stepD2H，所以command侧已识别总数只是
+至少`96→49/update`，并未全部收敛；Isaac真实CUDA fixed tape与profiler-off wall仍未测。该候选只允许进入
+下一性能验证，不授权替换现役run或宣称6秒目标闭合。Reward28已沿现有Epoch packed drain每update一次
+D2H，暂不继续微优化。G05保持`Partial`。

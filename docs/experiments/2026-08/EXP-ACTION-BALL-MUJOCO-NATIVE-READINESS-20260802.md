@@ -71,6 +71,21 @@ convex/primitive narrow phase。当前artifact仍是source-only candidate；“c
 numerically padded upper estimate或补完整interval误差证明，Python/platform/QHull/BLAS也须进入物化收据。
 consumer、20 mm余量、teacher、Reward和Stage均未改。
 
+### 长窗mimic→hit与exact narrow-phase裁定
+
+- Mu现役`8200c4a2` recent30截至update `7079`已有`2,952 launch`、`2,958 R03-valid`和四项
+  playback paddle误差`.05661 m/.33082 mps/.20845 rad/.27212 rad`，但raw/selected/crossing/landing
+  仍为0；finite与conservation clean。该分母足以否决“只需继续等更久就会自然hit”，但不证明policy永远
+  不可学。
+- teacher zero-PPO回放已证明component51/55/57的single OBB能在实际collider仍有净空时误报。采用
+  `cheap OBB broad phase -> positive pair backend-authoritative exact narrow phase`作为下一可证伪诊断；
+  heldout固定为51/55/57，true-contact与20 mm扩张桌面作正负控制。GPU1结果出来前不改变production
+  termination、Reward、Observation或现役run。
+- 性能旁路`e6958d2a`已在Pod fresh exact tree通过`244 tests`，把exact-quality metric从48次逐stepD2H
+  收成update边界1次；hold/recovery仍有48次，所以已识别command侧只是至少`96→49/update`。真实CUDA
+  fixed tape与matched wall未测，故暂不归因或替换现役source。Reward28已经是每update单次packed D2H，
+  不在没有新profile证据时继续堆微优化。
+
 ## 2026-08-29 current correction
 
 ### 重新判读：学习阶段、R06热路与部署边界

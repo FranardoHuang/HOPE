@@ -2699,3 +2699,15 @@ CPU affinity启动，无checkpoint/resume/namespace reuse。Mu首个durable upda
 `due/selected/accepted=512/512/512`。两端Reward finite且conservation fault=0，证明自然重叠入口已开放。
 自然阶段交接的学习趋势、physics/transfer parity与formal
 promotion仍未闭合，G06继续`Partial`。
+
+### 2026-08-30 Mu长窗mimic→hit反例与teacher量具下一步（Gate仍`Partial`）
+
+只读recent30截至Mu update `7079`：episode均长约`1498.80 tick`，四项playback paddle误差已到
+`.05661 m/.33082 mps/.20845 rad/.27212 rad`，R03/launch=`2,958/2,952`，但raw/selected/crossing/
+legal landing仍全为0；nonfinite/conservation为0，wall p50/p90=`6.259/6.478 s/H48`。这已是有充分
+teacher-active分母的mimic→hit反例，不再归因于“训练时间不够”。
+
+single-OBB对component51/55/57的空角误报与全62项adaptive census共同否决了全局粗拆proxy路线。
+下一诊断固定为OBB broad-positive后调用pinned Mu runtime的backend-authoritative exact convex/primitive
+narrow phase，并用51/55/57作heldout；在fresh GPU1 zero-PPO通过前不改production consumer或table safety。
+G06保持`Partial`，不授权transfer、promotion、部署或真机。
