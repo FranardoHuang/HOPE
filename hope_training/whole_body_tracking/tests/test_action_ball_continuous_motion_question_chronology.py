@@ -397,6 +397,26 @@ def _motion(device: torch.device = torch.device("cpu")) -> tuple[object, tuple]:
         quat_shape, dtype=torch.float32, device=device
     )
     command.body_quat_relative_w[..., 0] = 1.0
+    # The production initializer always creates the frozen SE(2) task-frame
+    # state before exact-resume can observe it.  This RT.__new__ fixture must
+    # mirror that identity-frame starting contract explicitly.
+    command._action_ball_full_mdp_frozen_root_pos_w = torch.zeros(
+        command.num_envs, 3, dtype=torch.float32, device=device
+    )
+    command._action_ball_full_mdp_frozen_root_quat_wxyz = torch.zeros(
+        command.num_envs, 4, dtype=torch.float32, device=device
+    )
+    command._action_ball_full_mdp_frozen_root_quat_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_frozen_root_valid = torch.ones(
+        command.num_envs, dtype=torch.bool, device=device
+    )
+    command._action_ball_full_mdp_task_yaw_wxyz = torch.zeros(
+        command.num_envs, 4, dtype=torch.float32, device=device
+    )
+    command._action_ball_full_mdp_task_yaw_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_task_translation_w = torch.zeros(
+        command.num_envs, 3, dtype=torch.float32, device=device
+    )
     command._action_ball_continuous_episode_step.copy_(
         torch.tensor([10, 20], dtype=torch.int64, device=device)
     )
