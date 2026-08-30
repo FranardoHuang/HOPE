@@ -627,15 +627,10 @@ class LeanActionEpochObservationSource:
         self._cached_key: tuple[int, int, int, int] | None = None
         self._cached_actor: torch.Tensor | None = None
         self._cached_critic: torch.Tensor | None = None
-        self._semantic_publications = 0
 
     @property
     def group_widths(self) -> Mapping[str, int]:
         return dict(self._widths)
-
-    @property
-    def semantic_publication_count(self) -> int:
-        return self._semantic_publications
 
     def _shape_probe(self, group: str) -> torch.Tensor:
         state = getattr(
@@ -818,7 +813,6 @@ class LeanActionEpochObservationSource:
         self._cached_key = key
         self._cached_actor = actor
         self._cached_critic = critic
-        self._semantic_publications += 1
         return actor, critic
 
     def observe(self, group: str) -> torch.Tensor:

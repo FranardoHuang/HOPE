@@ -2708,16 +2708,28 @@ ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = (
         ),
     )
     for name, func in (
-        ("racket_position", mdp.r03_racket_position),
-        ("racket_velocity", mdp.r03_racket_velocity),
-        ("racket_normal", mdp.r03_racket_normal),
-        ("racket_position_coarse", mdp.r03_racket_position_coarse),
-        ("racket_velocity_coarse", mdp.r03_racket_velocity_coarse),
-        ("racket_normal_coarse", mdp.r03_racket_normal_coarse),
-        ("racket_position_precision", mdp.r03_racket_position_precision),
-        ("racket_velocity_precision", mdp.r03_racket_velocity_precision),
-        ("racket_normal_precision", mdp.r03_racket_normal_precision),
-        ("paddle_center_proximity", mdp.r03_paddle_center_proximity),
+        ("racket_position", _full_mdp_lean_rewards.racket_position),
+        ("racket_velocity", _full_mdp_lean_rewards.racket_velocity),
+        ("racket_normal", _full_mdp_lean_rewards.racket_normal),
+        ("racket_position_coarse", _full_mdp_lean_rewards.racket_position_coarse),
+        ("racket_velocity_coarse", _full_mdp_lean_rewards.racket_velocity_coarse),
+        ("racket_normal_coarse", _full_mdp_lean_rewards.racket_normal_coarse),
+        (
+            "racket_position_precision",
+            _full_mdp_lean_rewards.racket_position_precision,
+        ),
+        (
+            "racket_velocity_precision",
+            _full_mdp_lean_rewards.racket_velocity_precision,
+        ),
+        (
+            "racket_normal_precision",
+            _full_mdp_lean_rewards.racket_normal_precision,
+        ),
+        (
+            "paddle_center_proximity",
+            _full_mdp_lean_rewards.paddle_center_proximity,
+        ),
     )
 )
 ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = tuple(
@@ -2727,7 +2739,7 @@ ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = tuple(
         manager_name="physical_selected_contact",
         payment_consumer="physical:physical_selected_contact",
         owner_role="physical_owner",
-        func=mdp.physical_selected_contact,
+        func=_full_mdp_lean_rewards.physical_selected_contact,
         weight_source=ACTION_BALL_FULL_MDP_WEIGHT_SOURCE,
         manager_weight=None,
         manager_weight_path=(
@@ -2738,7 +2750,7 @@ ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = tuple(
         manager_name="common_on_table_outcome",
         payment_consumer="r06:common_on_table_outcome",
         owner_role="r06_owner",
-        func=mdp.r06_common_on_table_outcome,
+        func=_full_mdp_lean_rewards.common_on_table_outcome,
         weight_source=ACTION_BALL_FULL_MDP_WEIGHT_SOURCE,
         manager_weight=None,
         manager_weight_path=(
@@ -2749,7 +2761,7 @@ ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = tuple(
         manager_name="post_contact_placement_guidance",
         payment_consumer="r06:post_contact_placement_guidance",
         owner_role="r06_owner",
-        func=mdp.r06_post_contact_placement_guidance,
+        func=_full_mdp_lean_rewards.post_contact_placement_guidance,
         weight_source=ACTION_BALL_FULL_MDP_WEIGHT_SOURCE,
         manager_weight=None,
         manager_weight_path=(
@@ -2761,7 +2773,7 @@ ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = tuple(
         manager_name="common_recovery_reward_v1",
         payment_consumer="r07:common_recovery_reward_v1",
         owner_role="r07_owner",
-        func=mdp.r07_continuous_recovery,
+        func=_full_mdp_lean_rewards.common_recovery_reward_v1,
         weight_source=ACTION_BALL_FULL_MDP_FIXED_WEIGHT_SOURCE,
         manager_weight=1.0,
         owner_weight_source=(
@@ -2871,7 +2883,6 @@ class HOPEActionBallFullMdpRewardsCfg:
 
 
 ACTION_BALL_FULL_MDP_TERMINATION_MANAGER_ORDER = (
-    "fresh_pre_reward_publish",
     "time_out",
     "base_fell_tilt",
     "base_too_low",
@@ -2882,15 +2893,12 @@ ACTION_BALL_FULL_MDP_TERMINATION_MANAGER_ORDER = (
 
 @configclass
 class HOPEActionBallFullMdpTerminationsCfg:
-    """Fresh publisher plus real episode timeout and plant terminal exits."""
+    """The exact five live episode timeout and plant terminal exits.
 
-    # This term publishes R03/R07 through the exact top reward graph and never
-    # requests a timeout.  It must precede every RewardTerm in the same control
-    # transition, including a transition that subsequently terminates.
-    fresh_pre_reward_publish = DoneTerm(
-        func=mdp.fresh_full_mdp_pre_reward_done_term,
-        time_out=False,
-    )
+    The full-MDP environment top publishes post-physics facts before manager
+    evaluation, so TerminationManager contains consumers only.
+    """
+
     # The manager retains this raw horizon fact for telemetry.  The fresh env
     # removes simultaneous plant terminals before exposing timeout to RSL or
     # writing the canonical reset-reason bit.
