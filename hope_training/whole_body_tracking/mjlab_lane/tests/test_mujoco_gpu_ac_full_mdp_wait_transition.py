@@ -1339,6 +1339,24 @@ def _prepare_and_settle(env, dones=None):
     return reveal, launch, due, deferred, missed
 
 
+def test_full_a_builder_failure_is_bitwise_zero_write():
+    env = _host_full_a_lifecycle_env()
+    fields = (
+        "_full_a_scheduled_ordinal", "_full_a_next_reveal_tick",
+        "_epoch_phase", "_epoch_clock_ticks", "_epoch_task_f32",
+    )
+    before = {name: getattr(env, name).clone() for name in fields}
+    scheduled_due, _launch, _missed = env._full_a_prepare_step()
+    env.common_step_counter += 1
+    def fail(**_kwargs):
+        raise RuntimeError("injected builder failure")
+    env._full_a_question_builder = fail
+    with pytest.raises(RuntimeError, match="injected builder failure"):
+        env._full_a_settle_reveal(scheduled_due, torch.zeros(env.num_envs, dtype=torch.bool))
+    for name in fields:
+        assert torch.equal(getattr(env, name), before[name]), name
+
+
 def test_full_a_racket_kinematics_materializes_one_official_site_tuple():
     env = _host_full_a_lifecycle_env()
     dtype = env.sim.data.site_xpos.dtype
