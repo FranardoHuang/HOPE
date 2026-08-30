@@ -953,7 +953,9 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
 
     import numpy as np
 
-    decoder_abi_atol_rad = 2.0e-7
+    decoder_abi_atol_rad = float(
+        _teacher_replay_module().TEACHER_REPLAY_DECODER_ABI_ATOL_RAD
+    )
     required_bits = (
         "direct_frame0_ball_unchanged",
         "direct_frame0_task_unchanged",
@@ -1099,6 +1101,7 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
                 decoder_abi_atol_rad,
             ),
             ("same_step_qdes_guard_clear", False),
+            ("same_step_done_clear", False),
             ("installed_frame0_table_keepout_clear", False),
             ("installed_frame0_resolved_table_contact_clear", False),
             ("joint_q0_error_after_zero", 0.0),
@@ -1144,10 +1147,7 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
         )
         add_float_at_most(
             "same_step_executable_teacher_error_within_decoder_abi",
-            max_abs_delta(
-                arrays["executable_qdes"][index],
-                arrays["requested_qdes"][index],
-            ),
+            arrays["direct_frame0_executable_q0_error_max_rad"][index, 0],
             decoder_abi_atol_rad,
         )
         add_exact(
@@ -1155,6 +1155,7 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
             arrays["qdes_guard_intervention"][index, 0],
             False,
         )
+        add_exact("same_step_done_clear", arrays["done"][index, 0], False)
         add_exact(
             "installed_frame0_table_keepout_clear",
             arrays["direct_frame0_installed_table_keepout"][index, 0],
@@ -1325,6 +1326,33 @@ def _write_direct_frame0_validation_failure(
     return path, payload_sha256
 
 
+def _validate_or_raise_direct_frame0(
+    *, arrays: dict, root: Path, identity_context: dict
+) -> dict:
+    """Run the production validator and durably identify every failure."""
+
+    validation = _direct_frame0_validation_report(arrays)
+    if validation["all_passed"]:
+        return validation
+    failure_path, failure_sha256 = _write_direct_frame0_validation_failure(
+        root, validation, identity_context=identity_context
+    )
+    failed = ",".join(validation["failed_predicates"]) or "none"
+    not_evaluated = ",".join(
+        validation["not_evaluated_predicates"]
+    ) or "none"
+    marker = {"artifact": str(failure_path), "payload_sha256": failure_sha256}
+    _best_effort_stdout_marker(
+        "ACTION_BALL_MUJOCO_DIRECT_FRAME0_FAILURE_JSON="
+        + json.dumps(marker, sort_keys=True, separators=(",", ":"))
+    )
+    raise RuntimeError(
+        "direct frame-zero validation differs: "
+        f"artifact={failure_path} payload_sha256={failure_sha256} "
+        f"failed={failed} not_evaluated={not_evaluated}"
+    )
+
+
 def _run_teacher_replay(
     *, env, root: Path, identity: dict, ready_pose_payload: bytes,
     steps: int, handoff_mode: str, torch_module,
@@ -1456,13 +1484,10 @@ def _run_teacher_replay(
                 action_scale=env.act_scale,
             )
             _obs, _reward, done, extras = env.step(action)
-            if direct_receipt is not None and (
+            direct_same_step_invalid = direct_receipt is not None and (
                 bool(done[0])
                 or not bool(env._full_a_teacher_frame[0].eq(1))
-            ):
-                raise RuntimeError(
-                    "direct frame-zero handoff did not expose natural frame one"
-                )
+            )
             table_attribution = env.diagnostic_table_attribution_tick(
                 extras["termination_bits"]
             )
@@ -1669,6 +1694,8 @@ def _run_teacher_replay(
                 for name, value in direct_values.items():
                     rows[name].append(host(value))
             previous_qdes = requested
+            if direct_same_step_invalid:
+                break
             if bool(done[0]):
                 if question is None:
                     pre_due_done_count += 1
@@ -1696,11 +1723,9 @@ def _run_teacher_replay(
     }
     direct_frame0_receipt = None
     if direct_frame0:
-        validation = _direct_frame0_validation_report(arrays)
-        if not validation["all_passed"]:
-            catalog = env._full_a_catalog
-            plant = identity["plant_model"]
-            failure_identity = {
+        catalog = env._full_a_catalog
+        plant = identity["plant_model"]
+        failure_identity = {
                 "run": {
                     "run_namespace": identity["run_namespace"],
                     "artifact_root": str(root),
@@ -1743,34 +1768,10 @@ def _run_teacher_replay(
                     "identity": plant,
                     "canonical_sha256": _canonical_payload_sha256(plant),
                 },
-            }
-            failure_path, failure_sha256 = (
-                _write_direct_frame0_validation_failure(
-                    root,
-                    validation,
-                    identity_context=failure_identity,
-                )
-            )
-            failed = ",".join(validation["failed_predicates"]) or "none"
-            not_evaluated = (
-                ",".join(validation["not_evaluated_predicates"]) or "none"
-            )
-            failure_marker = {
-                "artifact": str(failure_path),
-                "payload_sha256": failure_sha256,
-            }
-            _best_effort_stdout_marker(
-                "ACTION_BALL_MUJOCO_DIRECT_FRAME0_FAILURE_JSON="
-                + json.dumps(
-                    failure_marker, sort_keys=True, separators=(",", ":")
-                )
-            )
-            raise RuntimeError(
-                "direct frame-zero validation differs: "
-                f"artifact={failure_path} payload_sha256={failure_sha256} "
-                f"failed={failed} "
-                f"not_evaluated={not_evaluated}"
-            )
+        }
+        validation = _validate_or_raise_direct_frame0(
+            arrays=arrays, root=root, identity_context=failure_identity
+        )
         index = int(validation["trace_row"])
         next_index = int(validation["next_trace_row"])
         direct_frame0_receipt = {

@@ -253,6 +253,28 @@ def test_direct_frame0_install_is_atomic_one_shot_and_preserves_shot_state():
         env.install_diagnostic_direct_frame0_playback(ids)
 
 
+@pytest.mark.parametrize("receipt_field,mutate", (
+    ("ball_unchanged", lambda env: env.sim.data.qpos.__setitem__((0, env.b_q), 9.0)),
+    ("task_unchanged", lambda env: env._epoch_task_f32.__setitem__((0, 0), 9.0)),
+    ("lifecycle_unchanged", lambda env: env._epoch_clock_ticks.__setitem__((0, 0), 9)),
+    ("frame0_pose_exact", lambda env: env.sim.data.qpos.__setitem__((0, env._q_slice.start), 9.0)),
+    ("robot_velocity_zero", lambda env: env.sim.data.qvel.__setitem__((0, 0), 9.0)),
+    ("robot_qacc_warmstart_zero", lambda env: env.sim.data.qacc_warmstart.__setitem__((0, 0), 9.0)),
+    ("ctrl_zero", lambda env: env.sim.data.ctrl.__setitem__((0, 0), 9.0)),
+    ("controller_history_exact", lambda env: env.actions.__setitem__((0, 0), 9.0)),
+))
+def test_direct_frame0_install_returns_typed_atomic_failure_bits(
+    receipt_field, mutate
+):
+    env, _joint_q0, _forward_calls = _direct_frame0_install_rig()
+    env._compute_obs = lambda: mutate(env)
+    env.enable_diagnostic_direct_frame0_playback()
+    receipt = env.install_diagnostic_direct_frame0_playback(
+        torch.tensor([0], dtype=torch.long)
+    )
+    assert not bool(receipt[receipt_field][0])
+
+
 def test_direct_frame0_actor_boundary_reports_real_park_drift_without_gating_it():
     env, _joint_q0, _forward_calls = _direct_frame0_install_rig()
     ids = torch.tensor([0], dtype=torch.long)
@@ -334,6 +356,7 @@ def _valid_direct_frame0_validation_arrays():
         ),
         "post_teacher_frame": np.asarray([[1], [2]], dtype=np.int64),
         "pre_teacher_frame": np.asarray([[0], [1]], dtype=np.int64),
+        "done": np.zeros((2, 1), dtype=np.bool_),
     }
     for name in (
         "direct_frame0_ball_unchanged",
@@ -370,6 +393,9 @@ def _valid_direct_frame0_validation_arrays():
     arrays["requested_qdes"] = teacher.copy()
     arrays["guard_expected_executable_qdes"] = guard_expected.copy()
     arrays["executable_qdes"] = guard_expected.copy()
+    arrays["direct_frame0_executable_q0_error_max_rad"][0, 0] = (
+        np.float32(5.960464477539063e-8)
+    )
     return arrays
 
 
@@ -385,12 +411,15 @@ def _direct_frame0_failure_identity():
     }
 
 
-def test_direct_frame0_validation_names_and_isolates_every_predicate():
+def test_direct_frame0_validation_names_and_isolates_every_predicate(tmp_path):
     valid = runner._direct_frame0_validation_report(
         _valid_direct_frame0_validation_arrays()
     )
     assert valid["all_passed"]
-    assert len(valid["predicates"]) == 28
+    assert len(valid["predicates"]) == 29
+    assert valid["decoder_abi_atol_rad"] == (
+        replay.TEACHER_REPLAY_DECODER_ABI_ATOL_RAD
+    )
     assert valid["failed_predicates"] == []
     assert valid["not_evaluated_predicates"] == []
     assert valid["predicates"][
@@ -447,16 +476,12 @@ def test_direct_frame0_validation_names_and_isolates_every_predicate():
             ),
         ),
         "same_step_executable_teacher_error_within_decoder_abi": (
-            lambda arrays: (
-                arrays["executable_qdes"].__setitem__((0, 11), 0.501),
-                arrays["guard_expected_executable_qdes"].__setitem__(
-                    (0, 11), 0.501
-                ),
-            )
+            set_value("direct_frame0_executable_q0_error_max_rad", 0, 0.001)
         ),
         "same_step_qdes_guard_clear": set_value(
             "qdes_guard_intervention", 0, True
         ),
+        "same_step_done_clear": set_value("done", 0, True),
         "installed_frame0_table_keepout_clear": set_value(
             "direct_frame0_installed_table_keepout", 0, True
         ),
@@ -515,6 +540,19 @@ def test_direct_frame0_validation_names_and_isolates_every_predicate():
         report = runner._direct_frame0_validation_report(arrays)
         assert target in report["failed_predicates"], target
         assert report["predicates"][target]["passed"] is False
+        failure_root = tmp_path / target
+        failure_root.mkdir()
+        with pytest.raises(RuntimeError, match="payload_sha256="):
+            runner._validate_or_raise_direct_frame0(
+                arrays=arrays,
+                root=failure_root,
+                identity_context=_direct_frame0_failure_identity(),
+            )
+        persisted = json.loads(
+            (failure_root / "direct_frame0_validation_failure.json")
+            .read_text()
+        )
+        assert target in persisted["validation"]["failed_predicates"]
 
     missing = _valid_direct_frame0_validation_arrays()
     missing["direct_frame0_intervention"][0, 0] = False
@@ -591,17 +629,14 @@ def test_direct_frame0_validation_failure_artifact_is_json_safe_and_no_clobber(
 
 def test_direct_frame0_failure_artifact_precedes_trace_and_summary_writes():
     source = inspect.getsource(runner._run_teacher_replay)
-    validation = source.index("_direct_frame0_validation_report(arrays)")
-    failure_write = source.index(
-        "_write_direct_frame0_validation_failure", validation
-    )
-    marker = source.index(
-        "ACTION_BALL_MUJOCO_DIRECT_FRAME0_FAILURE_JSON", failure_write
-    )
-    failure_raise = source.index("raise RuntimeError(", marker)
+    validation = source.index("_validate_or_raise_direct_frame0(")
     trace_write = source.index('root / "teacher_replay.npz"')
     summary_write = source.index('root / "summary.json"')
-    assert validation < failure_write < marker < failure_raise
+    assert validation < trace_write < summary_write
+    assert "direct frame-zero handoff did not expose natural frame one" not in source
+    helper_source = inspect.getsource(runner._validate_or_raise_direct_frame0)
+    assert helper_source.index("_write_direct_frame0_validation_failure") \
+        < helper_source.index("raise RuntimeError")
     assert failure_raise < trace_write < summary_write
     assert "payload_sha256={failure_sha256}" in source
 

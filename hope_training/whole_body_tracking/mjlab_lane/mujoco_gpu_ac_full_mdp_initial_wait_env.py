@@ -386,7 +386,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         decoded_qdes = self.action_offset + self.act_scale * action
         if not self._torch.allclose(
-            decoded_qdes, expected_qdes, rtol=0.0, atol=2.0e-7
+            decoded_qdes,
+            expected_qdes,
+            rtol=0.0,
+            atol=teacher_replay.TEACHER_REPLAY_DECODER_ABI_ATOL_RAD,
         ):
             raise RuntimeError(
                 "Full-A dynamic-ready actor prior does not decode to hold q_des"
@@ -2460,20 +2463,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             .all(dim=1)
             & ~self._qdes_reward_operand_valid[ids]
         )
-        if not bool(
-            (
-                ball_unchanged
-                & task_unchanged
-                & lifecycle_unchanged
-                & frame0_pose_exact
-                & robot_velocity_zero
-                & robot_qacc_warmstart_zero
-                & ctrl_zero
-                & controller_history_exact
-            ).all()
-        ):
-            raise RuntimeError("direct frame-zero atomic invariants differ")
-
         consumed[ids] = True
         return {
             "applied": torch.ones(
