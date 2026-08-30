@@ -13,6 +13,17 @@ class FrozenTaskFrameSE2:
     yaw_wxyz: object
     translation_xyz: object
 
+    @classmethod
+    def derive(cls, torch, *, source_root_xyz, source_yaw_wxyz,
+               target_root_xyz, target_yaw_wxyz, quat_apply, quat_mul):
+        inverse = source_yaw_wxyz.clone()
+        inverse[..., 1:].neg_()
+        yaw = quat_mul(target_yaw_wxyz, inverse)
+        translation = target_root_xyz - quat_apply(yaw, source_root_xyz)
+        translation = translation.clone()
+        translation[..., 2] = 0.0
+        return cls(yaw.contiguous(), translation.contiguous())
+
     def validate_async(self, torch, *, valid=None, atol=1.0e-6):
         yaw = self.yaw_wxyz
         translation = self.translation_xyz

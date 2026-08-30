@@ -4765,12 +4765,6 @@ class MotionCommand(CommandTerm):
             min=0, max=source_xy.shape[0] - 1
         )
         source_yaw_rows = source_yaw[safe_slot]
-        source_yaw_inverse = source_yaw_rows.clone()
-        source_yaw_inverse[:, 1:].neg_()
-        expected_yaw = quat_mul(
-            yaw_quat(tensors["frozen_root_quat_wxyz"]),
-            source_yaw_inverse,
-        )
         source_xyz = torch.cat(
             (source_xy[safe_slot], torch.zeros_like(source_xy[safe_slot, :1])),
             dim=1,
@@ -4779,14 +4773,18 @@ class MotionCommand(CommandTerm):
             device=task_translation.device, dtype=task_translation.dtype
         )
         frozen_root_local = tensors["frozen_root_pos_w"] - env_origins
-        expected_translation = torch.cat(
-            (
-                frozen_root_local[:, :2]
-                - quat_apply(expected_yaw, source_xyz)[:, :2],
-                torch.zeros_like(source_xyz[:, :1]),
-            ),
-            dim=1,
+        target_xyz = torch.cat(
+            (frozen_root_local[:, :2], source_xyz[:, 2:3]), dim=1
         )
+        expected_frame = FrozenTaskFrameSE2.derive(
+            torch, source_root_xyz=source_xyz,
+            source_yaw_wxyz=source_yaw_rows,
+            target_root_xyz=target_xyz,
+            target_yaw_wxyz=yaw_quat(tensors["frozen_root_quat_wxyz"]),
+            quat_apply=quat_apply, quat_mul=quat_mul,
+        )
+        expected_yaw = expected_frame.yaw_wxyz
+        expected_translation = expected_frame.translation_xyz
         frame_matches_source = (
             torch.isclose(task_yaw, expected_yaw, rtol=0.0, atol=1.0e-6).all(dim=1)
             & torch.isclose(task_translation, expected_translation, rtol=0.0, atol=1.0e-6).all(dim=1)
@@ -6511,9 +6509,6 @@ class MotionCommand(CommandTerm):
         )
         source_root_xy_rows = source_root_xy[safe_slot]
         source_yaw_rows = source_yaw[safe_slot]
-        source_yaw_inverse = source_yaw_rows.clone()
-        source_yaw_inverse[:, 1:].neg_()
-        task_yaw = quat_mul(yaw_quat(frozen_quat), source_yaw_inverse)
         source_root_xyz = torch.cat(
             (source_root_xy_rows, torch.zeros_like(source_root_xy_rows[:, :1])),
             dim=1,
@@ -6523,15 +6518,18 @@ class MotionCommand(CommandTerm):
             0,
             epoch.MOTION_TASK_F32_WIDTH + 19 : epoch.MOTION_TASK_F32_WIDTH + 21,
         ]
-        task_translation = torch.cat(
-            (
-                base_goal_xy
-                - quat_apply(task_yaw, source_root_xyz)[:, :2],
-                torch.zeros_like(base_goal_xy[:, :1]),
-            ),
-            dim=1,
-        ).contiguous()
-        task_yaw = task_yaw.contiguous()
+        target_root_xyz = torch.cat(
+            (base_goal_xy, torch.zeros_like(base_goal_xy[:, :1])), dim=1
+        )
+        task_frame = FrozenTaskFrameSE2.derive(
+            torch, source_root_xyz=source_root_xyz,
+            source_yaw_wxyz=source_yaw_rows,
+            target_root_xyz=target_root_xyz,
+            target_yaw_wxyz=yaw_quat(frozen_quat),
+            quat_apply=quat_apply, quat_mul=quat_mul,
+        )
+        task_yaw = task_frame.yaw_wxyz
+        task_translation = task_frame.translation_xyz
         # Validate/latch the complete reveal reference before any D05 Motion
         # destination changes.  ``refresh`` preserves invalid cache rows and
         # updates the persistent writable mask; re-intersect so a frame/pending

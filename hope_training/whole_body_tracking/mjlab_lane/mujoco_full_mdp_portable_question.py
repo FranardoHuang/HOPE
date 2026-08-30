@@ -21,6 +21,12 @@ import hashlib
 import io
 import math
 from pathlib import Path
+import sys
+
+_MDP = Path(__file__).resolve().parent.parent / "source" / "whole_body_tracking" / "whole_body_tracking" / "tasks" / "tracking" / "mdp"
+if str(_MDP) not in sys.path:
+    sys.path.insert(0, str(_MDP))
+from action_ball_frozen_task_frame_se2 import FrozenTaskFrameSE2
 
 
 _JOINT_ORDER_CONTRACT_ID = "a3-gmr-dof-pos-to-runtime-articulation-v1"
@@ -550,10 +556,16 @@ def build_center_question(
             float(contact_reference_root_z_scene),
         )
     )
-    teacher_source_to_task_translation = (
-        base_goal
-        - _quat_apply_wxyz(torch, delta_yaw_q, source_strike_root)
-    ).contiguous()
+    task_frame = FrozenTaskFrameSE2.derive(
+        torch, source_root_xyz=source_strike_root,
+        source_yaw_wxyz=_yaw_quaternion(torch, reference_yaw, dtype, device),
+        target_root_xyz=base_goal,
+        target_yaw_wxyz=live_yaw_q,
+        quat_apply=lambda q, p: _quat_apply_wxyz(torch, q, p),
+        quat_mul=lambda a, b: _quat_mul_wxyz(torch, a, b),
+    )
+    delta_yaw_q = task_frame.yaw_wxyz
+    teacher_source_to_task_translation = task_frame.translation_xyz
 
     # Selected ball centre relative to the official racket site comes from the
     # same dependency-light geometry module as the catalog's reference FK.
