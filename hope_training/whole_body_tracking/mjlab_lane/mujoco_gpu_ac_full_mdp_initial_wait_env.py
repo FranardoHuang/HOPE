@@ -870,12 +870,23 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             table_surface_z_scene=float(self.hope_to_scene[2]),
         )
         task = question["task_f32"]
+        destination_buffers = (
+            self._epoch_task_f32, self._full_a_launch_state_f32,
+            self._full_a_teacher_rate, self._full_a_scaled_t_hit_s,
+            self._full_a_scaled_t_cycle_s, self._full_a_pre_swing_wait_s,
+            self._full_a_teacher_source_to_task_yaw_wxyz,
+            self._full_a_teacher_source_to_task_translation_scene,
+            self._full_a_r03_fact_f32, self._full_a_r03_physically_valid,
+            self._epoch_clock_ticks, self._full_a_r03_expected_source_step,
+        )
         if (
             type(task) is not torch.Tensor
             or tuple(task.shape) != (n, observation_contract.TASK_F32_WIDTH)
             or task.dtype != torch.float32
+            or task.device != ids.device
+            or any(buffer.device != task.device for buffer in destination_buffers)
         ):
-            raise RuntimeError("portable centre question task width differs")
+            raise RuntimeError("portable centre question task destination differs")
         task_yaw = question["teacher_source_to_task_yaw_wxyz"]
         task_translation = question[
             "teacher_source_to_task_translation_scene"
