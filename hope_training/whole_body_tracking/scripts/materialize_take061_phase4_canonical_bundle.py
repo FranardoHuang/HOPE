@@ -38,6 +38,7 @@ ACTION_ID = "take061_slow_block_phase4_v1"
 FAMILY = "backhand"
 SCOPE = "full"
 HIT_FRAME = 48
+POLICY_STEP_S = 0.02
 EXPECTED_PHASE4_KIND = "take061_slow_block_exact_face_phase4_v1"
 
 
@@ -291,6 +292,20 @@ def _singleton_profile(*, ball_b: np.ndarray, incoming_b: np.ndarray,
     return result
 
 
+def _ceil_to_policy_tick(seconds: float) -> float:
+    """Keep the reveal-owned contact deadline on the FullMDP policy grid.
+
+    Rounding upward preserves the Phase4 teacher-rate lower bound and the full
+    reaction margin.  Rounding to nearest/down could make the exact-rate centre
+    infeasible even though the offline motion/contact witness is unchanged.
+    """
+
+    if not math.isfinite(seconds) or seconds <= 0.0:
+        raise BundleError("time-to-contact must be positive and finite")
+    ticks = math.ceil(seconds / POLICY_STEP_S - 1.0e-12)
+    return ticks * POLICY_STEP_S
+
+
 def _materialize_profile_pins(
     template_path: Path, ball_physics: Path, repo_root: Path
 ) -> tuple[Mapping[str, Any], bytes]:
@@ -420,9 +435,10 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     teacher_rate_min = float(exact["teacher_rate"])
     if not 0.0 < teacher_rate_min <= 1.0:
         raise BundleError("Phase4 exact-face teacher rate must lie in (0,1]")
+    raw_ttc = t_hit / teacher_rate_min + reaction
+    ttc = _ceil_to_policy_tick(raw_ttc)
     profile = _singleton_profile(ball_b=ball_b, incoming_b=incoming_b,
-                                 base_xy=root0[:2],
-                                 ttc=t_hit / teacher_rate_min + reaction)
+                                 base_xy=root0[:2], ttc=ttc)
     action_uid = manifest_contract.derive_action_ball_action_uid(ACTION_ID, FAMILY, motion_sha)
     solver_sha = profile_pins["solver_profile_sha256"]
     physics_sha = profile_pins["physics_profile_sha256"]
@@ -466,7 +482,10 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
             "fitted_ball_profile_pins_sha256": _sha256_bytes(profile_pins_bytes),
             "HOPE_BALL_PHYSICS_YAML": str(args.ball_physics.resolve()),
         },
-        "timing": {"t_hit_s": t_hit, "t_cycle_s": t_cycle, "fps": effective_fps},
+        "timing": {"t_hit_s": t_hit, "t_cycle_s": t_cycle, "fps": effective_fps,
+                   "time_to_contact_raw_s": raw_ttc,
+                   "time_to_contact_policy_grid_s": ttc,
+                   "policy_step_s": POLICY_STEP_S},
         "exact_center": {"ball_center_w_m": ball_w.tolist(),
             "ball_center_b_yaw_m": ball_b.tolist(), "incoming_velocity_w_mps": incoming_w.tolist(),
             "landing_aim_w_xy_m": aim.tolist(),
