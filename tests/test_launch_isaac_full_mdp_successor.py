@@ -378,6 +378,24 @@ def test_dry_run_fixed_action_probe_uses_its_own_boot_marker(
     assert not rig.root.exists()
 
 
+def test_dry_run_contact_tick_trace_is_noppo_finite_mode(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.module.main(
+        rig.argv(dry=True) + ["--diagnostic-contact-tick-trace"]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["argv"][-1] == (
+        "task.action_ball_full_mdp_contact_tick_trace_output_path="
+        f"{rig.root / 'contact-tick-trace.json'}"
+    )
+    assert payload["launcher_env"]["KIT_BOOT_MARKER"] == (
+        rig.module.CONTACT_TICK_TRACE_BOOT_MARKER
+    )
+    assert payload["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "1"
+    assert not rig.root.exists()
+
+
 def test_profile_probe_requires_budget_and_is_rate_exclusive_before_root(
     rig, capsys: pytest.CaptureFixture[str]
 ) -> None:
