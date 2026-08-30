@@ -386,7 +386,7 @@ def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -
     )
 
 
-def test_fresh_1500_tick_trace_has_exactly_six_due_opportunities() -> None:
+def test_fresh_500_tick_trace_has_exactly_one_slow_center_due_opportunity() -> None:
     command, _cadence_owner, device_owner, epoch_owner = (
         _fresh_command_and_owners(torch.device("cpu"))
     )
@@ -396,14 +396,14 @@ def test_fresh_1500_tick_trace_has_exactly_six_due_opportunities() -> None:
     reveal_ticks = []
     issued_task_ticks = []
     exhausted_observation_clocks = {}
-    for common_step in range(1500):
+    for common_step in range(500):
         command._env.common_step_counter = common_step
         command._advance_action_ball_continuous_motion_cadence()
         if command._action_ball_continuous_reveal_due[0].item():
             assert torch.all(command._action_ball_continuous_reveal_due)
             reveal_ticks.append(common_step)
         token = command.issue_current_r05_cadence_if_due()
-        if common_step in (973, 1158):
+        if common_step in (48, 436):
             observation_token = (
                 command.action_ball_continuous_motion_observation_projection()
             )
@@ -417,25 +417,25 @@ def test_fresh_1500_tick_trace_has_exactly_six_due_opportunities() -> None:
             )
         if token is not None:
             issued_task_ticks.append(common_step)
-        if common_step == 1158:
+        if common_step == 436:
             assert not torch.any(command._action_ball_continuous_reveal_due)
             assert token is None
             assert command._action_ball_continuous_scheduled_ordinal.tolist() == [
-                5,
-                5,
+                0,
+                0,
             ]
 
-    assert reveal_ticks == [48, 233, 418, 603, 788, 973]
+    assert reveal_ticks == [48]
     assert issued_task_ticks == reveal_ticks
-    assert command._action_ball_continuous_scheduled_ordinal.tolist() == [5, 5]
-    assert command._action_ball_swing_generation.tolist() == [5, 5]
+    assert command._action_ball_continuous_scheduled_ordinal.tolist() == [0, 0]
+    assert command._action_ball_swing_generation.tolist() == [0, 0]
     assert exhausted_observation_clocks == {
-        973: [-1.0, -1.0],
-        1158: [-1.0, -1.0],
+        48: [-1.0, -1.0],
+        436: [-1.0, -1.0],
     }
     assert command._action_ball_continuous_next_reveal_step.tolist() == [
-        1500,
-        1500,
+        500,
+        500,
     ]
 
 

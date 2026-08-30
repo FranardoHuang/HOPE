@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import importlib.util
+import json
 import math
 from pathlib import Path
 import stat
@@ -68,13 +69,25 @@ ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND = (
 ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT = 1
 ACTION_BALL_FULL_MDP_FRESH_ACTION_SLOT = 0
 PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH = (
-    "configs/action_ball_full_mdp_n1_take061_measured_a3p0807_v5_20260828.json"
+    "assets/motions/action_ball_full_mdp_n1_take061_optitrack_20260830/"
+    "take061_slow_block_phase4_v1.action_ball.v3.json"
 )
 PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256 = (
-    "a13bc6533cf22a0695a861470152683859f35afa7505320fcbe474f76addf597"
+    "ebed8cfa75b50415d143305bac910043c334cb25636c8fed4a40f97d957a6cbc"
 )
 PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
-    "c759f13402e1a97b54431076eb3279b8eb7e8dfffaba94dbb92e842817da4277"
+    "ebed8cfa75b50415d143305bac910043c334cb25636c8fed4a40f97d957a6cbc"
+)
+PINNED_BALL_PHYSICS_RELATIVE_PATH = "configs/ball_physics_optitrack_20260730.yaml"
+PINNED_BALL_PHYSICS_FILE_SHA256 = (
+    "3afb1c9a00f975d924169503d7dafab92ea6c0b96263336e27edcd1d6257ea14"
+)
+PINNED_PROFILE_PINS_RELATIVE_PATH = (
+    "assets/motions/action_ball_full_mdp_n1_take061_optitrack_20260830/"
+    "take061_slow_block_phase4_v1.profile_pins.v1.json"
+)
+PINNED_PROFILE_PINS_FILE_SHA256 = (
+    "e5996c1eceacc9be3eb079add58277967d4228fff19150f24f2f337be165524d"
 )
 FRESH_POLICY_STEP_S = 0.02
 # Give every fresh row one complete H48 balance rollout before task exposure.
@@ -84,12 +97,12 @@ FRESH_POLICY_STEP_S = 0.02
 FRESH_FIRST_REVEAL_TICK = 48
 FRESH_RECOVERY_END_OFFSET_TICKS = 77
 FRESH_HIDDEN_GAP_TICKS = 2
-FRESH_REFERENCE_DUE_COUNT = 6
-FRESH_REFERENCE_DUE_TICKS = (48, 233, 418, 603, 788, 973)
-FRESH_EPISODE_HORIZON_TICKS = 1500
+FRESH_REFERENCE_DUE_COUNT = 1
+FRESH_REFERENCE_DUE_TICKS = (48,)
+FRESH_EPISODE_HORIZON_TICKS = 500
 # Raw actor-clock sentinel shared by both backends.  A negative value is
 # outside the domain of every real countdown and makes schedule exhaustion
-# distinguishable from the sixth shot's still-valid settlement boundary.
+# distinguishable from the one shot's still-valid settlement boundary.
 FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S = -1.0
 
 
@@ -176,7 +189,7 @@ class PortableFreshCadence:
 def derive_portable_fresh_cadence(
     table: PortableActionCenterTable,
 ) -> PortableFreshCadence:
-    """Derive the 30 s cadence from the sealed active-action timing row."""
+    """Derive the one-shot N1 cadence from the sealed active-action timing row."""
 
     if type(table) is not PortableActionCenterTable or not table.actions:
         raise ValueError("portable fresh cadence requires the exact action bank")
@@ -203,12 +216,11 @@ def derive_portable_fresh_cadence(
         for ordinal in range(FRESH_REFERENCE_DUE_COUNT)
     )
     if (
-        maximum_close != 106
-        or cadence != 185
+        maximum_close != 309
+        or cadence != 388
         or due_ticks != FRESH_REFERENCE_DUE_TICKS
-        # Every advertised opportunity must fit its complete construction
-        # window.  The six-shot budget is explicit even though the shorter
-        # initial balance prefix leaves unused horizon after shot six.
+        # The one advertised N1 opportunity and its retirement boundary must
+        # both fit the episode.  Multi-shot cadence is not silently inferred.
         or due_ticks[-1] + cadence >= FRESH_EPISODE_HORIZON_TICKS
     ):
         raise ValueError("portable fresh cadence differs from the frozen schedule")
@@ -246,6 +258,49 @@ def _load_catalog_source():
         raise ValueError(
             "code-owned full-MDP diagnostic catalog schema/content changed"
         )
+    physics_path = (repo_root / PINNED_BALL_PHYSICS_RELATIVE_PATH).resolve()
+    profile_pins_path = (repo_root / PINNED_PROFILE_PINS_RELATIVE_PATH).resolve()
+    try:
+        physics_path.relative_to(repo_root)
+        profile_pins_path.relative_to(repo_root)
+        physics_payload = physics_path.read_bytes()
+        profile_pins_payload = profile_pins_path.read_bytes()
+        profile_pins = json.loads(profile_pins_payload)
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("code-owned full-MDP physics binding is unavailable") from exc
+    venue = profile_pins.get("physics_payload", {}).get("venue_source", {})
+    implementation = profile_pins.get("solver_implementation_source_sha256", {})
+    implementation_paths = {
+        "continuous_questions.py": Path(__file__).resolve().with_name(
+            "continuous_questions.py"
+        ),
+        "hope_commands.py": Path(__file__).resolve().with_name("hope_commands.py"),
+        "stroke_adapt_torch.py": Path(__file__).resolve().with_name(
+            "stroke_adapt_torch.py"
+        ),
+        "virtual_ball.py": Path(__file__).resolve().with_name("virtual_ball.py"),
+    }
+    if (
+        hashlib.sha256(physics_payload).hexdigest()
+        != PINNED_BALL_PHYSICS_FILE_SHA256
+        or hashlib.sha256(profile_pins_payload).hexdigest()
+        != PINNED_PROFILE_PINS_FILE_SHA256
+        or profile_pins.get("venue_yaml_sha256")
+        != PINNED_BALL_PHYSICS_FILE_SHA256
+        or venue.get("path") != PINNED_BALL_PHYSICS_RELATIVE_PATH
+        or venue.get("file_sha256") != PINNED_BALL_PHYSICS_FILE_SHA256
+        or profile_pins.get("physics_profile_sha256")
+        != loaded.manifest.physics_profile_sha256
+        or profile_pins.get("solver_profile_sha256")
+        != loaded.manifest.solver_profile_sha256
+        or set(implementation) != set(implementation_paths)
+        or any(
+            hashlib.sha256(path.read_bytes()).hexdigest()
+            != implementation.get(name)
+            for name, path in implementation_paths.items()
+        )
+    ):
+        raise ValueError("code-owned full-MDP physics binding differs")
     actions = loaded.manifest.actions
     action_order = tuple(loaded.manifest.action_order)
     if (
@@ -327,6 +382,8 @@ def _portable_reference_row(
 
     import numpy as np
 
+    if mount_normal_sign not in (-1, 1):
+        raise ValueError("portable action reference mount sign differs")
     with np.load(motion_file, allow_pickle=False) as data:
         required = {
             "fps",
@@ -335,8 +392,6 @@ def _portable_reference_row(
             "body_quat_w",
             "body_ang_vel_w",
             "kinematics_schema_version",
-            "measured_racket_schema_version",
-            "measured_racket_robot_mount_normal_sign",
         }
         if required.difference(data.files):
             raise ValueError("portable action reference NPZ schema differs")
@@ -356,16 +411,8 @@ def _portable_reference_row(
             or position.shape[1] != len(names)
             or int(np.asarray(data["kinematics_schema_version"]).reshape(-1)[0])
             != 2
-            or int(np.asarray(data["measured_racket_schema_version"]).reshape(-1)[0])
-            != 4
-            or int(
-                np.asarray(
-                    data["measured_racket_robot_mount_normal_sign"]
-                ).reshape(-1)[0]
-            )
-            != mount_normal_sign
         ):
-            raise ValueError("portable action reference array/sign contract differs")
+            raise ValueError("portable action reference array contract differs")
         fps_values = np.asarray(data["fps"]).reshape(-1)
         if fps_values.size != 1 or int(fps_values[0]) <= 0:
             raise ValueError("portable action reference fps differs")
@@ -510,6 +557,10 @@ __all__ = [
     "PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH",
     "PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256",
     "PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256",
+    "PINNED_BALL_PHYSICS_RELATIVE_PATH",
+    "PINNED_BALL_PHYSICS_FILE_SHA256",
+    "PINNED_PROFILE_PINS_RELATIVE_PATH",
+    "PINNED_PROFILE_PINS_FILE_SHA256",
     "FRESH_POLICY_STEP_S",
     "FRESH_FIRST_REVEAL_TICK",
     "FRESH_RECOVERY_END_OFFSET_TICKS",

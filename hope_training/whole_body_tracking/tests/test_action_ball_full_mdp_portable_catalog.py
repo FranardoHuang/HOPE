@@ -22,15 +22,16 @@ def test_portable_fresh_cadence_freezes_due_ticks_not_verdicts():
     table = catalog.load_portable_action_center_table()
     cadence = catalog.derive_portable_fresh_cadence(table)
     assert cadence.first_reveal_tick == 48
-    assert cadence.cadence_ticks == 185
-    assert cadence.reference_due_ticks == (48, 233, 418, 603, 788, 973)
+    assert cadence.maximum_task_close_ticks == 309
+    assert cadence.cadence_ticks == 388
+    assert cadence.reference_due_ticks == (48,)
     assert len(cadence.reference_due_ticks) == catalog.FRESH_REFERENCE_DUE_COUNT
-    assert cadence.reference_due_ticks[-1] + cadence.cadence_ticks == 1158
+    assert cadence.reference_due_ticks[-1] + cadence.cadence_ticks == 436
     assert (
         cadence.reference_due_ticks[-1] + cadence.cadence_ticks
         < cadence.episode_horizon_ticks
     )
-    assert cadence.episode_horizon_ticks == 1500
+    assert cadence.episode_horizon_ticks == 500
     assert not hasattr(cadence, "minimum_shot_reveal_ticks")
 
     drifted = replace(
@@ -48,6 +49,32 @@ def test_portable_fresh_cadence_freezes_due_ticks_not_verdicts():
         raise AssertionError("timing drift did not invalidate the frozen cadence")
 
 
+def test_one_shot_reveal_launch_contact_close_fit_exact_n1_episode():
+    table = catalog.load_portable_action_center_table()
+    action = table.fresh_action
+    cadence = catalog.derive_portable_fresh_cadence(table)
+    reveal_tick = cadence.first_reveal_tick
+    commit_and_full_horizon_launch_tick = reveal_tick + catalog.FRESH_HIDDEN_GAP_TICKS
+    contact_delta_ticks = round(
+        action.time_to_contact_center_s / catalog.FRESH_POLICY_STEP_S
+    )
+    contact_tick = commit_and_full_horizon_launch_tick + contact_delta_ticks
+    close_tick = (
+        commit_and_full_horizon_launch_tick + cadence.maximum_task_close_ticks
+    )
+    retirement_tick = reveal_tick + cadence.cadence_ticks
+
+    assert contact_delta_ticks == 265
+    assert (
+        reveal_tick,
+        commit_and_full_horizon_launch_tick,
+        contact_tick,
+        close_tick,
+        retirement_tick,
+    ) == (48, 50, 315, 359, 436)
+    assert contact_tick < close_tick < retirement_tick < cadence.episode_horizon_ticks
+
+
 def test_portable_catalog_preserves_legacy_columns_and_fresh_action_zero():
     legacy = catalog.load_action_ball_full_mdp_diagnostic_catalog_table()
     portable = catalog.load_portable_action_center_table()
@@ -59,7 +86,7 @@ def test_portable_catalog_preserves_legacy_columns_and_fresh_action_zero():
     action = portable.fresh_action
     assert action.action_slot == 0
     assert action.action_id == legacy.action_order[0]
-    assert action.action_uid == legacy.action_uids[0] == 5527597793770800
+    assert action.action_uid == legacy.action_uids[0] == 4098890508575574
     assert action.motion_file == legacy.motion_files[0]
     assert action.motion_sha256 == legacy.motion_sha256[0]
     assert action.family == legacy.clip_family_per_clip[0] == "backhand"
@@ -112,23 +139,23 @@ def test_action_zero_reference_row_matches_frozen_cold_builder_values():
     action = catalog.load_portable_action_center_table().fresh_action
     expected = {
         "reference_racket_site_position_w_m": (
-            0.688297688961029,
-            -0.2830958366394043,
-            1.054610013961792,
+            0.727763295173645,
+            -0.24545995891094208,
+            1.0585051774978638,
         ),
         "reference_racket_site_velocity_w_mps": (
-            1.7597556114196777,
-            -0.30233636498451233,
-            0.6198316812515259,
+            0.5448840856552124,
+            -0.009558722376823425,
+            0.1934632658958435,
         ),
         "reference_raw_face_normal_w": (
-            0.897560715675354,
-            -0.3738133907318115,
-            -0.23376573622226715,
+            0.9005173444747925,
+            -0.4245518445968628,
+            0.09392757713794708,
         ),
         "reference_reach_offset_xy_m": (
-            0.7324142456054688,
-            -0.27776747941970825,
+            0.7295531630516052,
+            -0.24445714056491852,
         ),
     }
     for name, values in expected.items():
