@@ -306,7 +306,7 @@ def test_direct_frame0_production_reparks_before_advancing_waiting_rows():
         wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step
     )
     step = inspect.getsource(wait_env.FullMdpInitialWaitVecEnv._step_full_a)
-    runner_source = inspect.getsource(runner.run_teacher_replay)
+    runner_source = inspect.getsource(runner._run_teacher_replay)
 
     assert prepare.index("self._full_a_park_rows(") < prepare.index(
         "return scheduled_due, launch, missed_launch"
