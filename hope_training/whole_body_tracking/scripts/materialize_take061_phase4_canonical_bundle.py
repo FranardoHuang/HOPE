@@ -126,18 +126,26 @@ def _rebuild_noncyclic_schema2(*, q: np.ndarray, qd: np.ndarray,
     # A runtime scene may contain a second free joint for the ball.  Bind the
     # robot root by the canonical first body instead of guessing "the only"
     # free joint; every scalar joint/body is still resolved by exact name.
-    root_body_id = int(mujoco.mj_name2id(
-        model, mujoco.mjtObj.mjOBJ_BODY, body_names[0]
-    ))
+    def resolve(obj_type: Any, count: int, name: str) -> int:
+        direct = int(mujoco.mj_name2id(model, obj_type, name))
+        if direct >= 0:
+            return direct
+        matches = [index for index in range(count)
+                   if (mujoco.mj_id2name(model, obj_type, index) or "").endswith("/" + name)]
+        if len(matches) != 1:
+            raise BundleError(f"runtime model cannot uniquely resolve {name!r}")
+        return int(matches[0])
+
+    root_body_id = resolve(mujoco.mjtObj.mjOBJ_BODY, int(model.nbody), body_names[0])
     free_ids = [jid for jid in range(int(model.njnt))
                 if int(model.jnt_type[jid]) == int(mujoco.mjtJoint.mjJNT_FREE)
                 and int(model.jnt_bodyid[jid]) == root_body_id]
     if root_body_id < 0 or len(free_ids) != 1:
         raise BundleError("runtime model does not have one free joint on canonical root body")
     root_joint_id = int(free_ids[0])
-    joint_ids = [int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name))
+    joint_ids = [resolve(mujoco.mjtObj.mjOBJ_JOINT, int(model.njnt), name)
                  for name in schema2.RUNTIME_JOINT_NAMES]
-    body_ids = [int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name))
+    body_ids = [resolve(mujoco.mjtObj.mjOBJ_BODY, int(model.nbody), name)
                 for name in body_names]
     if min(joint_ids) < 0 or len(set(joint_ids)) != 31:
         raise BundleError("runtime model does not close all 31 named joints")
