@@ -483,8 +483,12 @@ def build_center_question(
     def repeated(values):
         return torch.tensor(values, dtype=dtype, device=device).expand(count, -1)
 
+    # The selected-reset transaction has already installed this action's
+    # sampled station into the physical root.  In no-move mode the task goal
+    # is that exact episode birth, not a second copy of the manifest centre.
+    # Keeping the frozen reset root here also preserves translation/yaw
+    # equivariance when base-spawn curricula are enabled later.
     base_goal = base_position_scene.clone()
-    base_goal[:, :2] = repeated(row.base_spawn_center_w_xy_m)
     base_goal[:, 2] = _plain_finite(
         contact_reference_root_z_scene,
         "contact_reference_root_z_scene",

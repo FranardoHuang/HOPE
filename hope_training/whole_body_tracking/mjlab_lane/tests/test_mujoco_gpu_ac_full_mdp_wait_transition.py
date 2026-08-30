@@ -1224,6 +1224,7 @@ def _host_full_a_lifecycle_env():
                 action_slot=0,
                 action_uid=5527597793770800,
                 mount_normal_sign=1,
+                base_spawn_center_w_xy_m=(-0.19223234, 0.28527881),
             )
         ),
         _full_a_cadence=SimpleNamespace(
@@ -1271,6 +1272,9 @@ def _host_full_a_lifecycle_env():
             MethodType(getattr(wait_env.FullMdpInitialWaitVecEnv, name), env),
         )
     wait_env.FullMdpInitialWaitVecEnv._initialize_full_a_state(env)
+    wait_env.FullMdpInitialWaitVecEnv._install_full_a_physical_spawn(
+        env, env._all_env_ids
+    )
     # Step-order host tapes replace both tracked-state consumers.  Thread one
     # explicit ephemeral object through those replacements without inventing
     # fake body tensors in this lifecycle-only fixture.
@@ -3012,12 +3016,12 @@ def test_portable_center_question_uses_action_row_yaw_and_two_stage_reverse_inte
     # places the official site at task[5:8], and the ball centre is exactly the
     # selected-face geometry offset away.  This is the curriculum hand-off,
     # not a random rollout success proxy.
-    torch.testing.assert_close(task[0, 5:8], torch.tensor([0.6, -0.6, 1.0]))
-    torch.testing.assert_close(task[0, 14:17], torch.tensor([0.601, -0.58, 1.002]))
-    torch.testing.assert_close(task[1, 5:8], torch.tensor([0.7, 0.3, 1.0]), atol=1.0e-6, rtol=0.0)
-    torch.testing.assert_close(task[1, 14:17], torch.tensor([0.68, 0.301, 1.002]), atol=1.0e-6, rtol=0.0)
-    torch.testing.assert_close(task[0, 24:26], torch.tensor([0.3, -0.1]))
-    torch.testing.assert_close(task[1, 24:26], torch.tensor([0.2, 0.0]), atol=1.0e-6, rtol=0.0)
+    torch.testing.assert_close(task[0, 5:8], torch.tensor([0.4, -0.5, 1.0]))
+    torch.testing.assert_close(task[0, 14:17], torch.tensor([0.401, -0.48, 1.002]))
+    torch.testing.assert_close(task[1, 5:8], torch.tensor([1.5, 2.4, 1.0]), atol=1.0e-6, rtol=0.0)
+    torch.testing.assert_close(task[1, 14:17], torch.tensor([1.48, 2.401, 1.002]), atol=1.0e-6, rtol=0.0)
+    torch.testing.assert_close(task[0, 24:26], torch.tensor([0.1, 0.0]))
+    torch.testing.assert_close(task[1, 24:26], torch.tensor([1.0, 2.1]), atol=1.0e-6, rtol=0.0)
     torch.testing.assert_close(task[0, 26:29], torch.tensor([-3.0, 0.0, 0.0]))
     torch.testing.assert_close(
         task[1, 26:29],
@@ -3027,7 +3031,7 @@ def test_portable_center_question_uses_action_row_yaw_and_two_stage_reverse_inte
     )
     # Launch is reverse-integrated from the action question.  It is neither
     # the legacy serve-range midpoint nor a forward gravity shortcut.
-    torch.testing.assert_close(task[0, 32:35], torch.tensor([1.801, -0.58, 1.002]))
+    torch.testing.assert_close(task[0, 32:35], torch.tensor([1.601, -0.48, 1.002]))
     assert not torch.equal(task[0, 32:35], torch.tensor([2.0, -0.775, 1.44]))
 
 
@@ -3272,6 +3276,7 @@ def test_full_a_reveal_packs_env_local_question_and_launch_restores_world_origin
     local_base = torch.tensor([[0.1, -0.2, 0.9], [0.3, -0.4, 0.9]])
     env.env.scene.env_origins = origins
     env.sim.data.qpos[:, :3] = origins + local_base
+    frozen_base = env._full_a_frozen_root_position_scene.clone()
     captured = {}
 
     def question(**kwargs):
@@ -3296,7 +3301,8 @@ def test_full_a_reveal_packs_env_local_question_and_launch_restores_world_origin
     env.common_step_counter = 1
     wait_env.FullMdpInitialWaitVecEnv._full_a_reveal_rows(env, ids)
     env._full_a_next_reveal_tick[:] = 295
-    torch.testing.assert_close(captured["base"], local_base)
+    torch.testing.assert_close(captured["base"], frozen_base)
+    assert not torch.equal(captured["base"], local_base)
     env.sim.data.qpos[:, env.b_q : env.b_q + 3] = -100.0
     env.sim.data.qvel[:, env.b_v : env.b_v + 6] = 10.0
     env.common_step_counter = 1

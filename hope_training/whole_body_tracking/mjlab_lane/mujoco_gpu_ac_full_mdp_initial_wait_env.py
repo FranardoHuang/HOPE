@@ -315,6 +315,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             )
             self._initialize_full_a_geometry(mujoco)
             self._initialize_full_a_state()
+            self._install_full_a_physical_spawn(self._all_env_ids)
             self.sim.forward()
         self._snapshot_ready_teacher()
         if self.full_a_mode:
@@ -412,6 +413,31 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._qdes_previous_executable[ids] = (
                 self._full_a_policy_bootstrap_qdes
             )
+            self._install_full_a_physical_spawn(ids)
+
+    def _install_full_a_physical_spawn(self, ids) -> None:
+        """Install the selected station while preserving dynamic-ready pose.
+
+        ``physical_ready.root_pose`` owns root Z, tilt and joints.  The action
+        manifest owns the environment-local station XY.  A Full-A true reset
+        must combine those two facts atomically, exactly like the legacy
+        split-ready transaction, rather than treating the dynamic-ready
+        artifact's local origin as a table-relative station.
+        """
+
+        if ids.numel() == 0:
+            return
+        spawn_xy = self._full_a_base_spawn_center_scene_xy
+        origins = self.env.scene.env_origins[ids]
+        root = self.root_qadr
+        self.sim.data.qpos[ids, root : root + 2] = (
+            origins[:, :2] + spawn_xy
+        )
+        frozen_pos = self.sim.data.qpos[ids, root : root + 3] - origins
+        frozen_quat = self.sim.data.qpos[ids, root + 3 : root + 7]
+        self._full_a_frozen_root_position_scene[ids] = frozen_pos
+        self._full_a_frozen_root_quat_wxyz[ids] = frozen_quat
+        self._full_a_frozen_root_valid[ids] = True
 
     def _initialize_full_a_geometry(self, mujoco) -> None:
         """Bind R06/R07 numeric geometry to the compiled MuJoCo scene."""
@@ -707,6 +733,21 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_scaled_t_hit_s = torch.zeros(n, dtype=dtype, device=self.device)
         self._full_a_scaled_t_cycle_s = torch.zeros(n, dtype=dtype, device=self.device)
         self._full_a_pre_swing_wait_s = torch.zeros(n, dtype=dtype, device=self.device)
+        self._full_a_base_spawn_center_scene_xy = torch.tensor(
+            self._full_a_catalog.fresh_action.base_spawn_center_w_xy_m,
+            dtype=dtype,
+            device=self.device,
+        )
+        self._full_a_frozen_root_position_scene = torch.zeros(
+            (n, 3), dtype=dtype, device=self.device
+        )
+        self._full_a_frozen_root_quat_wxyz = torch.zeros(
+            (n, 4), dtype=dtype, device=self.device
+        )
+        self._full_a_frozen_root_quat_wxyz[:, 0] = 1.0
+        self._full_a_frozen_root_valid = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
         self._full_a_teacher_frame = torch.zeros(
             n, dtype=torch.long, device=self.device
         )
@@ -791,13 +832,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         builder = getattr(
             self, "_full_a_question_builder", portable_question.build_center_question
         )
-        origins = self.env.scene.env_origins[ids]
-        base_position = self.sim.data.qpos[
-            ids, self.root_qadr : self.root_qadr + 3
-        ] - origins
-        base_quat = self.sim.data.qpos[
-            ids, self.root_qadr + 3 : self.root_qadr + 7
-        ]
+        if not bool(self._full_a_frozen_root_valid[ids].all()):
+            raise RuntimeError("Full-A reveal has no installed physical spawn")
+        base_position = self._full_a_frozen_root_position_scene[ids]
+        base_quat = self._full_a_frozen_root_quat_wxyz[ids]
         question = builder(
             torch=torch,
             row=self._full_a_catalog.fresh_action,
