@@ -63,6 +63,18 @@ source clean，evidence root=
 `/workspace/franco/mktemp/direct-frame0-evidence-936d0f74-cpu-test-20260830T0530Z-r1`。尚未重发
 936真实CUDA，所以table/guard/physical intervention结果仍`unverified`，G06仍`Partial`。
 
+后续终审发现production仍有两条证据旁路：same-step `done/frame!=1`与installer八项原子
+不变量会在统一writer前直接raise。`643f03b505b1f3e9d51c55704268865035f46250`
+删除匿名early raise：installer只返回typed receipt bits；runner把same-step done纳入第29个
+predicate，所有失败都进入同一O_EXCL/mode-0600/file+directory-fsync writer后再raise。
+same-step teacher error直接消费production记录的q0 scalar，`2e-7 rad`只引用共享ready decoder
+ABI常量。29项validator mutation与8项真实installer receipt mutation均走production writer，验证
+typed actual/expected、无success artifact与no-clobber。fresh Pod三受影响module union=
+`103 passed / 2 skipped / 0 failed`（pytest 4.81 s，wall 6 s），evidence root=
+`/workspace/franco/mktemp/direct-frame0-final-643f03b5-cpu-test-20260830T0620Z-r2`；
+ignored mesh closure从已验证a513 exact恢复并由source-closure测试重新验明，source clean。真实CUDA
+仍未重发，故G06仍`Partial`。
+
 ## 2026-08-30 frozen-teacher targeted修复候选（仍`Partial`）
 
 为区分“保守SAT keepout”与“MuJoCo backend真实resolved contact”，后继只在opt-in

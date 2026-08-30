@@ -11978,6 +11978,17 @@ receipt 的旧选动作审计。新审计分母为 `73/73`，其中 `16` 条仅�
 `Take_061_unit04_BH` 是这16条之一，结论仍是 `UNKNOWN`，只能在显式
 `allow-mechanical-unknown-diagnostic` 下进入仿真 hold 诊断，不能授权正式训练、真机或 promotion。
 
+#### 12.3.1 direct-frame0 failure-evidence closure（2026-08-30）
+
+`643f03b505b1f3e9d51c55704268865035f46250`关闭了diagnostic replay中两条绕过持久化
+failure receipt的early raise：same-step `done/frame!=1`改由统一29-predicate report裁决，
+installer八项原子不变量改为返回typed bits后由同一production writer消费。每项反例都验证
+O_EXCL、mode 0600、file/parent-directory fsync、typed actual/expected以及异常前无summary/NPZ。
+q0 executable-vs-teacher误差直接读production scalar，容差绑定共享ready decoder ABI
+`2e-7 rad`。Pod三受影响module union=`103 passed / 2 skipped`，evidence root=
+`/workspace/franco/mktemp/direct-frame0-final-643f03b5-cpu-test-20260830T0620Z-r2`。这只关闭CPU
+证据链，真实CUDA intervention/frame1/table仍`unverified`。
+
 ### 12.4 Threshold-first direct-frame0 尝试：已被 Pod 反证（2026-08-04）
 
 本节保留一次被推翻的设计尝试，避免它再次混入当前 TODO。host 曾预注册13项 slack evaluator、

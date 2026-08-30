@@ -1,5 +1,14 @@
 # 简短进度记录
 
+## 2026-08-30 — direct-frame0 early-failure证据旁路关闭
+
+- `643f03b505b1f3e9d51c55704268865035f46250`把same-step `done/frame!=1`和
+  installer八项原子不变量都收敛到同一29-predicate production writer；失败先持久化
+  typed identity/SHA artifact再raise，不产生success summary/NPZ。q0 teacher error直接用runtime
+  scalar，decoder容差只引用共享ready ABI常量。Pod三受影响module union=`103 passed / 2 skipped`，
+  evidence=`/workspace/franco/mktemp/direct-frame0-final-643f03b5-cpu-test-20260830T0620Z-r2`，
+  source clean；未发GPU。
+
 ## 2026-08-30 — direct-frame0 post-run验收与失败收据闭环
 
 - `4c28608d`真实CUDA已越过frame0原子安装，但旧runner在summary/NPZ前以
