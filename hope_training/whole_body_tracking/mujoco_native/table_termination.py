@@ -36,7 +36,7 @@ ISAAC_TERMINATION_CONFIG = (
     "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
 )
 EXPECTED_ISAAC_TERMINATION_CONFIG_SEMANTIC_AST_SHA256 = (
-    "5f181db22f4d30e3582b13364eda4bcd70c0d8cc1a7c3d3dcf5a71ed135b6e21"
+    "508e5078ee8708e630a09b962b5e2cf803619ffa6c6d5ba84a18efda17e5fa9a"
 )
 ISAAC_TERMINATION_CALLABLES = (
     REPO_ROOT

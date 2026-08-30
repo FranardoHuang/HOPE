@@ -155,8 +155,9 @@ def test_construction_exposes_only_path_free_plant_receipt(monkeypatch):
             "identity_manifest_path": "/must/not/leak/manifest.json",
         },
         body_ids=immutable(np.arange(32, dtype=np.int64)),
-        components=SimpleNamespace(
-            component_ids=("component_00",),
+            components=SimpleNamespace(
+                component_ids=("component_00",),
+                source_component_ids=("component_00",),
             owner_indices=immutable(np.zeros(1, dtype=np.int64)),
             local_centers_m=immutable(np.zeros((1, 3), dtype=np.float64)),
             local_half_axes_m=immutable(

@@ -150,10 +150,15 @@ def test_tracked_multi_obb_artifact_seals_full_hull_tetra_cover():
     decomposition = document["decomposition"]
     assert decomposition["algorithm"] == M.TRIANGLE_PARTITION_ALGORITHM
     assert decomposition["backend_collision_authority"] == (
-        "Isaac split meshes under convexHull plus exact canonical MuJoCo "
-        "mesh hulls and analytic wrist primitives"
+        "component55 target refinement covers Isaac split meshes under "
+        "convexHull plus exact canonical MuJoCo target mesh hulls and "
+        "analytic wrist primitives; the other 61 source components retain "
+        "the shared conservative source proxy"
     )
-    assert decomposition["float32_coverage_validated"] is True
+    assert decomposition["float32_coverage_validation_scope"] == (
+        "mesh-frame source vertices and component55 MuJoCo target primitive "
+        "projection intervals before owner-frame serialization"
+    )
     assert decomposition["hull_toolchain"] == {
         "numpy_version": M.PINNED_HULL_NUMPY_VERSION,
         "pca_eigenvalue_tie_rtol": M.PCA_EIGENVALUE_TIE_RTOL,

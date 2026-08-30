@@ -238,7 +238,7 @@ def test_restamped_0409_proxy_survives_the_count_check_and_dies_on_the_gripper(
     forged["components"] = sorted(padded, key=lambda row: row["component_id"])
     forged["component_count"] = len(forged["components"])
     path, sha = _write(tmp_path, forged)
-    with pytest.raises(RuntimeError, match="OmniPicker3 gripper"):
+    with pytest.raises(RuntimeError, match="metadata is malformed"):
         term_mod._load_table_collision_proxy_artifact(path, sha, tuple(BODIES))
 
 
@@ -324,7 +324,7 @@ def test_dropping_the_gripper_and_padding_the_count_back_is_still_refused(
     trimmed["components"] = sorted(padded, key=lambda row: row["component_id"])
     trimmed["component_count"] = len(trimmed["components"])
     path, sha = _write(tmp_path, trimmed)
-    with pytest.raises(RuntimeError, match="OmniPicker3 gripper"):
+    with pytest.raises(RuntimeError, match="split parent mapping"):
         term_mod._load_table_collision_proxy_artifact(path, sha, tuple(BODIES))
 
 
@@ -594,3 +594,17 @@ def test_live_bundle_derivation_is_not_satisfied_by_the_pin_alone(
     assert derived != term_mod._A3_COLLISION_PROXY_ISAACLAB_ASSET_HASH
     with pytest.raises(RuntimeError, match="differs from the reviewed pin"):
         term_mod._verify_live_bundle_is_a_cache_of_this_plant(root)
+
+
+def test_split_proxy_parent_indices_must_be_contiguous(term_mod, tmp_path):
+    document = _live_document()
+    split_rows = [
+        row
+        for row in document["components"]
+        if row["proxy_box_count"] == 2
+    ]
+    assert [row["proxy_box_index"] for row in split_rows] == [0, 1]
+    split_rows[1]["proxy_box_index"] = 0
+    path, sha = _write(tmp_path, document, "split_gap.json")
+    with pytest.raises(RuntimeError, match="split parent mapping"):
+        term_mod._load_table_collision_proxy_artifact(path, sha, tuple(BODIES))
