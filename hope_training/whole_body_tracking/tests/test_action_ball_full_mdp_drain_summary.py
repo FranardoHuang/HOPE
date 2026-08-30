@@ -1202,6 +1202,56 @@ def test_same_env_multiple_resets_and_multibit_reasons_remain_distinct():
         D.ResetTelemetry(0, 4, 30, 7, 1 | 4),
         D.ResetTelemetry(0, 5, 31, 1, 4 | 16),
     )
+    assert decoded.terminal_reset_aggregate == D.ResetTelemetryAggregate(
+        row_count=2,
+        episode_length_sum=8,
+        reason_bit_counts=(1, 0, 2, 0, 1),
+    )
+
+
+def test_reset_aggregate_is_exact_while_python_examples_are_bounded(monkeypatch):
+    entries = []
+    closures = []
+    ticks = []
+    reasons = []
+    for index in range(12):
+        tick = 48 if index % 3 == 0 else index + 1
+        reason = (1, 4, 4 | 16)[index % 3]
+        ticks.append(tick)
+        reasons.append(reason)
+        entries.append(
+            _selected_reset_entry(
+                index,
+                generations=(index + 1, 0),
+                facts=((100 + index, tick, reason), (-1, -1, 0)),
+            )
+        )
+        closures.append(((True, False), (tick, 0), (reason, 0)))
+    milestone_i64, milestone_f64 = _milestone_with_episode_closures(*closures)
+    real_reset_telemetry = D.ResetTelemetry
+    constructor_calls = 0
+
+    def counted_reset_telemetry(*args, **kwargs):
+        nonlocal constructor_calls
+        constructor_calls += 1
+        return real_reset_telemetry(*args, **kwargs)
+
+    monkeypatch.setattr(D, "ResetTelemetry", counted_reset_telemetry)
+    decoded = _decode(
+        tuple(entries), milestone=(milestone_i64, milestone_f64)
+    )
+
+    assert constructor_calls == D.RESET_TELEMETRY_EXAMPLE_LIMIT
+    assert len(decoded.terminal_resets) == D.RESET_TELEMETRY_EXAMPLE_LIMIT
+    assert [row.common_step for row in decoded.terminal_resets] == list(
+        range(100, 108)
+    )
+    assert decoded.terminal_reset_aggregate == D.ResetTelemetryAggregate(
+        row_count=12,
+        episode_length_sum=sum(ticks),
+        reason_bit_counts=(4, 0, 8, 0, 4),
+    )
+    assert decoded.due_terminal_overlap_rows == 4
 
 
 def test_partial_n2_four_completed_shots_keep_distinct_keys_and_adjacent_targets():
