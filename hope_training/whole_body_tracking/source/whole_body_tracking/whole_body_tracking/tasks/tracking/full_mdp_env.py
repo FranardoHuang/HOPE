@@ -236,19 +236,35 @@ class FullMdpSelectedResetTransaction:
 
     The transaction is passed by identity to the construction-bound top.  It is
     not cloned into a second projection and compared back to itself.  D05 and
-    ActionEpoch retain their independent ledgers and join this transaction on
-    device before any leaf commit.
+    ActionEpoch retain their independent ledgers and reduce their join to one
+    compact verdict before any leaf commit.
     """
 
-    event: FullMdpSelectedResetEvent
-    reset_event_identity: object
-    selected_env_index: torch.Tensor
-    selected_mask: torch.Tensor
-    generation_before: torch.Tensor
-    generation_after: torch.Tensor
-    generation_overflow_fault: torch.Tensor
-    terminal_reset_facts_i64: torch.Tensor
+    event: FullMdpSelectedResetEvent | None
+    reset_event_identity: object | None
+    selected_env_index: torch.Tensor | None
+    selected_mask: torch.Tensor | None
+    generation_before: torch.Tensor | None
+    generation_after: torch.Tensor | None
+    generation_overflow_fault: torch.Tensor | None
+    terminal_reset_facts_i64: torch.Tensor | None
     handed_to_top: bool = False
+    closed: bool = False
+
+    def invalidate_before_env_commit(self) -> None:
+        """Destroy the ephemeral authority before its live ledger advances."""
+
+        if self.closed or not self.handed_to_top:
+            raise RuntimeError("selected-reset transaction close order differs")
+        self.closed = True
+        self.event = None
+        self.reset_event_identity = None
+        self.selected_env_index = None
+        self.selected_mask = None
+        self.generation_before = None
+        self.generation_after = None
+        self.generation_overflow_fault = None
+        self.terminal_reset_facts_i64 = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2546,6 +2562,9 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
     def _reset_idx(self, env_ids: torch.Tensor) -> None:
         """Commit one opaque top reset, then the pinned native bookkeeping."""
 
+        selected_reset_mask = None
+        selected_reset_terminal_facts = None
+
         if not isinstance(env_ids, torch.Tensor):
             raise FullMdpPostPhysicsProtocolError(
                 "fresh full-MDP selected env_ids must be one tensor"
@@ -2609,14 +2628,31 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                     type(record) is not FullMdpSelectedResetTransaction
                     or record is not transaction
                     or not record.handed_to_top
+                    or record.closed
                 ):
                     raise FullMdpPostPhysicsProtocolError(
                         "lean selected-reset record changed during settlement"
                     )
-                self._action_ball_full_mdp_reset_generation.copy_(
-                    record.generation_after
+                generation_after = record.generation_after
+                selected_reset_mask = record.selected_mask
+                selected_reset_terminal_facts = (
+                    record.terminal_reset_facts_i64
                 )
+                if (
+                    type(generation_after) is not torch.Tensor
+                    or type(selected_reset_mask) is not torch.Tensor
+                    or type(selected_reset_terminal_facts) is not torch.Tensor
+                ):
+                    raise FullMdpPostPhysicsProtocolError(
+                        "lean selected-reset after-image is unavailable"
+                    )
+                # No transaction may survive as a receipt whose aliased
+                # before-image changes under the following live-ledger write.
+                record.invalidate_before_env_commit()
                 self._action_ball_full_mdp_active_reset_record = None
+                self._action_ball_full_mdp_reset_generation.copy_(
+                    generation_after
+                )
             # Exact IsaacLab 2.3.2 native order, except that the two fresh
             # ActionBall command owners have already reset under the top owner.
             self.curriculum_manager.compute(env_ids=env_ids)
@@ -2661,15 +2697,17 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             self.extras["log"].update(info)
             self.episode_length_buf[env_ids] = 0
             if not genesis_reset:
-                if type(record) is not FullMdpSelectedResetTransaction:
+                if (
+                    type(selected_reset_mask) is not torch.Tensor
+                    or type(selected_reset_terminal_facts) is not torch.Tensor
+                ):
                     raise FullMdpPostPhysicsProtocolError(
-                        "completed lean selected-reset record differs"
+                        "completed lean selected-reset after-image differs"
                     )
-                terminal_facts = record.terminal_reset_facts_i64
                 components.epoch_owner.milestone.close_episodes(
-                    record.selected_mask,
-                    terminal_facts[:, 1],
-                    terminal_facts[:, 2],
+                    selected_reset_mask,
+                    selected_reset_terminal_facts[:, 1],
+                    selected_reset_terminal_facts[:, 2],
                 )
             if genesis_reset:
                 # IsaacLab's reset path does not compute commands before its

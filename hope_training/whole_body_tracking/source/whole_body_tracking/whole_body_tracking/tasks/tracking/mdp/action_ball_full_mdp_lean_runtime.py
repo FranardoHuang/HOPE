@@ -217,6 +217,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
         self._selected_reset_r05_receipt: Optional[object] = None
         self._selected_reset_completions: Optional[dict[str, object]] = None
         self._selected_reset_live_ledger_identity: Optional[object] = None
+        self._selected_reset_live_generation: Optional[torch.Tensor] = None
         self._selected_reset_epoch_prepared: Optional[object] = None
         self._selected_reset_leaf_completions_consumed = False
         self._lock = threading.RLock()
@@ -376,6 +377,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
             or self._selected_reset_child_commits_started
             or self._selected_reset_r05_receipt is not None
             or self._selected_reset_epoch_prepared is not None
+            or self._selected_reset_live_generation is not None
             or not self._genesis_after_command_completed
             or type(self._last_prephysics_position) is not tuple
             or type(self._last_postphysics_position) is not tuple
@@ -1545,6 +1547,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
         self._selected_reset_r05_receipt = None
         self._selected_reset_completions = None
         self._selected_reset_live_ledger_identity = None
+        self._selected_reset_live_generation = None
         self._selected_reset_epoch_prepared = None
         self._selected_reset_leaf_completions_consumed = False
 
@@ -1679,6 +1682,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
             or type(transaction.event) is not event_type
             or transaction.reset_event_identity is None
             or transaction.handed_to_top is not True
+            or transaction.closed is not False
         ):
             raise ActionBallFullMdpLeanRuntimeError(
                 "selected-reset transaction is stale, foreign, or replayed"
@@ -1771,15 +1775,10 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 shape=(count,),
                 dtype=torch.int64,
             )
-            # This is the first genuinely independent join: Device-R05 owns
-            # ``live`` while the environment owns the transaction ledger.  Keep
-            # it on device; a forced host verdict on every reset is unnecessary.
-            torch._assert_async(
-                torch.all(live == transaction.generation_before)
-            )
             self._selected_reset_live_ledger_identity = (
                 live_reset_ledger_identity
             )
+            self._selected_reset_live_generation = live
             return device_r05.DeviceTrueResetEventProjection(
                 reset_event_identity=transaction.reset_event_identity,
                 selected_env_index=index,
@@ -1789,15 +1788,16 @@ class ActionBallFullMdpLeanRuntimeOwner:
     def _join_selected_reset_independent_facts_locked(
         self, prepared: object
     ) -> device_r05.DeviceR05PreparedTrueResetProjection:
-        """Join env, Device-R05, and ActionEpoch facts without host transfer.
+        """Join env, Device-R05, and ActionEpoch with one compact host verdict.
 
         Shape and identity checks are synchronous Python facts.  The only
-        numeric comparisons left are between independent owners; they remain on
-        the device and fail-stop the stream through ``torch._assert_async``.
+        numeric comparisons left are between independent owners; they become
+        one compact device verdict and one pre-leaf host synchronization.
         """
 
         transaction = self._selected_reset_transaction
-        if transaction is None:
+        live_generation = self._selected_reset_live_generation
+        if transaction is None or live_generation is None:
             raise ActionBallFullMdpLeanRuntimeError(
                 "selected-reset transaction lacks env authority"
             )
@@ -1890,7 +1890,8 @@ class ActionBallFullMdpLeanRuntimeOwner:
             dtype=torch.bool,
         )
         independent_join = (
-            torch.all(d05_mask == selected)
+            torch.all(live_generation == env_before)
+            & torch.all(d05_mask == selected)
             & torch.all(d05_before == env_before)
             & torch.all(d05_before == epoch_generation)
             & torch.all(d05_after == env_after)
@@ -1898,7 +1899,17 @@ class ActionBallFullMdpLeanRuntimeOwner:
             & ~torch.any(env_overflow)
             & ~d05_writer_fault
         )
-        torch._assert_async(independent_join)
+        # This is the sole selected-reset synchronization.  Only genuinely
+        # independent writer facts reach the compact scalar; same-writer
+        # projections and 19-lane transcript checks stay retired.  Resolve it
+        # before the top marks a prepare valid or calls ActionEpoch/a leaf.
+        verdict_host = independent_join.detach().to(
+            device="cpu", non_blocking=False
+        )
+        if not bool(verdict_host):
+            raise ActionBallFullMdpLeanRuntimeError(
+                "selected-reset independent env/D05/epoch join failed"
+            )
         return claim
 
     def require_owned_r05_true_reset_preflight(
@@ -2045,8 +2056,14 @@ class ActionBallFullMdpLeanRuntimeOwner:
     ) -> device_r05.DeviceTrueResetAbortProjection:
         with self._lock:
             transaction = self._selected_reset_transaction
+            d05_active = getattr(self._r05_runtime, "_active", None)
+            validated = prepared is self._selected_reset_prepared
+            barrier_rejected = (
+                self._selected_reset_prepared is None
+                and prepared is d05_active
+            )
             if (
-                prepared is not self._selected_reset_prepared
+                not (validated or barrier_rejected)
                 or transaction is None
                 or self._selected_reset_child_commits_started
                 or self._selected_reset_child_commits is not None
@@ -2115,8 +2132,8 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 prepared = self._bound_plain_method(
                     self._r05_runtime, "prepare_true_reset_many"
                 )(transaction.event)
-                self._selected_reset_prepared = prepared
                 self._join_selected_reset_independent_facts_locked(prepared)
+                self._selected_reset_prepared = prepared
                 self._bound_plain_method(
                     self._r05_runtime, "register_true_reset_preflight"
                 )(prepared, transaction)
