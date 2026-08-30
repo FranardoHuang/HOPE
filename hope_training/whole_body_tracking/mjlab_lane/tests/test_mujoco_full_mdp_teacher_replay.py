@@ -436,7 +436,6 @@ def test_table_attribution_freezes_first_positive_before_reset_once_only():
         resolved_is_final=True,
         substep_index=None,
         capture_boundary="post_forward_final",
-        keepout_witness=_keepout_witness() if keepout else None,
     )
     second = finalize(
         env,
@@ -464,6 +463,7 @@ def test_table_attribution_unknown_or_unmatched_source_fails_closed(
         resolved_is_final=True,
         substep_index=None,
         capture_boundary="post_forward_final",
+        keepout_witness=_keepout_witness() if keepout else None,
     )
     bits = (
         wait_env.FULLMDP_TERMINATION_BITS["robot_hit_table"] if terminal else 0
@@ -512,6 +512,28 @@ def test_keepout_witness_is_frozen_once_and_unknown_fails_closed():
             capture_boundary="physics_substep_poststate",
             keepout_witness=unknown,
         )
+
+    invalid_pose = _keepout_witness()
+    invalid_pose["owner_position_env_m"][1] = float("nan")
+    fresh = _table_attribution_rig()
+    with pytest.raises(RuntimeError, match="witness is unknown"):
+        capture(
+            fresh,
+            keepout=torch.tensor([True]),
+            resolved=torch.tensor([False]),
+            resolved_is_final=False,
+            substep_index=1,
+            capture_boundary="physics_substep_poststate",
+            keepout_witness=invalid_pose,
+        )
+
+
+def test_keepout_witness_labels_never_reread_the_artifact_at_enable_time():
+    source = inspect.getsource(
+        wait_env.DeviceExactTableKeepout.enable_diagnostic_first_positive_witness
+    )
+    assert "read_text" not in source
+    assert "COLLISION_PROXY_ARTIFACT" not in source
 
 
 def test_substep_resolved_contact_can_separate_before_canonical_final_forward():

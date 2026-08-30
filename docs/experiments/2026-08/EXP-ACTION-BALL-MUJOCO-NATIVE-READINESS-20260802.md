@@ -12192,3 +12192,8 @@ Pod顺序：先跑targeted CPU synthetic（winner、once-only、unknown、既有
 N=1 CUDA replay。CUDA结果用于三选一：blade/body沿sweep侵入则优先重定时；root/owner整体偏置则检查站位
 平移；仅guard壳层浅负margin且真实contact始终阴性，才考虑单独审计2 cm margin。任何一项都不能由本候选
 host测试预先裁决。
+
+首轮Pod CPU为`112 passed, 7 skipped, 1 failed`：唯一失败是synthetic source-mismatch fixture未给新增witness，
+不是production runtime。独立review同时指出初版在replay enable二次读collision artifact，存在geometry已绑定、
+label却来自替换文件的TOCTOU。后继把component IDs加入authority同一次strict+SHA解析的frozen对象，witness只
+持有该tuple；补artifact replacement、invalid pose及真实fixture反例。修复后Pod复测仍待完成，GPU禁止先跑。

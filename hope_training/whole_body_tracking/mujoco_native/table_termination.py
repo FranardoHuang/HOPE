@@ -917,6 +917,7 @@ def bind_pre_registered_owner_frames(
 
 @dataclass(frozen=True)
 class CollisionComponents:
+    component_ids: tuple[str, ...]
     owner_indices: np.ndarray
     local_centers_m: np.ndarray
     local_half_axes_m: np.ndarray
@@ -1169,6 +1170,7 @@ def _load_collision_components_cached(
     for value in arrays:
         value.setflags(write=False)
     return CollisionComponents(
+        component_ids=tuple(component_ids),
         owner_indices=arrays[0],
         local_centers_m=arrays[1],
         local_half_axes_m=arrays[2],

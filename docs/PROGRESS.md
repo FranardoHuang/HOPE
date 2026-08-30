@@ -5404,6 +5404,9 @@
 - 默认训练仍只有既有consumer空检查，不分配witness buffer、不D2H、不改变termination或Reward。CPU synthetic
   覆盖component-major winner、once-only与unknown fail-closed；Pod CPU与真实CUDA复测尚未完成，不能据此
   决定重定时、站位平移或收窄2 cm guard。
+- Pod首轮发现test rig遗漏witness依赖，并由review发现二次读取artifact会造成label/geometry TOCTOU；后继已把
+  component IDs纳入生产authority同一次strict+SHA解析的immutable `CollisionComponents`，witness不再打开文件。
+  修复后的Pod CPU仍待复测，禁止在此之前消费GPU。
 
 ## HISTORICAL / SUPERSEDED — 2026-08-25 V6候选冻结、尚未Pod重验
 

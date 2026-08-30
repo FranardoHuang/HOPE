@@ -637,7 +637,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             raise RuntimeError("diagnostic table attribution shape differs")
         keepout_positive = bool(keepout[0].detach().cpu().item())
         resolved_positive = bool(resolved[0].detach().cpu().item())
-        if keepout_positive and self._diagnostic_table_tick_first_positive is None:
+        needs_keepout_witness = (
+            keepout_positive
+            and self._diagnostic_table_tick_first_positive is None
+            and self._diagnostic_first_table_terminal_source is None
+        )
+        if needs_keepout_witness:
             if keepout_witness is None:
                 keepout_witness = self._table_keepout.diagnostic_first_positive_witness(
                     self.sim.data
@@ -733,7 +738,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                     resolved_is_final and resolved_positive
                 ),
             }
-            if keepout_positive:
+            if keepout_positive and keepout_witness is not None:
                 self._diagnostic_table_tick_first_positive[
                     "keepout_witness"
                 ] = dict(keepout_witness)

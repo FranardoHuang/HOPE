@@ -2701,3 +2701,5 @@ MuJoCo resolved contact均为false。候选新增的二层witness严格为replay
 table-minor首重叠顺序，记录owner/body或blade、`top/keepout/net/posts` role、signed SAT margin和该substep
 root/owner pose；unknown或nonfinite具名失败。默认训练终止、Reward和热路径buffer/D2H不变。Pod CPU与下一次
 fresh CUDA尚未验收，故尚不能裁决轨迹需swept-safe重定时/站位平移，或2 cm guard本身过保守。
+component label现与几何共同来自production authority首轮strict+SHA解析出的immutable对象；replay enable不再
+二次读取artifact，避免文件替换造成TOCTOU错标签。该修复的Pod CPU复测仍未完成，Gate状态不变。

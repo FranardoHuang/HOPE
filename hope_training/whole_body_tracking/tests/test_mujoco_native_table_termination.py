@@ -25,6 +25,7 @@ def _synthetic_components() -> term.CollisionComponents:
     centers = np.zeros((count, 3), dtype=np.float64)
     axes = np.tile(np.eye(3, dtype=np.float64)[None, :, :] * 0.01, (count, 1, 1))
     return term.CollisionComponents(
+        component_ids=tuple(f"component_{index:02d}" for index in range(count)),
         owner_indices=owners,
         local_centers_m=centers,
         local_half_axes_m=axes,
@@ -39,6 +40,20 @@ def _five_boxes():
     lo[0] = (-0.1, -0.1, -0.1)
     hi[0] = (0.1, 0.1, 0.1)
     return lo, hi
+
+
+def test_component_ids_are_immutable_output_of_the_verified_artifact_parse(
+    monkeypatch, tmp_path
+):
+    components = term.load_collision_components()
+    ids = components.component_ids
+    assert isinstance(ids, tuple)
+    assert len(ids) == term.EXPECTED_COLLISION_PROXY_COMPONENT_COUNT
+    replacement = tmp_path / "replacement.json"
+    replacement.write_text("{}")
+    monkeypatch.setattr(term, "COLLISION_PROXY_ARTIFACT", replacement)
+    assert components.component_ids is ids
+    assert components.component_ids == ids
 
 
 def test_numpy_guard_matches_inclusive_exact_and_nonfinite_semantics():

@@ -8,7 +8,6 @@ host readback; Torch remains only as the dependency-light CPU test oracle.
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 import sys
 from types import MappingProxyType
@@ -837,6 +836,12 @@ class DeviceExactTableKeepout:
         self.component_owner_indices = tensor(
             authority.components.owner_indices, torch.long
         )
+        self._component_ids = authority.components.component_ids
+        if (
+            len(self._component_ids) != 62
+            or tuple(sorted(self._component_ids)) != self._component_ids
+        ):
+            raise RuntimeError("MuJoCo table keepout component identities differ")
         self.component_local_centers = tensor(authority.components.local_centers_m)
         self.component_local_half_axes = tensor(
             authority.components.local_half_axes_m
@@ -934,20 +939,6 @@ class DeviceExactTableKeepout:
             raise RuntimeError("keepout witness requires one CUDA environment")
         if self._diagnostic_winner_i64 is not None:
             raise RuntimeError("keepout witness is already enabled")
-        payload = json.loads(_authority.COLLISION_PROXY_ARTIFACT.read_text())
-        rows = payload.get("components")
-        component_ids = (
-            tuple(row.get("component_id") for row in rows)
-            if isinstance(rows, list)
-            else ()
-        )
-        if (
-            len(component_ids) != 62
-            or any(type(value) is not str or not value for value in component_ids)
-            or tuple(sorted(component_ids)) != component_ids
-        ):
-            raise RuntimeError("keepout witness component identities differ")
-        self._diagnostic_component_ids = component_ids
         self._diagnostic_winner_i64 = torch.full(
             (3,), -1, dtype=torch.int64, device=self._cuda_live_device
         )
@@ -1003,7 +994,7 @@ class DeviceExactTableKeepout:
         is_blade = component_index == 62
         component_id = (
             "racket_blade" if is_blade
-            else self._diagnostic_component_ids[component_index]
+            else self._component_ids[component_index]
         )
         owner_body_name = _authority.TABLE_CONTACT_BODY_NAMES[owner_index]
         return {
