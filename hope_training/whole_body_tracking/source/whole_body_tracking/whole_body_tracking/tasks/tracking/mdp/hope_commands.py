@@ -696,6 +696,19 @@ def _batched_host_scalar_values(values: Sequence[torch.Tensor]) -> tuple[float, 
     return tuple(float(value) for value in torch.stack(scalars).cpu().tolist())
 
 
+def _full_mdp_command_metric_deferral_recipe(
+    cfg: object, clip_names: dict[int, str], metric_buckets_per_clip: bool
+) -> bool:
+    """Exact N=1 recipe whose command metrics have no rollout-time host consumer."""
+
+    return tuple(clip_names) == (0,) and (
+        metric_buckets_per_clip, cfg.action_ball_diagnostic_unauthorized,
+        cfg.adaptive_sigma, cfg.adaptive_sigma_monotonic, cfg.adaptive_sigma_normal,
+        cfg.virtual_ball, cfg.vb_metrics_only, cfg.shadow_ball, cfg.physical_ball,
+        float(cfg.achieved_target_mix_prob),
+    ) == (True, True, False, False, False, False, False, False, False, 0.0)
+
+
 def _action_ball_validate_tensor_predicate(
     predicate: torch.Tensor,
     message: str,
@@ -4303,6 +4316,7 @@ class RacketTargetCommand(CommandTerm):
     # 放一个类级 False 兜底,任何没经过 __init__ 的实例都读到"关",默认安全,且以后新增读点不必
     # 逐个记得写 getattr。
     _cq_enabled: bool = False
+    _action_ball_full_mdp_command_metrics_device_enabled: bool = False
     # Counter-rally is installed only by the ActionBall runtime loader.  The
     # shared virtual-ball evaluator also serves reference/scene diagnostics,
     # so its disabled default must exist even when no ActionBall manifest was
@@ -5166,6 +5180,22 @@ class RacketTargetCommand(CommandTerm):
         self._recovery_spawn_sum_acc = 0.0
         self._recovery_expiry_sum_acc = 0.0
         self._recovery_n_acc = 0.0
+        self._action_ball_full_mdp_command_metrics_device_enabled = (
+            self._action_ball_full_mdp_enabled
+        )
+        if self._action_ball_full_mdp_command_metrics_device_enabled:
+            if not _full_mdp_command_metric_deferral_recipe(
+                self.cfg, self._clip_names, self._metric_buckets_per_clip
+            ):
+                raise ValueError(
+                    "full-MDP command metric deferral requires the exact "
+                    "diagnostic N=1 consumer-free recipe"
+                )
+            self._action_ball_full_mdp_command_metric_state = torch.zeros(
+                23, dtype=torch.float64, device=self.device
+            )
+            self._action_ball_full_mdp_command_metric_pending_row = None
+            self._action_ball_full_mdp_command_metric_step_count = 0
         # Diagnostic-only one-step staging for pure hold/recovery telemetry.  The next policy
         # step fuses these five reductions into the mandatory exact-any host packet; the final
         # rollout step is drained once at the PPO update boundary.
@@ -27354,6 +27384,8 @@ class RacketTargetCommand(CommandTerm):
         tests because these ledger semantics are easy to regress inside the larger metrics pass.
         """
         if in_hold is None:
+            if self._action_ball_full_mdp_command_metrics_device_enabled:
+                raise RuntimeError("full-MDP command metric hold row is missing")
             return
         in_hold = in_hold.bool()
         pending = self._hold_edge_pending
@@ -27382,7 +27414,13 @@ class RacketTargetCommand(CommandTerm):
             conditioned_expiry_yaw.sum(),
             conditioned.sum(dtype=yaw_abs.dtype),
         )
-        if self._action_ball_diagnostic_device_telemetry_enabled():
+        if self._action_ball_full_mdp_command_metrics_device_enabled:
+            if self._action_ball_full_mdp_command_metric_pending_row is not None:
+                raise RuntimeError("full-MDP command metric bucket seam was skipped")
+            row = self._action_ball_full_mdp_command_metric_row(metric_scalars, width=5)
+            self._action_ball_full_mdp_command_metric_state[18:].add_(row)
+            self._action_ball_full_mdp_command_metric_step_count += 1
+        elif self._action_ball_diagnostic_device_telemetry_enabled():
             targets = (
                 ("_heading_expiry_sum_acc", None),
                 ("_heading_expiry_n_acc", None),
@@ -27430,6 +27468,94 @@ class RacketTargetCommand(CommandTerm):
         self._recovery_spawn_sum_acc += recovery_spawn_sum
         self._recovery_expiry_sum_acc += recovery_expiry_sum
         self._recovery_n_acc += recovery_n
+
+    def _action_ball_full_mdp_command_metric_row(
+        self, values: Sequence[torch.Tensor], *, width: int
+    ) -> torch.Tensor:
+        """Validate one complete scalar row before any retained-state mutation."""
+        scalars = tuple(values)
+        state = self._action_ball_full_mdp_command_metric_state
+        if len(scalars) != width or any(
+            type(value) is not torch.Tensor
+            or value.ndim != 0
+            or not value.is_floating_point()
+            or value.dtype != scalars[0].dtype
+            or value.device != state.device
+            for value in scalars
+        ):
+            raise RuntimeError(
+                "full-MDP command metric row requires complete device 0-D tensors"
+            )
+        return torch.stack(tuple(value.detach() for value in scalars)).to(torch.float64)
+
+    def _materialize_action_ball_full_mdp_command_metrics(
+        self,
+        expected_steps: int | None,
+    ) -> None:
+        """Copy the fixed 23-scalar state once at the PPO/report boundary."""
+        if not self._action_ball_full_mdp_command_metrics_device_enabled:
+            if expected_steps is not None:
+                raise RuntimeError("full-MDP command metric owner is disabled")
+            return
+        count = self._action_ball_full_mdp_command_metric_step_count
+        if self._action_ball_full_mdp_command_metric_pending_row is not None:
+            raise RuntimeError("full-MDP command metric step is incomplete")
+        if expected_steps is not None and (
+            type(expected_steps) is not int
+            or expected_steps < 1
+            or count != expected_steps
+        ):
+            raise RuntimeError(
+                "full-MDP command metric PPO span differs: "
+                f"actual={count}, expected={expected_steps}"
+            )
+        if count == 0:
+            return
+        state = self._action_ball_full_mdp_command_metric_state
+        if (
+            type(state) is not torch.Tensor
+            or (state.dtype, tuple(state.shape), state.device, state.is_contiguous())
+            != (torch.float64, (23,), torch.device(self.device), True)
+        ):
+            raise RuntimeError("full-MDP command metric state ABI differs")
+        bucket_targets = (
+            self._exact_n_acc_c,
+            self._exact_pass_pos_acc_c,
+            self._exact_pass_vel_acc_c,
+            self._exact_pass_normal_acc_c,
+            self._exact_pass_comp_acc_c,
+            self._exact_pos_err_sum_c,
+            self._exact_vel_err_sum_c,
+            self._exact_nrm_err_sum_c,
+        )
+        if any(type(target) is not dict or 0 not in target for target in bucket_targets):
+            raise RuntimeError("full-MDP command metric bucket key is missing")
+        global_names = (
+            "_exact_n_acc", "_exact_pass_comp_acc", "_exact_pass_pos_acc",
+            "_exact_pass_vel_acc", "_exact_pass_5cm_acc", "_exact_pass_10cm_acc",
+            "_exact_pass_normal_acc", "_exact_pos_err_sum", "_exact_vel_err_sum",
+            "_exact_nrm_err_sum")
+        hold_names = ("_heading_expiry_sum_acc", "_heading_expiry_n_acc",
+                      "_recovery_spawn_sum_acc", "_recovery_expiry_sum_acc",
+                      "_recovery_n_acc")
+        if any(not hasattr(self, name) for name in global_names + hold_names):
+            raise RuntimeError("full-MDP command metric host target is missing")
+        host = state.detach().to(device="cpu", non_blocking=False)
+        values = host.tolist()
+        if len(values) != 23 or any(not math.isfinite(value) for value in values):
+            raise RuntimeError("full-MDP command metric snapshot is non-finite")
+        for name, value in zip(global_names, values[:10]):
+            setattr(self, name, value)
+        for target, value in zip(bucket_targets, values[10:18]):
+            target[0] = value
+        for name, value in zip(hold_names, values[18:]):
+            setattr(self, name, value)
+        self._exact_composite_rate = (
+            self._exact_pass_comp_acc / max(self._exact_n_acc, 1.0e-6)
+            if self._exact_n_acc >= float(self.cfg.exact_success_min_count)
+            else 0.0
+        )
+        self._action_ball_full_mdp_command_metric_step_count = 0
 
     def _action_ball_diagnostic_device_telemetry_enabled(self) -> bool:
         """Whether pure telemetry may stay device-resident until the PPO boundary."""
@@ -27791,9 +27917,16 @@ class RacketTargetCommand(CommandTerm):
                     else 0.0,
                 )
 
-    def materialize_action_ball_diagnostic_metrics_for_report(self) -> None:
+    def materialize_action_ball_diagnostic_metrics_for_report(
+        self,
+        *,
+        expected_full_mdp_command_metric_steps: int | None = None,
+    ) -> None:
         """One explicit boundary for training logs and consumer-less evaluation."""
 
+        self._materialize_action_ball_full_mdp_command_metrics(
+            expected_full_mdp_command_metric_steps
+        )
         self._flush_diagnostic_hold_recovery_metric_scalars()
         if not self._action_ball_diagnostic_device_telemetry_enabled():
             return
@@ -27805,6 +27938,14 @@ class RacketTargetCommand(CommandTerm):
     ) -> None:
         """Reject a diagnostic report that skipped the explicit boundary."""
 
+        if (
+            self._action_ball_full_mdp_command_metrics_device_enabled
+            and self._action_ball_full_mdp_command_metric_step_count != 0
+        ):
+            raise RuntimeError(
+                "full-MDP command metrics are pending on device; call "
+                "materialize_action_ball_diagnostic_metrics_for_report()"
+            )
         if bool(
             getattr(
                 self,
@@ -30366,11 +30507,16 @@ class RacketTargetCommand(CommandTerm):
         self._drift_sum_acc = decay * self._drift_sum_acc
         self._drift_fwd_sum_acc = decay * self._drift_fwd_sum_acc
         self._station_offset_start_sum_acc = decay * self._station_offset_start_sum_acc
-        self._heading_expiry_sum_acc = decay * self._heading_expiry_sum_acc
-        self._heading_expiry_n_acc = decay * self._heading_expiry_n_acc
-        self._recovery_spawn_sum_acc = decay * self._recovery_spawn_sum_acc
-        self._recovery_expiry_sum_acc = decay * self._recovery_expiry_sum_acc
-        self._recovery_n_acc = decay * self._recovery_n_acc
+        if self._action_ball_full_mdp_command_metrics_device_enabled:
+            if self._action_ball_full_mdp_command_metric_pending_row is None:
+                raise RuntimeError("full-MDP command metric global seam was skipped")
+            self._action_ball_full_mdp_command_metric_state[18:].mul_(decay)
+        else:
+            self._heading_expiry_sum_acc = decay * self._heading_expiry_sum_acc
+            self._heading_expiry_n_acc = decay * self._heading_expiry_n_acc
+            self._recovery_spawn_sum_acc = decay * self._recovery_spawn_sum_acc
+            self._recovery_expiry_sum_acc = decay * self._recovery_expiry_sum_acc
+            self._recovery_n_acc = decay * self._recovery_n_acc
         for _c in self._clip_names:
             self._swing_starts_acc_c[_c] = decay * self._swing_starts_acc_c[_c]
             self._prestrike_fall_acc_c[_c] = decay * self._prestrike_fall_acc_c[_c]
@@ -31254,25 +31400,42 @@ class RacketTargetCommand(CommandTerm):
         # serve scheduling, exact-strike serve-accuracy measurement, park drive. Off = no-op branch.
         if self._physical is not None:
             self._physical.update(exact_strike)
-        # Keep every reduction and the Python-float EMA recurrence unchanged.  Formal/default and
-        # non-VirtualBall variants retain their one ordered D2H here; diagnostic ActionBall reuses
-        # the exact-any packet above and therefore performs no second per-step host transfer.  The
-        # Pure reporting-only hold/recovery and swing ledgers stay device-resident until the PPO
-        # boundary; the exact metrics here remain immediate because adaptive sigma and the legacy
-        # perturbation curriculum consume them during training.
-        if _prefetched_diagnostic_host_values:
-            _exact_metric_width = len(_exact_metric_tensors)
-            if len(_prefetched_diagnostic_host_values) != _exact_metric_width:
-                raise RuntimeError(
-                    "diagnostic metric host packet changed width"
-                )
-            _exact_metric_values = iter(
+        if self._action_ball_full_mdp_command_metrics_device_enabled:
+            if (
                 _prefetched_diagnostic_host_values
+                or _stage1_sigma_metric_tensors
+                or _exact_metric_bucket_order != (0,)
+                or self._action_ball_full_mdp_command_metric_pending_row
+                is not None
+            ):
+                raise RuntimeError(
+                    "full-MDP command metric exact seam differs"
+                )
+            _full_mdp_metric_row = self._action_ball_full_mdp_command_metric_row(
+                _exact_metric_tensors, width=18
             )
+            self._action_ball_full_mdp_command_metric_state[:10].mul_(decay).add_(
+                _full_mdp_metric_row[:10]
+            )
+            self._action_ball_full_mdp_command_metric_pending_row = (
+                _full_mdp_metric_row
+            )
+            # No FullMDP control path reads these host mirrors between boundaries.
+            _exact_metric_values = iter((0.0,) * 18)
         else:
-            _exact_metric_values = iter(
-                _batched_host_scalar_values(_exact_metric_tensors)
-            )
+            if _prefetched_diagnostic_host_values:
+                _exact_metric_width = len(_exact_metric_tensors)
+                if len(_prefetched_diagnostic_host_values) != _exact_metric_width:
+                    raise RuntimeError(
+                        "diagnostic metric host packet changed width"
+                    )
+                _exact_metric_values = iter(
+                    _prefetched_diagnostic_host_values
+                )
+            else:
+                _exact_metric_values = iter(
+                    _batched_host_scalar_values(_exact_metric_tensors)
+                )
         self._exact_n_acc = decay * self._exact_n_acc + next(_exact_metric_values)
         self._exact_pass_comp_acc = (
             decay * self._exact_pass_comp_acc + next(_exact_metric_values)
@@ -31360,6 +31523,24 @@ class RacketTargetCommand(CommandTerm):
         # Consumers must gate on this count before interpreting a zero error; zero samples is
         # "not measured", not perfect recovery.
         self.metrics["heading_recovery_count"][:] = self._recovery_n_acc
+        if self._action_ball_full_mdp_command_metrics_device_enabled:
+            _full_mdp_state = self._action_ball_full_mdp_command_metric_state
+            self.metrics["swing_completion_rate"][:] = (
+                torch.clamp(_full_mdp_state[0] / _s_denom, max=1.0)
+                if _s_enough else 0.0
+            )
+            _minimum = float(self.cfg.exact_success_min_count)
+            for _name, _numerator, _denominator in (
+                ("base_heading_abs_at_swing_start", 18, 19),
+                ("heading_recovery_spawn_yaw", 20, 22),
+                ("heading_recovery_expiry_yaw", 21, 22),
+            ):
+                _n = _full_mdp_state[_denominator]
+                self.metrics[_name][:] = torch.where(
+                    _n >= _minimum, _full_mdp_state[_numerator] / _n.clamp_min(1e-6),
+                    torch.zeros_like(_n))
+            self.metrics["base_heading_hold_expiry_count"][:] = _full_mdp_state[19]
+            self.metrics["heading_recovery_count"][:] = _full_mdp_state[22]
         # HER replay diagnostics: fraction of resampled targets drawn from the achieved buffer
         # (~achieved_target_mix_prob once the per-clip buffers pass achieved_min_fill).
         self.metrics["achieved_replay_frac"][:] = (
@@ -31373,6 +31554,11 @@ class RacketTargetCommand(CommandTerm):
             self.metrics[f"swing_completion_rate_{_cn}"][:] = (
                 min(self._exact_n_acc_c[_c] / _cd, 1.0) if _ce else 0.0
             )
+            if self._action_ball_full_mdp_command_metrics_device_enabled:
+                self.metrics[f"swing_completion_rate_{_cn}"][:] = (
+                    torch.clamp(_full_mdp_state[10] / _cd, max=1.0)
+                    if _ce else 0.0
+                )
             # Fall attribution uses _prev_clip_id (the clip during the fall) while starts use the NEW
             # clip; with uniform clip resampling the denominators match in expectation.
             self.metrics[f"pre_strike_fall_rate_{_cn}"][:] = (
@@ -31468,45 +31654,30 @@ class RacketTargetCommand(CommandTerm):
         _pos_target_enough = _pos_target_count >= _minimum_target_count
         _vel_target_enough = _vel_target_count >= _minimum_target_count
         _face_target_enough = _face_target_count >= _minimum_target_count
-        _composite_target_enough = (
-            _composite_target_count >= _minimum_target_count
-        )
+        _composite_target_enough = _composite_target_count >= _minimum_target_count
         _pos_target_denom = max(_pos_target_count, 1e-6)
         _vel_target_denom = max(_vel_target_count, 1e-6)
         _face_target_denom = max(_face_target_count, 1e-6)
         _composite_target_denom = max(_composite_target_count, 1e-6)
         self._exact_composite_rate = (
             self._exact_pass_comp_acc / _composite_target_denom
-            if _composite_target_enough
-            else 0.0
+            if _composite_target_enough else 0.0
         )
-        # Broadcast in place so the entries reset() zeros are refreshed before the next reset logs them.
         self.metrics["strike_composite_success_exact"][:] = self._exact_composite_rate
         self.metrics["strike_pos_pass_exact"][:] = (
-            self._exact_pass_pos_acc / _pos_target_denom
-            if _pos_target_enough
-            else 0.0
+            self._exact_pass_pos_acc / _pos_target_denom if _pos_target_enough else 0.0
         )
         self.metrics["strike_vel_pass_exact"][:] = (
-            self._exact_pass_vel_acc / _vel_target_denom
-            if _vel_target_enough
-            else 0.0
+            self._exact_pass_vel_acc / _vel_target_denom if _vel_target_enough else 0.0
         )
         self.metrics["strike_normal_pass_exact"][:] = (
-            self._exact_pass_normal_acc / _face_target_denom
-            if _face_target_enough
-            else 0.0
+            self._exact_pass_normal_acc / _face_target_denom if _face_target_enough else 0.0
         )
-        # Exact-strike position accuracy buckets (comparable with composite: same mask + EMA denominator).
         self.metrics["exact_strike_pos_success_5cm"][:] = (
-            self._exact_pass_5cm_acc / _pos_target_denom
-            if _pos_target_enough
-            else 0.0
+            self._exact_pass_5cm_acc / _pos_target_denom if _pos_target_enough else 0.0
         )
         self.metrics["exact_strike_pos_success_10cm"][:] = (
-            self._exact_pass_10cm_acc / _pos_target_denom
-            if _pos_target_enough
-            else 0.0
+            self._exact_pass_10cm_acc / _pos_target_denom if _pos_target_enough else 0.0
         )
         # Distribution of position error over THIS step's exact-strike samples (p90 + mean), broadcast.
         _ex_errs = pos_err[pos_target_eligible]
@@ -31523,6 +31694,24 @@ class RacketTargetCommand(CommandTerm):
             self.metrics[
                 f"strike_{_channel}_target_eligible_sample_count_decayed"
             ][:] = _count
+        if self._action_ball_full_mdp_command_metrics_device_enabled:
+            _full_mdp_n = _full_mdp_state[0]
+            _full_mdp_denom = _full_mdp_n.clamp_min(1.0e-6)
+            _full_mdp_zero = torch.zeros_like(_full_mdp_n)
+            _full_mdp_enough = _full_mdp_n >= _minimum_target_count
+            for _name, _index in (
+                ("strike_composite_success_exact", 1), ("strike_pos_pass_exact", 2),
+                ("strike_vel_pass_exact", 3), ("exact_strike_pos_success_5cm", 4),
+                ("exact_strike_pos_success_10cm", 5),
+                ("strike_normal_pass_exact", 6)):
+                self.metrics[_name][:] = torch.where(
+                    _full_mdp_enough, _full_mdp_state[_index] / _full_mdp_denom,
+                    _full_mdp_zero)
+            self.metrics["exact_strike_sample_count_decayed"][:] = _full_mdp_n
+            for _channel in ("pos", "vel", "normal", "composite"):
+                self.metrics[
+                    f"strike_{_channel}_target_eligible_sample_count_decayed"
+                ][:] = _full_mdp_n
         # --- per-clip (forehand/backhand) breakdown of the exact-strike pass rates + errors -----------
         # Same sample-weighted EMA as the global block above, selected by the motion command's clip_id so
         # wandb shows each swing separately. pass_pos/vel/normal already include `& exact_strike`.
@@ -31534,7 +31723,38 @@ class RacketTargetCommand(CommandTerm):
             # 三档合计,"backhand"桶=反手三档合计,不再把正手 1.0 档记成反手);
             # 显式命名 N=1 的唯一行就是 action_id 自己。
             _fam = self._metric_bucket_rows()[_motion.clip_id]
+            if self._action_ball_full_mdp_command_metrics_device_enabled:
+                _full_mdp_metric_row = self._action_ball_full_mdp_command_metric_pending_row
+                if _full_mdp_metric_row is None:
+                    raise RuntimeError("full-MDP command metric exact row is missing")
+                _full_mdp_state[10:18].mul_(decay).add_(
+                    _full_mdp_metric_row[10:18]
+                )
+                self._action_ball_full_mdp_command_metric_pending_row = None
+                _full_mdp_bucket_n = _full_mdp_state[10]
+                _full_mdp_bucket_denom = _full_mdp_bucket_n.clamp_min(1.0e-6)
+                _full_mdp_bucket_zero = torch.zeros_like(_full_mdp_bucket_n)
+                _full_mdp_bucket_enough = _full_mdp_bucket_n >= _minimum_target_count
+                _full_mdp_bucket_name = self._clip_names[0]
+                for _name, _index in (
+                    ("strike_pos_pass_exact", 11), ("strike_vel_pass_exact", 12),
+                    ("strike_normal_pass_exact", 13),
+                    ("strike_composite_success_exact", 14),
+                    ("racket_pos_error_exact_strike", 15),
+                    ("racket_vel_error_exact_strike", 16),
+                    ("racket_normal_error_deg_exact_strike", 17)):
+                    self.metrics[f"{_name}_{_full_mdp_bucket_name}"][:] = torch.where(
+                        _full_mdp_bucket_enough,
+                        _full_mdp_state[_index] / _full_mdp_bucket_denom,
+                        _full_mdp_bucket_zero)
+                for _channel in ("pos", "vel", "normal", "composite"):
+                    self.metrics[
+                        f"strike_{_channel}_target_eligible_sample_count_decayed_"
+                        f"{_full_mdp_bucket_name}"
+                    ][:] = _full_mdp_bucket_n
             for _c, _cn in self._clip_names.items():
+                if self._action_ball_full_mdp_command_metrics_device_enabled:
+                    continue
                 (
                     _bucket_n,
                     _bucket_pass_pos,

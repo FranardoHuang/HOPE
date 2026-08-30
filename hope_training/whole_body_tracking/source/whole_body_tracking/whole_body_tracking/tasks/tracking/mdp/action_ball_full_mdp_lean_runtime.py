@@ -719,6 +719,32 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     raise ActionBallFullMdpLeanRuntimeError(
                         "epoch drain start differs from the ACKed frontier"
                     )
+                if getattr(self._racket, "_action_ball_full_mdp_command_metrics_device_enabled", False) is True:
+                    completed_delta = completed - self._last_completed_environment_steps
+                    if completed_delta % self._epoch.num_envs:
+                        self._poison_locked("command metric PPO span is not whole steps")
+                        raise ActionBallFullMdpLeanRuntimeError(
+                            "command metric PPO span is not whole steps"
+                        )
+                    try:
+                        result = self._bound_plain_method(
+                            self._racket,
+                            "materialize_action_ball_diagnostic_metrics_for_report",
+                        )(
+                            expected_full_mdp_command_metric_steps=(
+                                completed_delta // self._epoch.num_envs
+                                + int(update == 0)
+                            )
+                        )
+                    except BaseException as exc:
+                        self._poison_locked("command metric materialization failed: "
+                                            + type(exc).__name__)
+                        raise
+                    if result is not None:
+                        self._poison_locked("command metric materializer returned a value")
+                        raise ActionBallFullMdpLeanRuntimeError(
+                            "command metric materializer returned a value"
+                        )
                 boundary = _OptimizerBoundary()
                 self._active_boundary = boundary
                 self._active_update_index = update
