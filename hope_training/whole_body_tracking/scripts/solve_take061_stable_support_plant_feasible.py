@@ -474,6 +474,7 @@ def solve(args: argparse.Namespace) -> dict[str, Any]:
     selected = stages[selected_index] if selected_index is not None else stages[-1]
     reject_reasons = []
     if selected_index is None:
+        reject_reasons.append("NO_STAGE_JOINTLY_SATISFIES_CONTACT_AND_PLANT")
         if not any(stage["kinematic_contact_admitted"] for stage in stages):
             reject_reasons.append("CONTACT_WINDOW_KINEMATIC_UNREACHABLE")
         for predicate in (
@@ -513,6 +514,9 @@ def solve(args: argparse.Namespace) -> dict[str, Any]:
             }
             break
     if prep["status"] != "ADMITTED":
+        prep["status"] = "SEARCH_EXHAUSTED"
+        prep["max_duration_s"] = float(args.max_prep_s)
+        prep["step_s"] = float(args.prep_step_s)
         reject_reasons.append("PREPARATION_PLANT_FEASIBILITY_UNSATISFIED")
 
     admitted = selected_index is not None and prep["status"] == "ADMITTED"
