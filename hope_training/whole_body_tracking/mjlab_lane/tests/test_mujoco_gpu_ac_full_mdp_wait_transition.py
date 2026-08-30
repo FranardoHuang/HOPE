@@ -822,6 +822,34 @@ def test_relative_body_rewards_use_prior_anchor_cache_then_align_next_tick():
     assert torch.equal(second_raw[1, 2:4], torch.ones(2, dtype=dtype))
 
 
+def test_full_a_teacher_target_does_not_reanchor_to_live_torso():
+    env = _fixed_reward_env()
+    env.full_a_mode = True
+    env._refresh_aligned_teacher_body_pose()
+    before = (
+        env._aligned_teacher_body_pos.clone(),
+        env._aligned_teacher_body_quat.clone(),
+        env._aligned_teacher_racket_site_pos_w.clone(),
+        env._aligned_teacher_racket_site_lin_vel_w.clone(),
+        env._aligned_teacher_racket_signed_normal_w.clone(),
+        env._aligned_teacher_racket_long_axis_w.clone(),
+    )
+    env.sim.data.xpos.add_(torch.tensor([3.0, -2.0, 0.5]))
+    env.sim.data.xquat.zero_()
+    env.sim.data.xquat[..., 3] = 1.0
+    env._refresh_aligned_teacher_body_pose()
+    after = (
+        env._aligned_teacher_body_pos,
+        env._aligned_teacher_body_quat,
+        env._aligned_teacher_racket_site_pos_w,
+        env._aligned_teacher_racket_site_lin_vel_w,
+        env._aligned_teacher_racket_signed_normal_w,
+        env._aligned_teacher_racket_long_axis_w,
+    )
+    for expected, actual in zip(before, after):
+        assert torch.equal(actual, expected)
+
+
 def test_reward28_two_transition_moving_anchor_uses_prior_alignment_cache():
     env = _fixed_reward_env()
     dtype = env._teacher_body_pos.dtype
@@ -1146,6 +1174,12 @@ def _host_full_a_lifecycle_env():
             "scaled_t_hit_s": torch.full((count,), 0.02),
             "scaled_t_cycle_s": torch.full((count,), 0.04),
             "pre_swing_wait_s": torch.full((count,), 0.02),
+            "teacher_source_to_task_yaw_wxyz": torch.tensor(
+                [1.0, 0.0, 0.0, 0.0]
+            ).expand(count, 4),
+            "teacher_source_to_task_translation_scene": torch.zeros(
+                count, 3
+            ),
         }
 
     env = SimpleNamespace(
@@ -1956,6 +1990,12 @@ def test_host_full_a_reveal_launch_r03_one_shot_and_selected_clear_are_rowwise()
         wait_env.FULL_A_FACT_INTEGRITY_R03_NONFINITE,
         wait_env.FULL_A_FACT_INTEGRITY_R07_NONFINITE,
     ])
+    env._full_a_teacher_source_to_task_yaw_wxyz[:] = torch.tensor(
+        [[0.8, 0.0, 0.0, 0.6], [0.6, 0.0, 0.0, -0.8]]
+    )
+    env._full_a_teacher_source_to_task_translation_scene[:] = torch.tensor(
+        [[0.4, -0.2, 0.0], [-0.7, 0.3, 0.0]]
+    )
     incident_bits = env._full_a_fact_integrity_fault_bits.clone()
     peer = {
         name: getattr(env, name)[1].clone()
@@ -1967,6 +2007,8 @@ def test_host_full_a_reveal_launch_r03_one_shot_and_selected_clear_are_rowwise()
             "_epoch_task_f32",
             "_epoch_clock_ticks",
             "_full_a_launch_state_f32",
+            "_full_a_teacher_source_to_task_yaw_wxyz",
+            "_full_a_teacher_source_to_task_translation_scene",
             "_full_a_owner_valid_bits",
             "_full_a_owner_fault_bits",
             "_full_a_owner_source_step",
@@ -2022,6 +2064,13 @@ def test_host_full_a_reveal_launch_r03_one_shot_and_selected_clear_are_rowwise()
     assert not env._full_a_r03_physically_valid[0]
     assert not env._full_a_r03_armed[0]
     assert env._full_a_r03_expected_source_step[0] == -1
+    assert torch.equal(
+        env._full_a_teacher_source_to_task_yaw_wxyz[0],
+        torch.tensor([1.0, 0.0, 0.0, 0.0]),
+    )
+    assert torch.count_nonzero(
+        env._full_a_teacher_source_to_task_translation_scene[0]
+    ) == 0
     for name, expected in peer.items():
         assert torch.equal(getattr(env, name)[1], expected), name
     # Lifecycle replacement/reset happens before extras are assembled; it may
@@ -3167,6 +3216,68 @@ def test_fresh_action_exact_mimic_closes_the_selected_face_contact_geometry():
     torch.testing.assert_close(
         task[4] + task[2], task[0], rtol=0.0, atol=1.0e-12
     )
+    task_yaw = result["teacher_source_to_task_yaw_wxyz"]
+    task_translation = result["teacher_source_to_task_translation_scene"]
+    source_root = torch.tensor(
+        [
+            [
+                row.reference_racket_site_position_w_m[0]
+                - row.reference_reach_offset_xy_m[0],
+                row.reference_racket_site_position_w_m[1]
+                - row.reference_reach_offset_xy_m[1],
+                root_z,
+            ]
+        ],
+        dtype=task.dtype,
+    )
+    source_site = torch.tensor(
+        [row.reference_racket_site_position_w_m], dtype=task.dtype
+    )
+    source_velocity = torch.tensor(
+        [row.reference_racket_site_velocity_w_mps], dtype=task.dtype
+    )
+    source_quat = torch.tensor(
+        [row.reference_racket_quat_wxyz], dtype=task.dtype
+    )
+    source_normal = wait_env.portable_question._quat_apply_wxyz(
+        torch,
+        source_quat,
+        torch.tensor([[0.0, 1.0, 0.0]], dtype=task.dtype),
+    )
+    torch.testing.assert_close(
+        wait_env.portable_question._quat_apply_wxyz(
+            torch, task_yaw, source_root
+        )[0]
+        + task_translation[0],
+        torch.stack((task[24], task[25], task.new_tensor(root_z))),
+        rtol=0.0,
+        atol=2.0e-8,
+    )
+    torch.testing.assert_close(
+        wait_env.portable_question._quat_apply_wxyz(
+            torch, task_yaw, source_site
+        )[0]
+        + task_translation[0],
+        task[5:8],
+        rtol=0.0,
+        atol=2.0e-8,
+    )
+    torch.testing.assert_close(
+        wait_env.portable_question._quat_apply_wxyz(
+            torch, task_yaw, source_velocity
+        )[0],
+        task[8:11],
+        rtol=0.0,
+        atol=2.0e-8,
+    )
+    torch.testing.assert_close(
+        wait_env.portable_question._quat_apply_wxyz(
+            torch, task_yaw, source_normal
+        )[0],
+        task[11:14],
+        rtol=0.0,
+        atol=1.0e-7,
+    )
 
 
 def test_negative_mount_perfect_mimic_keeps_raw_normal_and_signed_ball_offset():
@@ -3294,6 +3405,10 @@ def test_full_a_reveal_packs_env_local_question_and_launch_restores_world_origin
             "scaled_t_hit_s": torch.ones(2),
             "scaled_t_cycle_s": torch.full((2,), 2.0),
             "pre_swing_wait_s": torch.ones(2),
+            "teacher_source_to_task_yaw_wxyz": torch.tensor(
+                [1.0, 0.0, 0.0, 0.0]
+            ).expand(2, 4),
+            "teacher_source_to_task_translation_scene": torch.zeros(2, 3),
         }
 
     env._full_a_question_builder = question
@@ -3801,6 +3916,12 @@ def test_full_a_teacher_holds_coherent_frame0_then_plays_and_retires_rowwise():
             "scaled_t_hit_s": torch.full((count,), 1.04),
             "scaled_t_cycle_s": torch.full((count,), 1.90),
             "pre_swing_wait_s": torch.full((count,), 0.90),
+            "teacher_source_to_task_yaw_wxyz": torch.tensor(
+                [1.0, 0.0, 0.0, 0.0]
+            ).expand(count, 4),
+            "teacher_source_to_task_translation_scene": torch.zeros(
+                count, 3
+            ),
         }
 
     env._full_a_question_builder = question
@@ -4548,6 +4669,50 @@ def test_host_full_a_r07_nonunit_or_zero_quaternion_faults_row():
     )
     torch.testing.assert_close(
         explicit, errors, rtol=0.0, atol=0.0, equal_nan=True
+    )
+
+
+def test_host_full_a_recovery_uses_the_accepted_task_transform():
+    env = _host_full_a_lifecycle_env()
+    env._fullmdp_body_ids = torch.arange(14)
+    source_pos = torch.zeros((1, 14, 3))
+    source_pos[0, :, 0] = torch.linspace(-0.4, 0.5, 14)
+    source_pos[0, :, 1] = torch.linspace(0.3, -0.2, 14)
+    source_pos[0, :, 2] = torch.linspace(0.7, 1.3, 14)
+    source_quat = torch.zeros((1, 14, 4))
+    source_quat[..., 0] = 1.0
+    env._full_a_teacher = SimpleNamespace(
+        joint_pos=torch.zeros((1, 31)),
+        body_pos_w=source_pos,
+        body_quat_w=source_quat,
+    )
+    yaw = torch.tensor([0.4, -0.7])
+    task_yaw = torch.zeros((2, 4))
+    task_yaw[:, 0] = torch.cos(0.5 * yaw)
+    task_yaw[:, 3] = torch.sin(0.5 * yaw)
+    translation = torch.tensor([[0.8, -0.3, 0.1], [-0.6, 0.9, -0.05]])
+    env._full_a_teacher_source_to_task_yaw_wxyz.copy_(task_yaw)
+    env._full_a_teacher_source_to_task_translation_scene.copy_(translation)
+    expanded_yaw = task_yaw[:, None, :].expand(2, 14, 4)
+    actual_pos = _test_quat_apply(
+        expanded_yaw, source_pos.expand(2, -1, -1)
+    ) + translation[:, None, :]
+    actual_quat = _test_quat_mul(
+        expanded_yaw, source_quat.expand(2, -1, -1)
+    )
+    zeros = torch.zeros((2, 14, 3))
+    env._qpos_act = lambda: torch.zeros((2, 31))
+    env._qvel_act = lambda: torch.zeros((2, 31))
+    env._full_a_recovery_foot_support = lambda _body_lin_vel: (
+        torch.ones((2, 2), dtype=torch.bool),
+        torch.zeros((2, 2, 2)),
+        torch.ones(2, dtype=torch.bool),
+    )
+    errors = wait_env.FullMdpInitialWaitVecEnv._full_a_recovery_component_errors(
+        env, (actual_pos, actual_quat, zeros, zeros)
+    )
+    torch.testing.assert_close(
+        errors, torch.zeros_like(errors), rtol=0.0, atol=2.0e-6
     )
 
 

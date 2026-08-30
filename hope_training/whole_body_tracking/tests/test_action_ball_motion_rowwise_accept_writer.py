@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import fields, replace
 import inspect
+import math
 from pathlib import Path
 import sys
 import types
@@ -30,6 +31,8 @@ if torch.cuda.is_available():
 
 
 WRITTEN_TENSORS = (
+    "_action_ball_full_mdp_task_yaw_wxyz",
+    "_action_ball_full_mdp_task_translation_w",
     "_action_ball_task_pending_elapsed_s",
     "_action_ball_task_age_s",
     "_action_ball_time_to_contact_s",
@@ -78,6 +81,30 @@ def _to_device(command, device: torch.device) -> None:
             setattr(command.motion, name, value.to(device))
     command._env.scene.env_origins = command._env.scene.env_origins.to(device)
     command.device = str(device)
+
+
+def _install_frozen_task_frame_sources(command, n: int, device: torch.device) -> None:
+    dtype = torch.float32
+    command._action_ball_full_mdp_source_strike_root_xy = torch.tensor(
+        [[0.25, -0.15]], dtype=dtype, device=device
+    )
+    command._action_ball_full_mdp_source_strike_yaw_wxyz = torch.tensor(
+        [[math.cos(0.15), 0.0, 0.0, math.sin(0.15)]],
+        dtype=dtype,
+        device=device,
+    )
+    command._action_ball_full_mdp_frozen_root_quat_wxyz = torch.zeros(
+        n, 4, dtype=dtype, device=device
+    )
+    command._action_ball_full_mdp_frozen_root_quat_wxyz[:, 0] = math.cos(0.35)
+    command._action_ball_full_mdp_frozen_root_quat_wxyz[:, 3] = math.sin(0.35)
+    command._action_ball_full_mdp_task_yaw_wxyz = torch.zeros(
+        n, 4, dtype=dtype, device=device
+    )
+    command._action_ball_full_mdp_task_yaw_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_task_translation_w = torch.zeros(
+        n, 3, dtype=dtype, device=device
+    )
 
 
 def _masked_i64(
@@ -132,6 +159,8 @@ def _candidate(
         dim=1,
     )
     task[:, 0, : epoch_mod.MOTION_TASK_F32_WIDTH] = timing
+    task[:, 0, epoch_mod.MOTION_TASK_F32_WIDTH + 19] = rows[:, 0] + 1.25
+    task[:, 0, epoch_mod.MOTION_TASK_F32_WIDTH + 20] = rows[:, 0] - 0.35
     task = torch.where(valid.unsqueeze(2), task, torch.zeros_like(task)).contiguous()
     identity = epoch_mod.EpochIdentityPayload(
         shot_key=key,
@@ -176,6 +205,7 @@ def _install_exact_sources(
     epoch_mod = D05._require_action_epoch_module()
     command, _ = bridge._configure_unbound_command(num_envs=n)
     _to_device(command, device)
+    _install_frozen_task_frame_sources(command, n, device)
     epoch = epoch_mod.ActionEpochOwner(num_envs=n, device=device)
     token = object.__new__(D05.DeviceR05RowTransaction)
     owner = object.__new__(D05.DeviceR05Owner)
@@ -346,6 +376,7 @@ def _install_real_d05_record(
     n = 2
     command, _ = bridge._configure_unbound_command(num_envs=n)
     _to_device(command, device)
+    _install_frozen_task_frame_sources(command, n, device)
     epoch_owner = epoch_mod.ActionEpochOwner(num_envs=n, device=device)
     epoch_owner.activate_reset_genesis(
         selected_mask=torch.ones(n, dtype=torch.bool, device=device),
@@ -761,6 +792,39 @@ def test_partial_accept_writes_only_exact_row_and_preserves_peer_bytes(
     assert command._action_ball_continuous_canonical_task_identity[0] == 301
     assert command._action_ball_continuous_canonical_cadence_identity[0] == 501
     assert command._action_ball_continuous_canonical_chosen_horizon_tick[0] == 10
+    task_yaw = command._action_ball_full_mdp_task_yaw_wxyz[0]
+    source_yaw = command._action_ball_full_mdp_source_strike_yaw_wxyz[0]
+    frozen_yaw = bridge.C.yaw_quat(
+        command._action_ball_full_mdp_frozen_root_quat_wxyz[0:1]
+    )[0]
+    source_yaw_inverse = source_yaw.clone()
+    source_yaw_inverse[1:].neg_()
+    expected_task_yaw = bridge.C.quat_mul(
+        frozen_yaw[None, :], source_yaw_inverse[None, :]
+    )[0]
+    # The non-commutative order is fixed: installed physical yaw times the
+    # inverse source-strike yaw.  A reversed multiply or identity fallback is
+    # therefore observable even when both source values are valid quaternions.
+    torch.testing.assert_close(
+        task_yaw,
+        expected_task_yaw,
+        rtol=0.0,
+        atol=0.0,
+    )
+    assert not torch.equal(
+        task_yaw,
+        torch.tensor([1.0, 0.0, 0.0, 0.0], device=device),
+    )
+    source_root = torch.tensor([[0.25, -0.15, 0.0]], device=device)
+    mapped_source_root = bridge.C.quat_apply(task_yaw[None, :], source_root)[0]
+    expected_translation = torch.tensor([1.25, -0.35, 0.0], device=device)
+    expected_translation[:2] -= mapped_source_root[:2]
+    torch.testing.assert_close(
+        command._action_ball_full_mdp_task_translation_w[0],
+        expected_translation,
+        rtol=0.0,
+        atol=1.0e-7,
+    )
     peer_after = _snapshot(command, row=1)
     assert peer_before.keys() == peer_after.keys()
     assert all(torch.equal(peer_before[name], peer_after[name]) for name in peer_before)

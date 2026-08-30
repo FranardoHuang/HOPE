@@ -484,8 +484,10 @@ def build_center_question(
         return torch.tensor(values, dtype=dtype, device=device).expand(count, -1)
 
     # The selected-reset transaction has already installed this action's
-    # sampled station into the physical root.  In no-move mode the task goal
-    # is that exact episode birth, not a second copy of the manifest centre.
+    # sampled station into the physical root.  In no-move mode the public XY
+    # task goal is that exact episode birth, not a second copy of the manifest
+    # centre.  Root-z preparation remains a separate plant-feasibility
+    # contract; the task ABI carries no base-z goal.
     # Keeping the frozen reset root here also preserves translation/yaw
     # equivariance when base-spawn curricula are enabled later.
     base_goal = base_position_scene.clone()
@@ -539,6 +541,19 @@ def build_center_question(
     racket_site_target = base_goal + _quat_apply_wxyz(
         torch, delta_yaw_q, reference_reach
     )
+    source_strike_root = repeated(
+        (
+            float(row.reference_racket_site_position_w_m[0])
+            - float(row.reference_reach_offset_xy_m[0]),
+            float(row.reference_racket_site_position_w_m[1])
+            - float(row.reference_reach_offset_xy_m[1]),
+            float(contact_reference_root_z_scene),
+        )
+    )
+    teacher_source_to_task_translation = (
+        base_goal
+        - _quat_apply_wxyz(torch, delta_yaw_q, source_strike_root)
+    ).contiguous()
 
     # Selected ball centre relative to the official racket site comes from the
     # same dependency-light geometry module as the catalog's reference FK.
@@ -670,6 +685,10 @@ def build_center_question(
         "scaled_t_hit_s": scaled_hit,
         "scaled_t_cycle_s": scaled_cycle,
         "pre_swing_wait_s": pre_wait,
+        "teacher_source_to_task_yaw_wxyz": delta_yaw_q.contiguous(),
+        "teacher_source_to_task_translation_scene": (
+            teacher_source_to_task_translation
+        ),
     }
 
 

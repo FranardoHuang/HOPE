@@ -131,6 +131,31 @@ def _install_distinct_reset_and_frame_zero_tapes(command) -> None:
     command._action_ball_safe_ready_body_quat_w = torch.zeros(
         n, BODY_COUNT, 4, dtype=torch.float32
     )
+    action_count = int(command.motion.num_segments)
+    command._action_ball_full_mdp_source_strike_root_xy = torch.zeros(
+        action_count, 2, dtype=torch.float32
+    )
+    command._action_ball_full_mdp_source_strike_yaw_wxyz = torch.zeros(
+        action_count, 4, dtype=torch.float32
+    )
+    command._action_ball_full_mdp_source_strike_yaw_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_task_yaw_wxyz = torch.zeros(
+        n, 4, dtype=torch.float32
+    )
+    command._action_ball_full_mdp_task_yaw_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_task_translation_w = torch.zeros(
+        n, 3, dtype=torch.float32
+    )
+    command._action_ball_full_mdp_frozen_root_pos_w = torch.zeros(
+        n, 3, dtype=torch.float32
+    )
+    command._action_ball_full_mdp_frozen_root_quat_wxyz = torch.zeros(
+        n, 4, dtype=torch.float32
+    )
+    command._action_ball_full_mdp_frozen_root_quat_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_frozen_root_valid = torch.ones(
+        n, dtype=torch.bool
+    )
 
 
 def _fresh_command(num_envs: int):
@@ -391,28 +416,43 @@ def test_fresh_hidden_balance_then_accept_is_atomic_and_suffix_keeps_frame_zero(
         False,
         True,
     ]
+    row_yaw = command._action_ball_full_mdp_task_yaw_wxyz[0].expand(
+        BODY_COUNT, 4
+    )
+    expected_task_body_pos = (
+        C.quat_apply(row_yaw, command.motion.body_pos_w[frame_zero["steps"][0]])
+        + command._action_ball_full_mdp_task_translation_w[0]
+        + command._env.scene.env_origins[0]
+    )
+    expected_task_body_quat = C.quat_mul(
+        row_yaw, command.motion.body_quat_w[frame_zero["steps"][0]]
+    )
     assert torch.equal(command.joint_pos[0], frame_zero["joint_pos"][0])
-    assert torch.equal(command.body_pos_w[0], frame_zero["body_pos_w"][0])
-    assert torch.equal(command.body_quat_w[0], frame_zero["body_quat_w"][0])
-    assert torch.equal(command.anchor_pos_w[0], frame_zero["body_pos_w"][0, 0])
+    assert torch.equal(command.body_pos_w[0], expected_task_body_pos)
+    assert torch.equal(command.body_quat_w[0], expected_task_body_quat)
+    assert torch.equal(command.anchor_pos_w[0], expected_task_body_pos[0])
 
-    expected_quat_relative, expected_pos_relative = (
-        C._motion_anchor_relative_body_transform(
-            frame_zero["body_pos_w"][:, 0],
-            frame_zero["body_quat_w"][:, 0],
-            command.robot.data.body_pos_w[:, 0],
-            command.robot.data.body_quat_w[:, 0],
-            frame_zero["body_pos_w"],
-            frame_zero["body_quat_w"],
-            expected_body_count=BODY_COUNT,
-        )
+    # Accepted-shot targets are a frozen scene transform.  Live robot motion is
+    # an actor measurement and may not silently re-anchor the teacher.
+    accepted_teacher = {
+        "body_pos_w": command.body_pos_w[0].clone(),
+        "body_quat_w": command.body_quat_w[0].clone(),
+        "body_lin_vel_w": command.body_lin_vel_w[0].clone(),
+        "body_ang_vel_w": command.body_ang_vel_w[0].clone(),
+    }
+    live_pos = command.robot.data.body_pos_w.clone()
+    live_quat = command.robot.data.body_quat_w.clone()
+    command.robot.data.body_pos_w[0].add_(torch.tensor((17.0, -9.0, 3.0)))
+    command.robot.data.body_quat_w[0].copy_(
+        torch.tensor(((0.5, 0.5, 0.5, 0.5),) * BODY_COUNT)
     )
-    assert torch.equal(
-        command.body_pos_relative_w[0], expected_pos_relative[0]
-    )
-    assert torch.equal(
-        command.body_quat_relative_w[0], expected_quat_relative[0]
-    )
+    for name, expected in accepted_teacher.items():
+        assert torch.equal(getattr(command, name)[0], expected), name
+    command.robot.data.body_pos_w.copy_(live_pos)
+    command.robot.data.body_quat_w.copy_(live_quat)
+
+    assert torch.equal(command.body_pos_relative_w[0], expected_task_body_pos)
+    assert torch.equal(command.body_quat_relative_w[0], expected_task_body_quat)
     assert not torch.equal(command.body_pos_relative_w[0], reset_body[0])
 
     peer_writer_after = accept_writer._snapshot(command, row=1)
@@ -445,8 +485,8 @@ def test_fresh_hidden_balance_then_accept_is_atomic_and_suffix_keeps_frame_zero(
     assert command._action_ball_continuous_policy_opportunities_created[0] == 1
     assert not command._action_ball_full_mdp_initial_balance_reference_mask()[0]
     assert torch.equal(command.joint_pos[0], frame_zero["joint_pos"][0])
-    assert torch.equal(command.body_pos_w[0], frame_zero["body_pos_w"][0])
-    assert torch.equal(command.anchor_pos_w[0], frame_zero["body_pos_w"][0, 0])
+    assert torch.equal(command.body_pos_w[0], expected_task_body_pos)
+    assert torch.equal(command.anchor_pos_w[0], expected_task_body_pos[0])
     _assert_zero_velocity_reference(command, torch.tensor([0]))
 
 

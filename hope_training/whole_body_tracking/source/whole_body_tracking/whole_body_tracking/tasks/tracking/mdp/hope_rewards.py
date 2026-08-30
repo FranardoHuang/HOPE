@@ -775,24 +775,48 @@ def _stage1_aligned_clip_racket_target_at_steps(
     # Adding the same origin to both the source body and reference anchor below makes the x/y
     # subtraction cancel while preserving a non-zero terrain/origin z exactly like the upstream
     # body_pos_relative_w formula.
-    ref_anchor_pos = body_pos[current, anchor_index] + origins
-    ref_anchor_quat = _stage1_quat_normalize(
-        body_quat[current, anchor_index], name="reference_anchor_quat"
+    frozen_task_frame = bool(
+        getattr(motion, "_action_ball_continuous_fresh_motion_lane_bound", False)
     )
-    robot_anchor_pos = motion.robot_anchor_pos_w
-    robot_anchor_quat = _stage1_quat_normalize(
-        motion.robot_anchor_quat_w, name="robot_anchor_quat"
-    )
-    ref_anchor_inv = ref_anchor_quat.clone()
-    ref_anchor_inv[..., 1:] *= -1.0
-    delta_quat = _stage1_yaw_quat(_stage1_quat_mul(robot_anchor_quat, ref_anchor_inv))
-    delta_pos = robot_anchor_pos.clone()
-    delta_pos[..., 2] = ref_anchor_pos[..., 2]
+    if frozen_task_frame:
+        delta_quat = motion._action_ball_full_mdp_task_yaw_wxyz
+        delta_pos = motion._action_ball_full_mdp_task_translation_w
+        if (
+            not torch.is_tensor(delta_quat)
+            or not torch.is_tensor(delta_pos)
+            or tuple(delta_quat.shape) != (cmd.num_envs, 4)
+            or tuple(delta_pos.shape) != (cmd.num_envs, 3)
+        ):
+            raise RuntimeError("FullMDP measured-paddle task frame differs")
+        ref_anchor_pos = None
+    else:
+        ref_anchor_pos = body_pos[current, anchor_index] + origins
+        ref_anchor_quat = _stage1_quat_normalize(
+            body_quat[current, anchor_index], name="reference_anchor_quat"
+        )
+        robot_anchor_pos = motion.robot_anchor_pos_w
+        robot_anchor_quat = _stage1_quat_normalize(
+            motion.robot_anchor_quat_w, name="robot_anchor_quat"
+        )
+        ref_anchor_inv = ref_anchor_quat.clone()
+        ref_anchor_inv[..., 1:] *= -1.0
+        delta_quat = _stage1_yaw_quat(
+            _stage1_quat_mul(robot_anchor_quat, ref_anchor_inv)
+        )
+        delta_pos = robot_anchor_pos.clone()
+        delta_pos[..., 2] = ref_anchor_pos[..., 2]
 
     def _aligned(step: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        raw_pos = body_pos[step, source_index] + origins
+        raw_scene = body_pos[step, source_index]
         raw_quat = _stage1_quat_normalize(body_quat[step, source_index], name="reference_body_quat")
-        aligned_pos = delta_pos + _stage1_quat_apply(delta_quat, raw_pos - ref_anchor_pos)
+        if frozen_task_frame:
+            aligned_pos = (
+                _stage1_quat_apply(delta_quat, raw_scene) + delta_pos + origins
+            )
+        else:
+            aligned_pos = delta_pos + _stage1_quat_apply(
+                delta_quat, raw_scene + origins - ref_anchor_pos
+            )
         aligned_quat = _stage1_quat_normalize(
             _stage1_quat_mul(delta_quat, raw_quat), name="aligned_reference_body_quat"
         )
@@ -827,8 +851,16 @@ def _stage1_aligned_clip_racket_target_at_steps(
             )
 
         def _aligned_measured_pos(step: torch.Tensor) -> torch.Tensor:
-            raw = measured_pos[step] + origins
-            return delta_pos + _stage1_quat_apply(delta_quat, raw - ref_anchor_pos)
+            raw_scene = measured_pos[step]
+            if frozen_task_frame:
+                return (
+                    _stage1_quat_apply(delta_quat, raw_scene)
+                    + delta_pos
+                    + origins
+                )
+            return delta_pos + _stage1_quat_apply(
+                delta_quat, raw_scene + origins - ref_anchor_pos
+            )
 
         measured_previous = _aligned_measured_pos(previous)
         measured_current = _aligned_measured_pos(current)

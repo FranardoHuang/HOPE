@@ -389,7 +389,7 @@ _ACTION_BALL_CONTINUOUS_MOTION_SELECTED_RESET_AUTHORITY_API_SHA256 = (
 _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_KIND = (
     "action_ball_continuous_motion_fresh_checkpoint_v1"
 )
-_ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_SCHEMA_VERSION = 7
+_ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_SCHEMA_VERSION = 8
 _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS = (
     ("sequence_active", "_action_ball_continuous_sequence_active", False),
     ("control_tick", "_action_ball_continuous_episode_step", False),
@@ -459,6 +459,31 @@ _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS = (
     (
         "reset_ready_reference_pending",
         "_action_ball_safe_ready_reference_pending",
+        False,
+    ),
+    (
+        "frozen_root_pos_w",
+        "_action_ball_full_mdp_frozen_root_pos_w",
+        False,
+    ),
+    (
+        "frozen_root_quat_wxyz",
+        "_action_ball_full_mdp_frozen_root_quat_wxyz",
+        False,
+    ),
+    (
+        "frozen_root_valid",
+        "_action_ball_full_mdp_frozen_root_valid",
+        False,
+    ),
+    (
+        "accepted_task_yaw_wxyz",
+        "_action_ball_full_mdp_task_yaw_wxyz",
+        False,
+    ),
+    (
+        "accepted_task_translation_w",
+        "_action_ball_full_mdp_task_translation_w",
         False,
     ),
     ("body_pos_relative_w", "body_pos_relative_w", False),
@@ -6409,12 +6434,47 @@ class MotionCommand(CommandTerm):
             write_rows &= (
                 self._action_ball_full_mdp_motion_epoch_writable_rows
             )
+        source_root_xy = self._action_ball_full_mdp_source_strike_root_xy
+        source_yaw = self._action_ball_full_mdp_source_strike_yaw_wxyz
+        frozen_quat = self._action_ball_full_mdp_frozen_root_quat_wxyz
+        if source_root_xy is None or source_yaw is None or frozen_quat is None:
+            raise RuntimeError("Motion accepted rows have no frozen source frame")
+        safe_slot = key.action_slot[:, 0].clamp(
+            min=0, max=source_root_xy.shape[0] - 1
+        )
+        source_root_xy_rows = source_root_xy[safe_slot]
+        source_yaw_rows = source_yaw[safe_slot]
+        source_yaw_inverse = source_yaw_rows.clone()
+        source_yaw_inverse[:, 1:].neg_()
+        task_yaw = quat_mul(yaw_quat(frozen_quat), source_yaw_inverse)
+        source_root_xyz = torch.cat(
+            (source_root_xy_rows, torch.zeros_like(source_root_xy_rows[:, :1])),
+            dim=1,
+        )
+        base_goal_xy = timing_grid[
+            :,
+            0,
+            epoch.MOTION_TASK_F32_WIDTH + 19 : epoch.MOTION_TASK_F32_WIDTH + 21,
+        ]
+        task_translation = torch.cat(
+            (
+                base_goal_xy
+                - quat_apply(task_yaw, source_root_xyz)[:, :2],
+                torch.zeros_like(base_goal_xy[:, :1]),
+            ),
+            dim=1,
+        ).contiguous()
+        task_yaw = task_yaw.contiguous()
         # Validate/latch the complete reveal reference before any D05 Motion
         # destination changes.  ``refresh`` preserves invalid cache rows and
         # updates the persistent writable mask; re-intersect so a frame/pending
         # defect cannot mutate timing, identity, counters, or playback state
         # before the packed optimizer drain observes bit 25.
-        self.refresh_action_ball_revealed_body_reference(write_rows)
+        self.refresh_action_ball_revealed_body_reference(
+            write_rows,
+            task_yaw_wxyz=task_yaw,
+            task_translation_w=task_translation,
+        )
         persistent_writable = (
             self._action_ball_full_mdp_motion_epoch_writable_rows
         )
@@ -6474,6 +6534,11 @@ class MotionCommand(CommandTerm):
         deadline_tick = accepted.clocks.deadline_tick[:, 0]
 
         accepted_values = (
+            (self._action_ball_full_mdp_task_yaw_wxyz, task_yaw),
+            (
+                self._action_ball_full_mdp_task_translation_w,
+                task_translation,
+            ),
             (self._action_ball_task_pending_elapsed_s, zero_f32),
             (self._action_ball_task_age_s, zero_f32),
             (self._action_ball_time_to_contact_s, timing[:, 0]),
@@ -12702,6 +12767,10 @@ class MotionCommand(CommandTerm):
         self._action_ball_full_mdp_frozen_root_pos_w = None
         self._action_ball_full_mdp_frozen_root_quat_wxyz = None
         self._action_ball_full_mdp_frozen_root_valid = None
+        self._action_ball_full_mdp_source_strike_root_xy = None
+        self._action_ball_full_mdp_source_strike_yaw_wxyz = None
+        self._action_ball_full_mdp_task_yaw_wxyz = None
+        self._action_ball_full_mdp_task_translation_w = None
 
         binding = getattr(self.cfg, "action_ball_dynamic_ready", None)
         if binding is None:
@@ -13133,6 +13202,17 @@ class MotionCommand(CommandTerm):
             self._action_ball_full_mdp_frozen_root_quat_wxyz[:, 0] = 1.0
             self._action_ball_full_mdp_frozen_root_valid = torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._action_ball_full_mdp_task_yaw_wxyz = torch.zeros(
+                (self.num_envs, 4),
+                dtype=self.motion.body_quat_w.dtype,
+                device=self.device,
+            )
+            self._action_ball_full_mdp_task_yaw_wxyz[:, 0] = 1.0
+            self._action_ball_full_mdp_task_translation_w = torch.zeros(
+                (self.num_envs, 3),
+                dtype=self.motion.body_pos_w.dtype,
+                device=self.device,
             )
         # ActionManager constructs after CommandManager in Isaac Lab.  Keep all
         # pre-scene identity/physical validation above, but resolve the decoder
@@ -13903,7 +13983,11 @@ class MotionCommand(CommandTerm):
         self._action_ball_public_task_valid = task_valid
 
     def refresh_action_ball_revealed_body_reference(
-        self, reveal: torch.Tensor
+        self,
+        reveal: torch.Tensor,
+        *,
+        task_yaw_wxyz: torch.Tensor | None = None,
+        task_translation_w: torch.Tensor | None = None,
     ) -> None:
         """Refresh cached aligned bodies on an exact public reveal tick.
 
@@ -13974,31 +14058,49 @@ class MotionCommand(CommandTerm):
         # masked away below.
         safe_steps = torch.where(reveal, steps, frame_zero)
 
-        body_pos_w = (
-            self.motion.body_pos_w[safe_steps]
-            + self._env.scene.env_origins[:, None, :]
-        )
+        source_body_pos = self.motion.body_pos_w[safe_steps]
         body_quat_w = self.motion.body_quat_w[safe_steps]
-        anchor_pos_w = body_pos_w[:, self.motion_anchor_body_index]
-        anchor_quat_w = body_quat_w[:, self.motion_anchor_body_index]
-        robot_anchor_pos_w = self.robot.data.body_pos_w[
-            :, self.robot_anchor_body_index
-        ]
-        robot_anchor_quat_w = self.robot.data.body_quat_w[
-            :, self.robot_anchor_body_index
-        ]
-        (
-            measured_body_quat_relative_w,
-            measured_body_pos_relative_w,
-        ) = _motion_anchor_relative_body_transform(
-            anchor_pos_w,
-            anchor_quat_w,
-            robot_anchor_pos_w,
-            robot_anchor_quat_w,
-            body_pos_w,
-            body_quat_w,
-            expected_body_count=len(self.cfg.body_names),
-        )
+        if fresh_direct:
+            if (
+                type(task_yaw_wxyz) is not torch.Tensor
+                or type(task_translation_w) is not torch.Tensor
+                or tuple(task_yaw_wxyz.shape) != (self.num_envs, 4)
+                or tuple(task_translation_w.shape) != (self.num_envs, 3)
+            ):
+                raise RuntimeError("fresh Motion reveal task frame differs")
+            expanded_yaw = task_yaw_wxyz[:, None, :].expand_as(body_quat_w)
+            measured_body_pos_relative_w = (
+                quat_apply(expanded_yaw, source_body_pos)
+                + task_translation_w[:, None, :]
+                + self._env.scene.env_origins[:, None, :]
+            )
+            measured_body_quat_relative_w = quat_mul(
+                expanded_yaw, body_quat_w
+            )
+        else:
+            body_pos_w = (
+                source_body_pos + self._env.scene.env_origins[:, None, :]
+            )
+            anchor_pos_w = body_pos_w[:, self.motion_anchor_body_index]
+            anchor_quat_w = body_quat_w[:, self.motion_anchor_body_index]
+            robot_anchor_pos_w = self.robot.data.body_pos_w[
+                :, self.robot_anchor_body_index
+            ]
+            robot_anchor_quat_w = self.robot.data.body_quat_w[
+                :, self.robot_anchor_body_index
+            ]
+            (
+                measured_body_quat_relative_w,
+                measured_body_pos_relative_w,
+            ) = _motion_anchor_relative_body_transform(
+                anchor_pos_w,
+                anchor_quat_w,
+                robot_anchor_pos_w,
+                robot_anchor_quat_w,
+                body_pos_w,
+                body_quat_w,
+                expected_body_count=len(self.cfg.body_names),
+            )
         self.body_quat_relative_w = torch.where(
             reveal[:, None, None],
             measured_body_quat_relative_w,
@@ -16992,6 +17094,14 @@ class MotionCommand(CommandTerm):
         frozen_pos[env_ids] = root_pos
         frozen_quat[env_ids] = root_quat
         frozen_valid[env_ids] = True
+        task_yaw = getattr(self, "_action_ball_full_mdp_task_yaw_wxyz", None)
+        task_translation = getattr(
+            self, "_action_ball_full_mdp_task_translation_w", None
+        )
+        if task_yaw is not None and task_translation is not None:
+            task_yaw[env_ids] = 0.0
+            task_yaw[env_ids, 0] = 1.0
+            task_translation[env_ids] = 0.0
         return result
 
     def action_ball_full_mdp_frozen_root_frame(
@@ -17029,6 +17139,63 @@ class MotionCommand(CommandTerm):
                 env_ids
             ].contiguous(),
         )
+
+    def bind_action_ball_full_mdp_source_strike_frame(
+        self,
+        source_root_xy: torch.Tensor,
+        source_root_quat_wxyz: torch.Tensor,
+    ) -> None:
+        """Bind the immutable source strike root used by accepted-shot SE(2)."""
+
+        action_count = int(self.motion.num_segments)
+        device = torch.device(self.device)
+        if (
+            type(source_root_xy) is not torch.Tensor
+            or type(source_root_quat_wxyz) is not torch.Tensor
+            or source_root_xy.device != device
+            or source_root_quat_wxyz.device != device
+            or source_root_xy.dtype != torch.float32
+            or source_root_quat_wxyz.dtype != torch.float32
+            or tuple(source_root_xy.shape) != (action_count, 2)
+            or tuple(source_root_quat_wxyz.shape) != (action_count, 4)
+            or not source_root_xy.is_contiguous()
+            or not source_root_quat_wxyz.is_contiguous()
+        ):
+            raise RuntimeError("FullMDP source strike frame ABI differs")
+        source_yaw = yaw_quat(source_root_quat_wxyz).contiguous()
+        torch._assert_async(
+            (
+                torch.isfinite(source_root_xy).all()
+                & torch.isfinite(source_yaw).all()
+                & torch.isclose(
+                    torch.linalg.vector_norm(source_yaw, dim=1),
+                    torch.ones(action_count, device=device, dtype=source_yaw.dtype),
+                    rtol=0.0,
+                    atol=1.0e-5,
+                ).all()
+            )
+        )
+        bound_source_root_xy = getattr(
+            self, "_action_ball_full_mdp_source_strike_root_xy", None
+        )
+        bound_source_yaw = getattr(
+            self, "_action_ball_full_mdp_source_strike_yaw_wxyz", None
+        )
+        if bound_source_root_xy is not None:
+            if not (
+                torch.equal(
+                    bound_source_root_xy,
+                    source_root_xy,
+                )
+                and torch.equal(
+                    bound_source_yaw,
+                    source_yaw,
+                )
+            ):
+                raise RuntimeError("FullMDP source strike frame may not be rebound")
+            return
+        self._action_ball_full_mdp_source_strike_root_xy = source_root_xy.clone()
+        self._action_ball_full_mdp_source_strike_yaw_wxyz = source_yaw.clone()
 
     def _restore_action_ball_sim_state(
         self, env_ids: torch.Tensor, rollback_state: dict
@@ -17679,10 +17846,26 @@ class MotionCommand(CommandTerm):
     def body_pos_w(self) -> torch.Tensor:
         wait = self._action_ball_safe_ready_wait_mask()
         steps = self._action_ball_full_mdp_safe_pose_reference_steps()
-        measured = (
-            self.motion.body_pos_w[steps]
-            + self._env.scene.env_origins[:, None, :]
+        source = self.motion.body_pos_w[steps]
+        task_yaw = getattr(self, "_action_ball_full_mdp_task_yaw_wxyz", None)
+        task_translation = getattr(
+            self, "_action_ball_full_mdp_task_translation_w", None
         )
+        if (
+            getattr(self, "_action_ball_continuous_fresh_motion_lane_bound", False)
+            and task_yaw is not None
+            and task_translation is not None
+        ):
+            yaw = task_yaw[:, None, :].expand(
+                self.num_envs, source.shape[1], 4
+            )
+            measured = (
+                quat_apply(yaw, source)
+                + task_translation[:, None, :]
+                + self._env.scene.env_origins[:, None, :]
+            )
+        else:
+            measured = source + self._env.scene.env_origins[:, None, :]
         if self._action_ball_safe_ready_body_pos_w is not None:
             measured = torch.where(
                 wait[:, None, None],
@@ -17697,6 +17880,13 @@ class MotionCommand(CommandTerm):
         measured = self.motion.body_quat_w[
             self._action_ball_full_mdp_safe_pose_reference_steps()
         ]
+        task_yaw = getattr(self, "_action_ball_full_mdp_task_yaw_wxyz", None)
+        if (
+            getattr(self, "_action_ball_continuous_fresh_motion_lane_bound", False)
+            and task_yaw is not None
+        ):
+            yaw = task_yaw[:, None, :].expand_as(measured)
+            measured = quat_mul(yaw, measured)
         if self._action_ball_safe_ready_body_quat_w is not None:
             measured = torch.where(
                 wait[:, None, None],
@@ -17715,6 +17905,17 @@ class MotionCommand(CommandTerm):
         ]
         if self.retiming_active:
             v = v * self.speed_scale[:, None, None]
+        task_yaw = getattr(self, "_action_ball_full_mdp_task_yaw_wxyz", None)
+        if (
+            getattr(self, "_action_ball_continuous_fresh_motion_lane_bound", False)
+            and task_yaw is not None
+        ):
+            v = quat_apply(
+                task_yaw[:, None, :].expand(
+                    self.num_envs, v.shape[1], 4
+                ),
+                v,
+            )
         stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
         return torch.where(stationary[:, None, None], torch.zeros_like(v), v)
 
@@ -17725,6 +17926,17 @@ class MotionCommand(CommandTerm):
         ]
         if self.retiming_active:
             v = v * self.speed_scale[:, None, None]
+        task_yaw = getattr(self, "_action_ball_full_mdp_task_yaw_wxyz", None)
+        if (
+            getattr(self, "_action_ball_continuous_fresh_motion_lane_bound", False)
+            and task_yaw is not None
+        ):
+            v = quat_apply(
+                task_yaw[:, None, :].expand(
+                    self.num_envs, v.shape[1], 4
+                ),
+                v,
+            )
         stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
         return torch.where(stationary[:, None, None], torch.zeros_like(v), v)
 
@@ -17744,6 +17956,12 @@ class MotionCommand(CommandTerm):
         ]
         if self.retiming_active:
             alv = alv * self.speed_scale[:, None]
+        task_yaw = getattr(self, "_action_ball_full_mdp_task_yaw_wxyz", None)
+        if (
+            getattr(self, "_action_ball_continuous_fresh_motion_lane_bound", False)
+            and task_yaw is not None
+        ):
+            alv = quat_apply(task_yaw, alv)
         if self.canonical_ready_mode or getattr(
             self, "_action_ball_continuous_fresh_motion_lane_bound", False
         ):
@@ -17759,6 +17977,12 @@ class MotionCommand(CommandTerm):
         ]
         if self.retiming_active:
             aav = aav * self.speed_scale[:, None]
+        task_yaw = getattr(self, "_action_ball_full_mdp_task_yaw_wxyz", None)
+        if (
+            getattr(self, "_action_ball_continuous_fresh_motion_lane_bound", False)
+            and task_yaw is not None
+        ):
+            aav = quat_apply(task_yaw, aav)
         if self.canonical_ready_mode or getattr(
             self, "_action_ball_continuous_fresh_motion_lane_bound", False
         ):
@@ -20604,18 +20828,25 @@ class MotionCommand(CommandTerm):
             finally:
                 self._resampling_from_wrap = False
 
-        (
-            next_body_quat_relative_w,
-            next_body_pos_relative_w,
-        ) = _motion_anchor_relative_body_transform(
-            self.anchor_pos_w,
-            self.anchor_quat_w,
-            self.robot_anchor_pos_w,
-            self.robot_anchor_quat_w,
-            self.body_pos_w,
-            self.body_quat_w,
-            expected_body_count=len(self.cfg.body_names),
-        )
+        if fresh_action_ball_active:
+            # FullMDP's accepted shot owns one frozen scene SE(2).  The
+            # policy-moved torso is achieved state and cannot redefine the
+            # teacher or paddle target on later ticks.
+            next_body_pos_relative_w = self.body_pos_w
+            next_body_quat_relative_w = self.body_quat_w
+        else:
+            (
+                next_body_quat_relative_w,
+                next_body_pos_relative_w,
+            ) = _motion_anchor_relative_body_transform(
+                self.anchor_pos_w,
+                self.anchor_quat_w,
+                self.robot_anchor_pos_w,
+                self.robot_anchor_quat_w,
+                self.body_pos_w,
+                self.body_quat_w,
+                expected_body_count=len(self.cfg.body_names),
+            )
         writable_rows = getattr(
             self,
             "_action_ball_full_mdp_motion_epoch_writable_rows",
