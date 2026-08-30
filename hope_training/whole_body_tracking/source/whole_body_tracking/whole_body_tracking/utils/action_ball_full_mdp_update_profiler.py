@@ -22,15 +22,15 @@ from collections.abc import Callable, Mapping
 
 PROFILE_ENV_VAR = "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES"
 PROFILE_JSON_PREFIX = "HOPE_ACTION_BALL_FULL_MDP_PROFILE_JSON="
-PROFILE_SCHEMA_VERSION = 2
+PROFILE_SCHEMA_VERSION = 3
 MAX_PROFILE_UPDATES = 50
 
 _SEGMENT_NAMES = (
     "env_step_total",
     "before_policy_step",
     "step_may_start_assert",
-    "protected_state_capture",
-    "protected_state_assert",
+    "manager_clock_capture",
+    "manager_clock_assert",
     "action_process",
     "action_apply",
     "scene_write_data_to_sim",
@@ -363,11 +363,11 @@ class FullMdpUpdateProfiler:
             (unwrapped, "step", "env_step_total", None),
             (unwrapped, "_before_policy_step", "before_policy_step", None),
             (unwrapped, "_assert_step_may_start", "step_may_start_assert", None),
-            (unwrapped, "_protected_manager_state", "protected_state_capture", None),
+            (unwrapped, "_manager_clock_token", "manager_clock_capture", None),
             (
                 unwrapped,
-                "_assert_protected_manager_state_unchanged",
-                "protected_state_assert",
+                "_assert_manager_clock_token_unchanged",
+                "manager_clock_assert",
                 None,
             ),
             (
