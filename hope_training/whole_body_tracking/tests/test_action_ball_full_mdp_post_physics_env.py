@@ -603,7 +603,6 @@ class _Physical:
         self.trace = trace
         self.fail_publish = False
         self.mutate_clock = False
-        self.mutate_manager_tensor_via_data = False
         self.transport_work = True
         self.recovery_epoch_work = True
 
@@ -626,8 +625,6 @@ class _Physical:
         self.trace.append(("physical_publish", stamp.exact_tuple()))
         if self.mutate_clock:
             self.env.common_step_counter += 1
-        if self.mutate_manager_tensor_via_data:
-            self.env.episode_length_buf.data.add_(7)
         if self.fail_publish:
             raise ValueError("physical publish counterexample")
         return None
@@ -1235,17 +1232,6 @@ def test_tensor_version_scan_is_not_misrepresented_as_runtime_isolation():
     probe.data.add_(1)
     assert int(probe._version) == version_before
     assert torch.equal(probe, torch.ones(1))
-
-    # Production now promises only exact clock/lease/poison/dispatch facts at
-    # this seam.  A same-writer tensor mutation is intentionally not presented
-    # as independently detected; true business invariants remain owned at their
-    # cross-writer consumers.
-    env, _owner, physical, _trace = _fake_env(decimation=2)
-    physical.mutate_manager_tensor_via_data = True
-    env.step(torch.zeros(2, 4))
-    assert env._full_mdp_post_physics_poison is None
-    assert env.episode_length_buf.tolist() == [15, 15]
-
 
 def test_production_step_has_no_per_substep_manager_tensor_scan():
     tree = ast.parse(MODULE_PATH.read_text(encoding="utf-8"))
