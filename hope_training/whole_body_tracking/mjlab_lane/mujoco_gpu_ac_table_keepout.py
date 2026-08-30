@@ -348,8 +348,6 @@ if _wp is not None:
         lo: _wp.vec3,
         hi: _wp.vec3,
     ) -> float:
-        """Largest SAT gap: positive is clear, zero/tiny negative overlaps."""
-
         box_center = 0.5 * (lo + hi)
         box_half = 0.5 * (hi - lo)
         delta = box_center - center
@@ -489,8 +487,6 @@ if _wp is not None:
         winner_i64: _wp.array(dtype=_wp.int64, ndim=1),
         witness_f32: _wp.array(dtype=_wp.float32, ndim=1),
     ):
-        """Replay-only witness for the production kernel's first overlap."""
-
         env = _wp.tid()
         origin = env_origins[env]
         winner_i64[0] = -1
