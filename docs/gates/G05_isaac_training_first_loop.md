@@ -2,6 +2,14 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-30 Isaac lean rollout实测时钟（branch candidate，仍`Partial`）
+
+候选修复删除了用update公式自造`completed_environment_steps`的同writer证明。RSL3 runner现在只消费成功返回
+的真实vector `env.step()`，并在optimizer前将本轮observed调用数、真实storage step与typed `H`三方核对；
+D05/WAL/ACK继续消费累计observed transitions。Pod focused与真实Isaac `512×H48×2`仍`未测`，通过前不得发
+下一条long。该修复不改变学习配方，也不授权physics parity、resume、promotion、部署或真机，G05保持
+`Partial`。细节见[课程实验§11.6](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#116-2026-08-30-isaac-lean-observed-rollout-chronology)。
+
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
 validated code source=`b0d7d562`保留`255df4a1`的每control一次R06 finalize与每substep Scene capture、terminal

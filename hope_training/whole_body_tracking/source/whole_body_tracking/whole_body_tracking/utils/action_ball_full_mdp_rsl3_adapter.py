@@ -1322,19 +1322,116 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
         self._full_mdp_adapter = ActionBallFullMdpRsl3Adapter(
             env=env, owner=action_ball_full_mdp_runtime_owner, log_dir=log_dir
         )
+        bind_observed = _bound(
+            action_ball_full_mdp_runtime_owner,
+            "bind_observed_rollout_chronology",
+        )
+        record_successful_step = _bound(
+            action_ball_full_mdp_runtime_owner,
+            "record_successful_environment_step",
+        )
+        observed_steps = _bound(
+            action_ball_full_mdp_runtime_owner,
+            "observed_completed_environment_steps",
+        )
+        bind_observed()
         original_update = self.alg.update
         if not callable(original_update) or getattr(original_update, "__self__", None) is not self.alg:
             raise RuntimeError("RSL3 PPO update is not the exact bound algorithm method")
+        storage = getattr(self.alg, "storage", None)
+        if type(getattr(storage, "step", None)) is not int or storage.step != 0:
+            raise RuntimeError("RSL3 PPO rollout storage must start empty")
+        original_env_step = getattr(self.env, "step", None)
+        if not callable(original_env_step):
+            raise RuntimeError("RSL3 FullMDP runner requires callable env.step()")
+        rollout = {
+            "storage": storage,
+            "in_flight": False,
+            "successful_vector_steps": 0,
+            "successful_vector_steps_at_boundary": 0,
+        }
+
+        def step_with_observed_rollout(*args, **kwargs):
+            if rollout["in_flight"]:
+                raise RuntimeError("RSL3 FullMDP env.step re-entered")
+            rollout["in_flight"] = True
+            try:
+                result = original_env_step(*args, **kwargs)
+            except BaseException:
+                raise
+            else:
+                completed = record_successful_step()
+                rollout["successful_vector_steps"] += 1
+                if (
+                    type(completed) is not int
+                    or completed
+                    != rollout["successful_vector_steps"]
+                    * int(self.env.num_envs)
+                ):
+                    raise RuntimeError(
+                        "RSL3 FullMDP successful-step frontier differs"
+                    )
+                return result
+            finally:
+                rollout["in_flight"] = False
+
+        self.env.step = step_with_observed_rollout
+        self._full_mdp_rollout_chronology = rollout
 
         def update_with_full_mdp_boundary():
             update_index = self._full_mdp_adapter._last_update + 1
-            return self._full_mdp_adapter.update(
+            boundary = None
+            try:
+                self._full_mdp_adapter._require_healthy()
+                observed = observed_steps()
+                successful_delta = (
+                    rollout["successful_vector_steps"]
+                    - rollout["successful_vector_steps_at_boundary"]
+                )
+                expected_completed = (
+                    (update_index + 1)
+                    * int(self.env.num_envs)
+                    * int(self.num_steps_per_env)
+                )
+                if (
+                    getattr(self.alg, "storage", None) is not rollout["storage"]
+                    or type(getattr(rollout["storage"], "step", None)) is not int
+                    or rollout["storage"].step != int(self.num_steps_per_env)
+                    or rollout["in_flight"] is not False
+                    or successful_delta != int(self.num_steps_per_env)
+                    or type(observed) is not int
+                    or observed
+                    != rollout["successful_vector_steps"]
+                    * int(self.env.num_envs)
+                    or observed != expected_completed
+                ):
+                    raise RuntimeError(
+                        "RSL3 FullMDP observed rollout/storage chronology differs"
+                    )
+            except BaseException as exc:
+                reason = (
+                    "RSL3 FullMDP observed rollout boundary failed; retry "
+                    "forbidden: "
+                    f"{type(exc).__module__}.{type(exc).__qualname__}"
+                )
+                try:
+                    self._full_mdp_adapter._poison(
+                        boundary,
+                        update_index=update_index,
+                        reason=reason,
+                    )
+                except BaseException:
+                    pass
+                raise RuntimeError(reason) from exc
+            result = self._full_mdp_adapter.update(
                 original_update,
                 update_index=update_index,
-                completed_environment_steps=(
-                    (update_index + 1) * int(self.env.num_envs) * int(self.num_steps_per_env)
-                ),
+                completed_environment_steps=observed,
             )
+            rollout["successful_vector_steps_at_boundary"] = rollout[
+                "successful_vector_steps"
+            ]
+            return result
 
         self.alg.update = update_with_full_mdp_boundary
         self._full_mdp_update_profiler = None

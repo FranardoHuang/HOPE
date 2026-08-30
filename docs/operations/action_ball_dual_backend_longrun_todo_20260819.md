@@ -213,6 +213,11 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    第二刀按全仓AST/callsite审计删除三个无生产consumer的兼容decoder/view及两个只为它们存在的facts类型：
    Physical/R06不再各自重读并clone完整Epoch slice，Epoch也不再暴露未消费的active D05 rows；源码净减约
    214行。该刀不在active调用图上，预期不改变墙钟；其价值是缩小owner/API面，仍须Pod exact相关套件确认。
+   本项另定位到一个必须在下一条Isaac long前闭合的evidence-origin cut：旧RSL3 runner用
+   `(update_index+1)×num_envs×H`同时生成并复核`completed_environment_steps`，只能证明公式自洽。branch
+   candidate改为只在vector `env.step()`成功返回后累计，PPO前要求本轮observed delta、真实storage step与
+   typed `H`三方一致，异常返回不推进；mismatch sticky-poison。Pod focused和真实`512×H48×2`仍`未测`，
+   通过前不发下一条long。更大的typed-owner清债继续留在item 9，但不阻塞已通过该切口的N1 long。
 10. [x] 已在GPU1隔离、严格加载Mu `model_2000.pt`做`512×240`随机policy轨迹诊断；optimizer未加载，当前
     GPU0/2长期run未改。`8,081/122,880=6.58%` policy rows有actual hard edge，`8,373/122,880=6.81%`
     有qdes guard，非零hard joint只有`waist_pitch/waist_roll/left_ankle_roll`三项；其中`77.47%` hard rows在

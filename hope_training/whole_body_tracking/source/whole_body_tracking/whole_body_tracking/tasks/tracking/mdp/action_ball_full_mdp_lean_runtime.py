@@ -171,6 +171,10 @@ class ActionBallFullMdpLeanRuntimeOwner:
         self._operation_sequence = 0
         self._drain_sequence = 0
         self._last_completed_environment_steps = 0
+        # The RSL3 runner advances this only after env.step() returns
+        # successfully.  N*H remains an expectation, never the evidence source.
+        self._rollout_chronology_bound = False
+        self._observed_completed_environment_steps = 0
         self._acked_commit_end = 0
 
         self._active_boundary: Optional[_OptimizerBoundary] = None
@@ -641,6 +645,59 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     "device epoch owner decoded a terminal fault"
                 )
 
+    def bind_observed_rollout_chronology(self) -> None:
+        """Bind one fresh runner as the successful vector-step observer."""
+
+        with self._lock:
+            self.require_healthy()
+            if self._rollout_chronology_bound:
+                self._poison_locked("observed rollout chronology was rebound")
+                raise ActionBallFullMdpLeanRuntimeError(
+                    "observed rollout chronology was rebound"
+                )
+            if self._active_boundary is not None:
+                self._poison_locked(
+                    "observed rollout chronology bound during an active boundary"
+                )
+                raise ActionBallFullMdpLeanRuntimeError(
+                    "observed rollout chronology bound during an active boundary"
+                )
+            self._observed_completed_environment_steps = (
+                self._last_completed_environment_steps
+            )
+            self._rollout_chronology_bound = True
+
+    def record_successful_environment_step(self) -> int:
+        """Record one vector step after, never before, successful env.step()."""
+
+        with self._lock:
+            self.require_healthy()
+            if not self._rollout_chronology_bound:
+                self._poison_locked("successful-step observer was not bound")
+                raise ActionBallFullMdpLeanRuntimeError(
+                    "successful-step observer was not bound"
+                )
+            if self._active_boundary is not None:
+                self._poison_locked(
+                    "environment step crossed an active optimizer boundary"
+                )
+                raise ActionBallFullMdpLeanRuntimeError(
+                    "environment step crossed an active optimizer boundary"
+                )
+            self._observed_completed_environment_steps += self._epoch.num_envs
+            return self._observed_completed_environment_steps
+
+    def observed_completed_environment_steps(self) -> int:
+        """Return the owner-observed successful transition frontier."""
+
+        with self._lock:
+            self.require_healthy()
+            if not self._rollout_chronology_bound:
+                raise ActionBallFullMdpLeanRuntimeError(
+                    "observed rollout chronology is not bound"
+                )
+            return self._observed_completed_environment_steps
+
     @staticmethod
     def _bound_plain_method(owner: object, name: str):
         function = vars(type(owner)).get(name)
@@ -690,6 +747,16 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     )
                     raise ActionBallFullMdpLeanRuntimeError(
                         "completed environment steps did not advance"
+                    )
+                if (
+                    self._rollout_chronology_bound
+                    and completed != self._observed_completed_environment_steps
+                ):
+                    self._poison_locked(
+                        "caller completed steps differ from observed successful rollout"
+                    )
+                    raise ActionBallFullMdpLeanRuntimeError(
+                        "caller completed steps differ from observed successful rollout"
                     )
                 if self._active_boundary is not None:
                     self._poison_locked("one optimizer boundary is already active")

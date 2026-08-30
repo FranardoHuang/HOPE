@@ -1,5 +1,13 @@
 # 简短进度记录
 
+## 2026-08-30 — Isaac FullMDP rollout chronology改为实测
+
+- branch candidate不再用update公式同时生产和验证`completed_environment_steps`；RSL3 runner只在
+  `env.step()`成功返回后累计，并在PPO前与真实storage step及typed `H`三方核对。异常返回不计数，
+  mismatch在optimizer前sticky-poison。
+- Pod focused与真实`512×H48×2`仍`未测`；D05/WAL/ACK wire、Reward、Observation、课程与PPO均未改变，
+  无学习A/B或Gate晋级结论。
+
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 
 - fresh 4× Mu到ACK623后，matched旧Mu的raw/selected/crossing=`56/5/2` vs `1,665/334/281`，最近10轮

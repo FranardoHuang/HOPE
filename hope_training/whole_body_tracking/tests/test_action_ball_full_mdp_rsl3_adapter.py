@@ -336,15 +336,40 @@ class _Owner:
         self.summary = None
         self.completed_environment_steps = None
         self.poisoned = False
+        self.rollout_chronology_bound = False
+        self.observed_environment_steps = 0
 
     def require_healthy(self):
         if self.poisoned:
             raise RuntimeError("owner is poisoned")
         self.events.append("healthy")
 
+    def bind_observed_rollout_chronology(self):
+        if self.rollout_chronology_bound:
+            self.poisoned = True
+            raise RuntimeError("rollout chronology rebound")
+        self.rollout_chronology_bound = True
+
+    def record_successful_environment_step(self):
+        if not self.rollout_chronology_bound or self.poisoned:
+            raise RuntimeError("rollout chronology unavailable")
+        self.observed_environment_steps += self.epoch_owner.num_envs
+        return self.observed_environment_steps
+
+    def observed_completed_environment_steps(self):
+        if not self.rollout_chronology_bound or self.poisoned:
+            raise RuntimeError("rollout chronology unavailable")
+        return self.observed_environment_steps
+
     def prepare_pre_optimizer_ppo_boundary(
         self, *, update_index, completed_environment_steps
     ):
+        if (
+            self.rollout_chronology_bound
+            and completed_environment_steps != self.observed_environment_steps
+        ):
+            self.poisoned = True
+            raise RuntimeError("caller forged rollout chronology")
         self.events.append(("prepare", update_index, completed_environment_steps))
         self.completed_environment_steps = completed_environment_steps
         self.active = object()
@@ -396,6 +421,12 @@ class _Env:
             first_sequence=0,
             consume_sequence=0,
         )
+        self.step_calls = 0
+
+    def step(self, *args, **kwargs):
+        del args, kwargs
+        self.step_calls += 1
+        return object()
 
     def action_ball_full_mdp_ppo_drain_owner(self, lease):
         assert lease is self.action_ball_full_mdp_runtime_lease
@@ -852,10 +883,10 @@ def test_runner_alg_update_executes_real_optimizer_inside_boundary_and_returns_r
 
     class _Algorithm:
         def __init__(self):
-            self.storage = storage_sentinel
+            self.storage = types.SimpleNamespace(step=0, identity=storage_sentinel)
 
         def update(self):
-            assert self.storage is storage_sentinel
+            assert self.storage.identity is storage_sentinel
             env.owner.events.append("optimizer_begin")
             optimizer.zero_grad()
             loss = parameter.square().sum()
@@ -896,6 +927,9 @@ def test_runner_alg_update_executes_real_optimizer_inside_boundary_and_returns_r
     monkeypatch.setattr(boundary, "_append", logged_append)
     before = parameter.detach().clone()
 
+    for _ in range(24):
+        runner.env.step(None)
+    runner.alg.storage.step = 24
     assert runner.alg.update() is result_sentinel
     assert not torch.equal(parameter.detach(), before)
     state = optimizer.state[parameter]
@@ -906,6 +940,7 @@ def test_runner_alg_update_executes_real_optimizer_inside_boundary_and_returns_r
         for event in env.owner.events
     ]
     assert names == [
+        "healthy",
         "healthy",
         "healthy",
         "prepare",
@@ -924,6 +959,125 @@ def test_runner_alg_update_executes_real_optimizer_inside_boundary_and_returns_r
     assert env.owner.active is None
     assert env.action_term.pending is None
     assert env.action_term.acknowledged == 1
+
+
+def _observed_rollout_runner(
+    *, tmp_path, monkeypatch, env, rollout_h=2
+):
+    class _Algorithm:
+        def __init__(self):
+            self.storage = types.SimpleNamespace(step=0)
+            self.optimizer_calls = 0
+
+        def update(self):
+            self.optimizer_calls += 1
+            return "optimizer-result"
+
+    def base_init(self, base_env, train_cfg, log_dir, device):
+        del train_cfg, log_dir, device
+        self.env = base_env
+        self.alg = _Algorithm()
+        self.is_distributed = False
+        self.num_steps_per_env = rollout_h
+
+    monkeypatch.setattr(adapter.OnPolicyRunner, "__init__", base_init, raising=False)
+    env.action_term.snapshot = _compact_snapshot(
+        num_envs=env.num_envs,
+        policy_steps=rollout_h,
+        first_sequence=0,
+        consume_sequence=0,
+    )
+    return adapter.ActionBallFullMdpRsl3Runner(
+        env,
+        {},
+        str(tmp_path),
+        training_contract_schema_version=3,
+        training_contract_sha256="a" * 64,
+        action_ball_full_mdp_runtime_owner=env.owner,
+        action_ball_full_mdp_run_mode="single_action_lean",
+    )
+
+
+def test_runner_counts_only_successful_env_step_returns(
+    tmp_path, _fake_imports, monkeypatch
+):
+    env = _Env()
+    calls = 0
+
+    def raw_step(*args, **kwargs):
+        nonlocal calls
+        del args, kwargs
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("synthetic env failure")
+        return "step-result"
+
+    env.step = raw_step
+    runner = _observed_rollout_runner(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, env=env
+    )
+    tracker = runner._full_mdp_rollout_chronology
+
+    assert runner.env.step(None) == "step-result"
+    assert tracker["successful_vector_steps"] == 1
+    assert env.owner.observed_environment_steps == env.num_envs
+    with pytest.raises(RuntimeError, match="synthetic env failure"):
+        runner.env.step(None)
+    assert tracker["successful_vector_steps"] == 1
+    assert tracker["in_flight"] is False
+    assert env.owner.observed_environment_steps == env.num_envs
+
+
+@pytest.mark.parametrize(
+    ("successful_steps", "storage_step"),
+    [(1, 2), (2, 1)],
+)
+def test_runner_hostile_formula_or_storage_forgery_poison_before_optimizer(
+    tmp_path,
+    _fake_imports,
+    monkeypatch,
+    successful_steps,
+    storage_step,
+):
+    env = _Env()
+    runner = _observed_rollout_runner(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, env=env
+    )
+    for _ in range(successful_steps):
+        runner.env.step(None)
+    runner.alg.storage.step = storage_step
+
+    with pytest.raises(RuntimeError, match="retry forbidden"):
+        runner.alg.update()
+    assert runner.alg.optimizer_calls == 0
+    assert env.owner.poisoned is True
+    assert not any(
+        isinstance(event, tuple) and event[0] == "prepare"
+        for event in env.owner.events
+    )
+    assert runner._full_mdp_adapter._size == 0
+    with pytest.raises(RuntimeError, match="retry forbidden"):
+        runner.alg.update()
+    assert runner.alg.optimizer_calls == 0
+
+
+def test_runner_publishes_owner_observed_transition_frontier(
+    tmp_path, _fake_imports, monkeypatch
+):
+    env = _Env(num_envs=2)
+    runner = _observed_rollout_runner(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, env=env
+    )
+    runner.env.step(None)
+    runner.env.step(None)
+    runner.alg.storage.step = 2
+
+    assert runner.alg.update() == "optimizer-result"
+    assert runner.alg.optimizer_calls == 1
+    assert ("prepare", 0, 4) in env.owner.events
+    assert runner._full_mdp_rollout_chronology[
+        "successful_vector_steps_at_boundary"
+    ] == 2
 
 
 @pytest.mark.parametrize("failure_mode", ["short_write", "broken_pipe"])
@@ -1337,6 +1491,9 @@ def test_runner_rejects_resume_or_lineage_authority_before_any_side_effect(
 
 def _install_fake_runner_base(monkeypatch, calls):
     class _Algorithm:
+        def __init__(self):
+            self.storage = types.SimpleNamespace(step=0)
+
         def update(self):
             return None
 
