@@ -17,6 +17,12 @@ physics substep给出`-1.236878 mm`，同时Mu backend resolved contact/substep�
 它是proxy假阳性的强候选，尚非正式几何裁决；该结果不能代签Isaac，也不能把teacher动态判负。component51
 只加入heldout，并进一步要求全部62个component的身份盲几何census，而不是继续逐winner加特例。
 
+该census现已完成：暂定5 mm全三维excess尺下`12/62`通过、50项到`k=8`仍未通过；强制8叶约需
+412 proxy rows，是现役63 rows的`6.54x`。独立复审接受这足以否决当前partition/PCA/row-budget路线，
+但不允许把source-only census冒充Mu actual或Isaac geometry结论，并指出其“certified upper bound”还不是
+完整interval proof。下一跨端候选因此是同一conservative OBB broad phase后，只对positive pair执行各backend
+同义的exact convex/primitive narrow phase；authority、数值容差、witness与wall parity闭合前仍为`未测`。
+
 ## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
 
 新机可复现边界现已具体化：Mu的Python3.12.3基础venv有133项tracked lock，Pod fresh resolver精确闭合；

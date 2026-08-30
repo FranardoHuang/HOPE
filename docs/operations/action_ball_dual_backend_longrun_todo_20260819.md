@@ -32,10 +32,16 @@ exact source和证据root继续只读，不hot-patch、不resume、不复用。R
   `-1.234677/-1.234658 mm`，而原始STL convex与Mu实际collider union离扩张桌面仍分别有
   `+13.522844/+13.361006 mm`净空，故这不是实际碰桌。Isaac live collider因缺对应ignored USD字节明确
   `未测`，不得由Mu结果代签。
-- 不再按文件名逐个加特例。下一guard候选必须是离线、确定性的通用adaptive multi-OBB：保留20 mm安全
-  余量、完整actual/source solid coverage、component级ledger与双端同artifact；先对全部62个source component
-  做身份盲、最终owner-frame float32的`k=1..8` census，再决定multi-OBB还是broad-phase后接exact convex
-  narrow-phase。已知component51/55/57只作heldout反例，不参与挑leaf数或5 mm暂定阈值。
+- 不再按文件名逐个加特例。`e73247f8`修订代码经`303eafb0`收口，已对全部62个source component完成
+  身份盲、最终owner-frame float32的`k=1..8` census：Pod专项`8 passed`，system authority重跑
+  `24.435 s`且`--check`逐字通过，artifact SHA=`67ff3946…32b8882`。暂定5 mm
+  全三维excess尺下只有`12/62`在`k=1`通过，其余50项到`k=8`仍未通过；若强塞上限约需
+  `12+50*8=412`个proxy row，即现役63-row proxy的`6.54x`。独立复审确认coverage与distance方向正确，
+  同时指出该balanced-centroid/PCA路线不优化max excess，且5 mm全方向尺与“只消除table相关空角”目标错配。
+  因而否决的是**这套partition+ruler+<=128 rows方案**，不是数学上否决所有multi-OBB。下一实现方向改为保留
+  cheap conservative OBB broad phase，仅对positive pair执行backend-authoritative exact convex/primitive
+  narrow phase；在补齐Mu actual authority、数值误差命名/工具链收据与双端fixed-tape前不改consumer。
+  component51/55/57仍只作heldout，不参与选择。
 - direct-frame0最终代码为`643f03b5`，Pod三模块CPU=`103 passed,2 skipped`，独立终审为`P0=0/P1=0`。
   fresh GPU1 zero-PPO root
   `/workspace/franco/runs/fullmdp-direct-frame0-643f03b5-gpu1-20260830T060903Z-r4`完成：29个typed谓词全部

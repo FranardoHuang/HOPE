@@ -57,6 +57,20 @@ resolved substep与generic contact均为false。component51是proxy假阳性的�
 裁决；它与既有55/57一样只作为heldout。全62 component身份盲`k=1..8` census完成前，不据此改teacher、
 Reward、20 mm余量或训练Stage，也不宣称Isaac collider parity。
 
+`e73247f8`修订代码经`303eafb0`收口并完成该census：Pod pinned NumPy/SciPy专项=`8 passed`，
+system authority物化`24.435 s`、二次`--check`逐字通过，artifact SHA=`67ff3946…32b8882`；暂定5 mm
+全三维directed-excess尺下仅`12/62`在`k=1`通过，50项到`k=8`仍未
+通过。若强制每个未解项8叶，约为`412` proxy rows=`6.54x`现役63 rows。独立几何复审确认：每个tetra
+exact归属一个leaf、每leaf OBB覆盖全部assigned tetra顶点，故union不漏source convex hull；对closed convex
+subset的distance为凸函数，八角足以给OBB内最大值上界，方向没有算反。零新增不是metric bug，而是
+balanced centroid partition+逐leaf PCA并不优化max excess，且全方向5 mm尺与table局部空角问题目标错配。
+
+据此采用“停止这套global adaptive OBB路线”的工程裁决，但不声称所有multi-OBB在数学上都不可能。
+下一设计保留cheap no-false-negative OBB broad phase，只在positive pair上执行backend-authoritative exact
+convex/primitive narrow phase。当前artifact仍是source-only candidate；“certified upper bound”命名须降为
+numerically padded upper estimate或补完整interval误差证明，Python/platform/QHull/BLAS也须进入物化收据。
+consumer、20 mm余量、teacher、Reward和Stage均未改。
+
 ## 2026-08-29 current correction
 
 ### 重新判读：学习阶段、R06热路与部署边界

@@ -9,7 +9,10 @@
 - 同一GPU replay随后由component51 `right_wrist_roll_link.stl`的single OBB报`-1.236878 mm` keepout，而
   backend resolved contact、resolved substep与generic contact均为false。它是proxy假阳性的强候选，不是
   动态老师不可行证据，但仍须exact geometry正式裁决。component51/55/57只作heldout；全62 component的
-  身份盲`k=1..8` census正在跑，consumer和20 mm余量未改。
+  身份盲`k=1..8` census已完成：只有`12/62`在暂定5 mm尺内，50项到8叶仍未通过，强塞约412 rows=
+  现役proxy的`6.54x`。独立复审确认覆盖链、distance方向与路线否决成立，但要求把“certified upper bound”
+  降为数值padding估计并补工具链/Mu actual authority。consumer和20 mm余量未改；下一设计是OBB broad
+  positive后才执行exact convex/primitive narrow phase。
 
 ## 2026-08-30 — teacher replay量具拆因与direct-frame0 validator修正（此前状态）
 

@@ -17,8 +17,10 @@ empty-corner假阳性，不是老师实际撞桌。20 mm安全余量不降低；
 production executable仅有`5.96e-8 rad`舍入且guard清零，随后自然消费frame1、frame2并推进到frame8。probe
 再被component51 single OBB以`-1.236878 mm`终止，而resolved contact/substep与generic contact均为false；
 这是proxy假阳性的强候选而非动态老师失败证据，仍须exact geometry裁决。handoff量具已闭合但完整动态teacher
-仍未测；component51/55/57只作heldout，全62身份盲census未完成，G05保持
-`Partial / diagnostic_unauthorized=true`。
+仍未测；component51/55/57只作heldout。全62身份盲census在暂定5 mm尺下仅`12/62`通过，50项到8叶仍
+未通过，强塞约412 rows=`6.54x`现役proxy；独立复审据此否决当前balanced-centroid/PCA global multi-OBB
+路线，并转向OBB broad-positive后的exact convex/primitive narrow phase。该候选尚未接入consumer，也缺Mu
+actual authority与双端fixed-tape，因此G05保持`Partial / diagnostic_unauthorized=true`。
 
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
