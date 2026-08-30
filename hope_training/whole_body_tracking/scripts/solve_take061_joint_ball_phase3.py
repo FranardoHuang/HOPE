@@ -37,6 +37,28 @@ def _require_seed_valid(label, report):
         )
 
 
+def _phase4_seed_valid(*, q_ref, site, velocity, face, solver):
+    """Return whether Phase4 has a finite joint/kinematic retarget seed.
+
+    Mechanical and match admission remain reported by Phase3, but are not seed
+    prerequisites: Phase4 changes the joint path and then re-evaluates both
+    with its stricter final gates.
+    """
+    if not isinstance(solver, dict) or solver.get("solver_admitted") is not True:
+        return False
+    for value in (q_ref, site, velocity, face):
+        if not bool(np.all(np.isfinite(np.asarray(value, np.float64)))):
+            return False
+    for name in ("racket_velocity_w_mps", "signed_face_w"):
+        try:
+            value = np.asarray(solver[name], np.float64)
+        except (KeyError, TypeError, ValueError):
+            return False
+        if value.shape != (3,) or not bool(np.all(np.isfinite(value))):
+            return False
+    return True
+
+
 def _require_ball_physics_lineage(label, solver_report, ball_physics):
     """Reject a phase chain that silently changes its fitted ball model."""
     try:
@@ -222,7 +244,10 @@ def solve(args):
                     and plant["bilateral_support_frame_fraction"] >= 1.0
                     and plant["table_distance_min_m"] >= P1.TABLE_CLEARANCE_M - P1.NUMERIC_TOL_M
                 )
-                seed_valid = bool(mechanical and replay.get("solver_admitted", False))
+                seed_valid = _phase4_seed_valid(
+                    q_ref=q, site=path_site, velocity=velocity,
+                    face=path_face, solver=replay,
+                )
                 candidates.append({
                     "alpha": float(alpha), "timewarp": float(timewarp),
                     "wrist_inward_bias_rad": float(wrist_bias),
@@ -237,6 +262,7 @@ def solve(args):
     chosen = min(candidates, key=lambda row: (
         not row["admitted"],
         not row["seed_valid"],
+        not row["mechanically_admitted"],
         max(0.0, -row["plant"]["qdes_margin_min"]),
         max(0.0, -row["plant"]["torque_margin_min"]),
         row["solver"].get("face_error_deg", 999.0),
@@ -303,6 +329,7 @@ def solve(args):
             for row in sorted(candidates, key=lambda row: (
                 not row["admitted"],
                 not row["seed_valid"],
+                not row["mechanically_admitted"],
                 max(0.0, -row["plant"]["qdes_margin_min"]),
                 max(0.0, -row["plant"]["torque_margin_min"]),
                 row["solver"].get("face_error_deg", 999.0),
