@@ -323,6 +323,7 @@ def solve(args):
             for name, path in (
                 ("dynamic_ready", args.dynamic_ready), ("motion", args.motion),
                 ("plant", args.model), ("phase1_seed", args.phase1_npz),
+                ("ball_physics", args.ball_physics),
             )
         },
         "non_claims": [

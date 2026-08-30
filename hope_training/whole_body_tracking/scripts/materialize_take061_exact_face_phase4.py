@@ -37,6 +37,9 @@ def solve(args):
     from scipy.spatial.transform import Rotation
 
     source = json.loads(args.phase3_report.read_text())
+    P3._require_ball_physics_lineage(
+        "phase3", source.get("selected", {}).get("solver"), args.ball_physics
+    )
     with np.load(args.phase3_npz, allow_pickle=False) as payload:
         arrays = {key: np.asarray(payload[key]) for key in payload.files}
     ready = P1._HIT._load_ready(args.dynamic_ready)
@@ -224,6 +227,7 @@ def solve(args):
             ("phase3_report", args.phase3_report), ("phase3_npz", args.phase3_npz),
             ("dynamic_ready", args.dynamic_ready), ("plant", args.model),
             ("geometry", MDP / "racket_contact_geometry.py"),
+            ("ball_physics", args.ball_physics),
         )},
         "non_claims": [
             "not the old Take061 action identity", "not a runtime fixed tape",

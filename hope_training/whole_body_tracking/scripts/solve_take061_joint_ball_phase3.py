@@ -29,6 +29,22 @@ P2 = _module("_take061_phase2", "solve_take061_feasible_center_phase2.py")
 KIND = "take061_joint_ball_feasible_center_phase3_v1"
 
 
+def _require_ball_physics_lineage(label, solver_report, ball_physics):
+    """Reject a phase chain that silently changes its fitted ball model."""
+    try:
+        declared_sha = solver_report["solver_sources"]["ball_physics_sha256"]
+    except (KeyError, TypeError) as exc:
+        raise P1.ProducerError(
+            f"{label} does not declare solver_sources.ball_physics_sha256"
+        ) from exc
+    actual_sha = P1._sha256(ball_physics)
+    if declared_sha != actual_sha:
+        raise P1.ProducerError(
+            f"{label} ball physics SHA mismatch: declared {declared_sha}, "
+            f"requested {actual_sha} ({ball_physics})"
+        )
+
+
 def _solver_replay(center, incoming, aim, args):
     import torch
 
@@ -109,6 +125,7 @@ def solve(args):
         faces = np.asarray(artifact["racket_face"], np.float64)
     phase2 = json.loads(args.phase2_report.read_text())
     inverse = phase2["fixed_action_solver_inverse"]
+    _require_ball_physics_lineage("phase2", inverse, args.ball_physics)
     desired_velocity = np.asarray(inverse["solver_racket_velocity_w_mps"], np.float64)
     desired_face = np.asarray(inverse["solver_signed_face_w"], np.float64)
     incoming = np.asarray(inverse["incoming_velocity_w_mps"], np.float64)
@@ -275,6 +292,7 @@ def solve(args):
                 ("dynamic_ready", args.dynamic_ready), ("motion", args.motion),
                 ("plant", args.model), ("phase2_npz", args.phase2_npz),
                 ("phase2_report", args.phase2_report),
+                ("ball_physics", args.ball_physics),
             )
         },
     }
