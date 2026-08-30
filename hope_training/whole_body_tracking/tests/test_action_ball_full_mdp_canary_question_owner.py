@@ -463,6 +463,10 @@ def test_shared_fixed_question_cuda_fixed_tape_is_deterministic_and_causal(
     repeated = solve(**cuda_kwargs)
     for field in first.__dataclass_fields__:
         assert torch.equal(getattr(first, field), getattr(repeated, field)), field
+    frozen_contact_tick = first.contact_tick.clone()
+    cuda_kwargs["contact_tick"].add_(1)
+    assert torch.equal(first.contact_tick, frozen_contact_tick)
+    cuda_kwargs["contact_tick"].sub_(1)
 
     attempted = int(first.construction_reason.numel())
     admitted = int(first.admitted.sum().item())
