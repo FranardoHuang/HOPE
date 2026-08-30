@@ -528,8 +528,17 @@ def test_selected_reset_hot_path_has_no_self_projection_clone_or_host_verdict():
         "require_owned_r05_true_reset_abort",
         "selected_true_reset",
     }
-    forbidden = {"clone", "cpu", "item", "numpy", "tolist", "synchronize"}
+    forbidden = {
+        "_assert_async",
+        "clone",
+        "cpu",
+        "item",
+        "numpy",
+        "tolist",
+        "synchronize",
+    }
     visited = set()
+    host_transfers = []
     for method in owner.body:
         if not isinstance(method, ast.FunctionDef) or method.name not in reset_methods:
             continue
@@ -537,7 +546,20 @@ def test_selected_reset_hot_path_has_no_self_projection_clone_or_host_verdict():
         for node in ast.walk(method):
             if isinstance(node, ast.Attribute):
                 assert node.attr not in forbidden
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "to"
+                and any(
+                    keyword.arg == "device"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value == "cpu"
+                    for keyword in node.keywords
+                )
+            ):
+                host_transfers.append(method.name)
     assert visited == reset_methods
+    assert host_transfers == ["_join_selected_reset_independent_facts_locked"]
 
 
 def _complete_boundary(owner, *, update, completed):

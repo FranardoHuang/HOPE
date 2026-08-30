@@ -617,8 +617,11 @@ def test_n2_selected_reset_changes_only_selected_native_row():
     assert len(owner.reset_ids) == 1
     assert torch.equal(owner.reset_ids[0], torch.tensor([1]))
     assert len(owner.reset_transactions) == 1
-    assert type(owner.reset_transactions[0]) is M.FullMdpSelectedResetTransaction
-    assert owner.reset_transactions[0].event is owner.reset_events[0]
+    settled_transaction = owner.reset_transactions[0]
+    assert type(settled_transaction) is M.FullMdpSelectedResetTransaction
+    assert settled_transaction.closed is True
+    assert settled_transaction.event is None
+    assert settled_transaction.generation_before is None
     assert type(owner.reset_events[0]) is M.FullMdpSelectedResetEvent
     assert not hasattr(owner.reset_events[0], "env_ids")
     assert torch.equal(

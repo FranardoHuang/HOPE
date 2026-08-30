@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import ast
 import importlib
+import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import types
 
@@ -1083,6 +1086,141 @@ def _selected_env_devices():
     if torch.cuda.is_available():
         values.append("cuda:0")
     return values
+
+
+def _cuda_selected_reset_mutation_subprocess_main(
+    case: str, receipt_path: str
+) -> None:
+    """Exercise a rejected independent join in an isolated CUDA process."""
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        (
+            env,
+            owner,
+            epoch_owner,
+            d05_owner,
+            leaves,
+            trace,
+            _poisoned,
+        ) = _real_selected_reset_env(torch.device("cuda:0"), monkeypatch)
+        env_ids = torch.tensor([0], dtype=torch.int64, device="cuda:0")
+        if case == "d05":
+            d05_owner._reset_generation[0] += 1
+        elif case == "epoch":
+            epoch_owner._reset_generation[0] += 1
+        elif case == "writer":
+            # In-range but non-monotonic: env construction is defined, while
+            # Device-R05 independently latches its selection writer fault.
+            env_ids = torch.tensor([1, 0], dtype=torch.int64, device="cuda:0")
+        elif case == "overflow":
+            maximum = torch.iinfo(torch.int64).max
+            env._action_ball_full_mdp_reset_generation.fill_(maximum)
+            epoch_owner._reset_generation.fill_(maximum)
+            d05_owner._reset_generation.fill_(maximum)
+        else:
+            raise AssertionError("unknown selected-reset mutation case")
+
+        env_generation_before = (
+            env._action_ball_full_mdp_reset_generation.detach().clone()
+        )
+        epoch_generation_before = epoch_owner._reset_generation.detach().clone()
+        d05_generation_before = d05_owner._reset_generation.detach().clone()
+        episode_before = env.episode_length_buf.detach().clone()
+        epoch_head_before = epoch_owner.commit_head
+        peer_before = _peer_raw_bytes(epoch_owner, d05_owner)
+        milestone_before = tuple(
+            value.detach().clone() for value in epoch_owner.milestone.pack_views()
+        )
+        leaf_owned_before = {
+            name: len(leaf._owned) for name, leaf in leaves.items()
+        }
+        trace.clear()
+        env._authorize_action_ball_full_mdp_reset_callpoint(
+            env_ids, source="step_nonzero"
+        )
+        failure = None
+        try:
+            env._reset_idx(env_ids)
+        except M.FullMdpPostPhysicsProtocolError as exc:
+            failure = type(exc).__name__
+        if failure is None:
+            raise AssertionError("mutated CUDA reset unexpectedly committed")
+
+        assert owner.poisoned is True
+        assert torch.equal(
+            env._action_ball_full_mdp_reset_generation,
+            env_generation_before,
+        )
+        assert torch.equal(epoch_owner._reset_generation, epoch_generation_before)
+        assert torch.equal(d05_owner._reset_generation, d05_generation_before)
+        assert torch.equal(env.episode_length_buf, episode_before)
+        assert epoch_owner.commit_head == epoch_head_before
+        assert _peer_raw_bytes(epoch_owner, d05_owner) == peer_before
+        milestone_after = tuple(
+            value.detach().clone() for value in epoch_owner.milestone.pack_views()
+        )
+        assert all(
+            torch.equal(before, after)
+            for before, after in zip(milestone_before, milestone_after)
+        )
+        assert {
+            name: len(leaf._owned) for name, leaf in leaves.items()
+        } == leaf_owned_before
+        leaf_trace = [
+            item for item in trace if item and item[0] in leaves
+        ]
+        assert leaf_trace == []
+        payload = {
+            "case": case,
+            "cuda_device": torch.cuda.get_device_name(0),
+            "failure": failure,
+            "leaf_commit_events": 0,
+            "leaf_after_image_unchanged": True,
+            "epoch_commit_head_unchanged": True,
+            "env_generation_unchanged": True,
+        }
+        Path(receipt_path).write_text(
+            json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    finally:
+        monkeypatch.undo()
+    raise SystemExit(23)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+@pytest.mark.parametrize("case", ("d05", "epoch", "writer", "overflow"))
+def test_cuda_independent_reset_join_rejects_before_every_leaf(
+    case, tmp_path
+):
+    receipt = tmp_path / (case + ".json")
+    env = os.environ.copy()
+    tests = str(ROOT / "tests")
+    env["PYTHONPATH"] = tests + os.pathsep + env.get("PYTHONPATH", "")
+    code = (
+        "import test_action_ball_full_mdp_lean_env_install as t; "
+        "t._cuda_selected_reset_mutation_subprocess_main"
+        "(__import__('sys').argv[1], __import__('sys').argv[2])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code, case, str(receipt)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload == {
+        "case": case,
+        "cuda_device": torch.cuda.get_device_name(0),
+        "failure": "FullMdpPostPhysicsProtocolError",
+        "leaf_commit_events": 0,
+        "leaf_after_image_unchanged": True,
+        "epoch_commit_head_unchanged": True,
+        "env_generation_unchanged": True,
+    }
 
 
 def test_selected_reset_fixture_ignores_stale_focused_epoch_preloader(
