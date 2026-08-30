@@ -137,6 +137,54 @@ def _physical_owner() -> physical.PhysicalQuestionNumericCore:
 
 
 @pytest.mark.parametrize("device", _DEVICES)
+def test_pure_physical_max_segment_is_bitwise_owner_numeric_semantics(
+    device: torch.device,
+) -> None:
+    batch = _physical_batch(device)
+    owner = _physical_owner()
+    params = owner.flight_params
+    config = owner.numeric_config
+    contact_tick = torch.full_like(batch.candidate_identity, 17)
+
+    receipt = owner.issue_horizon_for_test(batch)
+    horizon = owner.project_horizon_for_test(receipt)
+    chosen = torch.minimum(
+        horizon.max_feasible_motion_ticks, contact_tick.clamp(min=0)
+    ).contiguous()
+    launch_tick = (contact_tick - chosen).contiguous()
+    owned = owner.finalize_exact_ticks_for_test(
+        receipt,
+        candidate_identity=batch.candidate_identity,
+        contact_tick=contact_tick,
+        launch_tick=launch_tick,
+    )
+    pure = physical.solve_max_final_segment_device(
+        batch,
+        candidate_identity=batch.candidate_identity,
+        contact_tick=contact_tick,
+        params=params,
+        config=config,
+    )
+    assert torch.equal(
+        pure.max_feasible_motion_ticks, horizon.max_feasible_motion_ticks
+    )
+    assert torch.equal(pure.chosen_horizon_ticks, chosen)
+    assert torch.equal(pure.launch_tick, launch_tick)
+    assert torch.equal(
+        pure.horizon_construction_reason, horizon.construction_reason
+    )
+    assert torch.equal(pure.horizon_producer_fault, horizon.producer_fault)
+    assert torch.equal(pure.construction_reason, owned.construction_reason)
+    assert torch.equal(pure.physical_state_f32, owned.physical_state_f32)
+    assert torch.equal(
+        pure.effective_contact_horizon_s,
+        owned.effective_contact_horizon_s,
+    )
+    assert torch.equal(pure.producer_fault, owned.producer_fault)
+    assert owner._pending == {}
+
+
+@pytest.mark.parametrize("device", _DEVICES)
 def test_physical_tick_cache_is_bitwise_reference_for_all_tick_outcomes(
     device: torch.device,
 ) -> None:
