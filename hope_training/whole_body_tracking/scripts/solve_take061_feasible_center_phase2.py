@@ -14,6 +14,8 @@ import hashlib
 import importlib.util
 import io
 import json
+import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +29,108 @@ P1 = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(P1)
 
 KIND = "take061_stable_support_feasible_center_phase2_v1"
+
+
+def _load_fixed_solver_math():
+    """Load the shipped solver modules by path without importing IsaacLab."""
+    root = HERE.parents[0] / "source" / "whole_body_tracking" / "whole_body_tracking"
+    mdp = root / "tasks" / "tracking" / "mdp"
+    package = "_take061_phase2_mdp"
+    module = types.ModuleType(package)
+    module.__path__ = [str(mdp)]
+    sys.modules[package] = module
+    loaded = {}
+    for name in (
+        "racket_contact_geometry", "virtual_ball", "strike_spec_torch",
+        "stroke_adapt_torch", "continuous_questions",
+    ):
+        spec = importlib.util.spec_from_file_location(
+            package + "." + name, mdp / (name + ".py")
+        )
+        child = importlib.util.module_from_spec(spec)
+        sys.modules[package + "." + name] = child
+        spec.loader.exec_module(child)
+        loaded[name] = child
+    return loaded["continuous_questions"], loaded["virtual_ball"]
+
+
+def _fixed_solver_inverse_grid(center, args):
+    import torch
+
+    cq, vb = _load_fixed_solver_math()
+    rows = []
+    for speed in args.ball_speeds:
+        for y in args.ball_direction_y:
+            for z in args.ball_direction_z:
+                direction = np.asarray([-1.0, y, z], np.float64)
+                direction /= np.linalg.norm(direction)
+                for aim_x in args.landing_aim_x:
+                    for aim_y in args.landing_aim_y:
+                        rows.append((float(speed), direction, float(aim_x), float(aim_y)))
+    n = len(rows)
+    dtype = torch.float32
+    contact = torch.tensor([center["site_w_m"]] * n, dtype=dtype)
+    incoming = torch.tensor(
+        [(speed * direction).tolist() for speed, direction, _, _ in rows], dtype=dtype
+    )
+    spin = torch.zeros(n, 3, dtype=dtype)
+    aim = torch.tensor([[x, y] for _, _, x, y in rows], dtype=dtype)
+    feasible_velocity = torch.tensor(center["velocity_w_mps"], dtype=dtype)
+    direction = feasible_velocity / torch.linalg.norm(feasible_velocity)
+    protos = types.SimpleNamespace(
+        v_hat_b=direction[None].expand(n, 3).clone(),
+        speed_min=torch.full((n,), 0.1, dtype=dtype),
+        speed_max=torch.full((n,), 2.0, dtype=dtype),
+        face_sign=torch.ones(n, dtype=dtype),
+    )
+    base_quat = torch.zeros(n, 4, dtype=dtype)
+    base_quat[:, 0] = 1.0
+    reference_face = torch.tensor([center["signed_face_w"]] * n, dtype=dtype)
+    cfg = cq.ContinuousQuestionCfg(
+        fixed_direction=True, n_iters=12, max_redraw_rounds=1, speed_budget=2.0
+    )
+    prm = vb.load_venue_params(str(args.ball_physics))
+    solved = cq.solve_proposals(
+        torch.zeros(n, dtype=torch.long), contact, incoming, spin, aim,
+        reference_face, protos=protos, base_quat=base_quat, prm=prm,
+        surface_z=args.surface_z, net_x=args.net_x, net_top_z=args.net_top_z,
+        cfg=cfg, h=0.01, n_steps=100,
+    )
+    unit_face = solved.n_racket / torch.linalg.norm(solved.n_racket, dim=1, keepdim=True)
+    target_face = reference_face / torch.linalg.norm(reference_face, dim=1, keepdim=True)
+    face_deg = torch.rad2deg(torch.acos(torch.clamp((unit_face * target_face).sum(1), -1, 1)))
+    velocity_error = torch.linalg.norm(solved.v_racket - feasible_velocity, dim=1)
+    score = velocity_error + 0.02 * face_deg
+    score[~solved.ok] = float("inf")
+    best = int(torch.argmin(score))
+    if not bool(torch.isfinite(score[best])):
+        return {"matched": False, "admitted_count": 0, "reason_counts": solved.reason_counts}
+    speed, incoming_direction, aim_x, aim_y = rows[best]
+    return {
+        "matched": bool(
+            velocity_error[best] <= args.solver_velocity_tolerance_mps
+            and face_deg[best] <= args.solver_face_tolerance_deg
+        ),
+        "admitted_count": int(solved.ok.sum()),
+        "proposal_count": n,
+        "incoming_speed_mps": speed,
+        "incoming_direction_w": incoming_direction.tolist(),
+        "incoming_velocity_w_mps": incoming[best].tolist(),
+        "landing_aim_w_xy_m": [aim_x, aim_y],
+        "solver_racket_velocity_w_mps": solved.v_racket[best].tolist(),
+        "solver_signed_face_w": solved.n_racket[best].tolist(),
+        "solver_residual_m": float(solved.resid_m[best]),
+        "velocity_error_from_feasible_center_mps": float(velocity_error[best]),
+        "face_error_from_feasible_center_deg": float(face_deg[best]),
+        "velocity_tolerance_mps": args.solver_velocity_tolerance_mps,
+        "face_tolerance_deg": args.solver_face_tolerance_deg,
+        "reason_counts": solved.reason_counts,
+        "solver_sources": {
+            "continuous_questions_sha256": P1._sha256(Path(cq.__file__)),
+            "virtual_ball_sha256": P1._sha256(Path(vb.__file__)),
+            "ball_physics_sha256": P1._sha256(args.ball_physics),
+        },
+    }
 
 
 def _smooth_with_contact_taper(q, ready, hit, window, savgol_filter):
@@ -164,12 +268,14 @@ def solve(args):
             row["center"]["canonical_site_error_m"],
         ),
     )
-    # This phase may establish a mechanically executable action centre.  Ball
-    # inversion remains fail-closed until the exact shared solver replays it.
+    solver_inverse = None
+    if chosen["mechanically_admitted"]:
+        solver_inverse = _fixed_solver_inverse_grid(chosen["center"], args)
     reject = []
     if not chosen["mechanically_admitted"]:
         reject.append("NO_MECHANICALLY_EXECUTABLE_CENTER")
-    reject.append("FIXED_ACTION_BALL_INVERSION_NOT_YET_REPLAYED")
+    elif not solver_inverse["matched"]:
+        reject.append("FIXED_ACTION_SOLVER_HAS_NO_MATCH_IN_REGISTERED_SEARCH")
 
     def plant_summary(plant):
         return {
@@ -181,7 +287,11 @@ def solve(args):
         "schema_version": 1,
         "kind": KIND,
         "diagnostic_unauthorized": True,
-        "admitted": False,
+        "admitted": bool(
+            chosen["mechanically_admitted"]
+            and solver_inverse is not None
+            and solver_inverse["matched"]
+        ),
         "mechanically_admitted": bool(chosen["mechanically_admitted"]),
         "typed_reject_reasons": reject,
         "selected": {
@@ -191,6 +301,7 @@ def solve(args):
             "center": chosen["center"],
             "plant": plant_summary(chosen["plant"]),
         },
+        "fixed_action_solver_inverse": solver_inverse,
         "candidate_summaries": [
             {
                 "window": row["window"], "timewarp": row["timewarp"],
@@ -247,6 +358,17 @@ def parser():
         "--wrist-inward-biases", type=float, nargs="+",
         default=[0.0, 0.02, 0.04, 0.06, 0.08],
     )
+    result.add_argument("--ball-physics", type=Path, default=Path("configs/ball_physics_venue.yaml"))
+    result.add_argument("--ball-speeds", type=float, nargs="+", default=[2.0, 3.0, 4.0, 5.0, 6.0])
+    result.add_argument("--ball-direction-y", type=float, nargs="+", default=[-1.0, -0.5, 0.0, 0.5, 1.0])
+    result.add_argument("--ball-direction-z", type=float, nargs="+", default=[-1.0, -0.5, 0.0, 0.5, 1.0])
+    result.add_argument("--landing-aim-x", type=float, nargs="+", default=[2.1, 2.5, 3.0])
+    result.add_argument("--landing-aim-y", type=float, nargs="+", default=[-0.6, 0.0, 0.6])
+    result.add_argument("--solver-velocity-tolerance-mps", type=float, default=0.10)
+    result.add_argument("--solver-face-tolerance-deg", type=float, default=10.0)
+    result.add_argument("--surface-z", type=float, default=0.78)
+    result.add_argument("--net-x", type=float, default=1.87)
+    result.add_argument("--net-top-z", type=float, default=0.9325)
     return result
 
 
