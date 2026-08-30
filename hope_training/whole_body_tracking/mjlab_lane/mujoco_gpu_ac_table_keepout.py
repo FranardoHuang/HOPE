@@ -877,6 +877,7 @@ class DeviceExactTableKeepout:
             authority.components.owner_indices, torch.long
         )
         self._component_ids = authority.components.component_ids
+        self._source_component_ids = authority.components.source_component_ids
         self._component_artifact_sha256 = authority.components.artifact_sha256
         self._component_content_sha256 = authority.components.content_sha256
         self.component_local_centers = tensor(authority.components.local_centers_m)
@@ -1038,11 +1039,16 @@ class DeviceExactTableKeepout:
         )
         owner_body_name = _authority.TABLE_CONTACT_BODY_NAMES[owner_index]
         return {
-            "schema": "action_ball_keepout_first_witness_v1",
+            "schema": "action_ball_keepout_first_witness_v2",
             "selection": "first_production_order_overlap",
             "reason": reason,
             "component_index": component_index,
             "component_id": component_id,
+            "source_component_id": (
+                "racket_blade"
+                if is_blade
+                else self._source_component_ids[component_index]
+            ),
             "component_kind": "blade" if is_blade else "body_proxy",
             "owner_body_index": owner_index,
             "owner_body_name": owner_body_name,

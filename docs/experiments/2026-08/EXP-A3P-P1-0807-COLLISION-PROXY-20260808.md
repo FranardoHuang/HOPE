@@ -369,7 +369,9 @@ frozen-teacher replay 的 component 55
 
 - `20 mm` no-touch 原样保留；
 - 不删 component，不缩 margin，不用 raw surface 冒充 backend collision volume；
-- shared guard 必须保守覆盖 Isaac 与 MuJoCo **实际 live collider 的并集**。
+- 本轮合同只声称 component55 target refinement 保守覆盖 Isaac 与
+  MuJoCo 的实际 live collider 并集；其他 61 个 source component 仍沿用
+  原 shared conservative source proxy，不宣称已证明全机器人 actual-collider union。
 
 这也纠正一个旧表述：两端并不是都用整个
 `right_hand_pingpang_link.stl` 的 whole-mesh convex hull。Isaac FullMDP split live stage
@@ -391,7 +393,9 @@ NumPy `1.26.4` / SciPy `1.11.4` / Qhull `Qt` 上，全局 convex hull 为
 - 两个 leaf 各 `305` tetra，每个 tetra 的四顶点均在所属 OBB 内；
 - PCA 基的 eigenvalue 降序、`1e-10` 近简并 tie group、轴符号和右手系
   都显式 canonicalize，不接受平台任意 eigenvector 符号；
-- 序列化为 float32 后再做全顶点覆盖后验，并有 `1 µm` 外扩。
+- mesh frame 内序列化为 float32 后做全顶点覆盖后验，并有
+  `1 µm` 外扩。这不再被写成“所有 row owner-frame 序列化后全局已验证”；
+  后者必须等 final-owner transform 的逐 row containment 补齐后才能声称。
 
 只有这一个 source component 从 1 leaf 切为 2 leaves；其余 61 个仍为
 1 leaf。因此 source component 仍是 `62`，runtime proxy row 是 `63`，相对 v1

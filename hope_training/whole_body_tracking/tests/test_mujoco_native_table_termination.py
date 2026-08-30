@@ -26,6 +26,9 @@ def _synthetic_components() -> term.CollisionComponents:
     axes = np.tile(np.eye(3, dtype=np.float64)[None, :, :] * 0.01, (count, 1, 1))
     return term.CollisionComponents(
         component_ids=tuple(f"component_{index:02d}" for index in range(count)),
+        source_component_ids=tuple(
+            f"component_{index:02d}" for index in range(count)
+        ),
         owner_indices=owners,
         local_centers_m=centers,
         local_half_axes_m=axes,

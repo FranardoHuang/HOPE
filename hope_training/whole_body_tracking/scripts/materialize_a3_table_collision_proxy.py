@@ -1580,8 +1580,10 @@ def _artifact(
         "decomposition": {
             "algorithm": TRIANGLE_PARTITION_ALGORITHM,
             "backend_collision_authority": (
-                "Isaac split meshes under convexHull plus exact canonical "
-                "MuJoCo mesh hulls and analytic wrist primitives"
+                "component55 target refinement covers Isaac split meshes "
+                "under convexHull plus exact canonical MuJoCo target mesh "
+                "hulls and analytic wrist primitives; the other 61 source "
+                "components retain the shared conservative source proxy"
             ),
             "coverage_contract": (
                 "one-box rows contain every source vertex and therefore its "
@@ -1591,7 +1593,10 @@ def _artifact(
                 "analytic primitive support intervals are assigned whole to "
                 "one leaf and revalidated after float32 conversion"
             ),
-            "float32_coverage_validated": True,
+            "float32_coverage_validation_scope": (
+                "mesh-frame source vertices and component55 MuJoCo target "
+                "primitive projection intervals before owner-frame serialization"
+            ),
             "hull_toolchain": {
                 "numpy_version": PINNED_HULL_NUMPY_VERSION,
                 "pca_eigenvalue_tie_rtol": PCA_EIGENVALUE_TIE_RTOL,

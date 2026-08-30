@@ -1606,6 +1606,9 @@ def _load_table_collision_proxy_artifact(
         for index, body_name in enumerate(expected_body_names)
     }
     component_ids = []
+    source_component_ids = []
+    proxy_box_indices = []
+    proxy_box_counts = []
     owner_indices = []
     centers = []
     half_axes = []
@@ -1617,6 +1620,9 @@ def _load_table_collision_proxy_artifact(
                 "robot_hit_table collision proxy component is malformed"
             )
         component_id = component.get("component_id")
+        source_component_id = component.get("source_component_id")
+        proxy_box_index = component.get("proxy_box_index")
+        proxy_box_count = component.get("proxy_box_count")
         owner_name = component.get("owner_body_name")
         source_links.add(component.get("source_link_name"))
         center = component.get("local_center_owner_m")
@@ -1625,6 +1631,11 @@ def _load_table_collision_proxy_artifact(
         if (
             not isinstance(component_id, str)
             or not component_id
+            or not isinstance(source_component_id, str)
+            or not source_component_id
+            or type(proxy_box_index) is not int
+            or type(proxy_box_count) is not int
+            or not 0 <= proxy_box_index < proxy_box_count
             or owner_name not in body_index
             or not _is_lower_sha256(mesh_sha)
             or not isinstance(center, list)
@@ -1662,6 +1673,9 @@ def _load_table_collision_proxy_artifact(
                 "with three positive half axes"
             )
         component_ids.append(component_id)
+        source_component_ids.append(source_component_id)
+        proxy_box_indices.append(proxy_box_index)
+        proxy_box_counts.append(proxy_box_count)
         owner_indices.append(body_index[owner_name])
         centers.append(center_values)
         half_axes.append(axis_values)
@@ -1674,6 +1688,25 @@ def _load_table_collision_proxy_artifact(
         raise RuntimeError(
             "robot_hit_table collision proxy components must be unique, "
             "canonically ordered, and cover every A3 rigid body"
+        )
+    grouped_indices = {}
+    grouped_counts = {}
+    for source_id, index, count in zip(
+        source_component_ids, proxy_box_indices, proxy_box_counts
+    ):
+        grouped_indices.setdefault(source_id, []).append(index)
+        grouped_counts.setdefault(source_id, set()).add(count)
+    if (
+        len(grouped_indices) != _A3_COLLISION_PROXY_SOURCE_COMPONENT_COUNT
+        or any(len(counts) != 1 for counts in grouped_counts.values())
+        or any(
+            sorted(indices) != list(range(next(iter(grouped_counts[source_id]))))
+            for source_id, indices in grouped_indices.items()
+        )
+    ):
+        raise RuntimeError(
+            "robot_hit_table collision proxy split parent mapping is "
+            "incomplete or non-contiguous"
         )
     missing_gripper = sorted(
         set(_A3_COLLISION_PROXY_LEFT_GRIPPER_SOURCE_LINKS) - source_links
@@ -1700,8 +1733,13 @@ def _load_table_collision_proxy_attribution_labels(
         raw_path, expected_file_sha256, expected_body_names
     )
     artifact_path = _resolve_collision_proxy_artifact_path(raw_path)
+    payload = artifact_path.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != expected_file_sha256:
+        raise RuntimeError(
+            "robot_hit_table attribution artifact changed after geometry parse"
+        )
     document = json.loads(
-        artifact_path.read_text(encoding="ascii"),
+        payload.decode("ascii"),
         object_pairs_hook=_strict_json_object,
     )
     components = document["components"]

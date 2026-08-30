@@ -931,6 +931,7 @@ def bind_pre_registered_owner_frames(
 @dataclass(frozen=True)
 class CollisionComponents:
     component_ids: tuple[str, ...]
+    source_component_ids: tuple[str, ...]
     owner_indices: np.ndarray
     local_centers_m: np.ndarray
     local_half_axes_m: np.ndarray
@@ -1176,6 +1177,7 @@ def _load_collision_components_cached(
         )
     body_index = {name: index for index, name in enumerate(TABLE_CONTACT_BODY_NAMES)}
     component_ids = []
+    source_component_ids = []
     owner_indices = []
     centers = []
     half_axes = []
@@ -1184,6 +1186,9 @@ def _load_collision_components_cached(
         if not isinstance(row, dict):
             raise TableTerminationContractError("collision proxy component is malformed")
         component_id = row.get("component_id")
+        source_component_id = row.get("source_component_id")
+        proxy_box_index = row.get("proxy_box_index")
+        proxy_box_count = row.get("proxy_box_count")
         owner = row.get("owner_body_name")
         try:
             center = np.asarray(row.get("local_center_owner_m"), dtype=np.float64)
@@ -1195,6 +1200,11 @@ def _load_collision_components_cached(
         if (
             not isinstance(component_id, str)
             or not component_id
+            or not isinstance(source_component_id, str)
+            or not source_component_id
+            or type(proxy_box_index) is not int
+            or type(proxy_box_count) is not int
+            or not 0 <= proxy_box_index < proxy_box_count
             or owner not in body_index
             or center.shape != (3,)
             or axes.shape != (3, 3)
@@ -1206,6 +1216,7 @@ def _load_collision_components_cached(
                 "collision proxy component metadata or geometry is malformed"
             )
         component_ids.append(component_id)
+        source_component_ids.append(source_component_id)
         owner_indices.append(body_index[str(owner)])
         centers.append(center)
         half_axes.append(axes)
@@ -1217,6 +1228,28 @@ def _load_collision_components_cached(
     ):
         raise TableTerminationContractError(
             "collision proxy components are not canonical or body-complete"
+        )
+    grouped_proxy_indices: dict[str, list[int]] = {}
+    grouped_proxy_counts: dict[str, set[int]] = {}
+    for row in components:
+        source_id = str(row["source_component_id"])
+        grouped_proxy_indices.setdefault(source_id, []).append(
+            int(row["proxy_box_index"])
+        )
+        grouped_proxy_counts.setdefault(source_id, set()).add(
+            int(row["proxy_box_count"])
+        )
+    if (
+        len(grouped_proxy_indices) != EXPECTED_COLLISION_PROXY_SOURCE_COMPONENT_COUNT
+        or any(len(counts) != 1 for counts in grouped_proxy_counts.values())
+        or any(
+            sorted(indices)
+            != list(range(next(iter(grouped_proxy_counts[source_id]))))
+            for source_id, indices in grouped_proxy_indices.items()
+        )
+    ):
+        raise TableTerminationContractError(
+            "collision proxy split parent mapping is incomplete or non-contiguous"
         )
     missing_gripper = sorted(
         set(EXPECTED_LEFT_GRIPPER_SOURCE_LINKS)
@@ -1236,6 +1269,7 @@ def _load_collision_components_cached(
         value.setflags(write=False)
     return CollisionComponents(
         component_ids=tuple(component_ids),
+        source_component_ids=tuple(source_component_ids),
         owner_indices=arrays[0],
         local_centers_m=arrays[1],
         local_half_axes_m=arrays[2],

@@ -336,14 +336,20 @@ def _table_attribution_rig():
     )
 
 
-def _keepout_witness(*, component_id="torso_box"):
+def _keepout_witness(
+    *, component_id="torso_box", source_component_id=None,
+    component_index=7, component_kind="body_proxy",
+):
+    if source_component_id is None:
+        source_component_id = component_id
     return {
-        "schema": "action_ball_keepout_first_witness_v1",
+        "schema": "action_ball_keepout_first_witness_v2",
         "selection": "first_production_order_overlap",
         "reason": "sat_overlap",
-        "component_index": 7,
+        "component_index": component_index,
         "component_id": component_id,
-        "component_kind": "body_proxy",
+        "source_component_id": source_component_id,
+        "component_kind": component_kind,
         "owner_body_index": 9,
         "owner_body_name": "torso_Link",
         "table_index": 0,
@@ -366,12 +372,55 @@ def _keepout_witness(*, component_id="torso_box"):
 
 
 def test_keepout_witness_winner_is_component_major_and_unknown_fails_closed():
-    exact = torch.zeros((63, 5), dtype=torch.bool)
+    exact = torch.zeros((64, 5), dtype=torch.bool)
     exact[12, 0] = True
     exact[3, 4] = True
     assert keepout._host_test_first_overlap_index(exact) == (3, 4)
     with pytest.raises(RuntimeError, match="no SAT witness"):
         keepout._host_test_first_overlap_index(torch.zeros_like(exact))
+
+
+def test_table_attribution_accepts_runtime_blade_index_63():
+    env = _table_attribution_rig()
+    wait_env.FullMdpInitialWaitVecEnv._capture_diagnostic_table_attribution(
+        env,
+        keepout=torch.tensor([True]),
+        resolved=torch.tensor([False]),
+        resolved_is_final=False,
+        substep_index=2,
+        capture_boundary="physics_substep_poststate",
+        keepout_witness=_keepout_witness(
+            component_id="racket_blade",
+            source_component_id="racket_blade",
+            component_index=63,
+            component_kind="blade",
+        ),
+    )
+    assert env._diagnostic_table_tick_first_positive["keepout_witness"][
+        "component_kind"
+    ] == "blade"
+
+
+def test_table_attribution_preserves_split_proxy_parent_mapping():
+    env = _table_attribution_rig()
+    source_id = "right_hand_pingpang_link:collision:mesh"
+    witness = _keepout_witness(
+        component_id=source_id + "#obb0001",
+        source_component_id=source_id,
+        component_index=55,
+    )
+    wait_env.FullMdpInitialWaitVecEnv._capture_diagnostic_table_attribution(
+        env,
+        keepout=torch.tensor([True]),
+        resolved=torch.tensor([False]),
+        resolved_is_final=False,
+        substep_index=2,
+        capture_boundary="physics_substep_poststate",
+        keepout_witness=witness,
+    )
+    frozen = env._diagnostic_table_tick_first_positive["keepout_witness"]
+    assert frozen["component_id"].endswith("#obb0001")
+    assert frozen["source_component_id"] == source_id
 
 
 def test_table_attribution_freezes_first_positive_before_reset_once_only():

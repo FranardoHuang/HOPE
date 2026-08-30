@@ -657,18 +657,32 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             if (
                 not isinstance(keepout_witness, dict)
                 or keepout_witness.get("schema")
-                != "action_ball_keepout_first_witness_v1"
+                != "action_ball_keepout_first_witness_v2"
                 or keepout_witness.get("table_role")
                 not in ("top", "keepout", "net", "post_left", "post_right")
                 or keepout_witness.get("component_kind")
                 not in ("body_proxy", "blade")
                 or keepout_witness.get("reason") != "sat_overlap"
                 or type(keepout_witness.get("component_index")) is not int
-                or not 0 <= keepout_witness["component_index"] < 63
+                or not 0 <= keepout_witness["component_index"] < 64
                 or type(keepout_witness.get("owner_body_name")) is not str
                 or not keepout_witness["owner_body_name"]
                 or type(keepout_witness.get("component_id")) is not str
                 or not keepout_witness["component_id"]
+                or type(keepout_witness.get("source_component_id")) is not str
+                or not keepout_witness["source_component_id"]
+                or (
+                    keepout_witness["component_index"] == 63
+                    and (
+                        keepout_witness["component_kind"] != "blade"
+                        or keepout_witness["component_id"] != "racket_blade"
+                        or keepout_witness["source_component_id"] != "racket_blade"
+                    )
+                )
+                or (
+                    keepout_witness["component_index"] < 63
+                    and keepout_witness["component_kind"] != "body_proxy"
+                )
                 or not isinstance(
                     keepout_witness.get("sat_signed_margin_m"), (int, float)
                 )
