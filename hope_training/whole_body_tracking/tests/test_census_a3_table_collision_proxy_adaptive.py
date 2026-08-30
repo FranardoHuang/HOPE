@@ -100,6 +100,75 @@ def test_closest_triangle_point_handles_face_edge_and_vertex_regions():
     )
 
 
+def test_vectorized_boundary_distance_matches_scalar_oracle_for_all_chunk_sizes():
+    from scipy.spatial import ConvexHull
+
+    vertices = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.7, 0.6, 0.8],
+        ],
+        dtype=np.float64,
+    )
+    hull, triangles = census._convex_subset_boundary(vertices)
+    point = np.asarray([1.3, 1.1, 0.9], dtype=np.float64)
+    scalar_witness = min(
+        (
+            census._closest_point_on_triangle(point, triangle)
+            for triangle in triangles
+        ),
+        key=lambda candidate: float(np.linalg.norm(point - candidate)),
+    )
+    scalar_distance = float(np.linalg.norm(point - scalar_witness))
+    observed = []
+    for chunk_size in (1, 3, 4096):
+        distance, witness, guard = census._point_to_convex_subset_distance(
+            point, hull, triangles, facet_chunk_size=chunk_size
+        )
+        observed.append((distance, witness))
+        assert math.isclose(distance, scalar_distance, abs_tol=1.0e-12)
+        assert guard > 0.0
+        assert float(np.max(hull.equations[:, :3] @ witness + hull.equations[:, 3])) <= 1.0e-12
+    for distance, witness in observed[1:]:
+        assert distance == observed[0][0]
+        assert np.array_equal(witness, observed[0][1])
+
+
+def test_near_boundary_outside_point_is_not_misclassified_inside():
+    vertices = np.asarray(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    hull, triangles = census._convex_subset_boundary(vertices)
+    normal = np.asarray([1.0, 1.0, 1.0], dtype=np.float64) / math.sqrt(3.0)
+    point = np.asarray([1.0 / 3.0] * 3) + normal * 1.0e-13
+    distance, witness, guard = census._point_to_convex_subset_distance(
+        point, hull, triangles, facet_chunk_size=1
+    )
+    assert guard > 0.0
+    assert distance > 0.0
+    assert math.isclose(distance, 1.0e-13, rel_tol=5.0e-4, abs_tol=1.0e-16)
+    assert float(np.max(hull.equations[:, :3] @ witness + hull.equations[:, 3])) <= 1.0e-12
+
+
+def test_deep_inside_point_returns_exact_zero_distance():
+    vertices = np.asarray(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    hull, triangles = census._convex_subset_boundary(vertices)
+    point = np.asarray([0.1, 0.1, 0.1], dtype=np.float64)
+    distance, witness, guard = census._point_to_convex_subset_distance(
+        point, hull, triangles
+    )
+    assert distance == 0.0
+    assert np.array_equal(witness, point)
+    assert guard > 0.0
+
+
 def test_candidate_is_deterministic_and_partitions_every_complete_tetrahedron():
     interior = (0.0, 0.0, 0.0)
     tetrahedra = [
@@ -128,3 +197,4 @@ def test_source_enumerator_matches_reviewed_62_component_authority():
     assert len(components) == 62
     assert len({row["source_component_id"] for row in components}) == 62
     assert source_sha == census.proxy.PINNED_SOURCE_URDF_SHA256
+    assert all("triangles" not in row for row in components)

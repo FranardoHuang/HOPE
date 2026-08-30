@@ -54,6 +54,8 @@ DEFAULT_EXCESS_RULER_M = 0.005
 DEFAULT_SOURCE_ROW_BUDGET = 128
 FINAL_OWNER_OUTWARD_PAD_M = 1.0e-6
 DISTANCE_CERTIFICATE_PAD_M = 1.0e-9
+INSIDE_CLASSIFICATION_ULP_FACTOR = 256.0
+FACET_CHUNK_SIZE = 4096
 
 
 def _parse_args() -> argparse.Namespace:
@@ -193,13 +195,6 @@ def _source_components(
             )
             if not all(value > 0.0 for value in scale):
                 raise ValueError("collision mesh scale must be positive")
-            triangles = tuple(
-                tuple(
-                    tuple(float(vertex[axis]) * scale[axis] for axis in range(3))
-                    for vertex in triangle
-                )
-                for triangle in proxy._stl_triangles(mesh_path)
-            )
             link_from_mesh_rotation, link_from_mesh_translation = (
                 proxy._origin_transform(collision.find("origin"))
             )
@@ -220,9 +215,10 @@ def _source_components(
                     "owner_body_name": owner,
                     "owner_from_mesh_rotation": owner_from_mesh_rotation,
                     "owner_from_mesh_translation": owner_from_mesh_translation,
+                    "scale": scale,
                     "source_component_id": source_component_id,
                     "source_link_name": link_name,
-                    "triangles": triangles,
+                    "source_mesh_path": mesh_path,
                 }
             )
     components.sort(key=lambda row: str(row["source_component_id"]))
@@ -359,9 +355,14 @@ def _closest_point_on_triangle(point: Any, triangle: Any) -> Any:
                     [float((projection - a) @ ab), float((projection - a) @ ac)]
                 ),
             )
-            weights = (1.0 - float(uv[0]) - float(uv[1]), float(uv[0]), float(uv[1]))
-            if min(weights) >= -1.0e-12:
-                candidates.append(projection)
+            weights = np.asarray(
+                (1.0 - float(uv[0]) - float(uv[1]), float(uv[0]), float(uv[1])),
+                dtype=np.float64,
+            )
+            if bool(np.all(weights >= 0.0)):
+                weights = np.maximum(weights, 0.0)
+                weights /= np.sum(weights)
+                candidates.append(weights @ triangle)
     return min(candidates, key=lambda candidate: float(np.linalg.norm(point - candidate)))
 
 
@@ -371,27 +372,121 @@ def _convex_subset_boundary(vertices: Any) -> tuple[Any, Any]:
 
     vertices = np.unique(np.asarray(vertices, dtype=np.float64), axis=0)
     hull = ConvexHull(vertices, qhull_options=proxy.PINNED_HULL_QHULL_OPTIONS)
-    triangles = vertices[np.asarray(hull.simplices, dtype=np.int64)]
+    facets = np.sort(np.asarray(hull.simplices, dtype=np.int64), axis=1)
+    order = np.lexsort((facets[:, 2], facets[:, 1], facets[:, 0]))
+    triangles = vertices[facets[order]]
     return hull, triangles
 
 
 def _point_to_convex_subset_distance(
-    point: Any, hull: Any, boundary_triangles: Any
-) -> tuple[float, Any]:
+    point: Any,
+    hull: Any,
+    boundary_triangles: Any,
+    *,
+    facet_chunk_size: int = FACET_CHUNK_SIZE,
+) -> tuple[float, Any, float]:
     import numpy as np
 
     point = np.asarray(point, dtype=np.float64)
     signed = hull.equations[:, :3] @ point + hull.equations[:, 3]
-    if float(np.max(signed)) <= 0.0:
-        return 0.0, point.copy()
-    witness = min(
-        (
-            _closest_point_on_triangle(point, triangle)
-            for triangle in boundary_triangles
-        ),
-        key=lambda candidate: float(np.linalg.norm(point - candidate)),
+    equation_normals = np.asarray(hull.equations[:, :3], dtype=np.float64)
+    equation_offsets = np.asarray(hull.equations[:, 3], dtype=np.float64)
+    inside_guards = (
+        INSIDE_CLASSIFICATION_ULP_FACTOR
+        * np.finfo(np.float64).eps
+        * (
+            np.sum(np.abs(equation_normals) * np.abs(point)[None, :], axis=1)
+            + np.abs(equation_offsets)
+            + 1.0
+        )
     )
-    return float(np.linalg.norm(point - witness)), witness
+    max_inside_guard = float(np.max(inside_guards))
+    # Only a point with a strict numerical reserve is classified inside.  A
+    # grey-zone point is sent to the boundary path; that can overestimate a
+    # true zero distance by a few ulps, but can never turn an outside point
+    # into a false zero.
+    if bool(np.all(signed + inside_guards < 0.0)):
+        return 0.0, point.copy(), max_inside_guard
+
+    # Batch every hull facet.  The former scalar loop performed one solve and
+    # three segment projections per Python iteration and made the 62-source
+    # census impractical.  All four candidates below are constructed as real
+    # points of the closed triangle, so their distances remain sound upper
+    # bounds even at floating-point region boundaries.
+    if (
+        isinstance(facet_chunk_size, bool)
+        or not isinstance(facet_chunk_size, int)
+        or facet_chunk_size <= 0
+    ):
+        raise ValueError("facet chunk size must be a positive integer")
+    triangles = np.asarray(boundary_triangles, dtype=np.float64)
+    best_squared = math.inf
+    best_witness = None
+    for start_index in range(0, triangles.shape[0], facet_chunk_size):
+        chunk = triangles[start_index : start_index + facet_chunk_size]
+        a = chunk[:, 0, :]
+        b = chunk[:, 1, :]
+        c = chunk[:, 2, :]
+
+        def segment_candidates(start: Any, end: Any) -> Any:
+            direction = end - start
+            denominator = np.sum(direction * direction, axis=1)
+            if bool(np.any(denominator <= 0.0)):
+                raise ValueError("convex hull contains a degenerate triangle edge")
+            amount = (
+                np.sum((point[None, :] - start) * direction, axis=1) / denominator
+            )
+            amount = np.clip(amount, 0.0, 1.0)
+            return start + amount[:, None] * direction
+
+        edge_ab = segment_candidates(a, b)
+        edge_bc = segment_candidates(b, c)
+        edge_ca = segment_candidates(c, a)
+
+        ab = b - a
+        ac = c - a
+        normal = np.cross(ab, ac)
+        normal_sq = np.sum(normal * normal, axis=1)
+        if bool(np.any(normal_sq <= 0.0)):
+            raise ValueError("convex hull contains a degenerate triangle facet")
+        plane_amount = (
+            np.sum((point[None, :] - a) * normal, axis=1) / normal_sq
+        )
+        projection = point[None, :] - plane_amount[:, None] * normal
+        gram_aa = np.sum(ab * ab, axis=1)
+        gram_ab = np.sum(ab * ac, axis=1)
+        gram_cc = np.sum(ac * ac, axis=1)
+        rhs_a = np.sum((projection - a) * ab, axis=1)
+        rhs_c = np.sum((projection - a) * ac, axis=1)
+        determinant = gram_aa * gram_cc - gram_ab * gram_ab
+        if bool(np.any(determinant <= 0.0)):
+            raise ValueError("convex hull contains a singular triangle facet")
+        weight_b = (rhs_a * gram_cc - rhs_c * gram_ab) / determinant
+        weight_c = (rhs_c * gram_aa - rhs_a * gram_ab) / determinant
+        weight_a = 1.0 - weight_b - weight_c
+        raw_weights = np.stack((weight_a, weight_b, weight_c), axis=1)
+        valid_face = np.all(raw_weights >= 0.0, axis=1)
+        weights = np.maximum(raw_weights, 0.0)
+        weight_sum = np.sum(weights, axis=1)
+        if bool(np.any(weight_sum <= 0.0)):
+            raise ValueError("triangle projection weights cannot be normalized")
+        weights /= weight_sum[:, None]
+        face = np.sum(weights[:, :, None] * chunk, axis=1)
+
+        candidates = np.stack((edge_ab, edge_bc, edge_ca, face), axis=1)
+        squared = np.sum((candidates - point[None, None, :]) ** 2, axis=2)
+        squared[~valid_face, 3] = math.inf
+        flat_index = int(np.argmin(squared))
+        facet_index, candidate_index = np.unravel_index(flat_index, squared.shape)
+        chunk_best = float(squared[facet_index, candidate_index])
+        # Strict comparison preserves the first canonical facet/candidate on
+        # exact ties, independent of the chosen chunk width.
+        if chunk_best < best_squared:
+            best_squared = chunk_best
+            best_witness = candidates[facet_index, candidate_index].copy()
+    if best_witness is None or not math.isfinite(best_squared):
+        raise ValueError("convex-subset boundary produced no finite witness")
+    return float(math.sqrt(best_squared)), best_witness, max_inside_guard
 
 
 def _directed_hausdorff_obb_to_convex_subset(
@@ -409,12 +504,14 @@ def _directed_hausdorff_obb_to_convex_subset(
 
     hull, boundary_triangles = _convex_subset_boundary(subset_vertices)
     maximum = -1.0
+    maximum_inside_guard = 0.0
     corner_witness = None
     subset_witness = None
     for corner in _obb_corners(center, half_axes):
-        distance, witness = _point_to_convex_subset_distance(
+        distance, witness, inside_guard = _point_to_convex_subset_distance(
             corner, hull, boundary_triangles
         )
+        maximum_inside_guard = max(maximum_inside_guard, inside_guard)
         if distance > maximum:
             maximum = distance
             corner_witness = corner.copy()
@@ -424,6 +521,7 @@ def _directed_hausdorff_obb_to_convex_subset(
     certified = float(np.nextafter(maximum, math.inf)) + DISTANCE_CERTIFICATE_PAD_M
     return {
         "certified_upper_bound_m": certified,
+        "max_inside_classification_guard_m": maximum_inside_guard,
         "obb_corner_owner_m": [float(value) for value in corner_witness],
         "raw_distance_m": maximum,
         "subset_witness_owner_m": [float(value) for value in subset_witness],
@@ -539,12 +637,22 @@ def census(
     selected_counts: list[int] = []
     unresolved_ids: list[str] = []
     for component in components:
-        tetrahedra, hull_receipt = proxy._convex_hull_tetrahedra(
-            component["triangles"]
+        scale = tuple(float(value) for value in component["scale"])
+        triangles = tuple(
+            tuple(
+                tuple(float(vertex[axis]) * scale[axis] for axis in range(3))
+                for vertex in triangle
+            )
+            for triangle in proxy._stl_triangles(component["source_mesh_path"])
         )
+        tetrahedra, hull_receipt = proxy._convex_hull_tetrahedra(
+            triangles
+        )
+        del triangles
         candidates = []
         selected_leaf_count = None
-        for leaf_count in range(1, max_leaves + 1):
+        evaluated_max_leaves = min(max_leaves, len(tetrahedra))
+        for leaf_count in range(1, evaluated_max_leaves + 1):
             candidate = _candidate(component, tetrahedra, leaf_count)
             candidate["passes_provisional_excess_ruler"] = (
                 float(candidate["max_directed_hausdorff_certified_m"])
@@ -563,6 +671,7 @@ def census(
             {
                 "candidates": candidates,
                 "convex_hull": hull_receipt,
+                "evaluated_max_leaf_count": evaluated_max_leaves,
                 "mesh_path": component["mesh_path"],
                 "mesh_sha256": component["mesh_sha256"],
                 "owner_body_name": component["owner_body_name"],
@@ -618,6 +727,8 @@ def census(
                 "point distance to the assigned closed convex tetra subset"
             ),
             "final_owner_outward_pad_m": FINAL_OWNER_OUTWARD_PAD_M,
+            "inside_classification_ulp_factor": INSIDE_CLASSIFICATION_ULP_FACTOR,
+            "facet_chunk_size": FACET_CHUNK_SIZE,
             "partition_algorithm": proxy.TRIANGLE_PARTITION_ALGORITHM,
             "selection_is_component_identity_blind": True,
         },
