@@ -934,7 +934,7 @@ def _run_controller_trace(
 
 def _run_teacher_replay(
     *, env, root: Path, identity: dict, ready_pose_payload: bytes,
-    steps: int, torch_module,
+    steps: int, handoff_mode: str, torch_module,
 ) -> dict:
     """Drive the live FullMDP owner with its own frozen measured teacher."""
 
@@ -946,15 +946,22 @@ def _run_teacher_replay(
         env.num_envs != helper.TEACHER_REPLAY_NUM_ENVS
         or steps <= 0
         or helper.TEACHER_REPLAY_ACTION_DELAY_STEPS != 0
+        or handoff_mode not in helper.TEACHER_REPLAY_HANDOFF_MODES
     ):
         raise ValueError("teacher replay dimensions/delay differ")
     env.enable_controller_trace()
     env.enable_diagnostic_first_generic_contact_patch()
+    direct_frame0 = (
+        handoff_mode == helper.TEACHER_REPLAY_HANDOFF_DIRECT_FRAME0
+    )
+    if direct_frame0:
+        env.enable_diagnostic_direct_frame0_playback()
     previous_qdes = env._full_a_policy_bootstrap_qdes.unsqueeze(0).clone()
     hold_qdes = previous_qdes.clone()
     rows = {name: [] for name in (
         "common_step", "phase", "pre_task_valid", "pre_teacher_frame",
-        "pre_motion_phase", "post_task_valid", "post_teacher_frame",
+        "pre_motion_phase", "pre_teacher_qdes", "pre_reveal_tick",
+        "pre_swing_wait_s", "post_task_valid", "post_teacher_frame",
         "post_motion_phase", "frozen_steps", "requested_qdes", "raw_action",
         "executable_qdes", "actual_joint_pos", "actual_joint_vel",
         "ball_center_w", "ball_lin_vel_w", "racket_site_w",
@@ -966,6 +973,35 @@ def _run_teacher_replay(
         "backend_resolved_table_contact",
         "resolved_any_substep",
     )}
+    if direct_frame0:
+        rows.update({name: [] for name in (
+            "direct_frame0_intervention",
+            "direct_frame0_joint_q0_error_max_before_rad",
+            "direct_frame0_joint_q0_error_max_after_rad",
+            "direct_frame0_root_position_q0_error_before_m",
+            "direct_frame0_root_position_q0_error_after_m",
+            "direct_frame0_root_quaternion_q0_error_before",
+            "direct_frame0_root_quaternion_q0_error_after",
+            "direct_frame0_ball_unchanged",
+            "direct_frame0_task_unchanged",
+            "direct_frame0_lifecycle_unchanged",
+            "direct_frame0_frame0_pose_exact",
+            "direct_frame0_robot_velocity_zero",
+            "direct_frame0_robot_qacc_warmstart_zero",
+            "direct_frame0_ctrl_zero",
+            "direct_frame0_controller_history_exact",
+            "direct_frame0_teacher_cache_refreshed",
+            "direct_frame0_actuator_state_absent",
+            "direct_frame0_installed_table_keepout",
+            "direct_frame0_installed_backend_resolved_table_contact",
+            "direct_frame0_requested_q0_error_max_rad",
+            "direct_frame0_executable_q0_error_max_rad",
+        )})
+    direct_frame0_applied = None
+    if direct_frame0:
+        direct_frame0_applied = torch_module.zeros(
+            env.num_envs, dtype=torch_module.bool, device=env.device
+        )
     question = launch = None
     question_reset_generation = None
     shot_boundary_reason = None
@@ -980,18 +1016,45 @@ def _run_teacher_replay(
                 pre_swing_wait_s=pre.pre_swing_wait_s,
                 step_dt=float(env.step_dt),
             )
-            requested = helper.frozen_teacher_qdes(
-                torch=torch_module,
-                task_valid=pre.task_valid,
-                hold_qdes=hold_qdes,
-                previous_qdes=previous_qdes,
-                teacher_qdes=pre.teacher_qdes,
-                frozen_steps=frozen,
-                bridge=(
-                    _wait_module().portable_question
-                    .step_diagnostic_split_ready_qdes_bridge
-                ),
-            )
+            direct_receipt = None
+            if direct_frame0:
+                handoff_due = helper.direct_frame0_handoff_due(
+                    torch=torch_module,
+                    task_valid=pre.task_valid,
+                    teacher_frame=pre.teacher_frame,
+                    frozen_steps=frozen,
+                    already_applied=direct_frame0_applied,
+                )
+                handoff_ids = handoff_due.nonzero(
+                    as_tuple=False
+                ).squeeze(-1)
+                if handoff_ids.numel() > 0:
+                    direct_receipt = (
+                        env.install_diagnostic_direct_frame0_playback(
+                            handoff_ids
+                        )
+                    )
+                    direct_frame0_applied |= handoff_due
+                requested = helper.direct_frame0_teacher_qdes(
+                    torch=torch_module,
+                    task_valid=pre.task_valid,
+                    hold_qdes=hold_qdes,
+                    teacher_qdes=pre.teacher_qdes,
+                    frozen_steps=frozen,
+                )
+            else:
+                requested = helper.frozen_teacher_qdes(
+                    torch=torch_module,
+                    task_valid=pre.task_valid,
+                    hold_qdes=hold_qdes,
+                    previous_qdes=previous_qdes,
+                    teacher_qdes=pre.teacher_qdes,
+                    frozen_steps=frozen,
+                    bridge=(
+                        _wait_module().portable_question
+                        .step_diagnostic_split_ready_qdes_bridge
+                    ),
+                )
             action = helper.decode_teacher_qdes_to_action(
                 torch=torch_module,
                 qdes=requested,
@@ -999,6 +1062,13 @@ def _run_teacher_replay(
                 action_scale=env.act_scale,
             )
             _obs, _reward, done, extras = env.step(action)
+            if direct_receipt is not None and (
+                bool(done[0])
+                or not bool(env._full_a_teacher_frame[0].eq(1))
+            ):
+                raise RuntimeError(
+                    "direct frame-zero handoff did not expose natural frame one"
+                )
             table_attribution = env.diagnostic_table_attribution_tick(
                 extras["termination_bits"]
             )
@@ -1023,6 +1093,9 @@ def _run_teacher_replay(
             rows["pre_task_valid"].append(host(pre.task_valid))
             rows["pre_teacher_frame"].append(host(pre.teacher_frame))
             rows["pre_motion_phase"].append(host(pre.motion_phase))
+            rows["pre_teacher_qdes"].append(host(pre.teacher_qdes))
+            rows["pre_reveal_tick"].append(host(pre.reveal_tick))
+            rows["pre_swing_wait_s"].append(host(pre.pre_swing_wait_s))
             rows["post_task_valid"].append(host(env._epoch_task_valid))
             rows["post_teacher_frame"].append(host(env._full_a_teacher_frame))
             rows["post_motion_phase"].append(host(env._full_a_motion_phase_code))
@@ -1069,6 +1142,135 @@ def _run_teacher_replay(
             rows["resolved_any_substep"].append([
                 table_attribution["resolved_any_substep"]
             ])
+            if direct_frame0:
+                direct_bool = torch_module.zeros(
+                    env.num_envs,
+                    dtype=torch_module.bool,
+                    device=env.device,
+                )
+                direct_float = torch_module.zeros(
+                    env.num_envs,
+                    dtype=requested.dtype,
+                    device=env.device,
+                )
+                direct_values = {
+                    "direct_frame0_intervention": direct_bool,
+                    "direct_frame0_joint_q0_error_max_before_rad": direct_float,
+                    "direct_frame0_joint_q0_error_max_after_rad": direct_float,
+                    "direct_frame0_root_position_q0_error_before_m": direct_float,
+                    "direct_frame0_root_position_q0_error_after_m": direct_float,
+                    "direct_frame0_root_quaternion_q0_error_before": direct_float,
+                    "direct_frame0_root_quaternion_q0_error_after": direct_float,
+                    "direct_frame0_ball_unchanged": direct_bool,
+                    "direct_frame0_task_unchanged": direct_bool,
+                    "direct_frame0_lifecycle_unchanged": direct_bool,
+                    "direct_frame0_frame0_pose_exact": direct_bool,
+                    "direct_frame0_robot_velocity_zero": direct_bool,
+                    "direct_frame0_robot_qacc_warmstart_zero": direct_bool,
+                    "direct_frame0_ctrl_zero": direct_bool,
+                    "direct_frame0_controller_history_exact": direct_bool,
+                    "direct_frame0_teacher_cache_refreshed": direct_bool,
+                    "direct_frame0_actuator_state_absent": direct_bool,
+                    "direct_frame0_installed_table_keepout": direct_bool,
+                    "direct_frame0_installed_backend_resolved_table_contact": (
+                        direct_bool
+                    ),
+                    "direct_frame0_requested_q0_error_max_rad": direct_float,
+                    "direct_frame0_executable_q0_error_max_rad": direct_float,
+                }
+                if direct_receipt is not None:
+                    direct_values.update({
+                        "direct_frame0_intervention": direct_receipt["applied"],
+                        "direct_frame0_joint_q0_error_max_before_rad": (
+                            direct_receipt[
+                                "joint_q0_error_max_before_rad"
+                            ]
+                        ),
+                        "direct_frame0_joint_q0_error_max_after_rad": (
+                            direct_receipt[
+                                "joint_q0_error_max_after_rad"
+                            ]
+                        ),
+                        "direct_frame0_root_position_q0_error_before_m": (
+                            direct_receipt[
+                                "root_position_q0_error_before_m"
+                            ]
+                        ),
+                        "direct_frame0_root_position_q0_error_after_m": (
+                            direct_receipt[
+                                "root_position_q0_error_after_m"
+                            ]
+                        ),
+                        "direct_frame0_root_quaternion_q0_error_before": (
+                            direct_receipt[
+                                "root_quaternion_q0_error_before"
+                            ]
+                        ),
+                        "direct_frame0_root_quaternion_q0_error_after": (
+                            direct_receipt[
+                                "root_quaternion_q0_error_after"
+                            ]
+                        ),
+                        "direct_frame0_ball_unchanged": direct_receipt[
+                            "ball_unchanged"
+                        ],
+                        "direct_frame0_task_unchanged": direct_receipt[
+                            "task_unchanged"
+                        ],
+                        "direct_frame0_lifecycle_unchanged": direct_receipt[
+                            "lifecycle_unchanged"
+                        ],
+                        "direct_frame0_frame0_pose_exact": direct_receipt[
+                            "frame0_pose_exact"
+                        ],
+                        "direct_frame0_robot_velocity_zero": direct_receipt[
+                            "robot_velocity_zero"
+                        ],
+                        "direct_frame0_robot_qacc_warmstart_zero": direct_receipt[
+                            "robot_qacc_warmstart_zero"
+                        ],
+                        "direct_frame0_ctrl_zero": direct_receipt[
+                            "ctrl_zero"
+                        ],
+                        "direct_frame0_controller_history_exact": direct_receipt[
+                            "controller_history_exact"
+                        ],
+                        "direct_frame0_teacher_cache_refreshed": direct_receipt[
+                            "teacher_cache_refreshed"
+                        ],
+                        "direct_frame0_actuator_state_absent": direct_receipt[
+                            "actuator_state_absent"
+                        ],
+                        "direct_frame0_installed_table_keepout": (
+                            direct_receipt["installed_frame0_table_keepout"]
+                        ),
+                        (
+                            "direct_frame0_installed_backend_resolved_"
+                            "table_contact"
+                        ): direct_receipt[
+                            "installed_frame0_backend_resolved_table_contact"
+                        ],
+                        "direct_frame0_requested_q0_error_max_rad": (
+                            torch_module.max(
+                                torch_module.abs(
+                                    requested
+                                    - direct_receipt["frame0_joint_qdes"]
+                                ),
+                                dim=1,
+                            ).values
+                        ),
+                        "direct_frame0_executable_q0_error_max_rad": (
+                            torch_module.max(
+                                torch_module.abs(
+                                    trace["executable_qdes"]
+                                    - direct_receipt["frame0_joint_qdes"]
+                                ),
+                                dim=1,
+                            ).values
+                        ),
+                    })
+                for name, value in direct_values.items():
+                    rows[name].append(host(value))
             previous_qdes = requested
             if bool(done[0]):
                 if question is None:
@@ -1095,6 +1297,194 @@ def _run_teacher_replay(
         name: np.asarray(values) if name == "common_step" else np.stack(values)
         for name, values in rows.items()
     }
+    direct_frame0_receipt = None
+    if direct_frame0:
+        intervention_rows = np.flatnonzero(
+            arrays["direct_frame0_intervention"][:, 0]
+        )
+        if intervention_rows.size != 1:
+            raise RuntimeError(
+                "direct frame-zero diagnostic requires exactly one intervention"
+            )
+        index = int(intervention_rows[0])
+        required_bits = (
+            "direct_frame0_ball_unchanged",
+            "direct_frame0_task_unchanged",
+            "direct_frame0_lifecycle_unchanged",
+            "direct_frame0_frame0_pose_exact",
+            "direct_frame0_robot_velocity_zero",
+            "direct_frame0_robot_qacc_warmstart_zero",
+            "direct_frame0_ctrl_zero",
+            "direct_frame0_controller_history_exact",
+            "direct_frame0_teacher_cache_refreshed",
+            "direct_frame0_actuator_state_absent",
+        )
+        if (
+            any(not bool(arrays[name][index, 0]) for name in required_bits)
+            or float(arrays[
+                "direct_frame0_requested_q0_error_max_rad"
+            ][index, 0]) != 0.0
+            or float(arrays[
+                "direct_frame0_executable_q0_error_max_rad"
+            ][index, 0]) != 0.0
+            or bool(arrays["qdes_guard_intervention"][index, 0])
+            or bool(arrays[
+                "direct_frame0_installed_table_keepout"
+            ][index, 0])
+            or bool(arrays[
+                "direct_frame0_installed_backend_resolved_table_contact"
+            ][index, 0])
+            or float(arrays[
+                "direct_frame0_joint_q0_error_max_after_rad"
+            ][index, 0]) != 0.0
+            or float(arrays[
+                "direct_frame0_root_position_q0_error_after_m"
+            ][index, 0]) != 0.0
+            or float(arrays[
+                "direct_frame0_root_quaternion_q0_error_after"
+            ][index, 0]) != 0.0
+            or int(arrays["post_teacher_frame"][index, 0]) != 1
+        ):
+            raise RuntimeError("direct frame-zero intervention receipt differs")
+        next_index = index + 1
+        if (
+            next_index >= arrays["common_step"].shape[0]
+            or int(arrays["pre_teacher_frame"][next_index, 0]) != 1
+            or bool(arrays["direct_frame0_intervention"][next_index, 0])
+            or not np.array_equal(
+                arrays["requested_qdes"][next_index],
+                arrays["pre_teacher_qdes"][next_index],
+            )
+            or not np.array_equal(
+                arrays["executable_qdes"][next_index],
+                arrays["pre_teacher_qdes"][next_index],
+            )
+            or bool(arrays["qdes_guard_intervention"][next_index, 0])
+        ):
+            raise RuntimeError(
+                "direct frame-zero next action did not use natural frame one"
+            )
+        direct_frame0_receipt = {
+            "schema_version": 1,
+            "kind": "action_ball_mujoco_direct_frame0_intervention_v1",
+            "diagnostic_unauthorized": True,
+            "training_authorized": False,
+            "ppo_update_calls": 0,
+            "applied": True,
+            "trace_row": index,
+            "common_step_after_transition": int(arrays["common_step"][index]),
+            "requested_frame0_same_step": bool(
+                arrays[
+                    "direct_frame0_requested_q0_error_max_rad"
+                ][index, 0]
+                == 0.0
+            ),
+            "executable_frame0_same_step": bool(
+                arrays[
+                    "direct_frame0_executable_q0_error_max_rad"
+                ][index, 0]
+                == 0.0
+            ),
+            "post_transition_teacher_frame": int(
+                arrays["post_teacher_frame"][index, 0]
+            ),
+            "next_action_trace_row": next_index,
+            "next_action_teacher_frame": int(
+                arrays["pre_teacher_frame"][next_index, 0]
+            ),
+            "next_action_uses_natural_teacher_qdes": True,
+            "next_action_executable_teacher_qdes_exact": True,
+            "next_action_qdes_guard_intervention": False,
+            "joint_q0_error_max_before_rad": float(
+                    arrays[
+                        "direct_frame0_joint_q0_error_max_before_rad"
+                    ][index, 0]
+            ),
+            "joint_q0_error_max_after_rad": float(
+                    arrays[
+                        "direct_frame0_joint_q0_error_max_after_rad"
+                    ][index, 0]
+            ),
+            "root_position_q0_error_before_m": float(
+                    arrays[
+                        "direct_frame0_root_position_q0_error_before_m"
+                    ][index, 0]
+            ),
+            "root_position_q0_error_after_m": float(
+                    arrays[
+                        "direct_frame0_root_position_q0_error_after_m"
+                    ][index, 0]
+            ),
+            "root_quaternion_q0_error_before": float(
+                    arrays[
+                        "direct_frame0_root_quaternion_q0_error_before"
+                    ][index, 0]
+            ),
+            "root_quaternion_q0_error_after": float(
+                    arrays[
+                        "direct_frame0_root_quaternion_q0_error_after"
+                    ][index, 0]
+            ),
+            "ball_unchanged": bool(
+                arrays["direct_frame0_ball_unchanged"][index, 0]
+            ),
+            "task_unchanged": bool(
+                arrays["direct_frame0_task_unchanged"][index, 0]
+            ),
+            "lifecycle_unchanged": bool(
+                    arrays[
+                        "direct_frame0_lifecycle_unchanged"
+                    ][index, 0]
+            ),
+            "frame0_pose_exact": bool(
+                    arrays[
+                        "direct_frame0_frame0_pose_exact"
+                    ][index, 0]
+            ),
+            "robot_velocity_zero": bool(
+                    arrays[
+                        "direct_frame0_robot_velocity_zero"
+                    ][index, 0]
+            ),
+            "robot_qacc_warmstart_zero": bool(
+                    arrays[
+                        "direct_frame0_robot_qacc_warmstart_zero"
+                    ][index, 0]
+            ),
+            "ctrl_zero": bool(
+                    arrays[
+                        "direct_frame0_ctrl_zero"
+                    ][index, 0]
+            ),
+            "controller_history_exact": bool(
+                    arrays[
+                        "direct_frame0_controller_history_exact"
+                    ][index, 0]
+            ),
+            "teacher_cache_refreshed": bool(
+                    arrays[
+                        "direct_frame0_teacher_cache_refreshed"
+                    ][index, 0]
+            ),
+            "actuator_state_absent": bool(
+                    arrays[
+                        "direct_frame0_actuator_state_absent"
+                    ][index, 0]
+            ),
+            "installed_frame0_table_attribution_boundary": (
+                "post_forward_pre_transition"
+            ),
+            "installed_frame0_table_keepout": bool(
+                arrays[
+                    "direct_frame0_installed_table_keepout"
+                ][index, 0]
+            ),
+            "installed_frame0_backend_resolved_table_contact": bool(
+                arrays[
+                    "direct_frame0_installed_backend_resolved_table_contact"
+                ][index, 0]
+            ),
+        }
     arrays["question_f32"] = (
         np.empty((0,), dtype=np.float32) if no_question
         else question.detach().cpu().numpy().astype(np.float32)
@@ -1111,11 +1501,16 @@ def _run_teacher_replay(
     plant = identity["plant_model"]
     summary = {
         "schema_version": helper.TEACHER_REPLAY_SCHEMA_VERSION,
-        "kind": "action_ball_mujoco_full_mdp_frozen_teacher_replay_v1",
+        "kind": (
+            "action_ball_mujoco_full_mdp_direct_frame0_teacher_replay_v1"
+            if direct_frame0
+            else "action_ball_mujoco_full_mdp_frozen_teacher_replay_v2"
+        ),
         "diagnostic_unauthorized": True,
         "training_authorized": False,
         "checkpoint_authority": False,
         "ppo_update_calls": 0,
+        "teacher_handoff_mode": handoff_mode,
         "num_envs": int(env.num_envs),
         "policy_steps": int(steps),
         "executed_policy_steps": int(len(rows["common_step"])),
@@ -1160,6 +1555,13 @@ def _run_teacher_replay(
             )
         },
     }
+    if direct_frame0:
+        summary.update({
+            "direct_frame0_intervention_count": int(
+                np.count_nonzero(arrays["direct_frame0_intervention"])
+            ),
+            "direct_frame0_intervention": direct_frame0_receipt,
+        })
     payload = json.dumps(summary, sort_keys=True, separators=(",", ":")).encode()
     _write_fresh_bytes(root / "summary.json", payload + b"\n")
     return summary
@@ -1405,6 +1807,7 @@ def main(
     diagnostic_teacher_replay: bool = False,
     diagnostic_teacher_replay_output: str | None = None,
     diagnostic_teacher_replay_steps: int = 180,
+    diagnostic_teacher_replay_handoff_mode: str = "split_ready_bridge",
     _test_allow_small_full_a: bool = False,
 ) -> int:
     num_steps_per_env = NUM_STEPS_PER_ENV
@@ -1416,6 +1819,7 @@ def main(
     teacher_replay = diagnostic_teacher_replay or (
         diagnostic_teacher_replay_output is not None
     )
+    teacher_helper = _teacher_replay_module()
     if (
         type(num_envs) is not int
         or num_envs <= 0
@@ -1426,10 +1830,21 @@ def main(
         or type(diagnostic_controller_trace_steps) is not int
         or type(diagnostic_teacher_replay) is not bool
         or type(diagnostic_teacher_replay_steps) is not int
+        or type(diagnostic_teacher_replay_handoff_mode) is not str
+        or diagnostic_teacher_replay_handoff_mode
+        not in teacher_helper.TEACHER_REPLAY_HANDOFF_MODES
         or type(_test_allow_small_full_a) is not bool
         or type(save_interval) is not int or save_interval != FULL_A_SAVE_INTERVAL
     ):
         raise ValueError("runner dimensions/mode differ")
+    if (
+        not teacher_replay
+        and diagnostic_teacher_replay_handoff_mode
+        != teacher_helper.TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE
+    ):
+        raise ValueError(
+            "direct frame-zero handoff requires diagnostic teacher replay"
+        )
     if teacher_replay and (
         not diagnostic_teacher_replay
         or not full_a_mode
@@ -1613,6 +2028,7 @@ def main(
             identity=identity,
             ready_pose_payload=ready_pose_payload,
             steps=diagnostic_teacher_replay_steps,
+            handoff_mode=diagnostic_teacher_replay_handoff_mode,
             torch_module=torch,
         )
         _best_effort_stdout_marker(
@@ -1921,6 +2337,11 @@ if __name__ == "__main__":
     parser.add_argument("--diagnostic-teacher-replay-output")
     parser.add_argument(
         "--diagnostic-teacher-replay-steps", type=int, default=180
+    )
+    parser.add_argument(
+        "--diagnostic-teacher-replay-handoff-mode",
+        choices=_teacher_replay_module().TEACHER_REPLAY_HANDOFF_MODES,
+        default="split_ready_bridge",
     )
     parser.add_argument("--evidence-jsonl")
     parser.add_argument("--snapshot-dir")

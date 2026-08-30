@@ -16,10 +16,16 @@ from decimal import Decimal
 from functools import lru_cache
 
 
-TEACHER_REPLAY_SCHEMA_VERSION = 1
+TEACHER_REPLAY_SCHEMA_VERSION = 2
 TEACHER_REPLAY_DEFAULT_STEPS = 180
 TEACHER_REPLAY_NUM_ENVS = 1
 TEACHER_REPLAY_ACTION_DELAY_STEPS = 0
+TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE = "split_ready_bridge"
+TEACHER_REPLAY_HANDOFF_DIRECT_FRAME0 = "direct_frame0_playback"
+TEACHER_REPLAY_HANDOFF_MODES = (
+    TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE,
+    TEACHER_REPLAY_HANDOFF_DIRECT_FRAME0,
+)
 
 
 @lru_cache(maxsize=8)
@@ -199,6 +205,65 @@ def frozen_teacher_qdes(
     return command
 
 
+def direct_frame0_handoff_due(
+    *, torch, task_valid, teacher_frame, frozen_steps, already_applied
+):
+    """Select the one diagnostic boundary that owns a direct frame-zero install.
+
+    The direct diagnostic deliberately holds physical ready throughout the
+    stationary preparation window.  It may install Motion frame zero only at
+    the first boundary where the split-ready countdown has reached zero while
+    Motion still publishes frame zero.  The caller owns the one-shot bit; this
+    pure selector cannot silently replay an intervention.
+    """
+
+    shape = tuple(task_valid.shape)
+    if (
+        task_valid.ndim != 1
+        or tuple(teacher_frame.shape) != shape
+        or tuple(frozen_steps.shape) != shape
+        or tuple(already_applied.shape) != shape
+        or task_valid.dtype != torch.bool
+        or already_applied.dtype != torch.bool
+        or teacher_frame.dtype != torch.long
+        or frozen_steps.dtype != torch.long
+    ):
+        raise ValueError("direct frame-zero handoff tensors differ")
+    torch._assert_async(torch.all(frozen_steps >= 0))
+    return (
+        task_valid
+        & teacher_frame.eq(0)
+        & frozen_steps.eq(0)
+        & ~already_applied
+    )
+
+
+def direct_frame0_teacher_qdes(
+    *, torch, task_valid, hold_qdes, teacher_qdes, frozen_steps
+):
+    """Hold physical ready until handoff, then follow the natural teacher.
+
+    The caller must atomically install physical frame zero before executing the
+    first row selected here.  Thereafter ``teacher_qdes`` naturally advances
+    to frame one and beyond; no synthetic split-ready interpolation remains.
+    """
+
+    shape = tuple(teacher_qdes.shape)
+    if (
+        teacher_qdes.ndim != 2
+        or tuple(hold_qdes.shape) != shape
+        or tuple(task_valid.shape) != (shape[0],)
+        or tuple(frozen_steps.shape) != (shape[0],)
+        or task_valid.dtype != torch.bool
+        or frozen_steps.dtype != torch.long
+    ):
+        raise ValueError("direct frame-zero q_des tensors differ")
+    use_teacher = task_valid & frozen_steps.eq(0)
+    command = torch.where(use_teacher[:, None], teacher_qdes, hold_qdes)
+    torch._assert_async(torch.isfinite(command).all())
+    return command
+
+
 def decode_teacher_qdes_to_action(*, torch, qdes, action_offset, action_scale):
     """Invert only the live affine decoder; the environment still executes it."""
 
@@ -236,12 +301,17 @@ __all__ = [
     "TEACHER_REPLAY_DEFAULT_STEPS",
     "TEACHER_REPLAY_NUM_ENVS",
     "TEACHER_REPLAY_ACTION_DELAY_STEPS",
+    "TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE",
+    "TEACHER_REPLAY_HANDOFF_DIRECT_FRAME0",
+    "TEACHER_REPLAY_HANDOFF_MODES",
     "TeacherReplayPreStep",
     "capture_teacher_replay_pre_step",
     "contact_capture_boundary",
     "validate_contact_patch_shot",
     "remaining_teacher_frozen_steps",
     "frozen_teacher_qdes",
+    "direct_frame0_handoff_due",
+    "direct_frame0_teacher_qdes",
     "decode_teacher_qdes_to_action",
     "tensor_f32_sha256",
 ]

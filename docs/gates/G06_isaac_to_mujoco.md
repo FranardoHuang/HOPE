@@ -2,6 +2,21 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+## 2026-08-30 direct-frame0 teacher replay反事实候选（仍`Partial`）
+
+N=1 zero-PPO teacher replay增加显式
+[`direct_frame0_playback`](../DEFINITIONS.md#mujoco-direct-frame0-teacher-replay)候选，只用来隔离
+split-ready bridge与teacher轨迹自身的因果。它只在合法题已接受、球仍是canonical park且
+未launch、pre-swing wait恰好归零的唯一边界安装frame0 root/q和零速；只清robot
+solver/controller/qdes history，ball/task/lifecycle逐位不变。当步q0、后继自然frame1、exactly-one
+intervention和typed `diagnostic_unauthorized / zero PPO`都fail closed；安装后、真实
+transition前的keepout与backend-resolved robot/table contact单独只读取证，不写lifecycle latch。默认
+`split_ready_bridge`、生产训练、Observation、Reward、termination不变。
+
+当前只有branch code/CPU fixture与`git diff --check`；本地不跑Python。exact Pod CPU targeted与
+fresh GPU CUDA replay仍`unverified`，因此不是physical-birth、physics parity、训练或部署证据，
+G06不升级。
+
 ## 2026-08-30 frozen-teacher targeted修复候选（仍`Partial`）
 
 为区分“保守SAT keepout”与“MuJoCo backend真实resolved contact”，后继只在opt-in

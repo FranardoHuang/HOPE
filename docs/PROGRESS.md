@@ -1,5 +1,19 @@
 # 简短进度记录
 
+## 2026-08-30 — direct-frame0 frozen-teacher反事实候选
+
+- 在exact `3f0b80d3`上增加显式
+  [`direct_frame0_playback`](DEFINITIONS.md#mujoco-direct-frame0-teacher-replay)枚举；默认
+  `split_ready_bridge`及生产训练/Observation/Reward/termination不变。N=1 zero-PPO模式只在
+  accepted、未launch、canonical parked ball、wait=0的唯一边界安装Motion frame0
+  root/q和零速，清robot solver/controller/qdes history，刷新aligned teacher/Observation cache；
+  安装后、真实transition前的table keepout与backend-resolved robot/table contact以只读边界证据记录，不写lifecycle latch；
+  ball/task/lifecycle逐位不变、requested/executable q0、后继实际执行自然frame1和exactly-one
+  intervention都fail closed。trace schema升为v2并对两种handoff都记录pre-step teacher qdes/
+  reveal/wait与mode；direct receipt明确`diagnostic_unauthorized=true / ppo_update_calls=0`。
+  已补CPU fixture和边界反例，本地只做静态diff，不跑Python；Pod CPU targeted及fresh CUDA
+  replay仍`unverified`，未访问或修改任何active run。
+
 ## 2026-08-30 — frozen-teacher Pod targeted失败修复候选
 
 - teacher replay新增pre-reset表碰归因，不改默认训练和termination：仅在已启用

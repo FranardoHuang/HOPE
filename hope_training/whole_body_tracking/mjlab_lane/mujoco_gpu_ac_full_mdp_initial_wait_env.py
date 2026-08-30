@@ -2036,6 +2036,397 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             & ~self._full_a_recovery_sticky_fault
         )
 
+    def enable_diagnostic_direct_frame0_playback(self) -> None:
+        """Enable one N=1 replay-only frame-zero plant intervention.
+
+        The production FullMDP step never calls this method.  Allocation and
+        state mutation exist only after the explicit teacher-replay CLI selects
+        ``direct_frame0_playback``.
+        """
+
+        if (
+            not getattr(self, "full_a_mode", False)
+            or self.num_envs != teacher_replay.TEACHER_REPLAY_NUM_ENVS
+            or hasattr(self, "_diagnostic_direct_frame0_consumed")
+        ):
+            raise RuntimeError("direct frame-zero diagnostic enable differs")
+        self._diagnostic_direct_frame0_consumed = self._torch.zeros(
+            self.num_envs, dtype=self._torch.bool, device=self.device
+        )
+
+    def _diagnostic_direct_frame0_preserved_state(self, ids):
+        """Clone the ball, accepted task, and lifecycle around one intervention."""
+
+        data = self.sim.data
+        ball = (
+            data.qpos[ids, self.b_q : self.b_q + 7].clone(),
+            data.qvel[ids, self.b_v : self.b_v + 6].clone(),
+            data.qacc_warmstart[ids, self.b_v : self.b_v + 6].clone(),
+        )
+        task = tuple(value[ids].clone() for value in (
+            self._epoch_task_f32,
+            self._full_a_launch_state_f32,
+            self._full_a_action_slot,
+            self._full_a_action_uid,
+            self._full_a_mount_normal_sign,
+            self._full_a_teacher_rate,
+            self._full_a_scaled_t_hit_s,
+            self._full_a_scaled_t_cycle_s,
+            self._full_a_pre_swing_wait_s,
+        ))
+        lifecycle = tuple(value[ids].clone() for value in (
+            self._epoch_phase,
+            self._epoch_task_valid,
+            self._epoch_selected,
+            self._epoch_launch_succeeded,
+            self._epoch_clock_ticks,
+            self.reset_generation,
+            self.episode_length_buf,
+            self.ball_age_buf,
+            self._full_a_physical_present,
+            self._full_a_owner_valid_bits,
+            self._full_a_owner_fault_bits,
+            self._full_a_owner_source_step,
+        ))
+        return ball, task, lifecycle, int(self.common_step_counter)
+
+    def _diagnostic_direct_frame0_table_state(self):
+        """Read table safety at the installed-frame-zero boundary.
+
+        This deliberately bypasses the production latches: the replay probe
+        needs attribution for the state immediately after ``sim.forward()``,
+        but must not manufacture lifecycle debt before the first real physics
+        transition.
+        """
+
+        keepout = self._table_keepout.sample(self.sim.data)
+        contact_census = A3ReadyBallVecEnv._contact_census(self)
+        resolved_table_contact = contact_census.robot_table_by_world.gt(0)
+        expected_shape = (self.num_envs,)
+        if (
+            tuple(keepout.shape) != expected_shape
+            or tuple(resolved_table_contact.shape) != expected_shape
+        ):
+            raise RuntimeError(
+                "direct frame-zero installed table-state shape differs"
+            )
+        return keepout, resolved_table_contact
+
+    @staticmethod
+    def _diagnostic_direct_frame0_rows_equal(torch, before, after):
+        """Return one exact equality bit per selected environment."""
+
+        if len(before) != len(after):
+            raise RuntimeError("direct frame-zero preserved rows differ")
+        comparisons = []
+        for left, right in zip(before, after):
+            comparisons.append(
+                left.eq(right).reshape(left.shape[0], -1).all(dim=1)
+            )
+        return torch.stack(comparisons, dim=1).all(dim=1)
+
+    def install_diagnostic_direct_frame0_playback(self, ids):
+        """Atomically install measured Motion frame zero for a replay only.
+
+        Root pose and the 31 runtime-ordered joints become frame zero, while
+        root/joint velocities and solver/controller history are reset.  Ball,
+        accepted task, and lifecycle bytes must remain unchanged across the
+        write and the required derived-state ``sim.forward()``.
+        """
+
+        torch = self._torch
+        data = self.sim.data
+        consumed = getattr(self, "_diagnostic_direct_frame0_consumed", None)
+        if (
+            consumed is None
+            or ids.ndim != 1
+            or ids.dtype != torch.long
+            or ids.numel() != 1
+            or int(ids[0].detach().cpu().item()) != 0
+        ):
+            raise RuntimeError("direct frame-zero diagnostic boundary differs")
+        expected_ball_position = (
+            self.env.scene.env_origins[ids] + self._full_a_park_position_scene
+        )
+        expected_ball_quaternion = self._full_a_park_quaternion.expand(
+            ids.numel(), 4
+        )
+        ball_is_canonical_park = (
+            data.qpos[ids, self.b_q : self.b_q + 3]
+            .eq(expected_ball_position)
+            .all(dim=1)
+            & data.qpos[ids, self.b_q + 3 : self.b_q + 7]
+            .eq(expected_ball_quaternion)
+            .all(dim=1)
+            & data.qvel[ids, self.b_v : self.b_v + 6].eq(0).all(dim=1)
+        )
+        frozen_steps = teacher_replay.remaining_teacher_frozen_steps(
+            torch=torch,
+            common_step=int(self.common_step_counter),
+            reveal_tick=self._epoch_clock_ticks[ids, 0],
+            pre_swing_wait_s=self._full_a_pre_swing_wait_s[ids],
+            step_dt=float(self.step_dt),
+        )
+        if (
+            bool(consumed[ids].any())
+            or not bool(self._epoch_task_valid[ids].all())
+            or not bool(
+                self._epoch_phase[ids]
+                .eq(FULL_A_PHASE_REVEAL_COMMITTED)
+                .all()
+            )
+            or bool(self._epoch_launch_succeeded[ids].any())
+            or bool(self._full_a_physical_present[ids].any())
+            or not bool(self.ball_age_buf[ids].eq(0).all())
+            or not bool(ball_is_canonical_park.all())
+            or not bool(frozen_steps.eq(0).all())
+            or not bool(self._full_a_teacher_frame[ids].eq(0).all())
+            or not bool(
+                self._full_a_motion_phase_code[ids]
+                .eq(FULL_A_MOTION_PREPARE_PHASE_INDEX)
+                .all()
+            )
+            or int(self.mj_model.na) != 0
+        ):
+            raise RuntimeError("direct frame-zero diagnostic boundary differs")
+
+        before_ball, before_task, before_lifecycle, before_step = (
+            self._diagnostic_direct_frame0_preserved_state(ids)
+        )
+        pelvis_index = FULLMDP_TRACKED_BODY_NAMES.index("pelvis_link")
+        joint_q0 = self._full_a_teacher.joint_pos[0].unsqueeze(0)
+        root_pos_q0 = (
+            self._full_a_teacher.body_pos_w[0, pelvis_index].unsqueeze(0)
+            + self.env.scene.env_origins[ids]
+        )
+        root_quat_q0 = self._full_a_teacher.body_quat_w[
+            0, pelvis_index
+        ].unsqueeze(0)
+        frame0_action = (
+            joint_q0 - self.action_offset.unsqueeze(0)
+        ) / self.act_scale.unsqueeze(0)
+        root_quat_norm = torch.linalg.vector_norm(root_quat_q0, dim=1)
+        if (
+            not bool(torch.isfinite(joint_q0).all())
+            or not bool(torch.isfinite(root_pos_q0).all())
+            or not bool(torch.isfinite(root_quat_q0).all())
+            or not bool(torch.isfinite(self.act_scale).all())
+            or bool(self.act_scale.eq(0).any())
+            or not bool(torch.isfinite(frame0_action).all())
+            or not bool(
+                torch.isclose(
+                    root_quat_norm,
+                    torch.ones_like(root_quat_norm),
+                    rtol=0.0,
+                    atol=1.0e-5,
+                ).all()
+            )
+            or not bool(
+                (
+                    joint_q0.ge(self.jnt_lo.unsqueeze(0))
+                    & joint_q0.le(self.jnt_hi.unsqueeze(0))
+                ).all()
+            )
+        ):
+            raise RuntimeError("direct frame-zero target is invalid")
+        current_joint = self._qpos_act()[ids].clone()
+        current_root_pos = data.qpos[
+            ids, self.root_qadr : self.root_qadr + 3
+        ].clone()
+        current_root_quat = data.qpos[
+            ids, self.root_qadr + 3 : self.root_qadr + 7
+        ].clone()
+
+        def quat_error(observed):
+            direct = torch.linalg.vector_norm(observed - root_quat_q0, dim=1)
+            antipodal = torch.linalg.vector_norm(observed + root_quat_q0, dim=1)
+            return torch.minimum(direct, antipodal)
+
+        joint_error_before = torch.max(
+            torch.abs(current_joint - joint_q0), dim=1
+        ).values
+        root_pos_error_before = torch.linalg.vector_norm(
+            current_root_pos - root_pos_q0, dim=1
+        )
+        root_quat_error_before = quat_error(current_root_quat)
+
+        data.qpos[ids, self.root_qadr : self.root_qadr + 3] = root_pos_q0
+        data.qpos[ids, self.root_qadr + 3 : self.root_qadr + 7] = root_quat_q0
+        if self._q_slice is not None:
+            data.qpos[ids, self._q_slice] = joint_q0
+        else:
+            data.qpos[ids[:, None], self.q_adr_act[None, :]] = joint_q0
+        data.qvel[ids, self.root_vadr : self.root_vadr + 6] = 0.0
+        if self._v_slice is not None:
+            data.qvel[ids, self._v_slice] = 0.0
+        else:
+            data.qvel[ids[:, None], self.v_adr_act[None, :]] = 0.0
+        def clear_robot_warmstart():
+            data.qacc_warmstart[
+                ids, self.root_vadr : self.root_vadr + 6
+            ] = 0.0
+            if self._v_slice is not None:
+                data.qacc_warmstart[ids, self._v_slice] = 0.0
+            else:
+                data.qacc_warmstart[
+                    ids[:, None], self.v_adr_act[None, :]
+                ] = 0.0
+
+        clear_robot_warmstart()
+        data.ctrl[ids] = 0.0
+
+        self.actions[ids] = frame0_action
+        self.last_actions[ids] = frame0_action
+        self.action_nonfinite_buf[ids] = False
+        self._qdes_previous_executable[ids] = joint_q0
+        self._qdes_previous_executable_valid[ids] = True
+        self._qdes_guard_terminal[ids] = False
+        self._qdes_guard_intervention[ids] = False
+        self._actual_hard_edge_latch[ids] = False
+        self._qdes_reward_processed[ids] = joint_q0
+        self._qdes_reward_pre_clamp[ids] = joint_q0
+        self._qdes_reward_nominal_projected[ids] = joint_q0
+        self._qdes_reward_operand_valid[ids] = False
+        self._controller_trace_latest = None
+        self.sim.forward()
+        if self._cap_ok:
+            self._probe_capacity("forward")
+        # ``forward`` may refresh solver guesses.  The next physical transition
+        # must start with no robot warm-start debt, while the parked ball keeps
+        # precisely the solver history it had before this robot-only probe.
+        clear_robot_warmstart()
+        data.qacc_warmstart[ids, self.b_v : self.b_v + 6] = before_ball[2]
+        data.ctrl[ids] = 0.0
+        (
+            installed_table_keepout,
+            installed_resolved_table_contact,
+        ) = self._diagnostic_direct_frame0_table_state()
+        installed_table_keepout = installed_table_keepout[ids].clone()
+        installed_resolved_table_contact = (
+            installed_resolved_table_contact[ids].clone()
+        )
+        self._refresh_aligned_teacher_body_pose()
+        self._compute_obs()
+
+        after_ball, after_task, after_lifecycle, after_step = (
+            self._diagnostic_direct_frame0_preserved_state(ids)
+        )
+        ball_unchanged = self._diagnostic_direct_frame0_rows_equal(
+            torch, before_ball, after_ball
+        )
+        task_unchanged = self._diagnostic_direct_frame0_rows_equal(
+            torch, before_task, after_task
+        )
+        lifecycle_unchanged = self._diagnostic_direct_frame0_rows_equal(
+            torch, before_lifecycle, after_lifecycle
+        ) & torch.full(
+            (ids.numel(),),
+            before_step == after_step,
+            dtype=torch.bool,
+            device=self.device,
+        )
+        joint_error_after = torch.max(
+            torch.abs(self._qpos_act()[ids] - joint_q0), dim=1
+        ).values
+        root_pos_error_after = torch.linalg.vector_norm(
+            data.qpos[ids, self.root_qadr : self.root_qadr + 3] - root_pos_q0,
+            dim=1,
+        )
+        root_quat_error_after = quat_error(
+            data.qpos[ids, self.root_qadr + 3 : self.root_qadr + 7]
+        )
+        frame0_pose_exact = (
+            self._qpos_act()[ids].eq(joint_q0).all(dim=1)
+            & data.qpos[ids, self.root_qadr : self.root_qadr + 3]
+            .eq(root_pos_q0)
+            .all(dim=1)
+            & data.qpos[ids, self.root_qadr + 3 : self.root_qadr + 7]
+            .eq(root_quat_q0)
+            .all(dim=1)
+        )
+        robot_velocity_zero = (
+            data.qvel[ids, self.root_vadr : self.root_vadr + 6]
+            .eq(0)
+            .all(dim=1)
+            & self._qvel_act()[ids].eq(0).all(dim=1)
+        )
+        root_warmstart_zero = data.qacc_warmstart[
+            ids, self.root_vadr : self.root_vadr + 6
+        ].eq(0).all(dim=1)
+        if self._v_slice is not None:
+            joint_warmstart_zero = data.qacc_warmstart[
+                ids, self._v_slice
+            ].eq(0).all(dim=1)
+        else:
+            joint_warmstart_zero = data.qacc_warmstart[
+                ids[:, None], self.v_adr_act[None, :]
+            ].eq(0).all(dim=1)
+        robot_qacc_warmstart_zero = (
+            root_warmstart_zero & joint_warmstart_zero
+        )
+        ctrl_zero = data.ctrl[ids].eq(0).all(dim=1)
+        controller_history_exact = (
+            self.actions[ids].eq(frame0_action).all(dim=1)
+            & self.last_actions[ids].eq(frame0_action).all(dim=1)
+            & self._qdes_previous_executable[ids].eq(joint_q0).all(dim=1)
+            & self._qdes_previous_executable_valid[ids]
+            & ~self.action_nonfinite_buf[ids]
+            & ~self._qdes_guard_terminal[ids]
+            & ~self._qdes_guard_intervention[ids]
+            & ~self._actual_hard_edge_latch[ids]
+            & self._qdes_reward_processed[ids].eq(joint_q0).all(dim=1)
+            & self._qdes_reward_pre_clamp[ids].eq(joint_q0).all(dim=1)
+            & self._qdes_reward_nominal_projected[ids]
+            .eq(joint_q0)
+            .all(dim=1)
+            & ~self._qdes_reward_operand_valid[ids]
+        )
+        if not bool(
+            (
+                ball_unchanged
+                & task_unchanged
+                & lifecycle_unchanged
+                & frame0_pose_exact
+                & robot_velocity_zero
+                & robot_qacc_warmstart_zero
+                & ctrl_zero
+                & controller_history_exact
+            ).all()
+        ):
+            raise RuntimeError("direct frame-zero atomic invariants differ")
+
+        consumed[ids] = True
+        return {
+            "applied": torch.ones(
+                ids.numel(), dtype=torch.bool, device=self.device
+            ),
+            "joint_q0_error_max_before_rad": joint_error_before,
+            "joint_q0_error_max_after_rad": joint_error_after,
+            "root_position_q0_error_before_m": root_pos_error_before,
+            "root_position_q0_error_after_m": root_pos_error_after,
+            "root_quaternion_q0_error_before": root_quat_error_before,
+            "root_quaternion_q0_error_after": root_quat_error_after,
+            "ball_unchanged": ball_unchanged,
+            "task_unchanged": task_unchanged,
+            "lifecycle_unchanged": lifecycle_unchanged,
+            "frame0_pose_exact": frame0_pose_exact,
+            "robot_velocity_zero": robot_velocity_zero,
+            "robot_qacc_warmstart_zero": robot_qacc_warmstart_zero,
+            "ctrl_zero": ctrl_zero,
+            "controller_history_exact": controller_history_exact,
+            "teacher_cache_refreshed": torch.ones(
+                ids.numel(), dtype=torch.bool, device=self.device
+            ),
+            "actuator_state_absent": torch.ones(
+                ids.numel(), dtype=torch.bool, device=self.device
+            ),
+            "installed_frame0_table_keepout": installed_table_keepout,
+            "installed_frame0_backend_resolved_table_contact": (
+                installed_resolved_table_contact
+            ),
+            "frame0_joint_qdes": joint_q0.clone(),
+        }
+
     def _snapshot_ready_teacher(self) -> None:
         data = self.sim.data
         ids = self._fullmdp_body_ids

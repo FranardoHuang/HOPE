@@ -51,6 +51,235 @@ def test_teacher_replay_wait_bridge_and_affine_decoder_are_exact():
     torch.testing.assert_close(offset + scale * action[0], frame0[0])
 
 
+def test_direct_frame0_mode_holds_then_selects_one_handoff_and_natural_teacher():
+    valid = torch.tensor([True, True])
+    teacher_frame = torch.tensor([0, 0], dtype=torch.long)
+    frozen = torch.tensor([1, 0], dtype=torch.long)
+    applied = torch.tensor([False, False])
+    due = replay.direct_frame0_handoff_due(
+        torch=torch,
+        task_valid=valid,
+        teacher_frame=teacher_frame,
+        frozen_steps=frozen,
+        already_applied=applied,
+    )
+    assert due.tolist() == [False, True]
+    hold = torch.tensor([[1.0, 2.0], [1.0, 2.0]])
+    teacher = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+    requested = replay.direct_frame0_teacher_qdes(
+        torch=torch,
+        task_valid=valid,
+        hold_qdes=hold,
+        teacher_qdes=teacher,
+        frozen_steps=frozen,
+    )
+    assert requested.tolist() == [[1.0, 2.0], [7.0, 8.0]]
+    applied[1] = True
+    assert not bool(replay.direct_frame0_handoff_due(
+        torch=torch,
+        task_valid=valid,
+        teacher_frame=teacher_frame,
+        frozen_steps=frozen,
+        already_applied=applied,
+    ).any())
+
+
+def _direct_frame0_install_rig():
+    env = object.__new__(wait_env.FullMdpInitialWaitVecEnv)
+    env._torch = torch
+    env.device = torch.device("cpu")
+    env.full_a_mode = True
+    env.num_envs = 1
+    env.num_actions = 31
+    env.step_dt = 0.02
+    env.root_qadr = 0
+    env.root_vadr = 0
+    env._q_slice = slice(7, 38)
+    env._v_slice = slice(6, 37)
+    env.q_adr_act = torch.arange(7, 38, dtype=torch.long)
+    env.v_adr_act = torch.arange(6, 37, dtype=torch.long)
+    env.b_q = 38
+    env.b_v = 37
+    qpos = torch.zeros((1, 45), dtype=torch.float32)
+    qvel = torch.zeros((1, 43), dtype=torch.float32)
+    qpos[:, 2] = 1.1
+    qpos[:, 3] = 1.0
+    qpos[:, 38:45] = torch.tensor(
+        [[4.0, 5.0, 6.0, 1.0, 0.0, 0.0, 0.0]]
+    )
+    data = types.SimpleNamespace(
+        qpos=qpos,
+        qvel=qvel,
+        qacc_warmstart=torch.cat((
+            torch.ones((1, 37), dtype=torch.float32),
+            torch.full((1, 6), 3.0, dtype=torch.float32),
+        ), dim=1),
+        ctrl=torch.ones((1, 31), dtype=torch.float32),
+        act=torch.empty((1, 0), dtype=torch.float32),
+    )
+    forward_calls = []
+    env.sim = types.SimpleNamespace(
+        data=data, forward=lambda: forward_calls.append("forward")
+    )
+    env.mj_model = types.SimpleNamespace(na=0)
+    env.env = types.SimpleNamespace(
+        scene=types.SimpleNamespace(env_origins=torch.tensor([[0.4, -0.2, 0.0]]))
+    )
+    env._full_a_park_position_scene = torch.tensor([3.6, 5.2, 6.0])
+    env._full_a_park_quaternion = torch.tensor([1.0, 0.0, 0.0, 0.0])
+    body_pos = torch.zeros((2, len(wait_env.FULLMDP_TRACKED_BODY_NAMES), 3))
+    body_pos[0, 0] = torch.tensor([0.1, 0.2, 0.9])
+    body_quat = torch.zeros((2, len(wait_env.FULLMDP_TRACKED_BODY_NAMES), 4))
+    body_quat[..., 0] = 1.0
+    joint_q0 = torch.linspace(-0.3, 0.3, 31).reshape(1, 31)
+    env._full_a_teacher = types.SimpleNamespace(
+        body_pos_w=body_pos,
+        body_quat_w=body_quat,
+        joint_pos=torch.cat((joint_q0, joint_q0 + 0.01), dim=0),
+    )
+    env.action_offset = torch.zeros(31)
+    env.act_scale = torch.ones(31)
+    env.jnt_lo = torch.full((31,), -1.0)
+    env.jnt_hi = torch.full((31,), 1.0)
+    env._cap_ok = False
+    env.actions = torch.full((1, 31), 7.0)
+    env.last_actions = torch.full((1, 31), 8.0)
+    env.action_nonfinite_buf = torch.ones(1, dtype=torch.bool)
+    env._qdes_previous_executable = torch.full((1, 31), 9.0)
+    env._qdes_previous_executable_valid = torch.zeros(1, dtype=torch.bool)
+    env._qdes_guard_terminal = torch.ones(1, dtype=torch.bool)
+    env._qdes_guard_intervention = torch.ones(1, dtype=torch.bool)
+    env._actual_hard_edge_latch = torch.ones(1, dtype=torch.bool)
+    env._qdes_reward_processed = torch.full((1, 31), 10.0)
+    env._qdes_reward_pre_clamp = torch.full((1, 31), 11.0)
+    env._qdes_reward_nominal_projected = torch.full((1, 31), 12.0)
+    env._qdes_reward_operand_valid = torch.ones(1, dtype=torch.bool)
+    env._controller_trace_latest = {"stale": True}
+    env._refresh_aligned_teacher_body_pose = lambda: forward_calls.append(
+        "refresh_teacher"
+    )
+    env._compute_obs = lambda: forward_calls.append("compute_obs")
+    env._diagnostic_direct_frame0_table_state = lambda: (
+        torch.tensor([False]),
+        torch.tensor([False]),
+    )
+    env._qpos_act = lambda: data.qpos[:, env._q_slice]
+    env._epoch_task_f32 = torch.arange(32, dtype=torch.float32).reshape(1, 32)
+    env._full_a_launch_state_f32 = torch.arange(
+        13, dtype=torch.float32
+    ).reshape(1, 13)
+    env._full_a_action_slot = torch.tensor([0], dtype=torch.long)
+    env._full_a_action_uid = torch.tensor([17], dtype=torch.long)
+    env._full_a_mount_normal_sign = torch.tensor([1], dtype=torch.int8)
+    env._full_a_teacher_rate = torch.tensor([1.0])
+    env._full_a_scaled_t_hit_s = torch.tensor([0.4])
+    env._full_a_scaled_t_cycle_s = torch.tensor([1.0])
+    env._full_a_pre_swing_wait_s = torch.tensor([0.9])
+    env._epoch_phase = torch.tensor(
+        [wait_env.FULL_A_PHASE_REVEAL_COMMITTED], dtype=torch.long
+    )
+    env._epoch_task_valid = torch.tensor([True])
+    env._epoch_selected = torch.tensor([True])
+    env._epoch_launch_succeeded = torch.tensor([False])
+    env._epoch_clock_ticks = torch.tensor([[48, 140, 130, 190, 198]])
+    env.reset_generation = torch.tensor([3], dtype=torch.long)
+    env.episode_length_buf = torch.tensor([93], dtype=torch.long)
+    env.ball_age_buf = torch.tensor([0], dtype=torch.long)
+    env._full_a_physical_present = torch.tensor([False])
+    env._full_a_owner_valid_bits = torch.tensor([[1, 2, 3, 4]])
+    env._full_a_owner_fault_bits = torch.tensor([[0, 0, 0, 0]])
+    env._full_a_owner_source_step = torch.tensor([[1, 2, 3, 4]])
+    env.common_step_counter = 93
+    env._full_a_teacher_frame = torch.tensor([0], dtype=torch.long)
+    env._full_a_motion_phase_code = torch.tensor(
+        [wait_env.FULL_A_MOTION_PREPARE_PHASE_INDEX], dtype=torch.long
+    )
+    return env, joint_q0, forward_calls
+
+
+def test_direct_frame0_install_is_atomic_one_shot_and_preserves_shot_state():
+    env, joint_q0, forward_calls = _direct_frame0_install_rig()
+    ids = torch.tensor([0], dtype=torch.long)
+    ball_before = torch.cat((
+        env.sim.data.qpos[:, env.b_q:env.b_q + 7],
+        env.sim.data.qvel[:, env.b_v:env.b_v + 6],
+    ), dim=1).clone()
+    task_before = env._epoch_task_f32.clone()
+    lifecycle_before = env._epoch_clock_ticks.clone()
+    env.enable_diagnostic_direct_frame0_playback()
+    receipt = env.install_diagnostic_direct_frame0_playback(ids)
+    torch.testing.assert_close(env._qpos_act(), joint_q0, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(
+        env.sim.data.qpos[:, :3], torch.tensor([[0.5, 0.0, 0.9]]),
+        rtol=0.0, atol=0.0,
+    )
+    assert torch.equal(env.sim.data.qvel[:, :37], torch.zeros((1, 37)))
+    assert torch.equal(
+        env.sim.data.qacc_warmstart[:, :37], torch.zeros((1, 37))
+    )
+    assert torch.equal(
+        env.sim.data.qacc_warmstart[:, 37:], torch.full((1, 6), 3.0)
+    )
+    assert torch.equal(env.sim.data.ctrl, torch.zeros((1, 31)))
+    assert torch.equal(env.actions, joint_q0)
+    assert torch.equal(env.last_actions, joint_q0)
+    assert torch.equal(env._qdes_previous_executable, joint_q0)
+    assert env._controller_trace_latest is None
+    assert torch.equal(torch.cat((
+        env.sim.data.qpos[:, env.b_q:env.b_q + 7],
+        env.sim.data.qvel[:, env.b_v:env.b_v + 6],
+    ), dim=1), ball_before)
+    assert torch.equal(env._epoch_task_f32, task_before)
+    assert torch.equal(env._epoch_clock_ticks, lifecycle_before)
+    assert forward_calls == ["forward", "refresh_teacher", "compute_obs"]
+    assert all(bool(receipt[name][0]) for name in (
+        "applied", "ball_unchanged", "task_unchanged",
+        "lifecycle_unchanged", "frame0_pose_exact",
+        "robot_velocity_zero", "robot_qacc_warmstart_zero", "ctrl_zero",
+        "controller_history_exact", "teacher_cache_refreshed",
+        "actuator_state_absent",
+    ))
+    assert float(receipt["joint_q0_error_max_after_rad"][0]) == 0.0
+    assert not bool(receipt["installed_frame0_table_keepout"][0])
+    assert not bool(
+        receipt["installed_frame0_backend_resolved_table_contact"][0]
+    )
+    with pytest.raises(RuntimeError, match="boundary differs"):
+        env.install_diagnostic_direct_frame0_playback(ids)
+
+
+def test_direct_frame0_install_rejects_an_early_or_live_ball_boundary():
+    ids = torch.tensor([0], dtype=torch.long)
+    early, _joint_q0, early_calls = _direct_frame0_install_rig()
+    early.common_step_counter -= 1
+    early.enable_diagnostic_direct_frame0_playback()
+    with pytest.raises(RuntimeError, match="boundary differs"):
+        early.install_diagnostic_direct_frame0_playback(ids)
+    assert early_calls == []
+
+    live, _joint_q0, live_calls = _direct_frame0_install_rig()
+    live._epoch_launch_succeeded[0] = True
+    live._full_a_physical_present[0] = True
+    live.enable_diagnostic_direct_frame0_playback()
+    with pytest.raises(RuntimeError, match="boundary differs"):
+        live.install_diagnostic_direct_frame0_playback(ids)
+    assert live_calls == []
+
+
+def test_direct_frame0_invalid_target_fails_before_mutating_the_plant():
+    env, _joint_q0, forward_calls = _direct_frame0_install_rig()
+    ids = torch.tensor([0], dtype=torch.long)
+    qpos_before = env.sim.data.qpos.clone()
+    qvel_before = env.sim.data.qvel.clone()
+    env.act_scale[4] = 0.0
+    env.enable_diagnostic_direct_frame0_playback()
+    with pytest.raises(RuntimeError, match="target is invalid"):
+        env.install_diagnostic_direct_frame0_playback(ids)
+    assert torch.equal(env.sim.data.qpos, qpos_before)
+    assert torch.equal(env.sim.data.qvel, qvel_before)
+    assert forward_calls == []
+
+
 def test_teacher_replay_frozen_counter_and_hash_are_content_exact():
     frozen = replay.remaining_teacher_frozen_steps(
         torch=torch,
@@ -578,9 +807,24 @@ def test_teacher_replay_cli_is_n1_zero_ppo_and_reuses_live_owner():
     signature = inspect.signature(runner.main)
     assert signature.parameters["diagnostic_teacher_replay"].default is False
     assert signature.parameters["diagnostic_teacher_replay_steps"].default == 180
+    assert (
+        signature.parameters[
+            "diagnostic_teacher_replay_handoff_mode"
+        ].default
+        == replay.TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE
+    )
     source = inspect.getsource(runner._run_teacher_replay)
     assert "env.step(action)" in source
     assert "ppo_update_calls\": 0" in source
     assert "enable_diagnostic_first_generic_contact_patch" in source
     assert "_epoch_task_f32" in source
     assert "_full_a_launch_state_f32" in source
+    assert "install_diagnostic_direct_frame0_playback" in source
+    with pytest.raises(
+        ValueError, match="requires diagnostic teacher replay"
+    ):
+        runner.main(
+            diagnostic_teacher_replay_handoff_mode=(
+                replay.TEACHER_REPLAY_HANDOFF_DIRECT_FRAME0
+            )
+        )

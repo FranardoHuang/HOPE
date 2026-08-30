@@ -8,7 +8,7 @@
 - 复核/决策负责人：Franco
 - 本 successor 当前最高证据等级：最终V3/PPO V6两端各自runtime/rate与fresh prefix达到诊断`E2`；
   跨引擎physics parity、formal learning与promotion仍低于`E2`，历史negative-control的`E3`不向新系统传递
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-29
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-30
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
@@ -19,6 +19,27 @@
 > “2026-08-21 portable successor事实纠正”起的229/399、211/319、H24、`history=8`与旧schema/gate结论
 > 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
+
+## 2026-08-30 direct-frame0 teacher replay反事实候选
+
+为了只回答“已验证physical-ready到Motion frame0的split bridge是否阻断老师动作本身”，
+MuJoCo N=1 frozen-teacher replay增加一个显式枚举的
+[`direct_frame0_playback`](../../DEFINITIONS.md#mujoco-direct-frame0-teacher-replay)诊断候选。默认
+`split_ready_bridge`的生产训练、Observation、Reward、termination、plant和回放trace语义均不变。
+
+反事实模式只允许一次交接：accepted task仍处于`REVEAL_COMMITTED`、球仍是canonical
+park且未launch、Motion仍为frame0/prepare、离散pre-swing wait恰好归零时，原子写入
+teacher frame0 pelvis root与31关节，将root/joint velocity归零，只清robot DOF的
+`qacc_warmstart`及controller/qdes history后做`sim.forward()`。ball qpos/qvel/solver history、task bytes、
+lifecycle counters必须逐位不变；`sim.forward()`后、真实transition前只读记录
+installed-frame0的table keepout与backend-resolved robot/table contact，不写入生产lifecycle latch；
+当步requested qdes必须exact q0，转移后必须自然公开frame1。
+0次、重放、live-ball、已launch、q0/root/zero-history不精确或任一保留量变化都fail closed。
+
+输出仍是typed `diagnostic_unauthorized=true / ppo_update_calls=0`，不构造optimizer或checkpoint，
+不允许把teleport解释成physical-birth、训练、physics parity或部署证据。当前代码及CPU fixture
+仅在分支候选；本地未跑Python。下一证据顺序是exact Pod CPU targeted，通过后才能在自然
+空闲GPU发fresh N=1 CUDA replay。在那之前状态为`unverified`，Gate不升级。
 
 ## 2026-08-30 frozen-teacher targeted修复候选
 
