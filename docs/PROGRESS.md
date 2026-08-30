@@ -1,5 +1,17 @@
 # 简短进度记录
 
+## 2026-08-30 — adaptive multi-OBB 全62-source census 候选证据
+
+- 新增不改 consumer 的离线 census：每 source 完整 convex-hull tetra solid、
+  deterministic `k=1..8`、final owner-frame float32 containment 和全 3D directed-Hausdorff
+  excess。provisional 5 mm 尺下 `12/62` 在 `k=1` 通过，其余 `50`
+  项到 `k=8` 仍无 admissible 分解；强行 cap 为 `412` rows/`6.54x`
+  且仍失败。这是 branch candidate，`5 mm`/global NO-GO 均未采用，待独立复核。
+- Pod exact `584c05b7` 专项 `8 passed`，system producer `19.765 s`并二次
+  byte-check PASS；artifact SHA `d8cf045c…758a1`。component51/55/57 只作 heldout，
+  不参与选 `k`。本软件分支未改 active run/GPU/consumer；详见
+  [collision proxy 实验 §10](experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#10-2026-08-30-adaptive-multi-obb-全62-source-census-候选证据)。
+
 ## 2026-08-30 — component-55 multi-OBB shared-guard 候选
 
 - 确认 frozen-teacher 的 `right_hand_pingpang_link.stl` single OBB 是空角误报：

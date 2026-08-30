@@ -118,6 +118,31 @@ signal/停掉或污染 active run。任意 pass count 只证明 materializer/loa
 `152 passed in 13.64 s`；MJLab keepout 依赖回归 `16 passed, 1 skipped in 2.93 s`。
 该 skip 是显式 CUDA direct 用例，当时不为了它污染 GPU2 现役训练窗口。
 
+### Adaptive multi-OBB 全62-source census（Pod-only candidate）
+
+该 census 不是 runtime artifact，不改 consumer。它要求和上述 v2 producer 完全相同的
+Pod system Python/package bytes；只核对 NumPy/SciPy 版本号不够，其他 wheel build
+会产生不同 PCA 浮点字节。在 clean exact checkout 运行：
+
+```bash
+PYTHONPATH=/usr/lib/python3/dist-packages /usr/bin/python3 -S \
+  hope_training/whole_body_tracking/scripts/census_a3_table_collision_proxy_adaptive.py \
+  --check
+```
+
+专项几何/authority 测试也必须在 Pod 的 pinned NumPy `1.26.4` / SciPy
+`1.11.4` Python 上运行：
+
+```bash
+"$PINNED_CENSUS_PY" -m pytest -q -p no:cacheprovider \
+  hope_training/whole_body_tracking/tests/test_census_a3_table_collision_proxy_adaptive.py
+```
+
+`$PINNED_CENSUS_PY` 必须是独立、不修改 shared venv 的 Pod interpreter；测试 PASS 不能
+代签 system producer 的 artifact byte authority。2026-08-30 exact `584c05b7` 为
+`8 passed in 0.51 s`，system 生成 `19.765 s`，同路径 `--check` PASS，file SHA
+`d8cf045c…758a1`。`5 mm` 仍只是 branch census 尺，不是 adopted table margin。
+
 ## Planner Unit Tests
 
 Run from the package directory:

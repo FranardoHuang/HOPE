@@ -2733,3 +2733,11 @@ deployment。细节见
 当成 unknown，并保留 split OBB leaf 到 source component 的 parent mapping。Pod exact
 `213c8622` 的扩展 CPU union（含 teacher replay）为 `200 passed, 2 skipped`；
 CUDA 因 GPU1 owner locks 及现役 GPU2 共享 NUMA 未越权运行，Gate 仍 `Partial`。
+
+2026-08-30 全62-source adaptive census 是 branch candidate evidence：`50/62` 在
+`k<=8` 内无 provisional 5 mm admissible 分解，强行 cap 为 `412` rows/
+`6.54x` 且仍失败。它未改 consumer，也不是已采用的 global NO-GO；
+metric/partition 仍待独立复核。若复核成立，后继候选是在全机双端 actual
+convex inventory 齐全后，只对 coarse-positive pair 运行 fail-closed exact convex
+narrow phase。G06 仍 `Partial`，详见
+[collision proxy 实验 §10](../experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#10-2026-08-30-adaptive-multi-obb-全62-source-census-候选证据)。

@@ -469,3 +469,90 @@ Pod1 final exact checkout
 `62`，已改为读 production count。live-constant 的另一个文本 mutation anchor
 在基线 `3f0b80d3` 上也因两处相同配置而失败；后继只将变异限制在具名
 `HOPEActionBallTerminationsCfg` 内，不改 production code，因此 final 152 条全绿。
+
+## 10. 2026-08-30 adaptive multi-OBB 全62-source census 候选证据
+
+### 10.1 方法
+
+component 55 的两叶修复不能推导“把其他阳性也多切几刀”。本轮对
+tracked URDF 的 **62 个 source convex authority 全量**运行同一个 identity-blind
+census：每个 source 的完整 convex hull 做 tetra fan，`k=1..8` 均用同一
+deterministic partition/PCA OBB。每个 tetra 只属于一叶，每叶 OBB 覆盖所有
+assigned tetra 顶点，因而覆盖完整 assigned convex solid。
+
+几何先转 owner frame、额外外扩 `1 µm`、序列化为 float32，再重做 containment。
+筛尺是全 3D directed Hausdorff 数值上界估计 `proxy leaf OBB -> conv(assigned tetra
+vertices)`，不是
+table-normal support。闭凸集距离是凸函数，所以 OBB 上最大值只需查 8 个角点；
+角点到凸多面体距离用 canonical hull facet 的闭三角形距离计算。
+`conv(assigned vertices)` 是 global source hull 的子集，因此该值是对 global-hull
+excess 的保守上界；它不是到非凸 assigned-tetra union 的精确距离。`nextafter`
+和 `1 nm` 只是数值 pad，没有形式覆盖 QHull/eigh 整条浮点误差，所以 artifact
+不使用 `certified` 字样。
+
+`5 mm` 只是 provisional geometry-only 筛尺，不是新安全 margin；运行时
+`20 mm` no-touch 未改。component 51/55/57 只在全量计算后做 heldout readout，
+从未参与 partition、`k` 或阈值选择。完整逐 component/逐 k/逐 leaf witness 见
+[`a3_table_collision_adaptive_obb_census.v1.json`](../../../configs/a3_table_collision_proxy_a3p0807_20260808/a3_table_collision_adaptive_obb_census.v1.json)。
+
+### 10.2 结果
+
+| 量 | 结果 |
+| --- | --- |
+| source component | `62` |
+| baseline | `63` proxy rows（再加 blade 为 runtime `64`） |
+| 第一个 admissible `k` | `k=1`: `12` 项；`k=2..8`: 新增 `0` 项 |
+| `k<=8` 仍不达 5 mm | `50/62` |
+| 有效全局 `M` | **未定义**：50 项没有 admissible `k<=8` |
+| 强行 unresolved 取 `k=8` | `412` rows = baseline 的 `6.54x`，且仍不达 5 mm |
+
+本 partition family 的 excess 并不单调；因此这里的 `>8` 严格指“在 `1..8`
+没找到 admissible k”，不声称 `k=9` 必然通过。三个 heldout 全部落在该类：
+全 62 项里只有 `21` 项在某个 `k>1` 改善，`41` 项反而以 `k=1` 最小；这与
+centroid-balanced partition/PCA 并未直接优化 maximum excess 一致，不是 Hausdorff 方向写反。
+
+| heldout source | `k=1` excess | `k=8` excess |
+| --- | ---: | ---: |
+| component51 `right_wrist_roll_link.stl` | `21.086 mm` | `41.214 mm` |
+| component55 `right_hand_pingpang_link.stl` | `64.732 mm` | `77.963 mm` |
+| component57 `right_wrist_yaw_link.stl` | `20.745 mm` | `37.220 mm` |
+
+component51 的 heldout 来自 direct-frame0 `643f03b5` 真实 CUDA replay：transition start 后
+physics substep18 的 v1 OBB keepout 为 `-1.236878 mm`，但 backend resolved contact=false。
+它只是第三个独立空角反例，不改变 census 算法。
+
+### 10.3 本分支提议和后继设计（待独立复核）
+
+**本候选分支不实现全局 adaptive multi-OBB consumer。** census 证据不支持
+`<=128` rows 的前提；
+把数百行 SAT 放进每个 physics substep 仍保不住 5 mm，同时丢性能和语义。
+
+下一设计只保留 coarse OBB 作 broad phase；只对 positive `(env, component,
+table-role)` pair 在 device compact，然后运行 exact conservative convex narrow phase。
+实现前必须先物化 Isaac split USD 和 canonical MuJoCo 的**全机** actual convex
+inventory，不能只沿用目前 wrist target sources 的 exact binding。convex mesh hull 使用
+exact support map，ellipsoid/capsule/box 保留解析 support map。可用固定迭代上限的
+batched GJK separation proof；只有大于数值 reserve 的 separation certificate 才判
+negative，不收敛/非有限/边界一律 fail closed 为 positive。
+
+这个方向保留真正的 `20 mm` 安全语义，并把额外计算限制在 coarse-positive
+对上。它还需固定 tape 的 positive density、双端 actual-authority oracle、component
+ledger/witness 守恒和 profiler-off wall 验收；本轮只做设计裁定，不用不完整
+authority 写近似 consumer。这是 branch-level 工程建议，不是已采用的 main
+合同；`5 mm` 尺子、partition metric 和 `k=2..8` 零新增结果仍需独立复核。
+
+### 10.4 Pod 证据和工具链边界
+
+code commit `584c05b72a2db3ab055f54d4bbaf293a0cca9530`，exact checkout
+`/workspace/franco/mktemp/adaptive-multiobb-584c05b7.exact`：
+
+- pinned NumPy `1.26.4` / SciPy `1.11.4` 专项回归 `8 passed in 0.51 s`；
+- 仓库 v2 已采用的 system producer 路径
+  `PYTHONPATH=/usr/lib/python3/dist-packages /usr/bin/python3 -S` 生成耗时 `19.765 s`；
+- 同 exact checkout 的 `--check` 逐字节 PASS；artifact file SHA-256
+  `d8cf045cdc54a540daf6c3ca554320b4bc3acb68798ee5654cd957db408758a1`，content SHA-256
+  `735026cc95c86bed2223ea61eae133b930b3c759338f40cf1169332489f2e2d3`。
+
+另一个 Python/wheel build 虽然也报 NumPy/SciPy `1.26.4/1.11.4`，PCA 浮点字节仍不同；
+科学结论 `12 pass / 50 unresolved` 不变，但它不是 artifact authority。因此只认
+上述既有 system producer 路径和 byte-check，不得只核对版本号就重物化。

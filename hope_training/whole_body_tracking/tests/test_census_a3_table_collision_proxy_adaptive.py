@@ -76,7 +76,7 @@ def test_directed_hausdorff_uses_full_3d_empty_corner_not_one_axis_support():
     )
     expected = 2.0 / math.sqrt(3.0)
     assert math.isclose(result["raw_distance_m"], expected, abs_tol=1.0e-12)
-    assert result["certified_upper_bound_m"] > result["raw_distance_m"]
+    assert result["numerically_padded_upper_estimate_m"] > result["raw_distance_m"]
     assert np.allclose(result["obb_corner_owner_m"], [1.0, 1.0, 1.0])
     assert np.allclose(result["subset_witness_owner_m"], [1.0 / 3.0] * 3)
 

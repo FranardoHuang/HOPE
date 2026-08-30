@@ -7047,3 +7047,10 @@ teacher/Reward/训练通过。详见
 proxy leaf 另带 parent source ID；双 loader 已校验 split index/count 无洞。
 Pod exact `213c8622` 扩展 CPU union 为 `200 passed, 2 skipped`。本轮合同
 仅声称 component55 actual-union refinement，不声称全机器人 actual collider 已证明。
+
+2026-08-30 全62-source adaptive census 是 branch candidate evidence，不是已采用合同。
+provisional 5 mm 三维 directed-Hausdorff 尺下只有 `12/62` 在 `k=1` 通过，
+其余 `50` 项在 `k<=8` 内无 admissible 分解；强行 cap 是 `412` rows/
+`6.54x` 且仍失败。本分支因此未改 consumer，提议独立复核 metric/partition
+后再决定是否转 coarse-positive exact convex narrow phase。Gate 仍 `Partial`，详见
+[collision proxy 实验 §10](../experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#10-2026-08-30-adaptive-multi-obb-全62-source-census-候选证据)。

@@ -53,7 +53,7 @@ DEFAULT_MAX_LEAVES = 8
 DEFAULT_EXCESS_RULER_M = 0.005
 DEFAULT_SOURCE_ROW_BUDGET = 128
 FINAL_OWNER_OUTWARD_PAD_M = 1.0e-6
-DISTANCE_CERTIFICATE_PAD_M = 1.0e-9
+DISTANCE_NUMERICAL_PAD_M = 1.0e-9
 INSIDE_CLASSIFICATION_ULP_FACTOR = 256.0
 FACET_CHUNK_SIZE = 4096
 
@@ -520,10 +520,10 @@ def _directed_hausdorff_obb_to_convex_subset(
             subset_witness = witness.copy()
     if corner_witness is None or subset_witness is None or not math.isfinite(maximum):
         raise ValueError("directed Hausdorff evaluation produced no finite witness")
-    certified = float(np.nextafter(maximum, math.inf)) + DISTANCE_CERTIFICATE_PAD_M
+    padded = float(np.nextafter(maximum, math.inf)) + DISTANCE_NUMERICAL_PAD_M
     return {
-        "certified_upper_bound_m": certified,
         "max_inside_classification_guard_m": maximum_inside_guard,
+        "numerically_padded_upper_estimate_m": padded,
         "obb_corner_owner_m": [float(value) for value in corner_witness],
         "raw_distance_m": maximum,
         "subset_witness_owner_m": [float(value) for value in subset_witness],
@@ -568,7 +568,8 @@ def _candidate(
             center_owner, axes_owner, assigned_owner
         )
         maximum_excess = max(
-            maximum_excess, float(directed["certified_upper_bound_m"])
+            maximum_excess,
+            float(directed["numerically_padded_upper_estimate_m"]),
         )
         leaf_rows.append(
             {
@@ -593,7 +594,7 @@ def _candidate(
     return {
         "leaf_count": leaf_count,
         "leaves": leaf_rows,
-        "max_directed_hausdorff_certified_m": maximum_excess,
+        "max_directed_hausdorff_upper_estimate_m": maximum_excess,
         "owner_float32_max_abs_obb_coefficient": maximum_coverage_coefficient,
         "partition_sha256": _sha256_bytes(
             _canonical_json_bytes([list(leaf) for leaf in leaves])
@@ -657,7 +658,7 @@ def census(
         for leaf_count in range(1, evaluated_max_leaves + 1):
             candidate = _candidate(component, tetrahedra, leaf_count)
             candidate["passes_provisional_excess_ruler"] = (
-                float(candidate["max_directed_hausdorff_certified_m"])
+                float(candidate["max_directed_hausdorff_upper_estimate_m"])
                 <= excess_ruler_m
             )
             candidates.append(candidate)
@@ -669,8 +670,19 @@ def census(
             unresolved_ids.append(component_id)
         else:
             selected_counts.append(selected_leaf_count)
+        best_candidate = min(
+            candidates,
+            key=lambda row: (
+                float(row["max_directed_hausdorff_upper_estimate_m"]),
+                int(row["leaf_count"]),
+            ),
+        )
         rows.append(
             {
+                "best_tested_leaf_count": best_candidate["leaf_count"],
+                "best_tested_upper_estimate_m": best_candidate[
+                    "max_directed_hausdorff_upper_estimate_m"
+                ],
                 "candidates": candidates,
                 "convex_hull": hull_receipt,
                 "evaluated_max_leaf_count": evaluated_max_leaves,
@@ -694,10 +706,29 @@ def census(
         for count in range(1, max_leaves + 1)
         if selected_counts.count(count)
     }
+    forced_cap_proxy_rows = sum(
+        int(row["selected_leaf_count"])
+        if row["selected_leaf_count"] is not None
+        else int(row["evaluated_max_leaf_count"])
+        for row in rows
+    )
+    best_tested_distribution = {
+        str(count): sum(
+            int(row["best_tested_leaf_count"] == count) for row in rows
+        )
+        for count in range(1, max_leaves + 1)
+        if any(row["best_tested_leaf_count"] == count for row in rows)
+    }
     summary = {
         "baseline_proxy_rows": baseline_proxy_rows,
         "baseline_runtime_rows_including_blade": baseline_proxy_rows + 1,
+        "best_tested_leaf_count_distribution": best_tested_distribution,
         "global_runtime_candidate_eligible": bool(within_budget),
+        "forced_cap_proxy_rows": forced_cap_proxy_rows,
+        "forced_cap_proxy_rows_linear_multiplier_vs_baseline": (
+            forced_cap_proxy_rows / float(baseline_proxy_rows)
+        ),
+        "forced_cap_satisfies_excess_ruler": not unresolved_ids,
         "max_tested_leaf_count": max_leaves,
         "provisional_excess_ruler_m": excess_ruler_m,
         "selected_leaf_count_distribution": distribution,
@@ -723,10 +754,12 @@ def census(
 
     content: dict[str, object] = {
         "algorithm": {
-            "distance_certificate_pad_m": DISTANCE_CERTIFICATE_PAD_M,
+            "distance_numerical_pad_m": DISTANCE_NUMERICAL_PAD_M,
             "distance_definition": (
-                "maximum over final owner-frame float32 OBB corners of exact "
-                "point distance to the assigned closed convex tetra subset"
+                "maximum over final owner-frame float32 OBB corners of point "
+                "distance to the convex hull of assigned tetra vertices; this "
+                "is a conservative upper estimate of excess to the global "
+                "source hull, not distance to the non-convex tetra union"
             ),
             "final_owner_outward_pad_m": FINAL_OWNER_OUTWARD_PAD_M,
             "inside_classification_ulp_factor": INSIDE_CLASSIFICATION_ULP_FACTOR,
