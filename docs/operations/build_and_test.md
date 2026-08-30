@@ -139,9 +139,9 @@ PYTHONPATH=/usr/lib/python3/dist-packages /usr/bin/python3 -S \
 ```
 
 `$PINNED_CENSUS_PY` 必须是独立、不修改 shared venv 的 Pod interpreter；测试 PASS 不能
-代签 system producer 的 artifact byte authority。2026-08-30 exact `584c05b7` 为
-`8 passed in 0.51 s`，system 生成 `19.765 s`，同路径 `--check` PASS，file SHA
-`d8cf045c…758a1`。`5 mm` 仍只是 branch census 尺，不是 adopted table margin。
+代签 system producer 的 artifact byte authority。2026-08-30 exact `e73247f8` 为
+`8 passed in 0.51 s`，system 生成 `24.435 s`，同路径 `--check` PASS，file SHA
+`67ff3946…b8882`。`5 mm` 仍只是 branch census 尺，不是 adopted table margin。
 
 ## Planner Unit Tests
 

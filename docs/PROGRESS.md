@@ -7,8 +7,8 @@
   excess。provisional 5 mm 尺下 `12/62` 在 `k=1` 通过，其余 `50`
   项到 `k=8` 仍无 admissible 分解；强行 cap 为 `412` rows/`6.54x`
   且仍失败。这是 branch candidate，`5 mm`/global NO-GO 均未采用，待独立复核。
-- Pod exact `584c05b7` 专项 `8 passed`，system producer `19.765 s`并二次
-  byte-check PASS；artifact SHA `d8cf045c…758a1`。component51/55/57 只作 heldout，
+- Pod exact `e73247f8` 专项 `8 passed`，system producer `24.435 s`并二次
+  byte-check PASS；artifact SHA `67ff3946…b8882`。component51/55/57 只作 heldout，
   不参与选 `k`。本软件分支未改 active run/GPU/consumer；详见
   [collision proxy 实验 §10](experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#10-2026-08-30-adaptive-multi-obb-全62-source-census-候选证据)。
 

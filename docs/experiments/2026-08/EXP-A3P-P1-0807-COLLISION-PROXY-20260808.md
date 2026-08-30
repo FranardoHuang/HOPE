@@ -543,15 +543,15 @@ authority 写近似 consumer。这是 branch-level 工程建议，不是已采�
 
 ### 10.4 Pod 证据和工具链边界
 
-code commit `584c05b72a2db3ab055f54d4bbaf293a0cca9530`，exact checkout
-`/workspace/franco/mktemp/adaptive-multiobb-584c05b7.exact`：
+code/docs commit `e73247f83cc0f3579dc36208b2839ecd317344b0`，exact checkout
+`/workspace/franco/mktemp/adaptive-multiobb-e73247f8.exact`：
 
 - pinned NumPy `1.26.4` / SciPy `1.11.4` 专项回归 `8 passed in 0.51 s`；
 - 仓库 v2 已采用的 system producer 路径
-  `PYTHONPATH=/usr/lib/python3/dist-packages /usr/bin/python3 -S` 生成耗时 `19.765 s`；
+  `PYTHONPATH=/usr/lib/python3/dist-packages /usr/bin/python3 -S` 生成耗时 `24.435 s`；
 - 同 exact checkout 的 `--check` 逐字节 PASS；artifact file SHA-256
-  `d8cf045cdc54a540daf6c3ca554320b4bc3acb68798ee5654cd957db408758a1`，content SHA-256
-  `735026cc95c86bed2223ea61eae133b930b3c759338f40cf1169332489f2e2d3`。
+  `67ff39468a193380899855cc6582470e6f0944e65376840b4b78c333a32b8882`，content SHA-256
+  `cabb229119417ea6163cc2e5da9d5955edba92f9ad7f5dd5113a8349334750b5`。
 
 另一个 Python/wheel build 虽然也报 NumPy/SciPy `1.26.4/1.11.4`，PCA 浮点字节仍不同；
 科学结论 `12 pass / 50 unresolved` 不变，但它不是 artifact authority。因此只认
