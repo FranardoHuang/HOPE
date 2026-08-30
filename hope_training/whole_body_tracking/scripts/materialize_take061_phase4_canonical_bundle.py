@@ -123,7 +123,35 @@ def _rebuild_noncyclic_schema2(*, q: np.ndarray, qd: np.ndarray,
     else:
         model = mujoco.MjModel.from_xml_path(str(model_path))
     body_names = schema2._read_body_order(body_order.resolve())
-    binding = schema2._bind_model(mujoco, model, body_names)
+    # A runtime scene may contain a second free joint for the ball.  Bind the
+    # robot root by the canonical first body instead of guessing "the only"
+    # free joint; every scalar joint/body is still resolved by exact name.
+    root_body_id = int(mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_BODY, body_names[0]
+    ))
+    free_ids = [jid for jid in range(int(model.njnt))
+                if int(model.jnt_type[jid]) == int(mujoco.mjtJoint.mjJNT_FREE)
+                and int(model.jnt_bodyid[jid]) == root_body_id]
+    if root_body_id < 0 or len(free_ids) != 1:
+        raise BundleError("runtime model does not have one free joint on canonical root body")
+    root_joint_id = int(free_ids[0])
+    joint_ids = [int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name))
+                 for name in schema2.RUNTIME_JOINT_NAMES]
+    body_ids = [int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name))
+                for name in body_names]
+    if min(joint_ids) < 0 or len(set(joint_ids)) != 31:
+        raise BundleError("runtime model does not close all 31 named joints")
+    if min(body_ids) < 0 or len(set(body_ids)) != 32:
+        raise BundleError("runtime model does not close canonical 32-body order")
+    binding = schema2._ModelBinding(
+        root_joint_id=root_joint_id, root_body_id=root_body_id,
+        root_qpos_adr=int(model.jnt_qposadr[root_joint_id]),
+        root_dof_adr=int(model.jnt_dofadr[root_joint_id]),
+        joint_ids=np.asarray(joint_ids, dtype=np.int64),
+        joint_qpos_adrs=np.asarray([model.jnt_qposadr[jid] for jid in joint_ids], dtype=np.int64),
+        joint_dof_adrs=np.asarray([model.jnt_dofadr[jid] for jid in joint_ids], dtype=np.int64),
+        body_ids=np.asarray(body_ids, dtype=np.int64),
+    )
     schema2._validate_joint_limits(model, binding, q)
     zeros = np.zeros((len(q), 3), dtype=np.float64)
     quat, quat_error = schema2._continuous_unit_quaternions(root_quat)
