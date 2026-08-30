@@ -1337,7 +1337,11 @@ def _prepare_and_settle(env, dones=None):
     return reveal, launch, due, deferred, missed
 
 
-def test_full_a_builder_failure_is_bitwise_zero_write():
+@pytest.mark.parametrize("mutation", (
+    "missing", "wrong_type", "wrong_dtype", "wrong_device",
+    "nonfinite", "invalid_positive", "invalid_integer",
+))
+def test_full_a_builder_failure_is_bitwise_zero_write(mutation):
     env = _host_full_a_lifecycle_env()
     fields = (
         "_full_a_scheduled_ordinal", "_full_a_next_reveal_tick",
@@ -1349,10 +1353,26 @@ def test_full_a_builder_failure_is_bitwise_zero_write():
     original = env._full_a_question_builder
     def fail(**kwargs):
         question = original(**kwargs)
-        del question["launch_state_f32"]
+        if mutation == "missing":
+            del question["launch_state_f32"]
+        elif mutation == "wrong_type":
+            question["teacher_rate"] = question["teacher_rate"].tolist()
+        elif mutation == "wrong_dtype":
+            question["teacher_rate"] = question["teacher_rate"].double()
+        elif mutation == "wrong_device":
+            if not torch.cuda.is_available():
+                pytest.skip("CUDA required for cross-device staged payload")
+            question["teacher_rate"] = question["teacher_rate"].cuda()
+        elif mutation == "nonfinite":
+            question["teacher_rate"] = question["teacher_rate"].clone()
+            question["teacher_rate"][0] = torch.nan
+        elif mutation == "invalid_positive":
+            question["teacher_rate"] = torch.zeros_like(question["teacher_rate"])
+        else:
+            question["ttc_ticks"] = question["ttc_ticks"].float()
         return question
     env._full_a_question_builder = fail
-    with pytest.raises(RuntimeError, match="staged fields differ"):
+    with pytest.raises(RuntimeError, match="portable centre"):
         env._full_a_settle_reveal(scheduled_due, torch.zeros(env.num_envs, dtype=torch.bool))
     for name in fields:
         assert torch.equal(getattr(env, name), before[name]), name
