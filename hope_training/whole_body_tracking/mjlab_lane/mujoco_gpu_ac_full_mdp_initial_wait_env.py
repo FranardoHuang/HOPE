@@ -190,6 +190,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._fullmdp_racket_root_id = int(
             self.mj_model.body_rootid[self._fullmdp_racket_body_id]
         )
+        self._fullmdp_ball_body_id = int(
+            self.mj_model.geom_bodyid[self._ball_gid]
+        )
         self._fullmdp_anchor_index = FULLMDP_TRACKED_BODY_NAMES.index(
             FULLMDP_ANCHOR_BODY_NAME
         )
@@ -1061,7 +1064,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         table_count = contact_census.ball_table_by_world
         active = self._epoch_phase.eq(FULL_A_PHASE_LAUNCH_SETTLED)
         first_contact = active & racket_count.gt(0) & ~self._full_a_racket_contact
-        center = self.sim.data.qpos[:, self.b_q : self.b_q + 3]
+        # MJWarp updates free-joint qpos during integration but refreshes the
+        # contact census, site transforms, and body transforms together at the
+        # next forward.  Classify the observed contact from that one derived
+        # snapshot; mixing post-integration qpos with the older census/site pose
+        # can move a valid near-edge hit across the strict safe-face boundary.
+        center = self.sim.data.xpos[:, self._fullmdp_ball_body_id]
         center_local = center - self.env.scene.env_origins
         site = self.sim.data.site_xpos[:, self.racket_sid]
         rotation = self.sim.data.site_xmat[:, self.racket_sid].reshape(

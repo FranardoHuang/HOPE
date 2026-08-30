@@ -1202,6 +1202,7 @@ def _host_full_a_lifecycle_env():
             data=SimpleNamespace(
                 qpos=qpos,
                 qvel=qvel,
+                xpos=qpos[:, 7:10].unsqueeze(1),
                 site_xpos=torch.tensor(
                     [[[0.0, -0.76, 1.05]], [[0.1, -0.76, 1.05]]]
                 ),
@@ -1211,6 +1212,7 @@ def _host_full_a_lifecycle_env():
             )
         ),
         racket_sid=0,
+        _fullmdp_ball_body_id=0,
         _fullmdp_racket_body_id=0,
         _fullmdp_racket_root_id=0,
         _fullmdp_racket_long_axis_local=torch.tensor(
@@ -5675,6 +5677,54 @@ def test_host_live_generic_contact_classifies_selected_and_opposite_once():
         wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward(dense_env)
     )
     assert torch.count_nonzero(repeated_terms[:, 10]) == 0
+
+
+def test_host_live_generic_contact_uses_same_forward_ball_pose_at_safe_edge():
+    env = _host_full_a_lifecycle_env()
+    _prepare_and_settle(env)
+    env.common_step_counter = 2
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env._con_geom = torch.tensor([[2, 1]], dtype=torch.long)
+    env._con_idx = torch.tensor([0])
+    env._nacon = torch.tensor([1], dtype=torch.long)
+    env._con_world = torch.tensor([0], dtype=torch.long)
+    env._ball_gid = 2
+    env._geom_class = torch.tensor([0, 1, 0], dtype=torch.int8)
+
+    same_forward_radius_m = 0.0435
+    post_integrated_radius_m = 0.0455
+    safe_radius_m = (
+        wait_env.racket_contact_geometry.SAFE_BALL_CENTER_TANGENTIAL_RADIUS_M
+    )
+    assert same_forward_radius_m < safe_radius_m < post_integrated_radius_m
+    center_x, center_z = (
+        wait_env.racket_contact_geometry.FACE_AREA_CENTER_XZ_FROM_SITE_M
+    )
+    site = env.sim.data.site_xpos[0, env.racket_sid]
+    same_forward_center = site + torch.tensor(
+        [center_x + same_forward_radius_m, 0.020, center_z]
+    )
+    post_integrated_center = site + torch.tensor(
+        [center_x + post_integrated_radius_m, 0.020, center_z]
+    )
+    # Break the host fixture's normal qpos/xpos view alias to reproduce
+    # MJWarp's post-step state: qpos has integrated ahead while derived body
+    # and site poses still describe the contact census' forward snapshot.
+    env.sim.data.xpos = env.sim.data.xpos.clone()
+    env.sim.data.xpos[0, env._fullmdp_ball_body_id] = same_forward_center
+    env.sim.data.qpos[0, env.b_q : env.b_q + 3] = post_integrated_center
+
+    wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_latch_ball_contacts(env)
+
+    assert bool(env._full_a_selected_contact_event[0])
+    assert not bool(env._full_a_edge_contact_event[0])
+    assert env._full_a_contact_classification_status[0] == (
+        wait_env.racket_contact_geometry.OBSERVED_RUBBER_STATUS_SELECTED
+    )
+    torch.testing.assert_close(
+        env._full_a_contact_center[0], same_forward_center, rtol=0.0, atol=0.0
+    )
 
 
 def test_host_full_a_second_net_crossing_cannot_upgrade_first_low_crossing():
