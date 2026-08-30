@@ -29,8 +29,6 @@ _SEGMENT_NAMES = (
     "env_step_total",
     "before_policy_step",
     "step_may_start_assert",
-    "manager_clock_capture",
-    "manager_clock_assert",
     "action_process",
     "action_apply",
     "scene_write_data_to_sim",
@@ -363,13 +361,6 @@ class FullMdpUpdateProfiler:
             (unwrapped, "step", "env_step_total", None),
             (unwrapped, "_before_policy_step", "before_policy_step", None),
             (unwrapped, "_assert_step_may_start", "step_may_start_assert", None),
-            (unwrapped, "_manager_clock_token", "manager_clock_capture", None),
-            (
-                unwrapped,
-                "_assert_manager_clock_token_unchanged",
-                "manager_clock_assert",
-                None,
-            ),
             (
                 unwrapped,
                 "_publish_post_physics_substep",
