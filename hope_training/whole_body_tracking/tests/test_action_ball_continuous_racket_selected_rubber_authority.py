@@ -1,12 +1,14 @@
-"""Focused contracts for the direct ActionEpoch selected-rubber view.
+"""Focused contracts for legacy and direct ActionEpoch selected-rubber views.
 
-The lean lane pulls an exact live Physical allocation during its launch
+The legacy token publisher remains fail-closed.  The lean ActionEpoch lane
+instead pulls an exact live Physical allocation directly during its launch
 transaction and joins it to Racket's cold mount-sign table without a caller
-mask, slot, digest, token registry, or host verdict.
+mask, slot, digest, or verdict.
 """
 
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 import importlib
 import inspect
@@ -17,10 +19,10 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import test_action_ball_continuous_racket_selected_reset as reset_test
+import test_action_ball_continuous_racket_observation_projection as obs_test
 
 
-HC = reset_test.HC
+HC = obs_test.HC
 
 
 def _load_scene_module():
@@ -645,6 +647,62 @@ def test_selected_rubber_mapping_is_device_only_and_marks_invalid_rows(device):
     )
 
 
+def _racket(*, committed: bool):
+    racket = HC.RacketTargetCommand.__new__(HC.RacketTargetCommand)
+    racket.num_envs = 2
+    racket.device = "cpu"
+    racket._action_ball_full_mdp_enabled = True
+    racket._action_ball_enabled = False
+    racket._action_ball_continuous_racket_poisoned = False
+    racket._action_ball_full_mdp_device_r05_owner = object()
+    racket._action_ball_continuous_racket_terminal_epoch_committed = committed
+    racket._action_ball_full_mdp_racket_physical_owner = object()
+    racket._action_ball_full_mdp_racket_selected_rubber_sequence = 0
+    racket._action_ball_full_mdp_racket_selected_rubber_token = None
+    racket._action_ball_full_mdp_racket_selected_rubber_view = None
+    return racket
+
+
+def test_capability_is_nonconstructible_and_unserializable():
+    token_type = HC.ActionBallFullMdpRacketSelectedRubberToken
+    with pytest.raises(TypeError, match="owner-issued"):
+        token_type()
+    token = object.__new__(token_type)
+    with pytest.raises(TypeError, match="cannot be copied"):
+        copy.copy(token)
+    with pytest.raises(TypeError, match="cannot be serialized"):
+        token.__reduce__()
+
+
+def test_production_publish_holds_before_any_mutation_without_real_accept():
+    racket = _racket(committed=False)
+    before = (
+        racket._action_ball_full_mdp_racket_selected_rubber_sequence,
+        racket._action_ball_full_mdp_racket_selected_rubber_token,
+        racket._action_ball_full_mdp_racket_selected_rubber_view,
+    )
+
+    with pytest.raises(
+        HC.ActionBallContinuousRacketSelectedRubberHold,
+        match="real Device-R05 ACCEPT",
+    ):
+        racket.publish_action_ball_full_mdp_selected_rubber_authority()
+
+    assert before == (
+        racket._action_ball_full_mdp_racket_selected_rubber_sequence,
+        racket._action_ball_full_mdp_racket_selected_rubber_token,
+        racket._action_ball_full_mdp_racket_selected_rubber_view,
+    )
+
+
+def test_production_publication_accepts_no_caller_identity_or_boolean():
+    method = HC.RacketTargetCommand.publish_action_ball_full_mdp_selected_rubber_authority
+    assert tuple(inspect.signature(method).parameters) == ("self",)
+    source = inspect.getsource(method)
+    for forbidden in ("projection_sha256", "_assert_async"):
+        assert forbidden not in source
+
+
 def test_direct_epoch_surface_has_no_caller_authority_or_host_verdict():
     method = (
         HC.RacketTargetCommand.
@@ -666,3 +724,110 @@ def test_direct_epoch_surface_has_no_caller_authority_or_host_verdict():
         assert forbidden not in source
     assert "epoch_owner.current()" not in source
     assert "epoch_owner.project_current_shot()" in source
+
+
+def _published_view(racket):
+    token_type = HC.ActionBallFullMdpRacketSelectedRubberToken
+    token = object.__new__(token_type)
+    active = torch.tensor([[True, False], [False, True]], dtype=torch.bool)
+    key = torch.zeros((2, 2, 32), dtype=torch.uint8)
+    key[0, 0, 0] = 1
+    key[1, 1, 0] = 2
+    generation = torch.tensor([[4, -1], [-1, 8]], dtype=torch.int64)
+    view = HC.ActionBallFullMdpRacketSelectedRubberView(
+        token=token,
+        racket_owner=racket,
+        publication_identity=object(),
+        publication_sequence=1,
+        physical_owner_mutation_version=9,
+        active_mask=active,
+        expected_rubber=torch.tensor([[0, -1], [-1, 1]], dtype=torch.int8),
+        full_key_sha256=key,
+        ball_generation=generation,
+        flight_slot=torch.tensor([[0, 1], [0, 1]], dtype=torch.int64),
+        reset_generation=torch.tensor([[1, 1], [2, 2]], dtype=torch.int64),
+        swing_generation=torch.tensor([[4, 4], [8, 8]], dtype=torch.int64),
+        action_uid=torch.tensor([[10, 10], [20, 20]], dtype=torch.int64),
+        action_slot=torch.tensor([[0, 0], [1, 1]], dtype=torch.int64),
+        task_receipt_sha256=key.clone(),
+    )
+    racket._action_ball_full_mdp_racket_selected_rubber_token = token
+    racket._action_ball_full_mdp_racket_selected_rubber_view = view
+    racket._action_ball_full_mdp_racket_physical_owner = SimpleNamespace(
+        scene_snapshot=lambda: SimpleNamespace(
+            owner_mutation_version=9,
+            published_to_runtime=active.clone(),
+            physically_parked=torch.zeros_like(active),
+            outcome_key_sha256=key.clone(),
+            ball_generation=generation.clone(),
+        )
+    )
+    return token, view
+
+
+def test_owned_view_is_clone_only_and_stale_physical_state_is_rejected():
+    racket = _racket(committed=True)
+    token, retained = _published_view(racket)
+
+    projected = (
+        racket.require_owned_action_ball_full_mdp_selected_rubber_authority(
+            token
+        )
+    )
+    projected.expected_rubber.fill_(1)
+    projected.full_key_sha256.zero_()
+    assert torch.equal(
+        retained.expected_rubber,
+        torch.tensor([[0, -1], [-1, 1]], dtype=torch.int8),
+    )
+    assert torch.count_nonzero(retained.full_key_sha256) == 2
+
+    racket._action_ball_full_mdp_racket_physical_owner.scene_snapshot = (
+        lambda: SimpleNamespace(
+            owner_mutation_version=10,
+            published_to_runtime=retained.active_mask.clone(),
+            physically_parked=torch.zeros_like(retained.active_mask),
+            outcome_key_sha256=retained.full_key_sha256.clone(),
+            ball_generation=retained.ball_generation.clone(),
+        )
+    )
+    with pytest.raises(
+        HC.ActionBallContinuousRacketSelectedRubberHold,
+        match="changed after publication",
+    ):
+        racket.require_owned_action_ball_full_mdp_selected_rubber_authority(
+            token
+        )
+
+
+def test_cuda_production_publish_holds_before_snapshot_or_token_mutation():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    racket = _racket(committed=True)
+    racket.device = "cuda:0"
+    calls = 0
+
+    def snapshot():
+        nonlocal calls
+        calls += 1
+        raise AssertionError("CUDA HOLD must precede Physical snapshot")
+
+    racket._action_ball_full_mdp_racket_physical_owner = SimpleNamespace(
+        scene_snapshot=snapshot
+    )
+    before = (
+        racket._action_ball_full_mdp_racket_selected_rubber_sequence,
+        racket._action_ball_full_mdp_racket_selected_rubber_token,
+        racket._action_ball_full_mdp_racket_selected_rubber_view,
+    )
+    with pytest.raises(
+        HC.ActionBallContinuousRacketSelectedRubberHold,
+        match="packed global boundary",
+    ):
+        racket.publish_action_ball_full_mdp_selected_rubber_authority()
+    assert calls == 0
+    assert before == (
+        racket._action_ball_full_mdp_racket_selected_rubber_sequence,
+        racket._action_ball_full_mdp_racket_selected_rubber_token,
+        racket._action_ball_full_mdp_racket_selected_rubber_view,
+    )

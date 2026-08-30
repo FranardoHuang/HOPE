@@ -75,6 +75,7 @@ _WRITTEN_FIELDS = (
     "_action_ball_swing_generation",
     "_action_ball_action_uid",
     "_action_ball_action_slot",
+    "_action_ball_continuous_racket_observation_scheduled_ordinal",
     "_action_ball_full_mdp_racket_ball_generation",
     "_action_ball_full_mdp_racket_outcome_shot_index",
     "_action_ball_full_mdp_racket_task_identity",
