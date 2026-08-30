@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Materialize one honest slow-motion Take061 exact-face diagnostic identity."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib.util
+import io
+import json
+from pathlib import Path
+import sys
+
+import numpy as np
+
+
+HERE = Path(__file__).resolve().parent
+MDP = HERE.parent / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp"
+KIND = "take061_slow_block_exact_face_phase4_v1"
+
+
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+P3 = _load("_take061_phase3_for_phase4", HERE / "solve_take061_joint_ball_phase3.py")
+P1 = P3.P1
+GEOMETRY = _load("_take061_exact_geometry_phase4", MDP / "racket_contact_geometry.py")
+
+
+def solve(args):
+    import mujoco
+    from scipy.spatial.transform import Rotation
+
+    source = json.loads(args.phase3_report.read_text())
+    if not source.get("admitted"):
+        raise P1.ProducerError("Phase-3 source must be continuous-solver admitted")
+    with np.load(args.phase3_npz, allow_pickle=False) as payload:
+        arrays = {key: np.asarray(payload[key]) for key in payload.files}
+    ready = P1._HIT._load_ready(args.dynamic_ready)
+    model = P1._load_model(mujoco, args.model)
+    data = mujoco.MjData(model)
+    _jids, qadr, _dadr, root_qadr, _root_dadr = P1._runtime_mapping(
+        mujoco, model, ready["names"]
+    )
+    site_id = P1._resolve_name(mujoco, model, mujoco.mjtObj.mjOBJ_SITE, P1.SITE_NAME)
+    qbase = np.asarray(model.qpos0, np.float64).copy()
+    qbase[root_qadr : root_qadr + 3] = ready["root_pos"]
+    qbase[root_qadr + 3 : root_qadr + 7] = ready["root_wxyz"]
+    qbase[qadr] = ready["ready"]
+    rotations = []
+    for q in np.asarray(arrays["q_ref"], np.float64):
+        _site, rotation = P1._fk(mujoco, model, data, qbase, qadr, q, site_id)
+        rotations.append(rotation)
+    rotations = np.asarray(rotations)
+    hit = int(args.hit_frame)
+    xyzw = Rotation.from_matrix(rotations[hit]).as_quat()
+    reference_quat = tuple(float(v) for v in (xyzw[3], xyzw[0], xyzw[1], xyzw[2]))
+    dt = float(source["selected"]["timewarp"]) / float(args.fps)
+    reference_omega = tuple(float(v) for v in Rotation.from_matrix(
+        rotations[hit + 1] @ rotations[hit - 1].T
+    ).as_rotvec() / (2.0 * dt))
+    site = np.asarray(arrays["racket_site"][hit], np.float64)
+    site_velocity = np.asarray(arrays["racket_velocity"][hit], np.float64)
+    raw_face = np.asarray(arrays["racket_face"][hit], np.float64)
+    ball_center = site + np.asarray(GEOMETRY.quat_rotate_wxyz(
+        reference_quat, GEOMETRY.ball_center_from_site_local(args.mount_normal_sign)
+    ))
+    center = {
+        "site_w_m": ball_center.tolist(),
+        "velocity_w_mps": site_velocity.tolist(),
+        "signed_face_w": raw_face.tolist(),
+    }
+    incoming = np.asarray(source["selected"]["incoming_ball_center"]["incoming_velocity_w_mps"])
+    aim = np.asarray(source["selected"]["incoming_ball_center"]["landing_aim_w_xy_m"])
+    replay = P3._solver_replay(center, incoming, aim, args)
+    if not replay.get("solver_admitted"):
+        raise P1.ProducerError("corrected ball center was rejected by continuous solver")
+    exact = GEOMETRY.solve_exact_face_contact(
+        ball_contact_w_m=ball_center.tolist(),
+        racket_face_center_velocity_w_mps=replay["racket_velocity_w_mps"],
+        solved_raw_a_normal_w=replay["signed_face_w"],
+        mount_normal_sign=args.mount_normal_sign,
+        reference_racket_quat_wxyz=reference_quat,
+        reference_racket_angular_velocity_w_radps=reference_omega,
+        reference_racket_site_speed_mps=float(np.linalg.norm(site_velocity)),
+        teacher_rate_min=args.teacher_rate_min,
+        teacher_rate_max=args.teacher_rate_max,
+    )
+    position_error = float(np.linalg.norm(np.asarray(exact.racket_site_target_w_m) - site))
+    velocity_error = float(np.linalg.norm(np.asarray(exact.racket_site_velocity_w_mps) - site_velocity))
+    plant = source["selected"]["plant"]
+    robust = bool(
+        plant["qdes_margin_min"] >= args.robust_qdes_margin_rad
+        and replay["velocity_error_mps"] <= args.robust_velocity_error_mps
+        and replay["face_error_deg"] <= args.robust_face_error_deg
+        and plant["table_distance_min_m"] >= args.table_clearance_m
+        and plant["torque_margin_min"] > 0.0
+        and plant["bilateral_support_frame_fraction"] >= 1.0
+    )
+    arrays.update({
+        "racket_quat_wxyz": np.asarray(reference_quat, np.float32),
+        "racket_omega_w_radps": np.asarray(reference_omega, np.float32),
+        "ball_center_w_m": ball_center.astype(np.float32),
+        "exact_racket_site_target_w_m": np.asarray(exact.racket_site_target_w_m, np.float32),
+        "exact_racket_site_velocity_w_mps": np.asarray(exact.racket_site_velocity_w_mps, np.float32),
+        "exact_racket_command_quat_wxyz": np.asarray(exact.racket_command_quat_wxyz, np.float32),
+    })
+    buffer = io.BytesIO(); np.savez_compressed(buffer, **arrays)
+    identity = hashlib.sha256(buffer.getvalue()).hexdigest()
+    report = {
+        "schema_version": 1, "kind": KIND, "diagnostic_unauthorized": True,
+        "new_action_identity_sha256": identity,
+        "exact_face_admitted": True, "robust_curriculum_center": robust,
+        "typed_reject_reasons": [] if robust else ["ROBUST_MARGIN_TARGETS_NOT_MET"],
+        "continuous_solver": replay,
+        "exact_face": {
+            "geometry_source_sha256": exact.geometry_source_sha256,
+            "ball_radius_m": GEOMETRY.BALL_RADIUS_M,
+            "mount_normal_sign": exact.mount_normal_sign,
+            "ball_center_w_m": ball_center.tolist(),
+            "reference_racket_quat_wxyz": list(reference_quat),
+            "reference_racket_angular_velocity_w_radps": list(reference_omega),
+            "racket_command_quat_wxyz": list(exact.racket_command_quat_wxyz),
+            "racket_command_angular_velocity_w_radps": list(exact.racket_command_angular_velocity_w_radps),
+            "racket_site_target_w_m": list(exact.racket_site_target_w_m),
+            "racket_site_velocity_w_mps": list(exact.racket_site_velocity_w_mps),
+            "teacher_rate": exact.teacher_rate,
+            "site_position_error_m": position_error,
+            "site_velocity_error_mps": velocity_error,
+        },
+        "plant": plant,
+        "timing": source["timing"],
+        "artifact_payloads": {"npz_sha256": identity},
+        "inputs": {name: {"path": str(path), "sha256": P1._sha256(path)} for name, path in (
+            ("phase3_report", args.phase3_report), ("phase3_npz", args.phase3_npz),
+            ("dynamic_ready", args.dynamic_ready), ("plant", args.model),
+            ("geometry", MDP / "racket_contact_geometry.py"),
+        )},
+        "non_claims": [
+            "not the old Take061 action identity", "not a runtime fixed tape",
+            "not policy, promotion, or deployment evidence",
+        ],
+    }
+    P1._write_no_replace(args.output_npz, buffer.getvalue())
+    P1._write_no_replace(args.output_report, P1._json_bytes(report))
+    return report
+
+
+def parser():
+    p = argparse.ArgumentParser()
+    for name in ("phase3-report", "phase3-npz", "dynamic-ready", "model", "output-report", "output-npz"):
+        p.add_argument("--" + name, type=Path, required=True)
+    p.add_argument("--ball-physics", type=Path, default=Path("configs/ball_physics_venue.yaml"))
+    p.add_argument("--hit-frame", type=int, default=48); p.add_argument("--fps", type=float, default=50.0)
+    p.add_argument("--mount-normal-sign", type=int, default=1)
+    p.add_argument("--teacher-rate-min", type=float, default=0.6); p.add_argument("--teacher-rate-max", type=float, default=1.0)
+    p.add_argument("--velocity-tolerance-mps", type=float, default=0.10); p.add_argument("--face-tolerance-deg", type=float, default=10.0)
+    p.add_argument("--robust-qdes-margin-rad", type=float, default=0.02)
+    p.add_argument("--robust-velocity-error-mps", type=float, default=0.08)
+    p.add_argument("--robust-face-error-deg", type=float, default=8.0)
+    p.add_argument("--table-clearance-m", type=float, default=0.02)
+    p.add_argument("--surface-z", type=float, default=0.78); p.add_argument("--net-x", type=float, default=1.87); p.add_argument("--net-top-z", type=float, default=0.9325)
+    return p
+
+
+def main():
+    report = solve(parser().parse_args()); print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+    return 0 if report["exact_face_admitted"] else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
