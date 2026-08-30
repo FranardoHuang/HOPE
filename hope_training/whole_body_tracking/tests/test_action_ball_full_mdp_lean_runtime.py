@@ -134,11 +134,19 @@ class _FailingR05(_R05):
 
 
 class _Racket:
+    _action_ball_full_mdp_command_metrics_device_enabled = True
+
     def __init__(self, calls):
         self.calls = calls
 
     def arm_action_ball_full_mdp_epoch_strike_fact(self):
         self.calls.append("racket")
+        return None
+
+    def materialize_action_ball_diagnostic_metrics_for_report(
+        self, *, expected_full_mdp_command_metric_steps=None
+    ):
+        del expected_full_mdp_command_metric_steps
         return None
 
 
@@ -328,7 +336,7 @@ def _owner(
         reward_graph=graph,
         r05_runtime=object() if r05 is None else r05,
         motion=object() if motion is None else motion,
-        racket=object() if racket is None else racket,
+        racket=_Racket([]) if racket is None else racket,
         physical_ball=object() if physical is None else physical,
         r06_landing_outcome=object() if r06 is None else r06,
         r03_strike_fact=object(),

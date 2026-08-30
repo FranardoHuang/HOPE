@@ -276,6 +276,93 @@ def _full_mdp_metric_host_snapshot(command):
     )
 
 
+def _full_mdp_metric_host_vector(command):
+    return tuple(
+        getattr(command, name)
+        for name in (
+            "_exact_n_acc", "_exact_pass_comp_acc", "_exact_pass_pos_acc",
+            "_exact_pass_vel_acc", "_exact_pass_5cm_acc", "_exact_pass_10cm_acc",
+            "_exact_pass_normal_acc", "_exact_pos_err_sum", "_exact_vel_err_sum",
+            "_exact_nrm_err_sum",
+        )
+    ) + tuple(
+        getattr(command, name)[0]
+        for name in (
+            "_exact_n_acc_c", "_exact_pass_pos_acc_c", "_exact_pass_vel_acc_c",
+            "_exact_pass_normal_acc_c", "_exact_pass_comp_acc_c",
+            "_exact_pos_err_sum_c", "_exact_vel_err_sum_c", "_exact_nrm_err_sum_c",
+        )
+    ) + tuple(
+        getattr(command, name)
+        for name in (
+            "_heading_expiry_sum_acc", "_heading_expiry_n_acc",
+            "_recovery_spawn_sum_acc", "_recovery_expiry_sum_acc",
+            "_recovery_n_acc",
+        )
+    )
+
+
+def _apply_full_mdp_metric_test_step(command, row, decay):
+    exact = command._action_ball_full_mdp_command_metric_row(
+        tuple(row[:18]), width=18
+    )
+    hold = command._action_ball_full_mdp_command_metric_row(
+        tuple(row[18:]), width=5
+    )
+    state = command._action_ball_full_mdp_command_metric_state
+    state[:10].mul_(decay).add_(exact[:10])
+    command._action_ball_full_mdp_command_metric_pending_row = exact
+    state[18:].mul_(decay)
+    state[10:18].mul_(decay).add_(
+        command._action_ball_full_mdp_command_metric_pending_row[10:18]
+    )
+    command._action_ball_full_mdp_command_metric_pending_row = None
+    state[18:].add_(hold)
+    command._action_ball_full_mdp_command_metric_step_count += 1
+
+
+def test_full_mdp_metric_two_round_h_plus_one_then_h_preserves_all_23_columns():
+    command = _full_mdp_metric_boundary_command(torch.device("cpu"))
+    command._action_ball_full_mdp_command_metric_state.zero_()
+    command._action_ball_full_mdp_command_metric_step_count = 0
+    decay = 0.99
+    rows = tuple(
+        torch.arange(1, 24, dtype=torch.float32) * float(index + 1)
+        + float(index) / 10.0
+        for index in range(5)
+    )
+    oracle = [0.0] * 23
+
+    def apply_and_update(row):
+        nonlocal oracle
+        _apply_full_mdp_metric_test_step(command, row, decay)
+        oracle = [
+            decay * previous + float(value)
+            for previous, value in zip(oracle, row)
+        ]
+
+    for row in rows[:3]:
+        apply_and_update(row)
+    assert command._action_ball_full_mdp_command_metric_step_count == 3
+    command._materialize_action_ball_full_mdp_command_metrics(3)
+    expected = torch.tensor(oracle, dtype=torch.float64)
+    assert torch.equal(command._action_ball_full_mdp_command_metric_state, expected)
+    assert _full_mdp_metric_host_vector(command) == tuple(oracle)
+    assert command._action_ball_full_mdp_command_metric_pending_row is None
+    assert command._action_ball_full_mdp_command_metric_step_count == 0
+
+    for row in rows[3:]:
+        apply_and_update(row)
+    assert command._action_ball_full_mdp_command_metric_step_count == 2
+    command._materialize_action_ball_full_mdp_command_metrics(2)
+    expected = torch.tensor(oracle, dtype=torch.float64)
+    assert torch.equal(command._action_ball_full_mdp_command_metric_state, expected)
+    assert _full_mdp_metric_host_vector(command) == tuple(oracle)
+    assert command._exact_composite_rate == oracle[1] / oracle[0]
+    assert command._action_ball_full_mdp_command_metric_pending_row is None
+    assert command._action_ball_full_mdp_command_metric_step_count == 0
+
+
 def test_full_mdp_metric_boundary_validates_before_host_mutation():
     command = _full_mdp_metric_boundary_command(torch.device("cpu"))
     before = _full_mdp_metric_host_snapshot(command)
@@ -408,12 +495,17 @@ def test_full_mdp_metric_hot_path_keeps_host_packets_off_active_branch():
     materialize = inspect.getsource(
         hope_commands_mod.RacketTargetCommand._materialize_action_ball_full_mdp_command_metrics
     )
-    assert update.index("command_metric_state[:10]") < update.index(
+    global_update = update.index("command_metric_state[:10]")
+    hold_decay = update.index("_decay_swing_accounting(decay)")
+    bucket_update = update.index("_full_mdp_state[10:18].mul_")
+    hold_add = update.index("_update_footwork_signals(pos_err)")
+    assert global_update < hold_decay < bucket_update < hold_add
+    assert global_update < update.index(
         "_batched_host_scalar_values(_exact_metric_tensors)"
     )
     assert hold.index("command_metric_state[18:].add_") < hold.index(
-        "_batched_host_scalar_values(metric_scalars)"
-    )
+        "command_metric_step_count += 1"
+    ) < hold.index("_batched_host_scalar_values(metric_scalars)")
     assert '.to(device="cpu", non_blocking=False)' in materialize
     assert "reciprocal" not in update
     assert update.index("_stage_action_ball_full_mdp_exact_pos_error") < update.index(

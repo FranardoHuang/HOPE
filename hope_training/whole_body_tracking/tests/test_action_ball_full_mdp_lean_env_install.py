@@ -708,6 +708,8 @@ class _TerminalResetManager(_ResetManager):
 class _SelectedResetLeafPort:
     """One leaf-local exact-method port; the real Lean owner coordinates."""
 
+    _action_ball_full_mdp_command_metrics_device_enabled = True
+
     def __init__(self, name, trace):
         self.name = name
         self.trace = trace
@@ -726,6 +728,12 @@ class _SelectedResetLeafPort:
     def action_ball_full_mdp_restore_physical_birth_controller_history(
         self, _env_ids
     ):
+        return None
+
+    def materialize_action_ball_diagnostic_metrics_for_report(
+        self, *, expected_full_mdp_command_metric_steps=None
+    ):
+        del expected_full_mdp_command_metric_steps
         return None
 
     def prepare_action_ball_continuous_motion_selected_reset(self, _prepared):

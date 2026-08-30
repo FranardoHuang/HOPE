@@ -166,6 +166,22 @@ class ActionBallFullMdpLeanRuntimeOwner:
             )
         self._reward_graph_identity = reward_graph
 
+        command_metric_enabled = getattr(
+            racket,
+            "_action_ball_full_mdp_command_metrics_device_enabled",
+            None,
+        )
+        self._command_metric_enabled_at_construction = command_metric_enabled
+        self._command_metric_racket_at_construction = racket
+        self._command_metric_materializer_at_construction = (
+            self._bound_plain_method(
+                racket,
+                "materialize_action_ball_diagnostic_metrics_for_report",
+            )
+            if type(command_metric_enabled) is bool and command_metric_enabled is True
+            else None
+        )
+
         self._ppo_drain = self
         self._next_update_index = 0
         self._operation_sequence = 0
@@ -719,6 +735,49 @@ class ActionBallFullMdpLeanRuntimeOwner:
         # mint a second environment authority at every control/update boundary.
         return self._reward_graph_identity
 
+    def _command_metric_materializer(self):
+        """Return the exact construction-bound metric owner or fail closed."""
+
+        enabled = getattr(
+            self._racket,
+            "_action_ball_full_mdp_command_metrics_device_enabled",
+            None,
+        )
+        retained = self._command_metric_materializer_at_construction
+        if (
+            self._racket is not self._command_metric_racket_at_construction
+            or self._command_metric_enabled_at_construction is not True
+            or type(enabled) is not bool
+            or enabled is not True
+        ):
+            raise ActionBallFullMdpLeanRuntimeError(
+                "construction-bound command metric enabled state changed"
+            )
+        current = self._bound_plain_method(
+            self._racket,
+            "materialize_action_ball_diagnostic_metrics_for_report",
+        )
+        if (
+            getattr(current, "__self__", None) is not getattr(retained, "__self__", None)
+            or getattr(current, "__func__", None) is not getattr(retained, "__func__", None)
+        ):
+            raise ActionBallFullMdpLeanRuntimeError(
+                "construction-bound command metric materializer identity changed"
+            )
+        return retained
+
+    def _abort_pre_materialization_drain_and_poison_locked(
+        self, *, start: int, end: int, reason: str
+    ) -> None:
+        """Release one exact frozen window before making the failure sticky."""
+
+        clean = reason
+        try:
+            self._epoch.abort_drain(start=start, end=end)
+        except BaseException as exc:
+            clean += "; pre-materialize abort failed: " + type(exc).__name__
+        self._poison_locked(clean)
+
     def prepare_pre_optimizer_ppo_boundary(
         self,
         *,
@@ -779,39 +838,56 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     )
 
                 start, end = self._epoch.prepare_drain()
-                if start != self._acked_commit_end:
-                    self._poison_locked(
-                        "epoch drain start differs from the ACKed frontier"
-                    )
-                    raise ActionBallFullMdpLeanRuntimeError(
-                        "epoch drain start differs from the ACKed frontier"
-                    )
-                if getattr(self._racket, "_action_ball_full_mdp_command_metrics_device_enabled", False) is True:
+                pre_materialization_failure = (
+                    "pre-materialization optimizer boundary failed"
+                )
+                try:
+                    if start != self._acked_commit_end:
+                        pre_materialization_failure = (
+                            "epoch drain start differs from the ACKed frontier"
+                        )
+                        raise ActionBallFullMdpLeanRuntimeError(
+                            pre_materialization_failure
+                        )
                     completed_delta = completed - self._last_completed_environment_steps
                     if completed_delta % self._epoch.num_envs:
-                        self._poison_locked("command metric PPO span is not whole steps")
-                        raise ActionBallFullMdpLeanRuntimeError(
+                        pre_materialization_failure = (
                             "command metric PPO span is not whole steps"
                         )
+                        raise ActionBallFullMdpLeanRuntimeError(
+                            pre_materialization_failure
+                        )
+                    pre_materialization_failure = (
+                        "command metric boundary binding differs"
+                    )
+                    materializer = self._command_metric_materializer()
                     try:
-                        result = self._bound_plain_method(
-                            self._racket,
-                            "materialize_action_ball_diagnostic_metrics_for_report",
-                        )(
+                        result = materializer(
                             expected_full_mdp_command_metric_steps=(
                                 completed_delta // self._epoch.num_envs
                                 + int(update == 0)
                             )
                         )
                     except BaseException as exc:
-                        self._poison_locked("command metric materialization failed: "
-                                            + type(exc).__name__)
+                        pre_materialization_failure = (
+                            "command metric materialization failed: "
+                            + type(exc).__name__
+                        )
                         raise
                     if result is not None:
-                        self._poison_locked("command metric materializer returned a value")
-                        raise ActionBallFullMdpLeanRuntimeError(
+                        pre_materialization_failure = (
                             "command metric materializer returned a value"
                         )
+                        raise ActionBallFullMdpLeanRuntimeError(
+                            pre_materialization_failure
+                        )
+                except BaseException:
+                    self._abort_pre_materialization_drain_and_poison_locked(
+                        start=start,
+                        end=end,
+                        reason=pre_materialization_failure,
+                    )
+                    raise
                 boundary = _OptimizerBoundary()
                 self._active_boundary = boundary
                 self._active_update_index = update

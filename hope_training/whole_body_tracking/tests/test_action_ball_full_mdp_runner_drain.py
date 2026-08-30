@@ -275,6 +275,7 @@ def _lean_owner(
     )
     rewards = sys.modules["action_ball_full_mdp_lean_rewards"]
     graph = rewards.LeanActionEpochRewardGraph(epoch_owner=epoch_owner)
+    command_metric_probe = _CommandMetricBoundaryProbe()
     owner = lean.ActionBallFullMdpLeanRuntimeOwner(
         env=env,
         runtime_lease=env.action_ball_full_mdp_runtime_lease,
@@ -282,12 +283,13 @@ def _lean_owner(
         reward_graph=graph,
         r05_runtime=object(),
         motion=object(),
-        racket=object(),
+        racket=command_metric_probe,
         physical_ball=object(),
         r06_landing_outcome=object(),
         r03_strike_fact=object(),
         r07_recovery=object(),
     )
+    command_metric_probe.owner = owner
     env._drain_owner = owner
     env._action_ball_full_mdp_lean_reward_graph = graph
     action, _action_env, asset = _action_and_env(
@@ -448,9 +450,10 @@ def _prepare_pending_epoch_summary(runner_module, owner, runner):
 class _CommandMetricBoundaryProbe:
     _action_ball_full_mdp_command_metrics_device_enabled = True
 
-    def __init__(self, owner, failure=None):
+    def __init__(self, owner=None, failure=None, return_value=None):
         self.owner = owner
         self.failure = failure
+        self.return_value = return_value
         self.calls = []
         self.saw_prepared_epoch = False
 
@@ -458,17 +461,20 @@ class _CommandMetricBoundaryProbe:
         self, *, expected_full_mdp_command_metric_steps=None
     ):
         self.calls.append(expected_full_mdp_command_metric_steps)
-        self.saw_prepared_epoch = self.owner.epoch_owner._pending_drain is not None
+        self.saw_prepared_epoch = (
+            self.owner is not None
+            and self.owner.epoch_owner._pending_drain is not None
+        )
         if self.failure is not None:
             raise self.failure
+        return self.return_value
 
 
 def test_command_metric_boundary_runs_after_epoch_prepare_and_counts_genesis(
     runner_module,
 ):
     owner, _env, _lean, _epoch = _lean_owner(runner_module, [])
-    probe = _CommandMetricBoundaryProbe(owner)
-    owner._racket = probe
+    probe = owner._racket
 
     owner.prepare_pre_optimizer_ppo_boundary(
         update_index=0, completed_environment_steps=4
@@ -478,23 +484,120 @@ def test_command_metric_boundary_runs_after_epoch_prepare_and_counts_genesis(
     assert probe.saw_prepared_epoch is True
 
 
-def test_command_metric_boundary_failure_is_sticky_and_not_retried(runner_module):
-    owner, _env, _lean, _epoch = _lean_owner(runner_module, [])
-    probe = _CommandMetricBoundaryProbe(owner, RuntimeError("metric failure"))
-    owner._racket = probe
+def test_command_metric_boundary_failure_aborts_then_poison_is_sticky(runner_module):
+    owner, _env, _lean, epoch = _lean_owner(runner_module, [])
+    probe = owner._racket
+    probe.failure = RuntimeError("metric failure")
+    milestone_before = tuple(value.clone() for value in epoch.milestone.pack_views())
+    aborts = []
+    original_abort = epoch.abort_drain
 
+    def abort(*, start, end):
+        aborts.append((start, end, owner.poisoned))
+        return original_abort(start=start, end=end)
+
+    epoch.abort_drain = abort
     with pytest.raises(RuntimeError, match="metric failure"):
         owner.prepare_pre_optimizer_ppo_boundary(
             update_index=0, completed_environment_steps=4
         )
     assert probe.calls == [3]
     assert probe.saw_prepared_epoch is True
+    assert aborts == [(0, 1, False)]
+    assert epoch._pending_drain is None
+    assert epoch._pending_drain_materialized is False
+    assert epoch.milestone._frozen is False
+    assert all(
+        torch.equal(before, after)
+        for before, after in zip(milestone_before, epoch.milestone.pack_views())
+    )
     assert owner.poisoned is True
     with pytest.raises(RuntimeError, match="retry is forbidden"):
         owner.prepare_pre_optimizer_ppo_boundary(
             update_index=0, completed_environment_steps=4
         )
     assert probe.calls == [3]
+
+
+@pytest.mark.parametrize("drift", ("missing", "false", "integer", "replacement"))
+def test_command_metric_enabled_binding_drift_aborts_without_calling(
+    runner_module, monkeypatch, drift
+):
+    owner, _env, _lean, epoch = _lean_owner(runner_module, [])
+    probe = owner._racket
+    if drift == "missing":
+        monkeypatch.delattr(
+            type(probe), "_action_ball_full_mdp_command_metrics_device_enabled"
+        )
+    elif drift == "false":
+        probe._action_ball_full_mdp_command_metrics_device_enabled = False
+    elif drift == "integer":
+        probe._action_ball_full_mdp_command_metrics_device_enabled = 1
+    else:
+        owner._racket = _CommandMetricBoundaryProbe(owner)
+
+    with pytest.raises(RuntimeError, match="enabled state changed"):
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=4
+        )
+    assert probe.calls == []
+    assert epoch._pending_drain is None
+    assert epoch.milestone._frozen is False
+    assert owner.poisoned is True
+
+
+@pytest.mark.parametrize("failure", ("non_whole_span", "non_none_return"))
+def test_command_metric_pre_materialization_rejection_aborts_frozen_epoch(
+    runner_module, failure
+):
+    owner, _env, _lean, epoch = _lean_owner(runner_module, [])
+    probe = owner._racket
+    completed = 4
+    expected = "returned a value"
+    if failure == "non_whole_span":
+        completed = 3
+        expected = "not whole steps"
+    else:
+        probe.return_value = object()
+
+    with pytest.raises(RuntimeError, match=expected):
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=completed
+        )
+    assert epoch._pending_drain is None
+    assert epoch._pending_drain_materialized is False
+    assert epoch.milestone._frozen is False
+    assert owner.poisoned is True
+
+
+def test_command_metric_materializer_binding_drift_aborts_without_calling(
+    runner_module,
+):
+    owner, _env, _lean, epoch = _lean_owner(runner_module, [])
+    probe = owner._racket
+    probe.materialize_action_ball_diagnostic_metrics_for_report = lambda **_kwargs: None
+
+    with pytest.raises(RuntimeError, match="lacks exact"):
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=4
+        )
+    assert probe.calls == []
+    assert epoch._pending_drain is None
+    assert epoch.milestone._frozen is False
+    assert owner.poisoned is True
+
+
+def test_command_metric_runner_counts_genesis_only_in_first_of_two_rounds(
+    runner_module,
+):
+    owner, env, _lean, _epoch = _lean_owner(runner_module, [])
+    probe = owner._racket
+    runner, _ = _diagnostic_runner(runner_module, owner, [], env=env)
+
+    runner.learn(2)
+
+    assert probe.calls == [3, 2]
+    assert probe.saw_prepared_epoch is True
 
 
 def _durable_wal_path(runner):

@@ -52,6 +52,8 @@ def _raw_bytes(value):
 
 
 class _Racket:
+    _action_ball_full_mdp_command_metrics_device_enabled = True
+
     def __init__(self):
         self._action_ball_strike_fact_exact_eligibility = torch.ones(
             2, dtype=torch.bool
@@ -61,6 +63,12 @@ class _Racket:
     def require_active_action_epoch_r03_writer(self):
         if not self.active:
             raise RuntimeError("R03 writer is inactive")
+
+    def materialize_action_ball_diagnostic_metrics_for_report(
+        self, *, expected_full_mdp_command_metric_steps=None
+    ):
+        del expected_full_mdp_command_metric_steps
+        return None
 
 
 @contextmanager
