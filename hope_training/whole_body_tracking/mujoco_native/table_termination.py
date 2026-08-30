@@ -1,7 +1,7 @@
 """Exact native-MuJoCo port of the Isaac ActionBall robot/table guard.
 
-The Isaac rule is a pose keep-out, not a resolved-contact test: 62 pinned robot
-collision-component OBBs and one live racket-blade OBB are compared with the
+The Isaac rule is a pose keep-out, not a resolved-contact test: 63 pinned robot
+proxy OBBs for 62 collision meshes and one live racket-blade OBB are compared with the
 five inflated table-assembly AABBs at every physics substep.  Broadening each
 OBB to a world AABB is only the PREFILTER; the verdict is the exact 15-axis
 separating-axis test.  This module consumes the same immutable component
@@ -68,6 +68,7 @@ ISAAC_TERMINATION_CALLABLE_SELECTORS = (
     ("assignment", "_A3_COLLISION_PROXY_ASSET_HASH_EXCLUDED_CONFIG_KEYS"),
     ("assignment", "_A3_COLLISION_PROXY_PLANT_IDENTITY_KIND"),
     ("assignment", "_A3_COLLISION_PROXY_PLANT_ASSET_ROOT_NAME"),
+    ("assignment", "_A3_COLLISION_PROXY_SOURCE_COMPONENT_COUNT"),
     ("assignment", "_A3_COLLISION_PROXY_COMPONENT_COUNT"),
     ("assignment", "_A3_COLLISION_PROXY_LEFT_GRIPPER_SOURCE_LINKS"),
     ("assignment", "_A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256"),
@@ -117,12 +118,13 @@ EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256 = (
 COLLISION_PROXY_ARTIFACT = (
     REPO_ROOT
     / "configs/a3_table_collision_proxy_a3p0807_20260808/"
-    "a3_table_collision_components.v1.json"
+    "a3_table_collision_components.v2.json"
 )
 EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256 = (
-    "896a5c96f5e16f266067841d72c1009e058eccf42850fff2f1c22ee46bda8b96"
+    "66b3ddc4b6a158ffc92172a313dd147f74994ebcddafa98363a7986112f72918"
 )
-EXPECTED_COLLISION_PROXY_COMPONENT_COUNT = 62
+EXPECTED_COLLISION_PROXY_SOURCE_COMPONENT_COUNT = 62
+EXPECTED_COLLISION_PROXY_COMPONENT_COUNT = 63
 ##
 # Plant identity for the collision proxy.
 #
@@ -185,7 +187,7 @@ EXPECTED_RUNTIME_USD_FILES = [
     },
 ]
 EXPECTED_ISAACLAB_ASSET_HASH = "676efde5febed3c0fde0f2ad59650cdf"
-EXPECTED_PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v1"
+EXPECTED_PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v2"
 EXPECTED_PLANT_ASSET_ROOT_NAME = "agibot_a3p_p1_0807_v1"
 ASSET_HASH_EXCLUDED_CONFIG_KEYS = ("asset_path", "usd_dir", "usd_file_name")
 # The 20 OmniPicker3 left-gripper collision links the 0807 plant introduces.
@@ -1076,8 +1078,9 @@ def _load_collision_components_cached(
     if not isinstance(document, dict):
         raise TableTerminationContractError("collision proxy root must be an object")
     if (
-        document.get("schema_version") != 1
-        or document.get("artifact_type") != "a3_table_collision_component_obb_v1"
+        document.get("schema_version") != 2
+        or document.get("artifact_type")
+        != "a3_table_collision_component_multi_obb_v2"
         or tuple(document.get("body_order", ())) != TABLE_CONTACT_BODY_NAMES
     ):
         raise TableTerminationContractError(
@@ -1104,6 +1107,8 @@ def _load_collision_components_cached(
         or len(components) != EXPECTED_COLLISION_PROXY_COMPONENT_COUNT
         or document.get("component_count")
         != EXPECTED_COLLISION_PROXY_COMPONENT_COUNT
+        or document.get("source_component_count")
+        != EXPECTED_COLLISION_PROXY_SOURCE_COMPONENT_COUNT
     ):
         raise TableTerminationContractError(
             "collision proxy must contain "

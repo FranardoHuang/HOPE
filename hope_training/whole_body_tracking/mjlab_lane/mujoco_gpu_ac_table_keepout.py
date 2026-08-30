@@ -1,6 +1,6 @@
 """Device-resident port of the exact Isaac robot/table pose guard.
 
-Construction binds the tracked plant, 62 collision-component OBBs, and canonical
+Construction binds the tracked plant, 63 proxy OBBs for 62 collision meshes, and canonical
 five-box table assembly. CUDA sampling is one fixed-shape Warp SAT launch with no
 host readback; Torch remains only as the dependency-light CPU test oracle.
 """
@@ -36,6 +36,10 @@ if (Path(_authority.__file__).resolve(), _authority.REPO_ROOT.resolve()) != (
     _WBT_ROOT / "mujoco_native/table_termination.py", _REPO
 ):
     raise RuntimeError("MuJoCo table keepout authority resolved outside this tree")
+
+_PROXY_COMPONENT_COUNT = _authority.EXPECTED_COLLISION_PROXY_COMPONENT_COUNT
+_TOTAL_GUARD_OBB_COUNT = _PROXY_COMPONENT_COUNT + 1
+_RACKET_BLADE_INDEX = _PROXY_COMPONENT_COUNT
 
 
 def _load_table_scene():
@@ -426,15 +430,15 @@ if _wp is not None:
                 output[env] = True
                 return
 
-        # Components 0..61 and the blade at 62 share one exact SAT path.  This
+        # Proxy rows and the final blade row share one exact SAT path.  This
         # preserves the authority order and permits an environment-local return
         # as soon as the first table box is hit.
-        for obb in range(63):
+        for obb in range(_TOTAL_GUARD_OBB_COUNT):
             local_body = racket_body_index
             local_center = blade_center_offset[0]
             local_axes = blade_local_half_axes[0]
             broad_guard = 0.0
-            if obb < 62:
+            if obb < _PROXY_COMPONENT_COUNT:
                 local_body = int(component_owner_indices[obb])
                 local_center = component_local_centers[obb]
                 local_axes = component_local_half_axes[obb]
@@ -507,12 +511,12 @@ if _wp is not None:
                 winner_i64[2] = _wp.int64(local_body)
                 winner_i64[3] = _wp.int64(3)
                 return
-        for obb in range(63):
+        for obb in range(_TOTAL_GUARD_OBB_COUNT):
             local_body = racket_body_index
             local_center = blade_center_offset[0]
             local_axes = blade_local_half_axes[0]
             broad_guard = 0.0
-            if obb < 62:
+            if obb < _PROXY_COMPONENT_COUNT:
                 local_body = int(component_owner_indices[obb])
                 local_center = component_local_centers[obb]
                 local_axes = component_local_half_axes[obb]
@@ -637,9 +641,9 @@ def _validate_cuda_static_inputs(
     expected = {
         "env_origins": (env_count, 3),
         "body_ids": (32,),
-        "component_owner_indices": (62,),
-        "component_local_centers": (62, 3),
-        "component_local_half_axes": (62, 3, 3),
+        "component_owner_indices": (_PROXY_COMPONENT_COUNT,),
+        "component_local_centers": (_PROXY_COMPONENT_COUNT, 3),
+        "component_local_half_axes": (_PROXY_COMPONENT_COUNT, 3, 3),
         "table_lo": (5, 3),
         "table_hi": (5, 3),
         "blade_center_offset": (3,),
@@ -789,7 +793,11 @@ def geometric_robot_table_hit_mask(
 def _host_test_first_overlap_index(exact: torch.Tensor) -> tuple[int, int]:
     """CPU-test oracle for the CUDA witness's component-major winner order."""
 
-    if exact.device.type != "cpu" or exact.dtype != torch.bool or exact.shape != (63, 5):
+    if (
+        exact.device.type != "cpu"
+        or exact.dtype != torch.bool
+        or exact.shape != (_TOTAL_GUARD_OBB_COUNT, 5)
+    ):
         raise RuntimeError("keepout witness test matrix differs")
     positive = torch.nonzero(exact.reshape(-1), as_tuple=False).reshape(-1)
     if positive.numel() == 0:
@@ -1017,13 +1025,13 @@ class DeviceExactTableKeepout:
         )
         reason = _diagnostic_witness_reason(reason_code, owner_index)
         if (
-            not 0 <= component_index < 63
+            not 0 <= component_index < _TOTAL_GUARD_OBB_COUNT
             or not 0 <= table_index < len(_authority.TABLE_ASSEMBLY_ROLES)
             or not 0 <= owner_index < len(_authority.TABLE_CONTACT_BODY_NAMES)
             or not bool(torch.isfinite(values).all().item())
         ):
             raise RuntimeError("positive keepout has no finite SAT witness")
-        is_blade = component_index == 62
+        is_blade = component_index == _RACKET_BLADE_INDEX
         component_id = (
             "racket_blade" if is_blade
             else self._component_ids[component_index]

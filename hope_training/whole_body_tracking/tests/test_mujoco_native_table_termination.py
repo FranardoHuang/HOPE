@@ -56,6 +56,56 @@ def test_component_ids_are_immutable_output_of_the_verified_artifact_parse(
     assert components.component_ids == ids
 
 
+def test_measured_hand_racket_empty_corner_is_removed_with_five_mm_reserve():
+    """The 2026-08-30 component-55 witness must not survive multi-OBB v2.
+
+    The old single OBB overlapped the 20 mm-expanded top by 1.018 mm while the
+    raw mesh was 72.239 mm clear.  Expanding the same top by another 5 mm makes
+    this stricter than merely flipping that one float at the boundary.
+    """
+
+    components = term.load_collision_components()
+    prefix = (
+        "right_wrist_yaw_Link:right_hand_pingpang_Link:0:"
+        "right_hand_pingpang_link.stl#obb"
+    )
+    indices = [
+        index
+        for index, component_id in enumerate(components.component_ids)
+        if component_id.startswith(prefix)
+    ]
+    assert len(indices) == 2
+    position = np.asarray(
+        (0.48873046040534973, -0.3085661232471466, 0.8546353578567505),
+        dtype=np.float64,
+    )
+    rotation = np.asarray(
+        (
+            (0.7995978941042668, 0.5942553647025152, 0.0866242995140657),
+            (0.2508197392634858, -0.46152899030889716, 0.8509291683214575),
+            (0.5456488487478177, -0.6586740868037324, -0.5180885843496753),
+        ),
+        dtype=np.float64,
+    )
+    local_centers = components.local_centers_m[indices]
+    local_axes = components.local_half_axes_m[indices]
+    centers = position[None, :] + np.einsum(
+        "ij,cj->ci", rotation, local_centers
+    )
+    axes = np.einsum("ij,ckj->cki", rotation, local_axes)
+    # Existing 20 mm top bounds, then another 5 mm on every face.
+    lo = np.asarray(((0.475, -0.7875, 0.685),), dtype=np.float64)
+    hi = np.asarray(((3.265, 0.7875, 0.785),), dtype=np.float64)
+    exact = term._obb_aabb_sat_overlap(
+        centers,
+        axes,
+        lo,
+        hi,
+        np.ones((2, 1), dtype=bool),
+    )
+    assert not bool(np.any(exact))
+
+
 def test_numpy_guard_matches_inclusive_exact_and_nonfinite_semantics():
     positions = np.full((32, 3), 10.0, dtype=np.float64)
     rotations = np.tile(np.eye(3, dtype=np.float64), (32, 1, 1))

@@ -56,9 +56,10 @@ _A3_COLLISION_PROXY_ASSET_HASH_EXCLUDED_CONFIG_KEYS = (
     "usd_dir",
     "usd_file_name",
 )
-_A3_COLLISION_PROXY_PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v1"
+_A3_COLLISION_PROXY_PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v2"
 _A3_COLLISION_PROXY_PLANT_ASSET_ROOT_NAME = "agibot_a3p_p1_0807_v1"
-_A3_COLLISION_PROXY_COMPONENT_COUNT = 62
+_A3_COLLISION_PROXY_SOURCE_COMPONENT_COUNT = 62
+_A3_COLLISION_PROXY_COMPONENT_COUNT = 63
 # The 20 OmniPicker3 left-gripper collision links.  The 0409 plant carried one
 # coarse ``left_hand_link`` placeholder box here; the 0807 plant carries the
 # real gripper, and its volume enters this guard for the first time.  Naming
@@ -1445,9 +1446,9 @@ def _load_table_collision_proxy_artifact(
             "robot_hit_table collision proxy artifact must be one JSON object"
         )
     if (
-        document.get("schema_version") != 1
+        document.get("schema_version") != 2
         or document.get("artifact_type")
-        != "a3_table_collision_component_obb_v1"
+        != "a3_table_collision_component_multi_obb_v2"
         or tuple(document.get("body_order", ())) != expected_body_names
     ):
         raise RuntimeError(
@@ -1536,6 +1537,8 @@ def _load_table_collision_proxy_artifact(
         not isinstance(components, list)
         or len(components) != _A3_COLLISION_PROXY_COMPONENT_COUNT
         or document.get("component_count") != len(components)
+        or document.get("source_component_count")
+        != _A3_COLLISION_PROXY_SOURCE_COMPONENT_COUNT
     ):
         raise RuntimeError(
             "robot_hit_table collision proxy component count is malformed"

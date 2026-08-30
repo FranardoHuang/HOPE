@@ -99,7 +99,7 @@ def test_the_real_0807_proxy_is_accepted_by_the_isaac_gate(term_mod):
     owners, centers, axes = term_mod._load_table_collision_proxy_artifact(
         str(REPO / COLLISION_PROXY_PATH), COLLISION_PROXY_SHA256, tuple(BODIES)
     )
-    assert len(owners) == len(centers) == len(axes) == 62
+    assert len(owners) == len(centers) == len(axes) == 63
     assert set(owners) == set(range(32))
 
 
@@ -108,7 +108,7 @@ def test_the_real_0807_proxy_is_accepted_by_the_mujoco_gate():
 
     term._load_collision_components_cached.cache_clear()
     components = term.load_collision_components()
-    assert components.owner_indices.shape == (62,)
+    assert components.owner_indices.shape == (63,)
     assert components.artifact_sha256 == (
         term.EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256
     )
@@ -152,10 +152,14 @@ def _restamped_0409_document() -> dict:
     live = _live_document()
     forged = dict(retired)
     for key in (
+        "schema_version",
+        "artifact_type",
         "source_urdf",
         "runtime_usd_bundle",
         "plant_identity",
         "left_gripper_source_links",
+        "decomposition",
+        "source_component_count",
     ):
         forged[key] = live[key]
     return forged
@@ -188,7 +192,7 @@ def test_restamped_0409_proxy_is_refused_by_the_mujoco_gate_too(tmp_path):
 
     path, sha = _write(tmp_path, _restamped_0409_document(), "mj_forged.json")
     term._load_collision_components_cached.cache_clear()
-    with pytest.raises(term.TableTerminationContractError, match="62 components"):
+    with pytest.raises(term.TableTerminationContractError, match="63 components"):
         term._load_collision_components_cached(path, sha)
     term._load_collision_components_cached.cache_clear()
 
@@ -198,15 +202,15 @@ def test_restamped_0409_proxy_survives_the_count_check_and_dies_on_the_gripper(
 ):
     """Strip the count check's help; the semantic requirement must stand alone.
 
-    A reviewer will reasonably ask whether 62-vs-43 is the only thing catching
+    A reviewer will reasonably ask whether 63-vs-43 is the only thing catching
     the forged 0409 document.  It is not: padding the retired geometry back up
-    to 62 rows still leaves the twenty gripper links absent.
+    to 63 rows still leaves the twenty gripper links absent.
     """
 
     forged = _restamped_0409_document()
     filler = dict(forged["components"][0])
     padded = list(forged["components"])
-    while len(padded) < 62:
+    while len(padded) < 63:
         clone = dict(filler)
         clone["component_id"] = f"zzz_pad_{len(padded):03d}"
         padded.append(clone)
@@ -278,7 +282,7 @@ def test_dropping_only_the_twenty_gripper_components_is_refused(
     term_mod, tmp_path
 ):
     trimmed = _without_gripper(_live_document(), also_drop_declaration=False)
-    assert trimmed["component_count"] == 42
+    assert trimmed["component_count"] == 43
     path, sha = _write(tmp_path, trimmed)
     with pytest.raises(RuntimeError, match="component count is malformed"):
         term_mod._load_table_collision_proxy_artifact(path, sha, tuple(BODIES))
@@ -292,7 +296,7 @@ def test_dropping_the_gripper_and_padding_the_count_back_is_still_refused(
     trimmed = _without_gripper(_live_document(), also_drop_declaration=True)
     filler = dict(trimmed["components"][0])
     padded = list(trimmed["components"])
-    while len(padded) < 62:
+    while len(padded) < 63:
         clone = dict(filler)
         clone["component_id"] = f"zzz_pad_{len(padded):03d}"
         padded.append(clone)
@@ -309,7 +313,7 @@ def test_dropping_the_gripper_is_refused_by_the_mujoco_gate_too(tmp_path):
     trimmed = _without_gripper(_live_document(), also_drop_declaration=False)
     path, sha = _write(tmp_path, trimmed, "mj_trimmed.json")
     term._load_collision_components_cached.cache_clear()
-    with pytest.raises(term.TableTerminationContractError, match="62 components"):
+    with pytest.raises(term.TableTerminationContractError, match="63 components"):
         term._load_collision_components_cached(path, sha)
     term._load_collision_components_cached.cache_clear()
 

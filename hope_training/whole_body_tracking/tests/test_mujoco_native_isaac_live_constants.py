@@ -252,9 +252,9 @@ def test_repinned_proxy_artifact_repointing_is_still_refused(tmp_path, monkeypat
         tmp_path,
         ISAAC_CONFIG,
         '    "configs/a3_table_collision_proxy_a3p0807_20260808/"\n'
-        '    "a3_table_collision_components.v1.json"',
-        '    "configs/a3_table_collision_proxy_a3p0807_20260808/"\n'
         '    "a3_table_collision_components.v2.json"',
+        '    "configs/a3_table_collision_proxy_a3p0807_20260808/"\n'
+        '    "a3_table_collision_components.v1.json"',
         "hope_env_cfg.py",
     )
     _repin_table_config(monkeypatch, mutated)

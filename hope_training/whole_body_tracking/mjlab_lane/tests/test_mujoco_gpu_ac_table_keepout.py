@@ -232,7 +232,8 @@ def _empty_corner_discriminator(device: str, dtype):
     quats[0, 0, 0] = np.cos(np.pi / 8.0)
     quats[0, 0, 3] = np.sin(np.pi / 8.0)
     one_axes = torch.eye(3, dtype=dtype, device=device).mul_(0.01)
-    axes = one_axes.unsqueeze(0).repeat(62, 1, 1)
+    count = keepout._PROXY_COMPONENT_COUNT
+    axes = one_axes.unsqueeze(0).repeat(count, 1, 1)
     lo = torch.tensor(
         (
             (-0.1, -0.1, -0.1),
@@ -253,10 +254,10 @@ def _empty_corner_discriminator(device: str, dtype):
         "body_quat_w": quats,
         "env_origins": torch.zeros((1, 3), dtype=dtype, device=device),
         "component_owner_indices": torch.zeros(
-            62, dtype=torch.long, device=device
+            count, dtype=torch.long, device=device
         ),
         "component_local_centers": torch.zeros(
-            (62, 3), dtype=dtype, device=device
+            (count, 3), dtype=dtype, device=device
         ),
         "component_local_half_axes": axes,
         "table_lo": lo,
@@ -293,9 +294,10 @@ def _fixed_shape_tape(dtype=torch.float32):
     quats = torch.zeros((count, 32, 4), dtype=dtype)
     quats[..., 0] = 1.0
     origins = torch.zeros((count, 3), dtype=dtype)
-    owners = torch.arange(62, dtype=torch.long).remainder(31)
-    centers = torch.zeros((62, 3), dtype=dtype)
-    half_axes = torch.eye(3, dtype=dtype).mul(0.125).repeat(62, 1, 1)
+    count = keepout._PROXY_COMPONENT_COUNT
+    owners = torch.arange(count, dtype=torch.long).remainder(31)
+    centers = torch.zeros((count, 3), dtype=dtype)
+    half_axes = torch.eye(3, dtype=dtype).mul(0.125).repeat(count, 1, 1)
     anisotropic = torch.diag(torch.tensor((0.2, 0.05, 0.1), dtype=dtype))
     half_axes[owners == 0] = anisotropic
     lo = torch.tensor(
@@ -614,9 +616,9 @@ def test_free_function_rejects_non_cpu_instead_of_opening_second_cuda_path():
             body_pos,
             torch.empty((1, 32, 4), device="meta"),
             torch.empty((1, 3), device="meta"),
-            torch.empty(62, dtype=torch.long, device="meta"),
-            torch.empty((62, 3), device="meta"),
-            torch.empty((62, 3, 3), device="meta"),
+            torch.empty(keepout._PROXY_COMPONENT_COUNT, dtype=torch.long, device="meta"),
+            torch.empty((keepout._PROXY_COMPONENT_COUNT, 3), device="meta"),
+            torch.empty((keepout._PROXY_COMPONENT_COUNT, 3, 3), device="meta"),
             torch.empty((5, 3), device="meta"),
             torch.empty((5, 3), device="meta"),
             racket_body_index=31,
@@ -677,9 +679,10 @@ def test_cuda_bound_sampler_uses_native_mjwarp_arrays_without_torch_bridge(
     bound._cuda_live_quat_shape = (2, 47)
     bound.env_origins = torch.zeros((2, 3))
     bound.body_ids = torch.arange(32)
-    bound.component_owner_indices = torch.arange(62).remainder(32)
-    bound.component_local_centers = torch.zeros((62, 3))
-    bound.component_local_half_axes = torch.zeros((62, 3, 3))
+    count = keepout._PROXY_COMPONENT_COUNT
+    bound.component_owner_indices = torch.arange(count).remainder(32)
+    bound.component_local_centers = torch.zeros((count, 3))
+    bound.component_local_half_axes = torch.zeros((count, 3, 3))
     bound.table_lo = torch.zeros((5, 3))
     bound.table_hi = torch.ones((5, 3))
     bound.racket_body_index = 31
@@ -825,9 +828,10 @@ def test_cuda_bound_sampler_caches_static_wrappers_and_rebinds_only_on_stream_ch
     bound = object.__new__(keepout.DeviceExactTableKeepout)
     bound.env_origins = torch.zeros((2, 3))
     bound.body_ids = torch.arange(32)
-    bound.component_owner_indices = torch.arange(62).remainder(32)
-    bound.component_local_centers = torch.zeros((62, 3))
-    bound.component_local_half_axes = torch.zeros((62, 3, 3))
+    count = keepout._PROXY_COMPONENT_COUNT
+    bound.component_owner_indices = torch.arange(count).remainder(32)
+    bound.component_local_centers = torch.zeros((count, 3))
+    bound.component_local_half_axes = torch.zeros((count, 3, 3))
     bound.table_lo = torch.zeros((5, 3))
     bound.table_hi = torch.ones((5, 3))
     bound.racket_body_index = 31

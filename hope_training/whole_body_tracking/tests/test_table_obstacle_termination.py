@@ -1095,14 +1095,15 @@ def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
     assert configured.count("right_wrist_yaw_Link") == 1
 
 
-def test_collision_proxy_artifact_binds_62_components_32_bodies_and_pinned_usd(
+def test_collision_proxy_artifact_binds_63_boxes_62_meshes_32_bodies_and_pinned_usd(
     term_mod,
 ):
     artifact = REPO / COLLISION_PROXY_PATH
     payload = artifact.read_bytes()
     assert hashlib.sha256(payload).hexdigest() == COLLISION_PROXY_SHA256
     document = json.loads(payload)
-    assert document["component_count"] == 62
+    assert document["source_component_count"] == 62
+    assert document["component_count"] == 63
     assert tuple(document["body_order"]) == tuple(BODIES)
     assert {
         component["owner_body_name"]
@@ -1131,7 +1132,7 @@ def test_collision_proxy_artifact_binds_62_components_32_bodies_and_pinned_usd(
         COLLISION_PROXY_SHA256,
         tuple(BODIES),
     )
-    assert len(owners) == len(centers) == len(axes) == 62
+    assert len(owners) == len(centers) == len(axes) == 63
     assert set(owners) == set(range(32))
     assert sum(
         document["body_order"][owner] == "right_wrist_yaw_Link"
@@ -1598,10 +1599,10 @@ LOGICAL_BODIES = (
 WATCHED = [BODIES.index(name) for name in LOGICAL_BODIES[:3]]
 COLLISION_PROXY_PATH = (
     "configs/a3_table_collision_proxy_a3p0807_20260808/"
-    "a3_table_collision_components.v1.json"
+    "a3_table_collision_components.v2.json"
 )
 COLLISION_PROXY_SHA256 = (
-    "896a5c96f5e16f266067841d72c1009e058eccf42850fff2f1c22ee46bda8b96"
+    "66b3ddc4b6a158ffc92172a313dd147f74994ebcddafa98363a7986112f72918"
 )
 EXACT_SENSOR_NAMES = [
     "table_top_robot_contact",

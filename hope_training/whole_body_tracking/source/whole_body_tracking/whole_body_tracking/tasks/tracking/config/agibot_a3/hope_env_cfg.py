@@ -378,8 +378,10 @@ TABLE_FULL_CONTACT_SENSOR_PRIMS = (
     TABLE_NET_POST_LEFT_PRIM,
     TABLE_NET_POST_RIGHT_PRIM,
 )
-#: Exact 62 collision-component OBB artifact for the 0807 A3P-P1 plant: vendor ping-pong URDF
-#: collision bytes are folded through the fixed children into the 32 live A3 rigid bodies.  The
+#: Exact 63-row multi-OBB artifact for the 62 collision meshes of the 0807 A3P-P1 plant: vendor
+#: ping-pong URDF collision bytes are folded through fixed children into the 32 live rigid bodies.
+#: The non-convex hand+racket support mesh alone is split into two complete-triangle boxes; all
+#: other source components remain one box.  The 20 mm table margin is unchanged.  The
 #: artifact binds the reviewed six-file Pod runtime USD tree AND carries the derivation proof
 #: that the tree is a conversion of the same URDF; the DoneTerm refuses either drifting.
 #:
@@ -387,15 +389,15 @@ TABLE_FULL_CONTACT_SENSOR_PRIMS = (
 #: negative fixture: it is a complete, self-consistent, correctly sealed proxy of the WRONG
 #: robot, which is why "the digests all match" was never a sufficient answer.
 #:
-#: 43 -> 62 components is not a re-mesh.  The 0409 plant carried one coarse ``left_hand_link``
+#: 43 -> 62 source components is not a re-mesh.  The 0409 plant carried one coarse ``left_hand_link``
 #: placeholder box on the non-paddle wrist; the 0807 plant carries the real 20-part OmniPicker3
 #: gripper.  See EXP-A3P-P1-0807-COLLISION-PROXY-20260808 for what that does to the guard.
 TABLE_COLLISION_PROXY_ARTIFACT_PATH = (
     "configs/a3_table_collision_proxy_a3p0807_20260808/"
-    "a3_table_collision_components.v1.json"
+    "a3_table_collision_components.v2.json"
 )
 TABLE_COLLISION_PROXY_ARTIFACT_SHA256 = (
-    "896a5c96f5e16f266067841d72c1009e058eccf42850fff2f1c22ee46bda8b96"
+    "66b3ddc4b6a158ffc92172a313dd147f74994ebcddafa98363a7986112f72918"
 )
 TABLE_CONTACT_RACKET_BODY_NAME = "right_wrist_yaw_Link"
 #: Conservative OBB for the shipped ``right_racket_face_collision.STL`` in the wrist-yaw frame.
