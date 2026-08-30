@@ -1355,7 +1355,7 @@ def _validate_or_raise_direct_frame0(
 
 def _run_teacher_replay(
     *, env, root: Path, identity: dict, ready_pose_payload: bytes,
-    steps: int, handoff_mode: str, torch_module,
+    steps: int, handoff_mode: str, torch_module, physical_root_xy_m=None,
 ) -> dict:
     """Drive the live FullMDP owner with its own frozen measured teacher."""
 
@@ -1387,7 +1387,13 @@ def _run_teacher_replay(
         handoff_mode == helper.TEACHER_REPLAY_HANDOFF_DIRECT_FRAME0
     )
     if direct_frame0:
-        env.enable_diagnostic_direct_frame0_playback()
+        env.enable_diagnostic_direct_frame0_playback(
+            physical_root_xy_m=physical_root_xy_m
+        )
+    elif physical_root_xy_m is not None:
+        raise ValueError(
+            "teacher replay root XY requires direct frame-zero playback"
+        )
     previous_qdes = env._full_a_policy_bootstrap_qdes.unsqueeze(0).clone()
     hold_qdes = previous_qdes.clone()
     rows = {name: [] for name in (
@@ -1790,6 +1796,11 @@ def _run_teacher_replay(
             "kind": "action_ball_mujoco_direct_frame0_intervention_v1",
             "diagnostic_unauthorized": True,
             "training_authorized": False,
+            "physical_root_xy_m": [
+                float(value) for value in direct_receipt[
+                    "physical_root_xy_m"
+                ][0].detach().cpu().tolist()
+            ],
             "ppo_update_calls": 0,
             "applied": True,
             "validation": validation,
@@ -2246,6 +2257,7 @@ def main(
     diagnostic_teacher_replay_output: str | None = None,
     diagnostic_teacher_replay_steps: int = 180,
     diagnostic_teacher_replay_handoff_mode: str = "split_ready_bridge",
+    diagnostic_teacher_replay_physical_root_xy_m=None,
     _test_allow_small_full_a: bool = False,
 ) -> int:
     num_steps_per_env = NUM_STEPS_PER_ENV
@@ -2466,6 +2478,7 @@ def main(
             ready_pose_payload=ready_pose_payload,
             steps=diagnostic_teacher_replay_steps,
             handoff_mode=diagnostic_teacher_replay_handoff_mode,
+            physical_root_xy_m=diagnostic_teacher_replay_physical_root_xy_m,
             torch_module=torch,
         )
         _best_effort_stdout_marker(
@@ -2779,6 +2792,12 @@ if __name__ == "__main__":
         "--diagnostic-teacher-replay-handoff-mode",
         choices=DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_MODES,
         default=DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE,
+    )
+    parser.add_argument(
+        "--diagnostic-teacher-replay-physical-root-xy-m",
+        nargs=2,
+        type=float,
+        metavar=("X_M", "Y_M"),
     )
     parser.add_argument("--evidence-jsonl")
     parser.add_argument("--snapshot-dir")

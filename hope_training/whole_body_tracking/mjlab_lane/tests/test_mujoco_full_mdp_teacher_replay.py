@@ -253,6 +253,42 @@ def test_direct_frame0_install_is_atomic_one_shot_and_preserves_shot_state():
         env.install_diagnostic_direct_frame0_playback(ids)
 
 
+def test_direct_frame0_diagnostic_can_recenter_only_physical_root_xy():
+    env, joint_q0, _forward_calls = _direct_frame0_install_rig()
+    ids = torch.tensor([0], dtype=torch.long)
+    ball_before = env.sim.data.qpos[:, env.b_q:env.b_q + 7].clone()
+    task_before = env._epoch_task_f32.clone()
+    env.enable_diagnostic_direct_frame0_playback(
+        physical_root_xy_m=(-0.192232, 0.285279)
+    )
+    receipt = env.install_diagnostic_direct_frame0_playback(ids)
+    torch.testing.assert_close(env._qpos_act(), joint_q0, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(
+        env.sim.data.qpos[:, :3],
+        torch.tensor([[-0.192232, 0.285279, 0.9]]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    torch.testing.assert_close(
+        receipt["physical_root_xy_m"],
+        torch.tensor([[-0.192232, 0.285279]]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    assert torch.equal(env.sim.data.qpos[:, env.b_q:env.b_q + 7], ball_before)
+    assert torch.equal(env._epoch_task_f32, task_before)
+    assert bool(receipt["frame0_pose_exact"][0])
+
+
+@pytest.mark.parametrize("value", ((float("nan"), 0.0), (0.0,), "bad"))
+def test_direct_frame0_diagnostic_root_xy_is_finite_pair(value):
+    env, _joint_q0, _forward_calls = _direct_frame0_install_rig()
+    with pytest.raises(ValueError, match="root XY differs"):
+        env.enable_diagnostic_direct_frame0_playback(
+            physical_root_xy_m=value
+        )
+
+
 @pytest.mark.parametrize("receipt_field,mutate", (
     ("ball_unchanged", lambda env: env.sim.data.qpos.__setitem__((0, env.b_q), 9.0)),
     ("task_unchanged", lambda env: env._epoch_task_f32.__setitem__((0, 0), 9.0)),

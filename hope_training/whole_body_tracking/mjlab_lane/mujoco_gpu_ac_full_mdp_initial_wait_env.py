@@ -2212,7 +2212,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             & ~self._full_a_recovery_sticky_fault
         )
 
-    def enable_diagnostic_direct_frame0_playback(self) -> None:
+    def enable_diagnostic_direct_frame0_playback(
+        self, *, physical_root_xy_m=None
+    ) -> None:
         """Enable one N=1 replay-only frame-zero plant intervention.
 
         The production FullMDP step never calls this method.  Allocation and
@@ -2229,6 +2231,22 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._diagnostic_direct_frame0_consumed = self._torch.zeros(
             self.num_envs, dtype=self._torch.bool, device=self.device
         )
+        if physical_root_xy_m is None:
+            self._diagnostic_direct_frame0_root_xy_m = None
+        else:
+            if (
+                type(physical_root_xy_m) not in (tuple, list)
+                or len(physical_root_xy_m) != 2
+                or any(
+                    type(value) not in (int, float)
+                    or not math.isfinite(float(value))
+                    for value in physical_root_xy_m
+                )
+            ):
+                raise ValueError("direct frame-zero diagnostic root XY differs")
+            self._diagnostic_direct_frame0_root_xy_m = tuple(
+                float(value) for value in physical_root_xy_m
+            )
 
     def _diagnostic_direct_frame0_preserved_state(self, ids):
         """Clone the ball, accepted task, and lifecycle around one intervention."""
@@ -2454,6 +2472,14 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_teacher.body_pos_w[0, pelvis_index].unsqueeze(0)
             + self.env.scene.env_origins[ids]
         )
+        diagnostic_root_xy = self._diagnostic_direct_frame0_root_xy_m
+        if diagnostic_root_xy is not None:
+            root_pos_q0 = root_pos_q0.clone()
+            root_pos_q0[:, :2] = torch.tensor(
+                diagnostic_root_xy,
+                dtype=root_pos_q0.dtype,
+                device=root_pos_q0.device,
+            ).unsqueeze(0) + self.env.scene.env_origins[ids, :2]
         root_quat_q0 = self._full_a_teacher.body_quat_w[
             0, pelvis_index
         ].unsqueeze(0)
@@ -2661,6 +2687,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "actuator_state_absent": torch.ones(
                 ids.numel(), dtype=torch.bool, device=self.device
             ),
+            "physical_root_xy_m": root_pos_q0[:, :2]
+            - self.env.scene.env_origins[ids, :2],
             "installed_frame0_table_keepout": installed_table_keepout,
             "installed_frame0_backend_resolved_table_contact": (
                 installed_resolved_table_contact
