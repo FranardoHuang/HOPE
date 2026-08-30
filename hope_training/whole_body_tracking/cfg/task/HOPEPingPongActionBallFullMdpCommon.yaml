@@ -17,6 +17,10 @@ action_ball_full_mdp_runtime: true
 action_ball_full_mdp_rate_probe: false
 action_ball_full_mdp_profile_probe: false
 action_ball_full_mdp_fixed_action_probe_output_path: null
+# Diagnostic-only one-env/no-PPO chronology trace.  Null is the sole normal
+# training value; a launcher may set one absent absolute path for an isolated
+# teacher-forced contact-boundary investigation.
+action_ball_full_mdp_contact_tick_trace_output_path: null
 actor_obs_contract: null
 registry_name: null
 registry_name_2: null
