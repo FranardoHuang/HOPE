@@ -261,8 +261,12 @@ def _singleton_profile(*, ball_b: np.ndarray, incoming_b: np.ndarray,
         "incoming_inbound_axis_b_yaw": [-1.0, 0.0, 0.0], "incoming_inbound_min_cosine": 0.2,
         "incoming_speed_center_mps": speed, "incoming_speed_std_lower_initial_mps": 0.0,
         "incoming_speed_std_lower_max_mps": 0.0, "incoming_speed_std_upper_initial_mps": 0.0,
-        "incoming_speed_std_upper_max_mps": 0.0, "incoming_speed_min_mps": speed,
-        "incoming_speed_max_mps": speed,
+        "incoming_speed_std_upper_max_mps": 0.0,
+        # Schema v3 requires a non-empty physical support interval even for an
+        # exact-centre diagnostic.  Keep the sampler widths at zero while
+        # registering only a one-micrometre/s representational envelope.
+        "incoming_speed_min_mps": speed - 1.0e-6,
+        "incoming_speed_max_mps": speed + 1.0e-6,
         "spin_direction_center_b_yaw": [0.0, 1.0, 0.0],
         "spin_direction_tangent_u_b_yaw": [0.0, 0.0, 1.0],
         "spin_direction_tangent_v_b_yaw": [1.0, 0.0, 0.0],
