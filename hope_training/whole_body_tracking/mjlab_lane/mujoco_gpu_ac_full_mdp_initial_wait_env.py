@@ -453,6 +453,26 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         if self._table_gid < 0 or net < 0 or self._ball_gid < 0:
             raise RuntimeError("FullMDP landing geometry is unavailable")
+        ball_net_pair = any(
+            {
+                int(self.mj_model.pair_geom1[pair_id]),
+                int(self.mj_model.pair_geom2[pair_id]),
+            }
+            == {self._ball_gid, net}
+            for pair_id in range(int(self.mj_model.npair))
+        )
+        bitmask_contact = bool(
+            int(self.mj_model.geom_contype[self._ball_gid])
+            & int(self.mj_model.geom_conaffinity[net])
+        ) or bool(
+            int(self.mj_model.geom_contype[net])
+            & int(self.mj_model.geom_conaffinity[self._ball_gid])
+        )
+        if bitmask_contact or ball_net_pair:
+            raise RuntimeError(
+                "FullMDP ball-net contact must be filtered; ball-centre "
+                "crossing owns net clearance"
+            )
         table_position = self.mj_model.geom_pos[self._table_gid]
         table_half_size = self.mj_model.geom_size[self._table_gid]
         net_position = self.mj_model.geom_pos[net]

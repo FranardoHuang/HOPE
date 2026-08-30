@@ -5762,6 +5762,138 @@ def test_host_full_a_second_net_crossing_cannot_upgrade_first_low_crossing():
     assert not bool(env._full_a_selected_contact_event.any())
 
 
+def test_mu_ball_filtered_net_low_crossing_can_land_but_cannot_score():
+    import mujoco
+    import a3_court_env as court_env
+
+    # Compile the production court builder with its normal explicit pairs.  The
+    # net remains visible/robot-collidable geometry, but neither masks nor an
+    # explicit pair may let its unmeasured response perturb the ball trajectory.
+    spec = mujoco.MjSpec()
+    for name in (
+        court_env.FLOOR_GEOM,
+        *court_env.RACKET_GEOMS,
+    ):
+        geom = spec.worldbody.add_geom()
+        geom.name = name
+        geom.type = mujoco.mjtGeom.mjGEOM_BOX
+        geom.size = [0.05, 0.05, 0.05]
+        geom.pos = [-10.0, 0.0, 0.0]
+    court_env.make_court_spec_fn(
+        (2.0, -0.76, 0.70), "elliptic", add_pairs=True
+    )(spec)
+    model = spec.compile()
+    net_gid = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_GEOM, "court_net"
+    )
+    ball_gid = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_GEOM, court_env.BALL_GEOM
+    )
+    assert net_gid >= 0 and ball_gid >= 0
+    mask_contact = bool(
+        int(model.geom_contype[ball_gid])
+        & int(model.geom_conaffinity[net_gid])
+    ) or bool(
+        int(model.geom_contype[net_gid])
+        & int(model.geom_conaffinity[ball_gid])
+    )
+    assert not mask_contact
+    floor_gid = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_GEOM, court_env.FLOOR_GEOM
+    )
+    assert bool(
+        int(model.geom_contype[floor_gid])
+        & int(model.geom_conaffinity[net_gid])
+    ) or bool(
+        int(model.geom_contype[net_gid])
+        & int(model.geom_conaffinity[floor_gid])
+    )
+    assert not any(
+        {
+            int(model.pair_geom1[pair_id]),
+            int(model.pair_geom2[pair_id]),
+        }
+        == {ball_gid, net_gid}
+        for pair_id in range(model.npair)
+    )
+
+    # Fixed tape: both rows cross the net and descend through the exact same
+    # target landing.  Row 0 clears at z=0.96 m; row 1 intersects the net band
+    # at z=0.93 m (< the 0.94 m centre-clearance plane).  A physical collider
+    # would alter row 1 before landing; under the single adjudication contract
+    # it may continue, but its low first crossing must remain OUT and earn zero.
+    env = _host_full_a_lifecycle_env()
+    _prepare_and_settle(env)
+    env.common_step_counter = 2
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env._full_a_selected_racket_contact[:] = True
+    env._full_a_previous_ball_center_valid[:] = True
+    env._full_a_previous_ball_center[:] = torch.tensor(
+        [[1.70, 0.0, 0.96], [1.70, 0.0, 0.93]]
+    )
+    empty_census = SimpleNamespace(
+        ball_racket_by_world=torch.zeros(2),
+        ball_table_by_world=torch.zeros(2),
+    )
+
+    def observe_at(points):
+        env.sim.data.xpos[:, env._fullmdp_ball_body_id] = torch.tensor(points)
+        wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+        wait_env.FullMdpInitialWaitVecEnv._full_a_latch_ball_contacts(
+            env, empty_census
+        )
+
+    observe_at([[2.00, 0.0, 0.96], [2.00, 0.0, 0.93]])
+    assert env._full_a_net_crossed.all()
+    assert torch.equal(env._full_a_net_clear, torch.tensor([True, False]))
+    observe_at([[2.40, 0.0, 0.90], [2.40, 0.0, 0.90]])
+    observe_at([[2.65, 0.0, 0.70], [2.65, 0.0, 0.70]])
+    assert env._full_a_landing_on_opponent.all()
+    torch.testing.assert_close(
+        env._full_a_landing_crossing_xy,
+        env._full_a_landing_target_xy.expand(2, 2),
+        rtol=0.0,
+        atol=1.0e-6,
+    )
+
+    settled, outcome = wait_env.FullMdpInitialWaitVecEnv._full_a_settle_outcome(
+        env, {"ball_pos": env.sim.data.xpos[:, env._fullmdp_ball_body_id]}
+    )
+    assert settled.all()
+    assert outcome.tolist() == [
+        wait_env.FULL_A_OUTCOME_LEGAL_LANDING,
+        wait_env.FULL_A_OUTCOME_OUT,
+    ]
+    present, eligible, common = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r06_fact(
+            env, settled, outcome
+        )
+    )
+    assert present.all() and eligible.all()
+    assert torch.equal(common, torch.tensor([True, False]))
+
+    dense_env = _fixed_reward_env()
+    dense_env.full_a_mode = True
+    dense_env._epoch_phase.copy_(env._epoch_phase)
+    dense_env._full_a_outcome_code.copy_(env._full_a_outcome_code)
+    dense_env._full_a_owner_valid_bits = env._full_a_owner_valid_bits
+    dense_env._full_a_owner_fault_bits = env._full_a_owner_fault_bits
+    dense_env._full_a_owner_fact_f32 = env._full_a_owner_fact_f32
+    dense_env._full_a_lifecycle_reward_weights = torch.tensor(
+        wait_env.portable_reward.LIFECYCLE_WEIGHTS,
+        dtype=dense_env._full_a_owner_fact_f32.dtype,
+    )
+    dense_env._full_a_selected_contact_event = torch.zeros(2, dtype=torch.bool)
+    dense_env._full_a_r03_present = torch.zeros(2, dtype=torch.bool)
+    dense_env._full_a_r06_payment_event = env._full_a_r06_payment_event
+    _total, terms = wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward(dense_env)
+    torch.testing.assert_close(
+        terms[0, 11:13],
+        torch.tensor([20.0, 1.0], dtype=terms.dtype) * dense_env.step_dt,
+    )
+    assert torch.count_nonzero(terms[1, 11:13]) == 0
+
+
 def _assert_step_surface(result, *, num_envs: int):
     observations, reward, dones, extras = result
     assert tuple(observations["policy"].shape) == (num_envs, P.ACTOR_WIDTH_V1)

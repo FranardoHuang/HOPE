@@ -5,8 +5,9 @@ WHAT THIS ADDS TO ``a3_plant_env.py`` (plain language)
 ------------------------------------------------------
 The plant script proved we can carry the vendor's robot physics into
 MuJoCo Warp field by field.  This script puts a court around it: an ITTF table,
-a net, and a 40 mm ball, plus the **contact parameters** -- which have no vendor
-authority at all and had to be derived from our own venue measurements.
+a rendered regulation net, and a 40 mm ball, plus the **contact parameters** -- which
+have no vendor authority at all and had to be derived from our own venue
+measurements.
 
 Three rules are kept from the plant work and one is added.
 
@@ -139,9 +140,11 @@ BALL_SOLREF = cal.kb_to_solref(BALL_K, BALL_B)   # (-902.5, -1921.42)
 # the rigid ceiling 0.4:  b_t = (a_t/0.4)/(ieff_t*dt), timeconst = 2/(dmax*b_t).
 BALL_SOLREFFRICTION = (0.002236, 1.0)
 
-# The net has NO measurement behind it.  A rigid box would hand the ball the
-# table's own e = 0.92; a real net absorbs almost everything and drops the ball.
-# This is an ASSUMED value, registered as a named gap.
+# Historical diagnostic only: the net has NO measurement behind it, so this
+# assumed response must not alter ball physics.  FullMDP keeps the net geom for
+# rendering/robot geometry and adjudicates ball clearance from the observed
+# centre crossing.  NET_SOLREF remains available to old alignment receipts but
+# is not wired to a geom or explicit pair.
 NET_E_ASSUMED = 0.10
 NET_SOLREF = cal.kb_to_solref(
     BALL_K, cal.analytic_seed_b(NET_E_ASSUMED, BALL_K, mu=BALL_MU))
@@ -238,13 +241,14 @@ def make_court_spec_fn(ball_pos_hope, cone: str, add_pairs: bool):
     def spec_fn(spec: "mujoco.MjSpec") -> None:
         wb = spec.worldbody
 
-        def add_static(name, size, pos, rgba, solref):
+        def add_static(name, size, pos, rgba, solref, *, contact_type=1):
             g = wb.add_geom()
             g.name = name
             g.type = mujoco.mjtGeom.mjGEOM_BOX
             g.size = list(size)
             g.pos = list(pos)
-            g.contype, g.conaffinity, g.condim = 1, 7, 3
+            g.contype, g.conaffinity = contact_type, 7
+            g.condim = 3
             g.friction = list(COURT_FRICTION)
             g.solref = list(solref)
             g.priority = 0
@@ -266,6 +270,11 @@ def make_court_spec_fn(ball_pos_hope, cone: str, add_pairs: bool):
             hope_to_scene(geom.net_center()),
             (0.85, 0.85, 0.9, 0.6),
             SURFACE_SOLREF,
+            # The ball uses source bit 8 and the net uses 16.  Both still
+            # accept the vendor/court 1|2|4 categories, preserving every
+            # robot-net and ball-table/racket/floor contact while filtering
+            # only ball-net.
+            contact_type=16,
         )
 
         body = wb.add_body()
@@ -299,7 +308,7 @@ def make_court_spec_fn(ball_pos_hope, cone: str, add_pairs: bool):
         g.name = BALL_GEOM
         g.type = mujoco.mjtGeom.mjGEOM_SPHERE
         g.size = [geom.BALL_RADIUS, 0.0, 0.0]
-        g.contype, g.conaffinity = 1, 7
+        g.contype, g.conaffinity = 8, 7
         g.condim = 3
         # priority 1 => the ball dictates condim/friction/solimp on every contact
         # it takes part in, so the calibration cannot be diluted by whatever the
@@ -327,7 +336,6 @@ def make_court_spec_fn(ball_pos_hope, cone: str, add_pairs: bool):
                 pr.solimp = list(BALL_SOLIMP)
 
             add_pair("court_table_top", BALL_SOLREF, BALL_SOLREFFRICTION)
-            add_pair("court_net", NET_SOLREF, BALL_SOLREFFRICTION)
             add_pair(FLOOR_GEOM, BALL_SOLREF, BALL_SOLREFFRICTION)
             for rg in RACKET_GEOMS:
                 add_pair(rg, BALL_SOLREF, BALL_SOLREFFRICTION)
