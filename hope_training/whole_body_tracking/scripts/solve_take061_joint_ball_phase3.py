@@ -155,40 +155,53 @@ def solve(args):
         and "ball" not in (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, gid) or "").lower()
         and int(model.geom_bodyid[gid]) != 0
     ]
+    wrist_index = ready["names"].index("right_wrist_yaw_joint")
+    frame_index = np.arange(q_seed.shape[0], dtype=np.float64)
+    distance = np.abs(frame_index - float(args.hit_frame))
+    wrist_taper = np.clip(
+        1.0 - distance / max(2.0, float(args.wrist_bias_window_frames)), 0.0, 1.0
+    )
     candidates = []
     for alpha in args.alphas:
-        q = q_seed + float(alpha) * (stage["q_ref"] - q_seed)
-        for timewarp in args.timewarps:
-            plant = P1._plant_eval(
-                mujoco=mujoco, model=model, qbase=qbase, qadr=qadr, dadr=dadr,
-                root_dadr=root_dadr, q_ref=q, fps=fps, timewarp=timewarp,
-                kp=kp, kd=kd, effort=effort, qdes_lower=qdes_lo,
-                qdes_upper=qdes_hi, table_geom_ids=table_ids,
-                robot_geom_ids=robot_ids,
+        q_alpha = q_seed + float(alpha) * (stage["q_ref"] - q_seed)
+        for wrist_bias in args.wrist_inward_biases:
+            q = q_alpha.copy()
+            q[:, wrist_index] += float(wrist_bias) * wrist_taper
+            q[:, wrist_index] = np.clip(
+                q[:, wrist_index], ready["lower"][wrist_index], ready["upper"][wrist_index]
             )
-            path_site, path_face, path_long = P2._fk_path(
-                mujoco, model, qbase, qadr, site_id, q
-            )
-            path_face *= mount_sign
-            velocity = np.gradient(path_site, float(timewarp) / fps, axis=0)
-            center = {
-                "site_w_m": path_site[args.hit_frame].tolist(),
-                "velocity_w_mps": velocity[args.hit_frame].tolist(),
-                "signed_face_w": path_face[args.hit_frame].tolist(),
-            }
-            replay = _solver_replay(center, incoming, aim, args)
-            mechanical = bool(
-                plant["qdes_margin_min"] > 0 and plant["torque_margin_min"] > 0
-                and plant["bilateral_support_frame_fraction"] >= 1.0
-                and plant["table_distance_min_m"] >= P1.TABLE_CLEARANCE_M - P1.NUMERIC_TOL_M
-            )
-            candidates.append({
-                "alpha": float(alpha), "timewarp": float(timewarp),
-                "q_ref": q, "site": path_site, "face": path_face,
-                "velocity": velocity, "long": path_long, "plant": plant,
-                "center": center, "solver": replay,
-                "admitted": bool(mechanical and replay.get("matched", False)),
-            })
+            for timewarp in args.timewarps:
+                plant = P1._plant_eval(
+                    mujoco=mujoco, model=model, qbase=qbase, qadr=qadr, dadr=dadr,
+                    root_dadr=root_dadr, q_ref=q, fps=fps, timewarp=timewarp,
+                    kp=kp, kd=kd, effort=effort, qdes_lower=qdes_lo,
+                    qdes_upper=qdes_hi, table_geom_ids=table_ids,
+                    robot_geom_ids=robot_ids,
+                )
+                path_site, path_face, path_long = P2._fk_path(
+                    mujoco, model, qbase, qadr, site_id, q
+                )
+                path_face *= mount_sign
+                velocity = np.gradient(path_site, float(timewarp) / fps, axis=0)
+                center = {
+                    "site_w_m": path_site[args.hit_frame].tolist(),
+                    "velocity_w_mps": velocity[args.hit_frame].tolist(),
+                    "signed_face_w": path_face[args.hit_frame].tolist(),
+                }
+                replay = _solver_replay(center, incoming, aim, args)
+                mechanical = bool(
+                    plant["qdes_margin_min"] > 0 and plant["torque_margin_min"] > 0
+                    and plant["bilateral_support_frame_fraction"] >= 1.0
+                    and plant["table_distance_min_m"] >= P1.TABLE_CLEARANCE_M - P1.NUMERIC_TOL_M
+                )
+                candidates.append({
+                    "alpha": float(alpha), "timewarp": float(timewarp),
+                    "wrist_inward_bias_rad": float(wrist_bias),
+                    "q_ref": q, "site": path_site, "face": path_face,
+                    "velocity": velocity, "long": path_long, "plant": plant,
+                    "center": center, "solver": replay,
+                    "admitted": bool(mechanical and replay.get("matched", False)),
+                })
     chosen = min(candidates, key=lambda row: (
         not row["admitted"],
         max(0.0, -row["plant"]["qdes_margin_min"]),
@@ -209,6 +222,7 @@ def solve(args):
         ],
         "selected": {
             "alpha": chosen["alpha"], "timewarp": chosen["timewarp"],
+            "wrist_inward_bias_rad": chosen["wrist_inward_bias_rad"],
             "center": chosen["center"], "plant": plant_summary(chosen["plant"]),
             "solver": chosen["solver"],
             "incoming_ball_center": {
@@ -216,6 +230,16 @@ def solve(args):
                 "incoming_velocity_w_mps": incoming.tolist(),
                 "spin_w_radps": [0.0, 0.0, 0.0],
                 "landing_aim_w_xy_m": aim.tolist(),
+                "support": {
+                    "contact_w_m_lower": chosen["center"]["site_w_m"],
+                    "contact_w_m_upper": chosen["center"]["site_w_m"],
+                    "incoming_velocity_w_mps_lower": incoming.tolist(),
+                    "incoming_velocity_w_mps_upper": incoming.tolist(),
+                    "spin_w_radps_lower": [0.0, 0.0, 0.0],
+                    "spin_w_radps_upper": [0.0, 0.0, 0.0],
+                    "landing_aim_w_xy_m_lower": aim.tolist(),
+                    "landing_aim_w_xy_m_upper": aim.tolist(),
+                },
             },
         },
         "timing": {
@@ -223,6 +247,25 @@ def solve(args):
             "t_cycle_s": args.reference_t_cycle_s * chosen["timewarp"],
         },
         "candidate_count": len(candidates),
+        "closest_candidates": [
+            {
+                "alpha": row["alpha"], "timewarp": row["timewarp"],
+                "wrist_inward_bias_rad": row["wrist_inward_bias_rad"],
+                "qdes_margin_min_rad": row["plant"]["qdes_margin_min"],
+                "torque_margin_min_nm": row["plant"]["torque_margin_min"],
+                "table_distance_min_m": row["plant"]["table_distance_min_m"],
+                "velocity_error_mps": row["solver"].get("velocity_error_mps"),
+                "face_error_deg": row["solver"].get("face_error_deg"),
+                "admitted": row["admitted"],
+            }
+            for row in sorted(candidates, key=lambda row: (
+                not row["admitted"],
+                max(0.0, -row["plant"]["qdes_margin_min"]),
+                max(0.0, -row["plant"]["torque_margin_min"]),
+                row["solver"].get("face_error_deg", 999.0),
+                row["solver"].get("velocity_error_mps", 999.0),
+            ))[:12]
+        ],
         "inputs": {
             name: {"path": str(path), "sha256": P1._sha256(path)}
             for name, path in (
@@ -255,8 +298,10 @@ def parser():
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument("--ball-physics", type=Path, default=Path("configs/ball_physics_venue.yaml"))
     p.add_argument("--hit-frame", type=int, default=48)
-    p.add_argument("--alphas", type=float, nargs="+", default=[0.25, 0.5, 0.75, 1.0])
-    p.add_argument("--timewarps", type=float, nargs="+", default=[3.0, 3.5, 4.0])
+    p.add_argument("--alphas", type=float, nargs="+", default=[0.25, 0.4, 0.5, 0.65, 0.75, 1.0])
+    p.add_argument("--timewarps", type=float, nargs="+", default=[4.0, 4.5, 5.0])
+    p.add_argument("--wrist-inward-biases", type=float, nargs="+", default=[0.0, 0.02, 0.04, 0.06])
+    p.add_argument("--wrist-bias-window-frames", type=int, default=21)
     p.add_argument("--velocity-tolerance-mps", type=float, default=0.10)
     p.add_argument("--face-tolerance-deg", type=float, default=10.0)
     p.add_argument("--surface-z", type=float, default=0.78)
