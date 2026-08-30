@@ -919,65 +919,6 @@ _ACTION_BALL_FULL_MDP_RUBBER_RED = 0
 _ACTION_BALL_FULL_MDP_RUBBER_BLACK = 1
 
 
-class _OpaqueActionBallFullMdpRacketSelectedRubberCapability:
-    """Non-constructible identity for one exact current N×K rubber view."""
-
-    __slots__ = ()
-
-    def __new__(cls):
-        del cls
-        raise TypeError("Racket selected-rubber capabilities are owner-issued")
-
-    def __copy__(self):
-        raise TypeError("Racket selected-rubber capabilities cannot be copied")
-
-    def __deepcopy__(self, memo: object):
-        del memo
-        raise TypeError("Racket selected-rubber capabilities cannot be copied")
-
-    def __reduce__(self):
-        raise TypeError("Racket selected-rubber capabilities cannot be serialized")
-
-    def __reduce_ex__(self, protocol: int):
-        del protocol
-        raise TypeError("Racket selected-rubber capabilities cannot be serialized")
-
-
-class ActionBallFullMdpRacketSelectedRubberToken(
-    _OpaqueActionBallFullMdpRacketSelectedRubberCapability
-):
-    """Empty process-local capability for a Racket-owned current projection."""
-
-    __slots__ = ()
-
-
-@dataclass(frozen=True, eq=False, repr=False)
-class ActionBallFullMdpRacketSelectedRubberView:
-    """Clone-only selected-face truth for every Physical flight slot.
-
-    A dataclass instance is not authority.  The production PhysX consumer must
-    receive a token from Racket and validate that exact token against Racket's
-    retained current publication.  ``expected_rubber`` uses the scene ABI:
-    inactive=-1, red outer face=0, black outer face=1.
-    """
-
-    token: ActionBallFullMdpRacketSelectedRubberToken
-    racket_owner: object
-    publication_identity: object
-    publication_sequence: int
-    physical_owner_mutation_version: int
-    active_mask: torch.Tensor
-    expected_rubber: torch.Tensor
-    full_key_sha256: torch.Tensor
-    ball_generation: torch.Tensor
-    flight_slot: torch.Tensor
-    reset_generation: torch.Tensor
-    swing_generation: torch.Tensor
-    action_uid: torch.Tensor
-    action_slot: torch.Tensor
-    task_receipt_sha256: torch.Tensor
-
-
 @dataclass(frozen=True, eq=False, repr=False)
 class ActionBallFullMdpActionEpochSelectedRubberView:
     """Direct current selected-face grid for the lean Physical transaction.
@@ -8750,7 +8691,6 @@ class RacketTargetCommand(CommandTerm):
             )
         )
 
-        self._action_ball_continuous_racket_terminal_epoch_committed = False
         self._action_ball_continuous_racket_observation_scheduled_ordinal = (
             torch.full(
                 (self.num_envs,), -1, dtype=torch.int64, device=self.device
@@ -8832,9 +8772,6 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_full_mdp_r03_writer_active = False
         self._action_ball_full_mdp_racket_physical_owner = None
         self._action_ball_full_mdp_racket_mount_sign_table = None
-        self._action_ball_full_mdp_racket_selected_rubber_sequence = 0
-        self._action_ball_full_mdp_racket_selected_rubber_token = None
-        self._action_ball_full_mdp_racket_selected_rubber_view = None
         self._action_ball_continuous_fresh_racket_time_left_receipt = None
         self._action_ball_continuous_fresh_racket_lane_bound = True
 
@@ -9887,249 +9824,6 @@ class RacketTargetCommand(CommandTerm):
             expected_rubber=rubber.detach().clone(),
         )
 
-    def publish_action_ball_full_mdp_selected_rubber_authority(
-        self,
-    ) -> ActionBallFullMdpRacketSelectedRubberToken:
-        """Publish exact current selected-rubber truth or HOLD before mutation.
-
-        The only successful publication joins Racket's retained installed
-        action/task/generation image with the directly bound Physical N×K
-        lifecycle/key/generation/slot image.  The fresh hot Racket writer is
-        not reachable yet, so a production call currently stops before token,
-        sequence, or registry mutation instead of manufacturing a success from
-        tombstones or a caller-authored hash.
-        """
-
-        if bool(
-            getattr(self, "_action_ball_continuous_racket_poisoned", False)
-        ):
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber authority cannot publish from poisoned Racket"
-            )
-        if (
-            getattr(self, "_action_ball_full_mdp_device_r05_owner", None) is None
-            or not bool(
-                getattr(
-                    self,
-                    "_action_ball_continuous_racket_terminal_epoch_committed",
-                    False,
-                )
-            )
-        ):
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber authority awaits a real Device-R05 ACCEPT "
-                "commit in the fresh Racket hot writer"
-            )
-        physical_owner = getattr(
-            self, "_action_ball_full_mdp_racket_physical_owner", None
-        )
-        if physical_owner is None:
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber authority has no exact bound Physical owner"
-            )
-        if torch.device(self.device).type != "cpu":
-            # CUDA cannot authorize a mutation by launching an async assert and
-            # continuing.  The production path must consume the same packed
-            # D05/global-boundary row that gates the other four writers; until
-            # that causal join exists, stop before snapshot clones or token
-            # publication rather than adding a hidden D2H synchronization.
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber CUDA publication awaits the packed global "
-                "boundary; no async assert may authorize this publication"
-            )
-
-        from whole_body_tracking.tasks.tracking.mdp import (
-            action_ball_physical_flight_device as physical,
-        )
-
-        snapshot = physical_owner.scene_snapshot()
-        if (
-            type(snapshot) is not physical.PhysicalFlightSceneSnapshotNK
-            or type(snapshot.owner_mutation_version) is not int
-            or snapshot.owner_mutation_version < 0
-        ):
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber Physical snapshot is stale or foreign"
-            )
-        shape = tuple(snapshot.published_to_runtime.shape)
-        if (
-            len(shape) != 2
-            or shape[0] != self.num_envs
-            or tuple(snapshot.outcome_key_sha256.shape) != shape + (32,)
-            or tuple(snapshot.ball_generation.shape) != shape
-            or snapshot.published_to_runtime.dtype != torch.bool
-            or snapshot.outcome_key_sha256.dtype != torch.uint8
-            or snapshot.ball_generation.dtype != torch.int64
-            or snapshot.published_to_runtime.device != torch.device(self.device)
-            or snapshot.outcome_key_sha256.device != torch.device(self.device)
-            or snapshot.ball_generation.device != torch.device(self.device)
-        ):
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber Physical N×K snapshot ABI differs"
-            )
-        active = snapshot.published_to_runtime & ~snapshot.physically_parked
-        if bool(
-            torch.any(
-                active
-                & (
-                    snapshot.owner_fault
-                    | torch.eq(snapshot.outcome_key_sha256, 0).all(dim=-1)
-                    | (snapshot.ball_generation < 0)
-                )
-            )
-        ):
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber Physical active identity is untrusted"
-            )
-
-        action_slot_env = self._action_ball_action_slot
-        action_uid_env = self._action_ball_action_uid
-        reset_generation_env = self._action_ball_reset_generation
-        swing_generation_env = self._action_ball_swing_generation
-        task_sha_env = self._action_ball_continuous_racket_observation_task_identity
-        task_valid_env = self._action_ball_task_valid
-        if any(
-            not torch.is_tensor(value)
-            for value in (
-                action_slot_env,
-                action_uid_env,
-                reset_generation_env,
-                swing_generation_env,
-                task_sha_env,
-                task_valid_env,
-            )
-        ):
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber retained Racket identity surface is absent"
-            )
-        k = shape[1]
-        action_slot = action_slot_env.unsqueeze(1).expand(shape)
-        action_uid = action_uid_env.unsqueeze(1).expand(shape)
-        reset_generation = reset_generation_env.unsqueeze(1).expand(shape)
-        swing_generation = swing_generation_env.unsqueeze(1).expand(shape)
-        task_sha = task_sha_env.unsqueeze(1).expand(shape + (32,))
-        retained_bad = active & (
-            ~task_valid_env.unsqueeze(1)
-            | (action_slot < 0)
-            | (action_uid < 0)
-            | (reset_generation < 1)
-            | (swing_generation < 0)
-            | torch.eq(task_sha, 0).all(dim=-1)
-            | (snapshot.ball_generation != swing_generation)
-        )
-        sign_table = torch.tensor(
-            tuple(int(value) for value in self._action_ball_mount_signs),
-            dtype=torch.int8,
-            device=self.device,
-        )
-        rubber, rubber_bad = _action_ball_full_mdp_expected_rubber_from_action_slot(
-            action_slot, active, sign_table
-        )
-        if bool(torch.any(retained_bad | rubber_bad)):
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber Racket/Physical installed identity join differs"
-            )
-
-        flight_slot = torch.arange(
-            k, dtype=torch.int64, device=self.device
-        ).unsqueeze(0).expand(shape)
-        sequence = getattr(
-            self, "_action_ball_full_mdp_racket_selected_rubber_sequence", None
-        )
-        if type(sequence) is not int or sequence < 0:
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber publication chronology differs"
-            )
-        token = object.__new__(ActionBallFullMdpRacketSelectedRubberToken)
-        view = ActionBallFullMdpRacketSelectedRubberView(
-            token=token,
-            racket_owner=self,
-            publication_identity=object(),
-            publication_sequence=sequence + 1,
-            physical_owner_mutation_version=snapshot.owner_mutation_version,
-            active_mask=active.detach().clone(),
-            expected_rubber=rubber.detach().clone(),
-            full_key_sha256=snapshot.outcome_key_sha256.detach().clone(),
-            ball_generation=snapshot.ball_generation.detach().clone(),
-            flight_slot=flight_slot.detach().clone(),
-            reset_generation=reset_generation.detach().clone(),
-            swing_generation=swing_generation.detach().clone(),
-            action_uid=action_uid.detach().clone(),
-            action_slot=action_slot.detach().clone(),
-            task_receipt_sha256=task_sha.detach().clone(),
-        )
-        self._action_ball_full_mdp_racket_selected_rubber_sequence = sequence + 1
-        self._action_ball_full_mdp_racket_selected_rubber_token = token
-        self._action_ball_full_mdp_racket_selected_rubber_view = view
-        return token
-
-    def require_owned_action_ball_full_mdp_selected_rubber_authority(
-        self,
-        token: object,
-    ) -> ActionBallFullMdpRacketSelectedRubberView:
-        """Validate the exact current token and return fresh clone-only tensors."""
-
-        current = getattr(
-            self, "_action_ball_full_mdp_racket_selected_rubber_token", None
-        )
-        view = getattr(
-            self, "_action_ball_full_mdp_racket_selected_rubber_view", None
-        )
-        if (
-            type(token) is not ActionBallFullMdpRacketSelectedRubberToken
-            or token is not current
-            or type(view) is not ActionBallFullMdpRacketSelectedRubberView
-            or view.token is not token
-            or view.racket_owner is not self
-        ):
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber authority is stale, foreign, or replayed"
-            )
-        physical_owner = getattr(
-            self, "_action_ball_full_mdp_racket_physical_owner", None
-        )
-        if physical_owner is None:
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber authority lost its bound Physical owner"
-            )
-        current_physical = physical_owner.scene_snapshot()
-        current_active = (
-            current_physical.published_to_runtime
-            & ~current_physical.physically_parked
-        )
-        if (
-            current_physical.owner_mutation_version
-            != view.physical_owner_mutation_version
-            or not torch.equal(
-                current_active, view.active_mask
-            )
-            or not torch.equal(
-                current_physical.outcome_key_sha256, view.full_key_sha256
-            )
-            or not torch.equal(
-                current_physical.ball_generation, view.ball_generation
-            )
-        ):
-            raise ActionBallContinuousRacketSelectedRubberHold(
-                "selected-rubber Physical lifecycle changed after publication"
-            )
-        return ActionBallFullMdpRacketSelectedRubberView(
-            token=token,
-            racket_owner=self,
-            publication_identity=view.publication_identity,
-            publication_sequence=view.publication_sequence,
-            physical_owner_mutation_version=view.physical_owner_mutation_version,
-            active_mask=view.active_mask.detach().clone(),
-            expected_rubber=view.expected_rubber.detach().clone(),
-            full_key_sha256=view.full_key_sha256.detach().clone(),
-            ball_generation=view.ball_generation.detach().clone(),
-            flight_slot=view.flight_slot.detach().clone(),
-            reset_generation=view.reset_generation.detach().clone(),
-            swing_generation=view.swing_generation.detach().clone(),
-            action_uid=view.action_uid.detach().clone(),
-            action_slot=view.action_slot.detach().clone(),
-            task_receipt_sha256=view.task_receipt_sha256.detach().clone(),
-        )
 
     def _action_ball_continuous_racket_observation_source(
         self,
@@ -11383,7 +11077,6 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_continuous_racket_poison_reason = (
                 "internal_racket_owner_protocol_violation"
             )
-        self._action_ball_continuous_racket_terminal_epoch_committed = False
         self._action_ball_continuous_racket_selected_reset_stage = None
         self._action_ball_continuous_racket_selected_reset_record = None
         self._action_ball_continuous_racket_selected_reset_prevalidated = None

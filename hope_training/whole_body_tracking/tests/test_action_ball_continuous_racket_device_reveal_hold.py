@@ -112,7 +112,6 @@ def _epoch_racket(r05_owner, *, device, bind_r03=False):
     racket._action_ball_full_mdp_racket_epoch_owner = None
     racket._action_ball_continuous_racket_poisoned = False
     racket._action_ball_continuous_racket_poison_reason = None
-    racket._action_ball_continuous_racket_terminal_epoch_committed = False
     racket._action_ball_continuous_racket_drain_fault_count_device = torch.zeros(
         1, dtype=torch.int64, device=target_device
     )
