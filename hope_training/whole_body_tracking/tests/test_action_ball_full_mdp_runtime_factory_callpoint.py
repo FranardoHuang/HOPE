@@ -2729,6 +2729,32 @@ def test_code_owned_lean_reward_bundle_materializes_exact_graph_and_cfg(
     assert epoch.REWARD_CONSUMER_ORDER == rewards.ORDERED_CONSUMERS
 
 
+def test_offside_reward_bundle_metadata_is_telemetry_not_an_admission_gate():
+    tree = ast.parse(FACTORY_MODULE_PATH.read_text(encoding="utf-8"))
+    construct = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_construct_offside_lean_runtime"
+    )
+    bundle_reads = {
+        node.attr
+        for node in ast.walk(construct)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "reward_bundle"
+    }
+
+    # Mutating producer-authored descriptive metadata cannot change factory
+    # control flow.  Only the graph and cfg cross their real consumer seams.
+    assert bundle_reads == {"graph", "manager_cfg"}
+    assert not any(
+        isinstance(node, ast.Constant)
+        and node.value == "exact single-action lean RewardManager bundle differs"
+        for node in ast.walk(construct)
+    )
+
+
 def test_fresh_lean_materializer_has_no_caller_numeric_or_receipt_seam():
     _factory, rewards, _epoch = _load_pod_lean_reward_stack()
     signature = inspect.signature(

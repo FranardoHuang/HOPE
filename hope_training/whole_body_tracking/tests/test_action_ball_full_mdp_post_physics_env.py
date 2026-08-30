@@ -747,6 +747,57 @@ def test_exact_lean_owner_binding_and_lease_identity(monkeypatch):
         _ = env.action_ball_full_mdp_runtime_lease
 
 
+def test_lean_owner_rejects_a_reward_graph_from_another_action_epoch():
+    expected_epoch = EPOCH.ActionEpochOwner(num_envs=2, device="cpu")
+    foreign_epoch = EPOCH.ActionEpochOwner(num_envs=2, device="cpu")
+    foreign_graph = REWARDS.LeanActionEpochRewardGraph(
+        epoch_owner=foreign_epoch
+    )
+
+    with pytest.raises(
+        LEAN.ActionBallFullMdpLeanRuntimeError,
+        match="exact graph for this ActionEpoch",
+    ):
+        LEAN.ActionBallFullMdpLeanRuntimeOwner(
+            env=object(),
+            runtime_lease=object(),
+            epoch_owner=expected_epoch,
+            reward_graph=foreign_graph,
+            r05_runtime=object(),
+            motion=object(),
+            racket=object(),
+            physical_ball=object(),
+            r06_landing_outcome=object(),
+            r03_strike_fact=object(),
+            r07_recovery=object(),
+        )
+
+
+def test_env_install_rejects_a_foreign_component_identity(monkeypatch):
+    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
+    env.step_dt = 0.02
+    env._action_ball_full_mdp_manager_construction_state = "sealed"
+    owner, components, _physical = _install_exact_lean_graph(env, [])
+    lease = env._action_ball_full_mdp_runtime_lease
+    monkeypatch.setattr(
+        M, "FULL_MDP_DIAGNOSTIC_RUNTIME_OWNER_MODULE", LEAN.__name__
+    )
+    hostile_fields = {
+        name: getattr(components, name)
+        for name in components.__dataclass_fields__
+    }
+    hostile_fields["r07_owner"] = object()
+    env._action_ball_full_mdp_components = M.FullMdpLeanRuntimeComponents(
+        **hostile_fields
+    )
+
+    with pytest.raises(
+        M.FullMdpPostPhysicsProtocolError,
+        match="component identities differ",
+    ):
+        env._validate_lean_owner_install(owner, expected_lease=lease)
+
+
 def test_construction_binding_rejects_debug_method_shadow_mutation(monkeypatch):
     env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
     env.step_dt = 0.02

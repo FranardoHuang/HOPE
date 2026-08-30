@@ -1,5 +1,15 @@
 # 简短进度记录
 
+## 2026-08-30 — FullMDP Reward bundle构造后自证减法
+
+- 删除factory对刚由同一producer构造的Reward bundle的逐项postcondition阻断；`profile_kind`与
+  `diagnostic_unauthorized`仍作metadata telemetry，只有`graph`和`manager_cfg`继续交给真正consumer。
+- hostile测试证明metadata drift不再误阻，而foreign graph↔ActionEpoch与env component identity仍在
+  独立consumer边界fail-stop。本机缺`torch`，pytest collection为`未测`；精确Pod命令已写入
+  [G05](gates/G05_isaac_training_first_loop.md)与
+  [热路实验](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。Gate仍`Partial`，
+  `diagnostic_unauthorized=true`，不改运行态配置或授权。
+
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 
 - fresh 4× Mu到ACK623后，matched旧Mu的raw/selected/crossing=`56/5/2` vs `1,665/334/281`，最近10轮

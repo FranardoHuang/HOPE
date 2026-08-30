@@ -12,6 +12,27 @@
 > 覆盖当前Reward28/PPO V5/Observation V3；Reward24只作V6历史。
 > 2026-08-27的现役候选已换为PPO V6；V5数值只作历史，当前速度结论见§17。
 
+## 18. 2026-08-30 Reward bundle同写者postcondition减法
+
+factory原在`materialize_diagnostic_n2_reward_manager_cfg` 返回后立即重验同一producer写入的
+bundle type、profile metadata、graph属性和manager顺序。这是构造后自证，不是跨owner事实。
+候选删除该阻断，保留`profile_kind`/`diagnostic_unauthorized` telemetry；graph↔ActionEpoch
+identity仍由Lean runtime owner独立验证，env component identities、manager cfg及registry仍由env安装
+consumer验证。三个hostile回归覆盖metadata drift非阻断、foreign graph↔epoch阻断和foreign
+component identity阻断。
+
+exact Pod聚焦计划：
+
+```bash
+python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_runtime_factory_callpoint.py::test_offside_reward_bundle_metadata_is_telemetry_not_an_admission_gate \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_post_physics_env.py::test_lean_owner_rejects_a_reward_graph_from_another_action_epoch \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_post_physics_env.py::test_env_install_rejects_a_foreign_component_identity
+```
+
+本机因Python环境缺`torch`，pytest在collection阶段停止，因此Pod结果仍`未测`。这项结构减法
+不改Reward数值或wall-time结论，不是performance GO，也不改`diagnostic_unauthorized=true`。
+
 <a id="fullmdp-v8-rate-current"></a>
 
 ## 17. V7 active业务速度翻转与V8低延迟shape

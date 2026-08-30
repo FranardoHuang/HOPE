@@ -2,6 +2,20 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-30 FullMDP Reward bundle 同写者自证删除（仍 `Partial`）
+
+fresh FullMDP factory 不再在构造 `DiagnosticN2RewardManagerBundle` 后立即重读同一
+producer 填入的 profile metadata、graph 属性与manager顺序并作为阻断。`profile_kind` 和
+`diagnostic_unauthorized` 仍保留在bundle中作telemetry；跨owner的 graph↔ActionEpoch identity 仍由
+Lean runtime consumer fail-stop，env component identities、manager cfg及component registry仍由env安装边界核验。
+
+新hostile测试锁定：profile metadata drift不再进入factory admission control；foreign graph↔ActionEpoch
+和foreign env component identity分别仍阻断。本机Python缺`torch`，pytest collection为`未测`；语法
+编译与`git diff --check`是本地结构验证，exact Pod聚焦命令见本页本节与
+[FullMDP热路实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
+此减法不改Reward经济、chronology、epoch/reward owner、reset、launch或训练配置，不授权
+promotion/export/deployment，Gate继续`Partial`。
+
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
 validated code source=`b0d7d562`保留`255df4a1`的每control一次R06 finalize与每substep Scene capture、terminal

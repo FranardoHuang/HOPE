@@ -1596,24 +1596,10 @@ def _construct_offside_lean_runtime(
                 epoch_owner=epoch_owner
             )
         )
-        if (
-            type(reward_bundle)
-            is not lean_rewards.DiagnosticN2RewardManagerBundle
-            or reward_bundle.profile_kind
-            != lean_rewards.DIAGNOSTIC_N2_REWARD_PROFILE_KIND
-            or type(reward_bundle.graph)
-            is not lean_rewards.LeanActionEpochRewardGraph
-            or reward_bundle.graph.epoch_owner is not epoch_owner
-            or reward_bundle.graph.num_envs != seed.num_envs
-            or reward_bundle.graph.device != seed.device
-            or type(reward_bundle.manager_cfg) is not dict
-            or tuple(reward_bundle.manager_cfg)
-            != lean_rewards.MANAGER_NAMES
-            or reward_bundle.diagnostic_unauthorized is not True
-        ):
-            raise ActionBallFullMdpRuntimeFactoryHold(
-                "exact single-action lean RewardManager bundle differs"
-            )
+        # ``profile_kind`` and ``diagnostic_unauthorized`` remain producer
+        # telemetry, not a same-writer admission gate.  The Lean owner below
+        # independently joins graph -> ActionEpoch identity; the environment
+        # installation seam validates the manager cfg and component registry.
         runtime_owner = lean.ActionBallFullMdpLeanRuntimeOwner(
             env=env,
             runtime_lease=env.action_ball_full_mdp_construction_lease(),
