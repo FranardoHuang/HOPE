@@ -4,9 +4,12 @@
 
 - teacher replay新增pre-reset表碰归因，不改默认训练和termination：仅在已启用
   N=1 diagnostic consumer时，每个policy tick独立记录`keepout_source`与
-  `backend_resolved_table_contact`，并在reset前把bit16首个positive的physics substep/
+  canonical final-forward `backend_resolved_table_contact`；substep resolved-any只作独立时序
+  诊断，不与final truth比较也不写入`_cur_robot_table`。reset前只把累计
+  keepout或final resolved对应的bit16首个positive physics substep/
   final-forward边界冻结一次。terminal bit与两类source不匹配时fail closed。本轮不为
-  body/role/SAT深归因新增热路；先用这一分流决定是keepout bridge、重定时还是base shift。
+  body/role/SAT深归因新增热路；默认路径只增一个轻量consumer存在分支，无
+  diagnostic buffer或D2H。先用这一分流决定是keepout bridge、重定时还是base shift。
 - `eff08cc4` Pod CPU的`93+154` module unions（含mesh closure）已全绿，但首个真实
   GPU1 CUDA replay在180-step前自然RC1：MJLab的live contact field是显式Torch-facing
   proxy，它有`torch.device`但不是`torch.Tensor`或Warp array；旧桥接把所有非Tensor

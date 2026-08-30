@@ -326,9 +326,11 @@ def _table_attribution_rig():
         decimation=20,
         _diagnostic_contact_patch_transition_start_step=41,
         _diagnostic_first_table_terminal_source=None,
+        _diagnostic_first_resolved_substep=None,
         _diagnostic_table_tick_first_positive=None,
         _diagnostic_table_tick_keepout=False,
-        _diagnostic_table_tick_resolved=False,
+        _diagnostic_table_tick_final_resolved=False,
+        _diagnostic_table_tick_resolved_any_substep=False,
         _diagnostic_table_attribution_consumer=True,
     )
 
@@ -341,6 +343,7 @@ def test_table_attribution_freezes_first_positive_before_reset_once_only():
         env,
         keepout=torch.tensor([False]),
         resolved=torch.tensor([False]),
+        resolved_is_final=False,
         substep_index=1,
         capture_boundary="physics_substep_poststate",
     )
@@ -348,6 +351,7 @@ def test_table_attribution_freezes_first_positive_before_reset_once_only():
         env,
         keepout=torch.tensor([True]),
         resolved=torch.tensor([False]),
+        resolved_is_final=False,
         substep_index=2,
         capture_boundary="physics_substep_poststate",
     )
@@ -355,8 +359,17 @@ def test_table_attribution_freezes_first_positive_before_reset_once_only():
         env,
         keepout=torch.tensor([False]),
         resolved=torch.tensor([True]),
+        resolved_is_final=False,
         substep_index=3,
         capture_boundary="physics_substep_poststate",
+    )
+    capture(
+        env,
+        keepout=torch.tensor([False]),
+        resolved=torch.tensor([False]),
+        resolved_is_final=True,
+        substep_index=None,
+        capture_boundary="post_forward_final",
     )
     result = finalize(
         env,
@@ -365,7 +378,9 @@ def test_table_attribution_freezes_first_positive_before_reset_once_only():
         ]),
     )
     assert result["keepout_source"] is True
-    assert result["backend_resolved_table_contact"] is True
+    assert result["backend_resolved_table_contact"] is False
+    assert result["resolved_any_substep"] is True
+    assert result["first_resolved_substep"]["physics_substep_index"] == 3
     assert result["first_table_terminal_source"] == {
         "transition_start_step": 41,
         "capture_boundary": "physics_substep_poststate",
@@ -380,6 +395,7 @@ def test_table_attribution_freezes_first_positive_before_reset_once_only():
         env,
         keepout=torch.tensor([False]),
         resolved=torch.tensor([True]),
+        resolved_is_final=True,
         substep_index=None,
         capture_boundary="post_forward_final",
     )
@@ -406,6 +422,7 @@ def test_table_attribution_unknown_or_unmatched_source_fails_closed(
         env,
         keepout=torch.tensor([keepout]),
         resolved=torch.tensor([resolved]),
+        resolved_is_final=True,
         substep_index=None,
         capture_boundary="post_forward_final",
     )
@@ -416,6 +433,41 @@ def test_table_attribution_unknown_or_unmatched_source_fails_closed(
         wait_env.FullMdpInitialWaitVecEnv.diagnostic_table_attribution_tick(
             env, torch.tensor([bits])
         )
+
+
+def test_substep_resolved_contact_can_separate_before_canonical_final_forward():
+    env = _table_attribution_rig()
+    capture = wait_env.FullMdpInitialWaitVecEnv._capture_diagnostic_table_attribution
+    capture(
+        env,
+        keepout=torch.tensor([False]),
+        resolved=torch.tensor([True]),
+        resolved_is_final=False,
+        substep_index=7,
+        capture_boundary="physics_substep_poststate",
+    )
+    capture(
+        env,
+        keepout=torch.tensor([False]),
+        resolved=torch.tensor([False]),
+        resolved_is_final=True,
+        substep_index=None,
+        capture_boundary="post_forward_final",
+    )
+    result = wait_env.FullMdpInitialWaitVecEnv.diagnostic_table_attribution_tick(
+        env, torch.tensor([0])
+    )
+    assert result["resolved_any_substep"] is True
+    assert result["backend_resolved_table_contact"] is False
+    assert result["keepout_source"] is False
+    assert result["first_table_terminal_source"] is None
+    assert result["first_resolved_substep"] == {
+        "transition_start_step": 41,
+        "capture_boundary": "physics_substep_poststate",
+        "physics_substep_index": 7,
+        "completed_physics_substeps": 7,
+        "backend_resolved_table_contact": True,
+    }
 
 
 def test_teacher_replay_cli_is_n1_zero_ppo_and_reuses_live_owner():

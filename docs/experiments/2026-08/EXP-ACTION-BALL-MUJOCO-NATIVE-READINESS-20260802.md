@@ -23,9 +23,12 @@
 ## 2026-08-30 frozen-teacher targeted修复候选
 
 为下一次fresh replay增加最小pre-reset归因：每tick的`keepout_source`和
-`backend_resolved_table_contact`分别进NPZ，首个bit16之前观测到的首个阳性
+canonical final-forward `backend_resolved_table_contact`分别进NPZ；substep resolved-any与其
+首见边界只是独立诊断，不写`_cur_robot_table`也不与final truth强制相等。首个
+canonical bit16之前观测到的首个阳性
 physics-substep/final-forward边界只冻结一次并进summary。这一diagnostic latch仅由
-teacher replay的opt-in enable创建；正常FullMDP训练不有该callback、不增buffer或D2H，
+teacher replay的opt-in enable创建；正常FullMDP训练只增一个轻量consumer存在分支，
+不增diagnostic buffer或D2H，
 termination bit语义不变。bit/source不匹配为unknown fail-closed。本轮先回答“SAT guard
 还是backend resolved contact”，不为body/component/table role新增另一条热路。
 

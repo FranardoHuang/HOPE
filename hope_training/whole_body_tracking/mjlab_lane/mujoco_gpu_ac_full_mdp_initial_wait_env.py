@@ -611,9 +611,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._capture_diagnostic_first_generic_contact_patch
         )
         self._diagnostic_first_table_terminal_source = None
+        self._diagnostic_first_resolved_substep = None
         self._diagnostic_table_tick_first_positive = None
         self._diagnostic_table_tick_keepout = False
-        self._diagnostic_table_tick_resolved = False
+        self._diagnostic_table_tick_final_resolved = False
+        self._diagnostic_table_tick_resolved_any_substep = False
         self._diagnostic_table_attribution_consumer = (
             self._capture_diagnostic_table_attribution
         )
@@ -621,10 +623,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
     def _begin_diagnostic_table_attribution_tick(self) -> None:
         self._diagnostic_table_tick_first_positive = None
         self._diagnostic_table_tick_keepout = False
-        self._diagnostic_table_tick_resolved = False
+        self._diagnostic_table_tick_final_resolved = False
+        self._diagnostic_table_tick_resolved_any_substep = False
 
     def _capture_diagnostic_table_attribution(
-        self, *, keepout, resolved, substep_index, capture_boundary
+        self, *, keepout, resolved, resolved_is_final,
+        substep_index, capture_boundary,
     ) -> None:
         """Latch the first pre-reset table source in the opt-in N=1 replay."""
 
@@ -633,10 +637,29 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         keepout_positive = bool(keepout[0].detach().cpu().item())
         resolved_positive = bool(resolved[0].detach().cpu().item())
         self._diagnostic_table_tick_keepout |= keepout_positive
-        self._diagnostic_table_tick_resolved |= resolved_positive
+        if resolved_is_final:
+            if capture_boundary != "post_forward_final" or substep_index is not None:
+                raise RuntimeError("diagnostic final resolved boundary differs")
+            self._diagnostic_table_tick_final_resolved = resolved_positive
+        else:
+            if capture_boundary != "physics_substep_poststate":
+                raise RuntimeError("diagnostic substep resolved boundary differs")
+            self._diagnostic_table_tick_resolved_any_substep |= resolved_positive
+            if resolved_positive and self._diagnostic_first_resolved_substep is None:
+                self._diagnostic_first_resolved_substep = {
+                    **teacher_replay.contact_capture_boundary(
+                        transition_start_step=int(
+                            self._diagnostic_contact_patch_transition_start_step
+                        ),
+                        capture_boundary=capture_boundary,
+                        physics_substep_index=substep_index,
+                        decimation=int(self.decimation),
+                    ),
+                    "backend_resolved_table_contact": True,
+                }
         if (
             self._diagnostic_table_tick_first_positive is None
-            and (keepout_positive or resolved_positive)
+            and (keepout_positive or (resolved_is_final and resolved_positive))
         ):
             boundary = teacher_replay.contact_capture_boundary(
                 transition_start_step=int(
@@ -649,7 +672,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._diagnostic_table_tick_first_positive = {
                 **boundary,
                 "keepout_source": keepout_positive,
-                "backend_resolved_table_contact": resolved_positive,
+                "backend_resolved_table_contact": (
+                    resolved_is_final and resolved_positive
+                ),
             }
 
     def diagnostic_table_attribution_tick(self, terminal_bits) -> dict:
@@ -665,7 +690,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         any_source = (
             self._diagnostic_table_tick_keepout
-            or self._diagnostic_table_tick_resolved
+            or self._diagnostic_table_tick_final_resolved
         )
         if table_terminal != any_source:
             raise RuntimeError("diagnostic table terminal source is unknown")
@@ -678,7 +703,15 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         return {
             "keepout_source": self._diagnostic_table_tick_keepout,
             "backend_resolved_table_contact": (
-                self._diagnostic_table_tick_resolved
+                self._diagnostic_table_tick_final_resolved
+            ),
+            "resolved_any_substep": (
+                self._diagnostic_table_tick_resolved_any_substep
+            ),
+            "first_resolved_substep": (
+                None
+                if self._diagnostic_first_resolved_substep is None
+                else dict(self._diagnostic_first_resolved_substep)
             ),
             "first_table_terminal_source": (
                 None
@@ -2342,6 +2375,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                     table_consumer(
                         keepout=keepout,
                         resolved=contact_census.robot_table_by_world.gt(0),
+                        resolved_is_final=False,
                         substep_index=substep_index,
                         capture_boundary="physics_substep_poststate",
                     )
@@ -3322,6 +3356,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             table_consumer(
                 keepout=final_keepout,
                 resolved=final_resolved_count.gt(0),
+                resolved_is_final=True,
                 substep_index=None,
                 capture_boundary="post_forward_final",
             )

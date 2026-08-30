@@ -964,6 +964,7 @@ def _run_teacher_replay(
         "invalid_contact", "crossing", "legal_landing", "done",
         "termination_bits", "qdes_guard_intervention", "keepout_source",
         "backend_resolved_table_contact",
+        "resolved_any_substep",
     )}
     question = launch = None
     question_reset_generation = None
@@ -1065,6 +1066,9 @@ def _run_teacher_replay(
             rows["backend_resolved_table_contact"].append([
                 table_attribution["backend_resolved_table_contact"]
             ])
+            rows["resolved_any_substep"].append([
+                table_attribution["resolved_any_substep"]
+            ])
             previous_qdes = requested
             if bool(done[0]):
                 if question is None:
@@ -1139,6 +1143,10 @@ def _run_teacher_replay(
         "generic_contact_patch": contact_patch,
         "first_table_terminal_source": (
             table_attribution["first_table_terminal_source"]
+            if rows["common_step"] else None
+        ),
+        "first_resolved_substep": (
+            table_attribution["first_resolved_substep"]
             if rows["common_step"] else None
         ),
         "event_counts": {
