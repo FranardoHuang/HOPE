@@ -56,6 +56,7 @@ DYNAMIC_READY_RECEIPT_SHA256 = (
 )
 RATE_PROBE_COMPLETION_TIMEOUT_S = 7200
 FIXED_ACTION_PROBE_BOOT_MARKER = "FULLMDP_ISAAC_FIXED_ACTION_PROBE_STARTED"
+CONTACT_TICK_TRACE_BOOT_MARKER = "FULLMDP_ISAAC_CONTACT_TICK_TRACE_STARTED"
 RATE_PROBE_WARMUP_UPDATES = 10
 RATE_PROBE_MEASURED_UPDATES = 50
 RATE_PROBE_TAIL_UPDATES = 1
@@ -431,6 +432,7 @@ def _paths(root: Path) -> dict[str, Path]:
         "rate_receipt": root / "diagnostic-rate-probe.json",
         "profile_receipt": root / "diagnostic-profile-probe.json",
         "fixed_action_probe": root / "fixed-action-probe",
+        "contact_tick_trace": root / "contact-tick-trace.json",
         "run_log": root / "run.log",
         "launch_state": root / "kit_boot.launch",
         "training": root / "training",
@@ -531,6 +533,7 @@ def _child_argv(
     diagnostic_rate_probe: bool = False,
     diagnostic_profile_probe: bool = False,
     diagnostic_fixed_action_probe: bool = False,
+    diagnostic_contact_tick_trace: bool = False,
 ) -> list[str]:
     argv = [
         str(isaac_python),
@@ -577,6 +580,11 @@ def _child_argv(
         argv.append(
             "task.action_ball_full_mdp_fixed_action_probe_output_path="
             f"{hydra_run_dir.parents[1] / 'fixed-action-probe'}"
+        )
+    if diagnostic_contact_tick_trace:
+        argv.append(
+            "task.action_ball_full_mdp_contact_tick_trace_output_path="
+            f"{hydra_run_dir.parents[1] / 'contact-tick-trace.json'}"
         )
     return argv
 
@@ -1132,6 +1140,7 @@ def launch(args: argparse.Namespace) -> int:
             args.diagnostic_rate_probe,
             args.diagnostic_profile_probe,
             args.diagnostic_fixed_action_probe,
+            args.diagnostic_contact_tick_trace,
         )
     )
     if diagnostic_count > 1:
@@ -1148,6 +1157,10 @@ def launch(args: argparse.Namespace) -> int:
         raise LaunchError(
             "diagnostic-fixed-action-probe and profile-updates are mutually exclusive"
         )
+    if args.diagnostic_contact_tick_trace and args.profile_updates:
+        raise LaunchError(
+            "diagnostic-contact-tick-trace and profile-updates are mutually exclusive"
+        )
     cpu_affinity, cpu_ids = _cpu_affinity(args.cpu_affinity)
     if cpu_affinity is not None:
         _canonical_regular(TASKSET, "taskset", executable=True)
@@ -1160,6 +1173,7 @@ def launch(args: argparse.Namespace) -> int:
         diagnostic_rate_probe=args.diagnostic_rate_probe,
         diagnostic_profile_probe=args.diagnostic_profile_probe,
         diagnostic_fixed_action_probe=args.diagnostic_fixed_action_probe,
+        diagnostic_contact_tick_trace=args.diagnostic_contact_tick_trace,
     )
     runtime_env = _runtime_env(
         gpu_uuid=args.expected_gpu_uuid,
@@ -1172,9 +1186,13 @@ def launch(args: argparse.Namespace) -> int:
         operator_runtime=operator_runtime,
     )
     boot_marker = (
-        FIXED_ACTION_PROBE_BOOT_MARKER
-        if args.diagnostic_fixed_action_probe
-        else "Learning iteration"
+        CONTACT_TICK_TRACE_BOOT_MARKER
+        if args.diagnostic_contact_tick_trace
+        else (
+            FIXED_ACTION_PROBE_BOOT_MARKER
+            if args.diagnostic_fixed_action_probe
+            else "Learning iteration"
+        )
     )
     if args.dry_run:
         dry_run_payload = {
@@ -1186,6 +1204,7 @@ def launch(args: argparse.Namespace) -> int:
                     args.diagnostic_rate_probe
                     or args.diagnostic_profile_probe
                     or args.diagnostic_fixed_action_probe
+                    or args.diagnostic_contact_tick_trace
                 ),
                 boot_marker=boot_marker,
             ),
@@ -1244,6 +1263,7 @@ def launch(args: argparse.Namespace) -> int:
                         args.diagnostic_rate_probe
                         or args.diagnostic_profile_probe
                         or args.diagnostic_fixed_action_probe
+                        or args.diagnostic_contact_tick_trace
                     ),
                     boot_marker=boot_marker,
                 ),
@@ -1259,6 +1279,7 @@ def launch(args: argparse.Namespace) -> int:
             args.diagnostic_rate_probe
             or args.diagnostic_profile_probe
             or args.diagnostic_fixed_action_probe
+            or args.diagnostic_contact_tick_trace
         ):
             pid, pgid = _verify_completed(paths)
         fixed_action_payload = None
@@ -1294,6 +1315,26 @@ def launch(args: argparse.Namespace) -> int:
             rate_payload = None
             profile_payload = None
             status = "DIAGNOSTIC_FIXED_ACTION_PROBE_COMPLETE"
+        elif args.diagnostic_contact_tick_trace:
+            try:
+                contact_tick_payload = json.loads(
+                    paths["contact_tick_trace"].read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError) as exc:
+                raise LaunchError(
+                    "completed contact-tick trace artifact is absent or invalid"
+                ) from exc
+            if (
+                contact_tick_payload.get("kind")
+                != "isaac_full_mdp_teacher_forced_contact_tick_trace_v1"
+                or contact_tick_payload.get("ppo_update_count") != 0
+                or len(contact_tick_payload.get("rows", ())) != 10
+            ):
+                raise LaunchError("completed contact-tick trace schema differs")
+            fixed_action_payload = None
+            rate_payload = None
+            profile_payload = None
+            status = "DIAGNOSTIC_CONTACT_TICK_TRACE_COMPLETE"
         else:
             pid, pgid = _verify_started(
                 paths, gpu_lock=gpu_lock, lock_file=args.lock_file
@@ -1321,6 +1362,11 @@ def launch(args: argparse.Namespace) -> int:
                     "update_seconds_p90": rate_payload["update_seconds_p90"],
                 }
                 if rate_payload is not None
+                else {}
+            ),
+            **(
+                {"contact_tick_trace": str(paths["contact_tick_trace"])}
+                if args.diagnostic_contact_tick_trace
                 else {}
             ),
             **(
@@ -1373,6 +1419,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--diagnostic-rate-probe", action="store_true")
     parser.add_argument("--diagnostic-profile-probe", action="store_true")
     parser.add_argument("--diagnostic-fixed-action-probe", action="store_true")
+    parser.add_argument("--diagnostic-contact-tick-trace", action="store_true")
     parser.add_argument("--cpu-affinity")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
