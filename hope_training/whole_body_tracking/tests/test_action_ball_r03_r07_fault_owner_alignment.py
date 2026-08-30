@@ -56,9 +56,6 @@ class _Racket:
         self._action_ball_strike_fact_exact_eligibility = torch.ones(
             2, dtype=torch.bool
         )
-        self._action_ball_strike_fact_target_validity = torch.ones(
-            2, dtype=torch.bool
-        )
         self.active = False
 
     def require_active_action_epoch_r03_writer(self):
@@ -94,18 +91,55 @@ def _r03_contact_step(epoch):
     return current.clocks.contact_tick.gather(1, slot).squeeze(1)
 
 
-def _real_settled_r03():
+def _selected_r03_target_vectors(epoch):
+    """Decode the sole R03 target authority from the current frozen task."""
+
+    epoch_module = importlib.import_module(type(epoch).__module__)
+    current = epoch.current()
+    slot = current.current_task_slot[:, None, None].expand(
+        epoch.num_envs, 1, epoch_module.TASK_F32_WIDTH
+    )
+    task = current.task.task_f32.gather(1, slot).squeeze(1)
+    start = epoch_module.MOTION_TASK_F32_WIDTH
+    racket = task[:, start : start + epoch_module.RACKET_TASK_F32_WIDTH]
+    return {
+        "target_position": racket[:, 0:3],
+        "target_velocity": racket[:, 3:6],
+        "target_face_normal": racket[:, 6:9],
+        "ball_position": racket[:, 9:12],
+        "ball_velocity": racket[:, 21:24],
+    }
+
+
+def _real_settled_r03(*, racket_task_f32=None):
     (
         _motion,
         _d05_owner,
         epoch,
         d05_token,
-        _row_record,
+        row_record,
         _racket_peer,
         _physical_peer,
     ) = motion_row._install_real_d05_record(
         device=torch.device("cpu"), corrupt_accept_mask=False
     )
+    if racket_task_f32 is not None:
+        epoch_module = importlib.import_module(type(epoch).__module__)
+        assert type(racket_task_f32) is torch.Tensor
+        assert racket_task_f32.shape == (
+            epoch.num_envs,
+            epoch_module.RACKET_TASK_F32_WIDTH,
+        )
+        candidate = row_record.candidate
+        task_f32 = candidate.task.task_f32.clone()
+        start = epoch_module.MOTION_TASK_F32_WIDTH
+        task_f32[:, 0, start : start + epoch_module.RACKET_TASK_F32_WIDTH].copy_(
+            racket_task_f32
+        )
+        row_record.candidate = replace(
+            candidate,
+            task=replace(candidate.task, task_f32=task_f32),
+        )
     active_d05 = epoch._active_d05
     epoch._active_d05 = None
     try:
@@ -189,8 +223,13 @@ def _ready_row_bytes(owner, row: int):
     return tuple(tensor[row].contiguous().numpy().tobytes() for tensor in tensors)
 
 
-def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
-    owner, epoch, racket, identity = _real_settled_r03()
+def test_r03_epoch_task_is_unforgeable_and_fixed_tape_bytes_rewards_match():
+    racket_task = (
+        torch.arange(54, dtype=torch.float32).reshape(2, 27) * 0.125 - 2.0
+    )
+    owner, epoch, racket, identity = _real_settled_r03(
+        racket_task_f32=racket_task
+    )
     epoch_module = importlib.import_module(type(epoch).__module__)
     foreign = R03.ActionBallStrikeFactDeviceCoordinator(
         num_envs=2, device="cpu"
@@ -210,15 +249,11 @@ def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
         assert _raw_bytes(epoch.current()) == before
 
     step = _r03_contact_step(epoch)
-    vectors = {
+    target_vectors = _selected_r03_target_vectors(epoch)
+    achieved = {
         name: torch.arange(offset, offset + 6, dtype=torch.float32).reshape(2, 3)
         for offset, name in enumerate(
             (
-                "target_position",
-                "target_velocity",
-                "target_face_normal",
-                "ball_position",
-                "ball_velocity",
                 "achieved_position",
                 "achieved_velocity",
                 "achieved_face_normal",
@@ -226,16 +261,24 @@ def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
             start=1,
         )
     }
+    hostile = torch.full((2, 3), float("nan"), dtype=torch.float32)
+    with _active(racket):
+        with pytest.raises(TypeError, match="target_position"):
+            owner.arm_action_epoch_strike_fact_v1(
+                racket_owner=racket,
+                source_step=step,
+                racket_identity=identity,
+                target_position=hostile,
+            )
+    assert owner._epoch_arm_identity is None
+    assert epoch.commit_head == before_head
+    assert _raw_bytes(epoch.current()) == before
+
     with _active(racket):
         owner.arm_action_epoch_strike_fact_v1(
             racket_owner=racket,
             source_step=step,
             racket_identity=identity,
-            target_position=vectors["target_position"],
-            target_velocity=vectors["target_velocity"],
-            target_face_normal=vectors["target_face_normal"],
-            ball_position=vectors["ball_position"],
-            ball_velocity=vectors["ball_velocity"],
         )
     after_arm = epoch.commit_head
     assert after_arm == before_head + 1
@@ -244,9 +287,9 @@ def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
             racket_owner=racket,
             source_step=step,
             racket_identity=identity,
-            achieved_position=vectors["achieved_position"],
-            achieved_velocity=vectors["achieved_velocity"],
-            achieved_face_normal=vectors["achieved_face_normal"],
+            achieved_position=achieved["achieved_position"],
+            achieved_velocity=achieved["achieved_velocity"],
+            achieved_face_normal=achieved["achieved_face_normal"],
         )
     assert epoch.commit_head == after_arm + 2
 
@@ -255,9 +298,13 @@ def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
     row = torch.arange(2, dtype=torch.int64)
     slot = record.current_task_slot
     published = record.fact_f32[row, slot, owner_slot]
-    expected = torch.cat(tuple(vectors.values()), dim=1)
+    expected = torch.cat(
+        (*target_vectors.values(), *achieved.values()), dim=1
+    )
     assert published.shape[1] == epoch_module.OWNER_FACT_F32_WIDTH
-    assert torch.equal(published[0, : R03.R03_EPOCH_FACT_VALUE_COUNT], expected[0])
+    assert _raw_bytes(
+        published[0, : R03.R03_EPOCH_FACT_VALUE_COUNT]
+    ) == _raw_bytes(expected[0])
     assert torch.count_nonzero(
         published[0, R03.R03_EPOCH_FACT_VALUE_COUNT :]
     ).item() == 0
@@ -272,6 +319,53 @@ def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
     ]
     assert record.owner_fault_bits[row, slot, owner_slot].tolist() == [0, 0]
     assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
+
+    reward_facts = owner.action_epoch_reward_facts_v1(record)
+    assert _raw_bytes(reward_facts.target_position[0, 0]) == _raw_bytes(
+        target_vectors["target_position"][0]
+    )
+    reward_before = torch.where(
+        step.ge(0), step - 1, torch.zeros_like(step)
+    )
+    epoch._reward_cycle_age.copy_(reward_before)
+    epoch._publication.current.reward_cycle_age.copy_(reward_before)
+    lean_rewards = importlib.import_module(
+        type(epoch).__module__.rsplit(".", 1)[0]
+        + ".action_ball_full_mdp_lean_rewards"
+    )
+    graph = lean_rewards.LeanActionEpochRewardGraph(epoch_owner=epoch)
+    scales = (0.2, 1.1, 0.45, 0.55, 2.1, 0.9, 0.08, 0.4, 0.2, 0.13)
+    actual_rewards = tuple(
+        graph.pay(ordinal, scale=scales[ordinal])
+        for ordinal in range(len(lean_rewards.R03_NAMES))
+    )
+    fact = published[:, : R03.R03_EPOCH_FACT_VALUE_COUNT]
+    errors = (
+        torch.linalg.vector_norm(fact[:, 15:18] - fact[:, 0:3], dim=-1),
+        torch.linalg.vector_norm(fact[:, 18:21] - fact[:, 3:6], dim=-1),
+        torch.acos(
+            torch.sum(fact[:, 21:24] * fact[:, 6:9], dim=-1).clamp(-1.0, 1.0)
+        ),
+        torch.linalg.vector_norm(fact[:, 15:18] - fact[:, 9:12], dim=-1),
+    )
+    component = (0, 1, 2, 0, 1, 2, 0, 1, 2, 3)
+    admitted = torch.tensor([True, False], dtype=torch.bool)
+    expected_rewards = []
+    for ordinal, scale in enumerate(scales):
+        ratio_sq = torch.square(errors[component[ordinal]] / scale)
+        raw = (
+            torch.reciprocal(1.0 + ratio_sq)
+            if lean_rewards.R03_NAMES[ordinal].endswith("_coarse")
+            or lean_rewards.R03_NAMES[ordinal] == "paddle_center_proximity"
+            else torch.exp(-ratio_sq)
+        )
+        expected_rewards.append(
+            torch.where(admitted, raw, torch.zeros_like(raw))
+        )
+    assert all(
+        torch.equal(actual, expected)
+        for actual, expected in zip(actual_rewards, expected_rewards)
+    )
 
     epoch.merge_runtime_owner_fault("r03_strike_fact", bits, owner=owner)
     record = epoch.current()
@@ -309,11 +403,6 @@ def test_r03_publish_faults_freeze_bad_row_preserve_peer_and_enter_named_drain(
             racket_owner=racket,
             source_step=step,
             racket_identity=identity,
-            target_position=zero,
-            target_velocity=zero,
-            target_face_normal=zero,
-            ball_position=zero,
-            ball_velocity=zero,
         )
     epoch_module = importlib.import_module(type(epoch).__module__)
     r03_slot = epoch_module.OWNER_ORDER.index("r03_strike_fact")
@@ -406,9 +495,14 @@ def test_r03_publish_faults_freeze_bad_row_preserve_peer_and_enter_named_drain(
 def test_r03_real_arm_types_each_fault_without_touching_peer(
     fault_kind, expected_fault, expected_row_fault
 ):
-    owner, epoch, racket, identity = _real_settled_r03()
+    racket_task = None
+    if fault_kind == "nonfinite":
+        racket_task = torch.zeros((2, 27), dtype=torch.float32)
+        racket_task[0, 0] = torch.nan
+    owner, epoch, racket, identity = _real_settled_r03(
+        racket_task_f32=racket_task
+    )
     step = _r03_contact_step(epoch)
-    target_position = torch.zeros((2, 3), dtype=torch.float32)
     if fault_kind == "epoch_identity":
         identity = replace(
             identity,
@@ -417,9 +511,6 @@ def test_r03_real_arm_types_each_fault_without_touching_peer(
         identity.task_identity[0] += 1
     elif fault_kind == "stale_source":
         step[0] = -1
-    else:
-        target_position[0, 0] = torch.nan
-    zero = torch.zeros((2, 3), dtype=torch.float32)
     owner_slot = importlib.import_module(type(epoch).__module__).OWNER_ORDER.index(
         "r03_strike_fact"
     )
@@ -437,11 +528,6 @@ def test_r03_real_arm_types_each_fault_without_touching_peer(
             racket_owner=racket,
             source_step=step,
             racket_identity=identity,
-            target_position=target_position,
-            target_velocity=zero,
-            target_face_normal=zero,
-            ball_position=zero,
-            ball_velocity=zero,
         )
     record = epoch.current()
     assert record.owner_fault_bits[0, 0, owner_slot].item() & expected_fault
@@ -470,11 +556,6 @@ def test_r03_producer_fault_stops_preoptimizer_with_exact_named_cause():
             racket_owner=racket,
             source_step=step,
             racket_identity=identity,
-            target_position=zero,
-            target_velocity=zero,
-            target_face_normal=zero,
-            ball_position=zero,
-            ball_velocity=zero,
         )
     achieved = zero.clone()
     achieved[0, 0] = torch.nan

@@ -10608,7 +10608,6 @@ class RacketTargetCommand(CommandTerm):
                     "_epoch_arm_source_step",
                     "_epoch_arm_mask",
                     "_epoch_arm_vectors",
-                    "_epoch_arm_validity",
                     "_epoch_arm_shot_key",
                     "_epoch_arm_slot",
                     "_epoch_arm_d05_identity",
@@ -16018,11 +16017,6 @@ class RacketTargetCommand(CommandTerm):
                         ),
                     ),
                     racket_owner=self,
-                    target_position=self.racket_target_pos_w,
-                    target_velocity=self.racket_target_vel_w,
-                    target_face_normal=self.target_normal_cmd,
-                    ball_position=self._action_ball_ball_contact_target_w,
-                    ball_velocity=self.vb_vel_in_w,
                 )
             finally:
                 self._action_ball_full_mdp_r03_writer_active = False
@@ -16086,10 +16080,9 @@ class RacketTargetCommand(CommandTerm):
         """Arm the bound R03 after D05 reveal and before the next physics.
 
         This helper accepts no mask, identity, step, or verdict from the top
-        owner.  The Racket leaf owns the exact one-shot eligibility, live task
-        integers, targets, and the manager's next-transition clock; R03 joins
-        them to its independently bound current ActionEpoch after the D05
-        coordinator operation has returned.
+        owner.  The Racket leaf owns its live task integers and the manager's
+        next-transition clock; R03 freezes targets only from its independently
+        bound current ActionEpoch after the D05 coordinator operation returns.
         """
 
         if getattr(self, "_action_ball_full_mdp_enabled", False) is not True:
@@ -16188,6 +16181,20 @@ class RacketTargetCommand(CommandTerm):
                 achieved_raw_face_normal,
                 _achieved_signed_face_normal,
             ) = self._racket_fk()
+            origins = getattr(
+                getattr(self._env, "scene", None), "env_origins", None
+            )
+            if (
+                type(origins) is not torch.Tensor
+                or origins.device != torch.device(self.device)
+                or origins.dtype != achieved_position.dtype
+                or tuple(origins.shape) != (self.num_envs, 3)
+                or not origins.is_contiguous()
+            ):
+                raise ActionBallContinuousRacketStrikeFactHold(
+                    "fresh R03 publication requires exact live environment origins"
+                )
+            achieved_position_scene = achieved_position - origins
             source = self._action_ball_strike_fact_source_step
             if self._action_ball_full_mdp_r03_writer_active:
                 raise RuntimeError("fresh R03 Racket writer is reentrant")
@@ -16204,7 +16211,7 @@ class RacketTargetCommand(CommandTerm):
                             self._action_ball_full_mdp_racket_task_identity
                         ),
                     ),
-                    achieved_position=achieved_position,
+                    achieved_position=achieved_position_scene,
                     achieved_velocity=achieved_velocity,
                     achieved_face_normal=achieved_raw_face_normal,
                 )

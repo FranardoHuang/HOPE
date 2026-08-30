@@ -1279,18 +1279,12 @@ def test_foreign_or_unsettled_fresh_r03_fails_before_racket_reset_write():
         action_slot=current.identity.action_slot.gather(1, slot).squeeze(1),
         task_identity=current.identity.task_identity.gather(1, slot).squeeze(1),
     )
-    zero = torch.zeros((racket.num_envs, 3), dtype=torch.float32)
     racket._action_ball_full_mdp_r03_writer_active = True
     try:
         r03_owner.arm_action_epoch_strike_fact_v1(
             racket_owner=racket,
             source_step=torch.ones(racket.num_envs, dtype=torch.int64),
             racket_identity=identity,
-            target_position=zero,
-            target_velocity=zero,
-            target_face_normal=zero,
-            ball_position=zero,
-            ball_velocity=zero,
         )
     finally:
         racket._action_ball_full_mdp_r03_writer_active = False

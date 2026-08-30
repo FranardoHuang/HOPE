@@ -880,8 +880,27 @@ def test_rowwise_accept_arms_r03_and_publishes_real_fk(
     record = epoch_owner.current()
     owner_slot = epoch.OWNER_ORDER.index("r03_strike_fact")
     assert record.fact_valid_bits[:, 0, owner_slot].tolist() == [3, 0]
+    racket_image = candidate.task.task_f32[
+        :, 0, epoch.MOTION_TASK_F32_WIDTH : (
+            epoch.MOTION_TASK_F32_WIDTH + epoch.RACKET_TASK_F32_WIDTH
+        )
+    ]
+    expected_targets = torch.cat(
+        (
+            racket_image[:, 0:3],
+            racket_image[:, 3:6],
+            racket_image[:, 6:9],
+            racket_image[:, 9:12],
+            racket_image[:, 21:24],
+        ),
+        dim=1,
+    )
     assert torch.equal(
-        record.fact_f32[0, 0, owner_slot, 15:18], achieved_position[0]
+        record.fact_f32[0, 0, owner_slot, :15], expected_targets[0]
+    )
+    assert torch.equal(
+        record.fact_f32[0, 0, owner_slot, 15:18],
+        achieved_position[0] - racket._env.scene.env_origins[0],
     )
     assert torch.all(record.fact_f32[1, 0, owner_slot] == 0)
     for name, expected in fact_before.items():
@@ -976,11 +995,6 @@ def test_rowwise_r03_rejects_foreign_racket_and_wrong_postphysics_step(
             racket_owner=object(),
             source_step=torch.full((2,), 5, dtype=torch.int64),
             racket_identity=identity,
-            target_position=racket.racket_target_pos_w,
-            target_velocity=racket.racket_target_vel_w,
-            target_face_normal=racket.target_normal_cmd,
-            ball_position=racket._action_ball_ball_contact_target_w,
-            ball_velocity=racket.vb_vel_in_w,
         )
     assert owner._epoch_arm_identity is None
     racket.arm_action_ball_full_mdp_epoch_strike_fact()

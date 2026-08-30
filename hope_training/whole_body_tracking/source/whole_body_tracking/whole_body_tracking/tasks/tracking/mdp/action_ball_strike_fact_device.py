@@ -1,11 +1,12 @@
 """Device-resident same-transition ActionBall strike-fact coordinator.
 
 The coordinator is the batched hot-path layer above the semantic strike-fact
-contract.  Every hot-path input has a fixed all-environment shape.  A caller
-arms target facts before physics, publishes achieved facts exactly once after
-physics and before RewardManager, and installs all nine guide RewardTerms as
-named consumers.  Consumers receive one shared, zero-filled cache object; no
-consumer gets a clone or performs a host materialization.
+contract.  Every hot-path input has a fixed all-environment shape.  R03 freezes
+target facts directly from the current ActionEpoch task before physics; the
+Racket caller publishes only achieved facts exactly once after physics and
+before RewardManager.  All nine guide RewardTerms are installed as named
+consumers.  Consumers receive one shared, zero-filled cache object; no consumer
+gets a clone or performs a host materialization.
 
 Protocol/value failures are fail-closed device-resident sticky bits.  The
 production path contributes its complete portable audit row to the one global
@@ -630,7 +631,6 @@ class ActionBallStrikeFactDeviceCoordinator:
         self._epoch_arm_source_step: torch.Tensor | None = None
         self._epoch_arm_mask: torch.Tensor | None = None
         self._epoch_arm_vectors: dict[str, torch.Tensor] | None = None
-        self._epoch_arm_validity: torch.Tensor | None = None
         self._epoch_arm_shot_key: object | None = None
         self._epoch_arm_slot: torch.Tensor | None = None
         self._epoch_arm_d05_identity: dict[str, torch.Tensor] | None = None
@@ -902,13 +902,8 @@ class ActionBallStrikeFactDeviceCoordinator:
         racket_owner: object,
         source_step: torch.Tensor,
         racket_identity: EpochR03RacketIdentity,
-        target_position: torch.Tensor,
-        target_velocity: torch.Tensor,
-        target_face_normal: torch.Tensor,
-        ball_position: torch.Tensor,
-        ball_velocity: torch.Tensor,
     ) -> None:
-        """Arm from the bound epoch and Racket's independent integer state.
+        """Arm from the bound epoch task and Racket's independent integers.
 
         Eligibility is the intersection of the launched epoch phase, the
         admitted task-valid row, and D05's absolute contact tick.  The latter
@@ -916,6 +911,10 @@ class ActionBallStrikeFactDeviceCoordinator:
         from Racket's manager-metric latch would observe the clock before the
         command update and publish one 20 ms control step late.  This lean path
         never reads or manufactures the legacy birth/sample/task SHA fields.
+        Target position, velocity, face normal, ball position and incoming ball
+        velocity are frozen only from the selected ActionEpoch ``task_f32``
+        Racket slice.  Positions use that slice's environment-local scene frame;
+        no Racket-owned target mirror can certify or replace them.
         """
 
         if self._action_epoch_owner is None:
@@ -934,9 +933,12 @@ class ActionBallStrikeFactDeviceCoordinator:
         identity = self._epoch_racket_identity(racket_identity)
         epoch = self._action_epoch_owner.current()
         slot = epoch.current_task_slot
-        index = slot[:, None]
 
         def selected(value: torch.Tensor) -> torch.Tensor:
+            suffix = (1,) * (value.ndim - 2)
+            index = slot.reshape(self.num_envs, 1, *suffix).expand(
+                self.num_envs, 1, *value.shape[2:]
+            )
             return torch.gather(value, 1, index).squeeze(1)
 
         epoch_module = importlib.import_module(type(self._action_epoch_owner).__module__)
@@ -966,14 +968,27 @@ class ActionBallStrikeFactDeviceCoordinator:
             | (identity.action_slot != selected(epoch.identity.action_slot))
             | (identity.task_identity != selected(epoch.identity.task_identity))
         )
+        task_f32 = selected(epoch.task.task_f32)
+        racket_start = epoch_module.MOTION_TASK_F32_WIDTH
+        racket_task = task_f32[
+            :, racket_start : racket_start + epoch_module.RACKET_TASK_F32_WIDTH
+        ]
         target_vectors = {
-            "target_position": self._vector(target_position, "target_position"),
-            "target_velocity": self._vector(target_velocity, "target_velocity"),
-            "target_face_normal": self._vector(
-                target_face_normal, "target_face_normal"
+            "target_position": self._vector(
+                racket_task[:, 0:3], "epoch.target_position"
             ),
-            "ball_position": self._vector(ball_position, "ball_position"),
-            "ball_velocity": self._vector(ball_velocity, "ball_velocity"),
+            "target_velocity": self._vector(
+                racket_task[:, 3:6], "epoch.target_velocity"
+            ),
+            "target_face_normal": self._vector(
+                racket_task[:, 6:9], "epoch.target_face_normal"
+            ),
+            "ball_position": self._vector(
+                racket_task[:, 9:12], "epoch.ball_position"
+            ),
+            "ball_velocity": self._vector(
+                racket_task[:, 21:24], "epoch.ball_velocity"
+            ),
         }
         stale_source = launched_task & steps.lt(0)
         nonfinite = eligible & self._vectors_nonfinite(target_vectors)
@@ -1018,10 +1033,6 @@ class ActionBallStrikeFactDeviceCoordinator:
         self._epoch_arm_vectors = {
             name: value.detach().clone() for name, value in target_vectors.items()
         }
-        self._epoch_arm_validity = self._mask(
-            getattr(racket_owner, "_action_ball_strike_fact_target_validity", None),
-            "bound_racket.target_validity",
-        ).detach().clone()
 
     def publish_action_epoch_strike_fact_v1(
         self,
@@ -1114,8 +1125,7 @@ class ActionBallStrikeFactDeviceCoordinator:
         valid_bits = torch.zeros_like(fault_slots)
         selected_valid = (
             safe.to(torch.int64) * R03_EPOCH_FACT_PRESENT
-            | (safe & self._epoch_arm_validity).to(torch.int64)
-            * R03_EPOCH_FACT_PHYSICALLY_VALID
+            | safe.to(torch.int64) * R03_EPOCH_FACT_PHYSICALLY_VALID
         )
         valid_bits[env_ids, slot] = selected_valid
         fact_step = torch.full_like(fault_slots, -1)
@@ -1153,7 +1163,6 @@ class ActionBallStrikeFactDeviceCoordinator:
         self._epoch_arm_source_step = None
         self._epoch_arm_mask = None
         self._epoch_arm_vectors = None
-        self._epoch_arm_validity = None
         self._epoch_arm_shot_key = None
         self._epoch_arm_slot = None
         self._epoch_arm_d05_identity = None
