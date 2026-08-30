@@ -260,7 +260,10 @@ def solve_fixed_action_question_device(
     physical = _physical.solve_max_final_segment_device(
         physical_batch,
         candidate_identity=candidate_identity,
-        contact_tick=contact_tick,
+        # Reuse the Physical leaf's already-cloned clock fact.  Returning the
+        # caller tensor would let later adapter mutation rewrite this frozen
+        # numerical result through shared storage.
+        contact_tick=physical.contact_tick,
         params=physical_params,
         config=physical_config,
     )
