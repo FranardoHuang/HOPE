@@ -123,6 +123,28 @@ def _bundle_harness(*, num_envs: int = 2, angular_velocity_z_radps=None):
         racket_owner=racket,
         physical_owner=physical_owner,
     )
+    env.scene = SimpleNamespace(
+        env_origins=torch.zeros(num_envs, 3, dtype=torch.float32)
+    )
+    reference_root_xy = (
+        bundle._contact_position_env_m[:, :2]
+        - bundle._contact_reach_offset_xy
+    )
+    action_count = reference_root_xy.shape[0]
+    slots = torch.arange(num_envs, dtype=torch.int64).remainder(action_count)
+    motion._action_ball_full_mdp_frozen_root_pos_w = torch.cat(
+        (
+            reference_root_xy.index_select(0, slots),
+            torch.ones(num_envs, 1, dtype=torch.float32),
+        ),
+        dim=1,
+    ).contiguous()
+    motion._action_ball_full_mdp_frozen_root_quat_wxyz = (
+        bundle._base_yaw_quat.index_select(0, slots).contiguous()
+    )
+    motion._action_ball_full_mdp_frozen_root_valid = torch.ones(
+        num_envs, dtype=torch.bool
+    )
     return SimpleNamespace(
         bundle=bundle,
         cadence=cadence,
@@ -150,8 +172,23 @@ def _direct_projection(
     construction_mask: torch.Tensor | None = None,
     action_slot: torch.Tensor | None = None,
     cadence_producer_fault: torch.Tensor | None = None,
+    frozen_root_xy: torch.Tensor | None = None,
+    frozen_root_yaw_rad: torch.Tensor | None = None,
 ):
     harness = _bundle_harness(num_envs=num_envs)
+    if frozen_root_xy is not None:
+        harness.motion._action_ball_full_mdp_frozen_root_pos_w[
+            :, :2
+        ] = frozen_root_xy
+    if frozen_root_yaw_rad is not None:
+        half = 0.5 * frozen_root_yaw_rad
+        harness.motion._action_ball_full_mdp_frozen_root_quat_wxyz.zero_()
+        harness.motion._action_ball_full_mdp_frozen_root_quat_wxyz[:, 0] = (
+            torch.cos(half)
+        )
+        harness.motion._action_ball_full_mdp_frozen_root_quat_wxyz[:, 3] = (
+            torch.sin(half)
+        )
     source_row = torch.tensor(source_rows, dtype=torch.int64)
     k = len(source_rows)
     values = {}
@@ -231,6 +268,26 @@ def _direct_projection(
     finally:
         torch._assert_async = original_assert_async
     return projection, harness, cadence
+
+
+def test_recurring_question_no_move_goal_is_the_installed_physical_spawn():
+    frozen_xy = torch.tensor([[0.081, -0.037]], dtype=torch.float32)
+    projection, harness, _cadence = _direct_projection(
+        num_envs=1,
+        source_rows=(0,),
+        selected_env_index=torch.tensor([0], dtype=torch.int64),
+        frozen_root_xy=frozen_xy,
+    )
+    admitted = projection.round_bank.construction_reason.eq(-1)
+    assert bool(admitted.any())
+    base_goal = projection.round_bank.racket_task_f32[..., 19:21]
+    torch.testing.assert_close(
+        base_goal[admitted],
+        frozen_xy.expand(int(admitted.sum()), -1),
+        rtol=0.0,
+        atol=2.0e-6,
+    )
+    assert harness.physical_owner._pending == {}
 
 
 @pytest.mark.parametrize("num_envs", (1, 2, 64))

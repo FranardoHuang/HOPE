@@ -474,13 +474,29 @@ def test_full_mdp_reset_projection_is_physical_ready_not_teacher_or_default():
     command._action_ball_dynamic_ready_physical_joint_vel_radps = torch.zeros(
         1, _JOINTS
     )
+    command._action_ball_full_mdp_base_spawn_center_xy = torch.tensor(
+        [[-0.19223234, 0.28527881]]
+    )
+    command._action_ball_full_mdp_frozen_root_pos_w = torch.zeros(2, 3)
+    command._action_ball_full_mdp_frozen_root_quat_wxyz = torch.zeros(2, 4)
+    command._action_ball_full_mdp_frozen_root_quat_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_frozen_root_valid = torch.zeros(
+        2, dtype=torch.bool
+    )
     ids = torch.tensor([1, 0], dtype=torch.int64)
 
     result = command.action_ball_full_mdp_physical_reset_state(ids)
 
-    assert torch.equal(
+    torch.testing.assert_close(
         result["root_state"][:, :3],
-        torch.tensor([[30.2, 39.7, 1.2], [10.2, 19.7, 1.2]]),
+        torch.tensor(
+            [
+                [29.80776787, 40.28527832, 1.2],
+                [9.80776787, 20.28527832, 1.2],
+            ]
+        ),
+        rtol=0.0,
+        atol=1.0e-6,
     )
     assert torch.equal(
         result["root_state"][:, 3:7],
@@ -489,6 +505,22 @@ def test_full_mdp_reset_projection_is_physical_ready_not_teacher_or_default():
     assert torch.count_nonzero(result["root_state"][:, 7:]).item() == 0
     assert torch.equal(result["joint_pos"], torch.full((2, _JOINTS), 0.7))
     assert torch.count_nonzero(result["joint_vel"]).item() == 0
+
+    frozen_pos, frozen_quat = command.action_ball_full_mdp_frozen_root_frame(
+        ids
+    )
+    torch.testing.assert_close(
+        frozen_pos[:, :2],
+        torch.tensor(
+            [
+                [-0.19223213, 0.28527832],
+                [-0.19223213, 0.28527832],
+            ]
+        ),
+        rtol=0.0,
+        atol=1.0e-6,
+    )
+    assert torch.equal(frozen_quat, result["root_state"][:, 3:7])
 
     command.action_ball_diagnostic_split_ready_teacher = False
     with pytest.raises(RuntimeError, match="split dynamic-ready binding"):

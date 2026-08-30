@@ -89,6 +89,7 @@ class RecurringD05InternalQuestionBundle:
 
     __slots__ = (
         "_racket_owner",
+        "_motion_owner",
         "_num_envs",
         "_physical_owner",
         "_timing_table",
@@ -117,6 +118,7 @@ class RecurringD05InternalQuestionBundle:
         self,
         *,
         racket_owner: object,
+        motion_owner: object,
         num_envs: int,
         physical_owner: _physical.PhysicalQuestionNumericCore,
         timing_table: _timing.DiagnosticActionTimingStaticTableProjection,
@@ -145,6 +147,7 @@ class RecurringD05InternalQuestionBundle:
                 "recurring question num_envs must be a positive exact int"
             )
         self._racket_owner = racket_owner
+        self._motion_owner = motion_owner
         self._num_envs = num_envs
         self._physical_owner = physical_owner
         self._timing_table = timing_table
@@ -325,6 +328,61 @@ def _compose_recurring_question_projection(
         (k, rounds), dtype=torch.int64, device=device
     )
     structural_fault = structural_fault.contiguous()
+
+    # Selected reset owns the actual action station.  Transform every cold
+    # strike-reference row into that one frozen episode frame before any ball
+    # solve.  This keeps contact, face, base goal and launch mutually
+    # equivariant and makes no-move mean goal == the physical reset spawn.
+    safe_env_index = selected_env_index.clamp(
+        min=0, max=bundle._num_envs - 1
+    )
+    frozen_root_position, frozen_root_quat = (
+        bundle._motion_owner.action_ball_full_mdp_frozen_root_frame(
+            safe_env_index
+        )
+    )
+    _require_tensor(
+        frozen_root_position,
+        name="frozen physical root position",
+        device=device,
+        dtype=torch.float32,
+        shape=(k, 3),
+    )
+    _require_tensor(
+        frozen_root_quat,
+        name="frozen physical root quaternion",
+        device=device,
+        dtype=torch.float32,
+        shape=(k, 4),
+    )
+    frozen_yaw_quat = _base_yaw_quaternion(frozen_root_quat)
+    inverse_reference_yaw = base_quat.clone()
+    inverse_reference_yaw[:, 1:].neg_()
+    delta_yaw_quat = _quat_multiply_wxyz(
+        frozen_yaw_quat, inverse_reference_yaw
+    )
+    reach_xyz = torch.cat(
+        (reach_offset, torch.zeros_like(reach_offset[:, :1])), dim=1
+    )
+    reach_offset_world = _quat_rotate_wxyz(delta_yaw_quat, reach_xyz)
+    contact = torch.cat(
+        (
+            frozen_root_position[:, :2] + reach_offset_world[:, :2],
+            contact[:, 2:3],
+        ),
+        dim=1,
+    ).contiguous()
+    reference_quat = _quat_multiply_wxyz(
+        delta_yaw_quat, reference_quat
+    )
+    reference_omega = _quat_rotate_wxyz(
+        delta_yaw_quat, reference_omega
+    ).contiguous()
+    reference_normal = _quat_rotate_wxyz(
+        delta_yaw_quat, reference_normal
+    ).contiguous()
+    base_quat = frozen_yaw_quat
+    reach_offset = reach_offset_world[:, :2].contiguous()
 
     # This is the single dynamic compaction boundary.  CUDA ``nonzero`` may
     # synchronize while materializing its dynamic output size; retain that
@@ -800,6 +858,23 @@ def _quat_rotate_wxyz(
     return vector + 2.0 * (scalar * uv + uuv)
 
 
+def _quat_multiply_wxyz(
+    left: torch.Tensor,
+    right: torch.Tensor,
+) -> torch.Tensor:
+    lw, lx, ly, lz = left.unbind(dim=1)
+    rw, rx, ry, rz = right.unbind(dim=1)
+    return torch.stack(
+        (
+            lw * rw - lx * rx - ly * ry - lz * rz,
+            lw * rx + lx * rw + ly * rz - lz * ry,
+            lw * ry - lx * rz + ly * rw + lz * rx,
+            lw * rz + lx * ry - ly * rx + lz * rw,
+        ),
+        dim=1,
+    ).contiguous()
+
+
 def _base_yaw_quaternion(base_quat: torch.Tensor) -> torch.Tensor:
     w, x, y, z = base_quat.unbind(dim=1)
     yaw = torch.atan2(
@@ -941,6 +1016,11 @@ def construct_recurring_d05_internal_question_bundle(
         raise CanaryQuestionError(
             "recurring Motion construction-bound row tensor differs"
         )
+    _require_exact_bound_method(
+        motion_owner,
+        owner_type=commands.MotionCommand,
+        method_name="action_ball_full_mdp_frozen_root_frame",
+    )
     num_envs = motion_time_steps.shape[0]
     if num_envs < 1:
         raise CanaryQuestionError(
@@ -1083,6 +1163,7 @@ def construct_recurring_d05_internal_question_bundle(
     )
     return RecurringD05InternalQuestionBundle(
         racket_owner=racket_owner,
+        motion_owner=motion_owner,
         num_envs=num_envs,
         physical_owner=physical_owner,
         timing_table=timing,

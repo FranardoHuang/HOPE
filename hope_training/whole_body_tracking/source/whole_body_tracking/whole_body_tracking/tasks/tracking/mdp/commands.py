@@ -92,6 +92,9 @@ ActionBallFullMdpDiagnosticCatalogTable = (
 load_action_ball_full_mdp_diagnostic_catalog_table = (
     _FULL_MDP_PORTABLE_CATALOG.load_action_ball_full_mdp_diagnostic_catalog_table
 )
+load_portable_action_center_table = (
+    _FULL_MDP_PORTABLE_CATALOG.load_portable_action_center_table
+)
 _ACTION_BALL_FULL_MDP_FRESH_REFERENCE_DUE_COUNT = (
     _FULL_MDP_PORTABLE_CATALOG.FRESH_REFERENCE_DUE_COUNT
 )
@@ -12695,6 +12698,10 @@ class MotionCommand(CommandTerm):
         self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad = None
         self._action_ball_dynamic_ready_normalized_actor_action = None
         self._action_ball_dynamic_ready_action_term = None
+        self._action_ball_full_mdp_base_spawn_center_xy = None
+        self._action_ball_full_mdp_frozen_root_pos_w = None
+        self._action_ball_full_mdp_frozen_root_quat_wxyz = None
+        self._action_ball_full_mdp_frozen_root_valid = None
 
         binding = getattr(self.cfg, "action_ball_dynamic_ready", None)
         if binding is None:
@@ -13090,6 +13097,43 @@ class MotionCommand(CommandTerm):
             dtype=self.motion.joint_pos.dtype,
             device=self.motion.joint_pos.device,
         )
+        diagnostic_catalog = getattr(
+            self, "_action_ball_full_mdp_diagnostic_catalog_table", None
+        )
+        if diagnostic_catalog is not None:
+            portable = load_portable_action_center_table()
+            if (
+                portable.manifest_file_sha256
+                != diagnostic_catalog.manifest_file_sha256
+                or portable.manifest_canonical_sha256
+                != diagnostic_catalog.manifest_canonical_sha256
+                or tuple(row.action_id for row in portable.actions)
+                != action_order
+                or tuple(row.motion_sha256 for row in portable.actions)
+                != motion_sha256_per_action
+            ):
+                raise ValueError(
+                    "FullMDP physical spawn table differs from admitted Motion rows"
+                )
+            self._action_ball_full_mdp_base_spawn_center_xy = torch.tensor(
+                [row.base_spawn_center_w_xy_m for row in portable.actions],
+                dtype=self.motion.body_pos_w.dtype,
+                device=self.device,
+            )
+            self._action_ball_full_mdp_frozen_root_pos_w = torch.zeros(
+                (self.num_envs, 3),
+                dtype=self.motion.body_pos_w.dtype,
+                device=self.device,
+            )
+            self._action_ball_full_mdp_frozen_root_quat_wxyz = torch.zeros(
+                (self.num_envs, 4),
+                dtype=self.motion.body_quat_w.dtype,
+                device=self.device,
+            )
+            self._action_ball_full_mdp_frozen_root_quat_wxyz[:, 0] = 1.0
+            self._action_ball_full_mdp_frozen_root_valid = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
         # ActionManager constructs after CommandManager in Isaac Lab.  Keep all
         # pre-scene identity/physical validation above, but resolve the decoder
         # term only at the first true reset, before any simulator state write.
@@ -16886,6 +16930,27 @@ class MotionCommand(CommandTerm):
             ]
             + self._env.scene.env_origins[env_ids]
         )
+        spawn_center = self._action_ball_full_mdp_base_spawn_center_xy
+        frozen_pos = self._action_ball_full_mdp_frozen_root_pos_w
+        frozen_quat = self._action_ball_full_mdp_frozen_root_quat_wxyz
+        frozen_valid = self._action_ball_full_mdp_frozen_root_valid
+        if any(
+            value is None
+            for value in (
+                spawn_center,
+                frozen_pos,
+                frozen_quat,
+                frozen_valid,
+            )
+        ):
+            raise RuntimeError(
+                "FullMDP physical reset has no admitted action-station table"
+            )
+        root_pos = root_pos.clone()
+        root_pos[:, :2] = (
+            self._env.scene.env_origins[env_ids, :2].to(root_pos.dtype)
+            + spawn_center[action_slots]
+        )
         root_quat = (
             self._action_ball_dynamic_ready_physical_root_quat_wxyz[
                 action_slots
@@ -16924,7 +16989,46 @@ class MotionCommand(CommandTerm):
             raise RuntimeError(
                 "FullMDP dynamic-ready physical reset state differs"
             )
+        frozen_pos[env_ids] = root_pos
+        frozen_quat[env_ids] = root_quat
+        frozen_valid[env_ids] = True
         return result
+
+    def action_ball_full_mdp_frozen_root_frame(
+        self, env_ids: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the installed episode root in environment-local coordinates.
+
+        This is an internal task-construction projection, not an observation or
+        lifecycle gate.  The selected reset writes the source tensors once;
+        every ball/task/recovery consumer then uses the same frozen station
+        instead of reading a policy-moved live root at reveal time.
+        """
+
+        if (
+            type(env_ids) is not torch.Tensor
+            or env_ids.ndim != 1
+            or env_ids.dtype != torch.int64
+            or env_ids.device != torch.device(self.device)
+            or self._action_ball_full_mdp_frozen_root_pos_w is None
+            or self._action_ball_full_mdp_frozen_root_quat_wxyz is None
+            or self._action_ball_full_mdp_frozen_root_valid is None
+        ):
+            raise ValueError(
+                "FullMDP frozen root requires selected int64 env_ids"
+            )
+        torch._assert_async(
+            self._action_ball_full_mdp_frozen_root_valid[env_ids].all()
+        )
+        return (
+            (
+                self._action_ball_full_mdp_frozen_root_pos_w[env_ids]
+                - self._env.scene.env_origins[env_ids]
+            ).contiguous(),
+            self._action_ball_full_mdp_frozen_root_quat_wxyz[
+                env_ids
+            ].contiguous(),
+        )
 
     def _restore_action_ball_sim_state(
         self, env_ids: torch.Tensor, rollback_state: dict
