@@ -1381,6 +1381,33 @@ def test_schema8_pending_work_cache_cannot_disagree_with_device_mask():
         command.exact_resume_state_dict()
 
 
+def test_schema8_recomputed_sha_cannot_authorize_wrong_valid_se2():
+    command = _checkpointable_fresh_exact_command()
+    leaf = command._action_ball_continuous_motion_checkpoint_payload()
+    leaf["tensors"]["canonical_phase"][0] = 0
+    leaf["tensors"]["frozen_root_valid"][0] = True
+    leaf["tensors"]["action_slot"][0] = 0
+    leaf["tensors"]["frozen_root_pos_w"][0, :2] = torch.tensor([0.4, -0.3])
+    leaf["tensors"]["frozen_root_quat_wxyz"][0] = torch.tensor([1.0, 0.0, 0.0, 0.0])
+    leaf["tensors"]["accepted_task_yaw_wxyz"][0] = torch.tensor([1.0, 0.0, 0.0, 0.0])
+    leaf["tensors"]["accepted_task_translation_w"][0] = torch.tensor([0.1, 0.2, 0.0])
+    command._action_ball_full_mdp_source_strike_root_xy = torch.zeros((1, 2))
+    command._action_ball_full_mdp_source_strike_yaw_wxyz = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    payload = {}
+    for key, value in leaf.items():
+        if key == "canonical_sha256":
+            continue
+        if key == "tensors":
+            payload[key] = {name: tensor.tolist() for name, tensor in value.items()}
+        elif isinstance(value, torch.Tensor):
+            payload[key] = value.tolist()
+        else:
+            payload[key] = value
+    leaf["canonical_sha256"] = hashlib.sha256(C._canonical_json_bytes(payload)).hexdigest()
+    with pytest.raises(ValueError, match="frozen task frame is invalid"):
+        command._prepare_action_ball_continuous_motion_checkpoint(leaf)
+
+
 def test_schema8_ready_teacher_load_rollback_restores_prior_live_state(
     monkeypatch,
 ):

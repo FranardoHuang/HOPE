@@ -708,6 +708,43 @@ def test_r07_completed_reference_tracks_same_slot_uid_next_shot_full_key(
     assert first.reference_kind.tolist() == [2, 1]
     assert first.validity.tolist() == [True, True]
     _assert_reference_key_row(first, first_public, row=0)
+    # A completed R07 row consumes the exact same accepted non-identity frame
+    # for root and every tracked body; bootstrap row 1 remains source-frame.
+    angle = torch.tensor(torch.pi / 2, device=device)
+    command._action_ball_full_mdp_task_yaw_wxyz[0] = torch.tensor(
+        [torch.cos(angle / 2), 0.0, 0.0, torch.sin(angle / 2)], device=device
+    )
+    command._action_ball_full_mdp_task_translation_w[0] = torch.tensor(
+        [0.3, -0.2, 0.0], device=device
+    )
+    transformed = command.project_action_ball_full_mdp_recovery_ready_reference()
+    q = command._action_ball_full_mdp_task_yaw_wxyz[0:1]
+    t = command._action_ball_full_mdp_task_translation_w[0]
+    origin = command._env.scene.env_origins[0]
+    start = command.motion.seg_start[0]
+    raw_root = command.motion.body_pos_w[start, 0]
+    raw_root_q = command.motion.body_quat_w[start, 0:1]
+    upper = tuple(sys.modules["whole_body_tracking.robots.agibot_a3"].A3_UPPER_TRACKED)
+    slots = [tuple(command.cfg.body_names).index(name) for name in upper]
+    raw_body = command.motion.body_pos_w[start, slots]
+    raw_body_q = command.motion.body_quat_w[start, slots]
+    assert torch.allclose(
+        transformed.root_position_m[0],
+        C.quat_apply(q, raw_root[None])[0] + t + origin,
+    )
+    assert torch.allclose(
+        transformed.root_orientation_wxyz[0],
+        C.quat_mul(q, raw_root_q)[0],
+    )
+    body_q = q[:, None, :].expand_as(first.body_orientation_wxyz[0:1])
+    assert torch.allclose(
+        transformed.body_position_m[0],
+        C.quat_apply(body_q, raw_body[None])[0] + t + origin,
+    )
+    assert torch.allclose(
+        transformed.body_orientation_wxyz[0],
+        C.quat_mul(body_q, raw_body_q[None])[0],
+    )
     for field in fields(C._ACTION_BALL_ROW_IDENTITY.ActionEpochShotKey):
         assert getattr(first.shot_key, field.name)[1] == -1
 
