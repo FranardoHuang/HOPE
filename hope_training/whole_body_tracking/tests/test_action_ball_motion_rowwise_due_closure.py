@@ -406,6 +406,7 @@ def test_rowwise_unplayed_close_keeps_inactive_peer_and_clears_next_tick(
     command._action_ball_continuous_sequence_active[1] = False
     command._action_ball_continuous_motion_active[1] = False
     command._action_ball_task_timing_active[1] = False
+    command._action_ball_continuous_canonical_task_valid[1] = False
     peer_identity = (
         command._action_ball_continuous_canonical_task_identity[1].clone()
     )
@@ -415,6 +416,11 @@ def test_rowwise_unplayed_close_keeps_inactive_peer_and_clears_next_tick(
         command._advance_action_ball_continuous_motion_cadence()
 
     projected = owner.project_current_action_epoch_rows()
+    assert command.action_ball_current_task_receipt_active.tolist() == [
+        False,
+        False,
+    ]
+    assert command.action_ball_task_timing_active.tolist() == [False, False]
     assert torch.equal(
         projected.closed_mask,
         torch.tensor([True, False], dtype=torch.bool, device=device),
@@ -467,6 +473,8 @@ def test_rowwise_played_suffix_close_is_not_broadcast_to_peer(
     command._advance_action_ball_continuous_motion_cadence()
     projected = owner.project_current_action_epoch_rows()
 
+    assert command.action_ball_current_task_receipt_active.tolist() == [False, True]
+    assert command.action_ball_task_timing_active.tolist() == [False, True]
     assert torch.equal(
         projected.closed_mask,
         torch.tensor([True, False], dtype=torch.bool, device=device),
@@ -492,6 +500,8 @@ def test_rowwise_played_suffix_close_is_not_broadcast_to_peer(
 def test_selected_reset_clears_only_selected_close_edge() -> None:
     command, _owner, r05_owner = reset_test._command()
     reset_test._seed_nontrivial_live_state(command)
+    command._action_ball_continuous_canonical_task_valid.fill_(True)
+    command._action_ball_task_timing_active.fill_(True)
     command._action_ball_continuous_closed_mask.copy_(
         torch.tensor([True, True, True], dtype=torch.bool)
     )
@@ -517,6 +527,12 @@ def test_selected_reset_clears_only_selected_close_edge() -> None:
     assert command._action_ball_continuous_close_reason[1] == (
         C.ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE
     )
+    assert command.action_ball_current_task_receipt_active.tolist() == [
+        True,
+        False,
+        True,
+    ]
+    assert command.action_ball_task_timing_active.tolist() == [True, False, True]
     assert torch.equal(
         command._action_ball_continuous_closed_mask[[0, 2]],
         before_mask[[0, 2]],

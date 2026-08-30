@@ -16470,6 +16470,25 @@ class MotionCommand(CommandTerm):
         )
 
     @property
+    def action_ball_current_task_receipt_active(self) -> torch.Tensor:
+        """Publish Motion's current FullMDP receipt lifecycle, clone-only.
+
+        Racket's attempt latch intentionally survives into scoring/recovery and
+        is therefore not authority for whether Motion must still own timing.
+        Canonical task validity is installed with timing by D05 and cleared
+        with it by natural close or selected reset.
+        """
+
+        if not self._action_ball_continuous_fresh_motion_lane_bound:
+            raise RuntimeError(
+                "current task receipt activity requires fresh FullMDP Motion"
+            )
+        return self._action_ball_continuous_public_tensor(
+            self._action_ball_continuous_canonical_task_valid,
+            name="current-task-receipt-active",
+        )
+
+    @property
     def action_ball_time_to_contact_remaining_s(self) -> torch.Tensor:
         """Signed task deadline; inactive rows use a large fail-closed positive sentinel."""
 

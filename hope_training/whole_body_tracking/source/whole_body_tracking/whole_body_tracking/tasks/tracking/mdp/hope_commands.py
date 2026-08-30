@@ -25832,17 +25832,47 @@ class RacketTargetCommand(CommandTerm):
             or getattr(self, "_action_ball_full_mdp_enabled", False)
         ):
             timing_active = motion.action_ball_task_timing_active
-            wrapped = getattr(motion, "just_resampled", None)
-            if wrapped is None:
-                wrapped = torch.zeros_like(timing_active)
-            elif (
-                wrapped.dtype != torch.bool
-                or tuple(wrapped.shape) != (self.num_envs,)
-            ):
-                raise RuntimeError(
-                    "action-ball Motion just_resampled mask is malformed"
+            async_validate = bool(
+                getattr(
+                    self,
+                    "_action_ball_diagnostic_unauthorized",
+                    False,
                 )
-            if hasattr(self, "_action_ball_attempt_active"):
+            )
+            if getattr(self, "_action_ball_full_mdp_enabled", False):
+                receipt_active = (
+                    motion.action_ball_current_task_receipt_active
+                )
+                if (
+                    not torch.is_tensor(receipt_active)
+                    or receipt_active.dtype != torch.bool
+                    or tuple(receipt_active.shape) != (self.num_envs,)
+                    or receipt_active.device != timing_active.device
+                ):
+                    raise RuntimeError(
+                        "FullMDP Motion current-receipt mask is malformed"
+                    )
+                _action_ball_validate_tensor_predicate(
+                    ~(receipt_active & ~timing_active),
+                    "active action-ball task has no receipt-owned Motion timing",
+                    async_validate=async_validate,
+                )
+                _action_ball_validate_tensor_predicate(
+                    ~(~receipt_active & timing_active),
+                    "FullMDP Motion timing has no current task receipt",
+                    async_validate=async_validate,
+                )
+            elif hasattr(self, "_action_ball_attempt_active"):
+                wrapped = getattr(motion, "just_resampled", None)
+                if wrapped is None:
+                    wrapped = torch.zeros_like(timing_active)
+                elif (
+                    wrapped.dtype != torch.bool
+                    or tuple(wrapped.shape) != (self.num_envs,)
+                ):
+                    raise RuntimeError(
+                        "action-ball Motion just_resampled mask is malformed"
+                    )
                 invalid_active_timing = (
                     self._action_ball_attempt_active
                     & ~timing_active
@@ -25851,13 +25881,7 @@ class RacketTargetCommand(CommandTerm):
                 _action_ball_validate_tensor_predicate(
                     ~invalid_active_timing,
                     "active action-ball task has no receipt-owned Motion timing",
-                    async_validate=bool(
-                        getattr(
-                            self,
-                            "_action_ball_diagnostic_unauthorized",
-                            False,
-                        )
-                    ),
+                    async_validate=async_validate,
                 )
             # TTC is the task deadline.  It includes the canonical-ready wait,
             # the scaled approach to contact, and remains signed after contact;

@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import test_action_ball_motion_rowwise_due_closure as motion_close_test
 import test_action_ball_continuous_racket_device_reveal_hold as racket_test
 import test_action_ball_continuous_runtime_transaction_device as d05_test
 
@@ -574,6 +575,9 @@ def test_full_mdp_racket_timing_keeps_d05_task_clock(
         action_ball_task_timing_active=torch.ones(
             2, dtype=torch.bool, device=device
         ),
+        action_ball_current_task_receipt_active=torch.ones(
+            2, dtype=torch.bool, device=device
+        ),
         just_resampled=torch.zeros(2, dtype=torch.bool, device=device),
         action_ball_time_to_contact_remaining_s=task_ttc,
     )
@@ -590,6 +594,87 @@ def test_full_mdp_racket_timing_keeps_d05_task_clock(
         racket.time_to_strike,
         torch.full_like(task_ttc, 0.52),
     )
+
+@pytest.mark.parametrize(
+    ("receipt_active", "timing_active", "error"),
+    (
+        ((False, False), (False, False), None),
+        (
+            (True, False),
+            (False, False),
+            "active action-ball task has no receipt-owned Motion timing",
+        ),
+        (
+            (False, False),
+            (True, False),
+            "FullMDP Motion timing has no current task receipt",
+        ),
+    ),
+)
+def test_full_mdp_timing_uses_motion_receipt_not_scoring_attempt(
+    monkeypatch,
+    receipt_active,
+    timing_active,
+    error,
+):
+    racket, _, _ = _racket_and_sources(
+        2, runtime_device="cpu", monkeypatch=monkeypatch
+    )
+    racket._action_ball_attempt_active = torch.ones(2, dtype=torch.bool)
+    task_ttc = torch.full((2,), 1.0e6, dtype=torch.float32)
+    motion = SimpleNamespace(
+        motion=SimpleNamespace(time_step_total=57),
+        action_ball_task_timing_active=torch.tensor(
+            timing_active, dtype=torch.bool
+        ),
+        action_ball_current_task_receipt_active=torch.tensor(
+            receipt_active, dtype=torch.bool
+        ),
+        action_ball_time_to_contact_remaining_s=task_ttc,
+    )
+    racket._motion = lambda: motion
+    racket._action_ball_diagnostic_unauthorized = False
+
+    if error is not None:
+        with pytest.raises(RuntimeError, match=error):
+            racket._compute_strike_timing()
+        return
+
+    racket._compute_strike_timing()
+    assert torch.equal(racket.time_to_strike, task_ttc)
+
+
+def test_full_mdp_racket_recovery_accepts_natural_motion_suffix(
+    monkeypatch,
+):
+    motion, _ = motion_close_test._fresh_motion(torch.device("cpu"))
+    motion_close_test._seed_current_task_rows(motion)
+    motion._action_ball_continuous_canonical_playback_started.fill_(True)
+    motion._action_ball_continuous_canonical_task_close_tick.fill_(100)
+    motion._action_ball_pre_swing_wait_s.zero_()
+    motion._action_ball_task_age_s.copy_(
+        torch.tensor([1.0, 0.0], dtype=torch.float64)
+    )
+    motion._env.common_step_counter = 3
+
+    motion._advance_action_ball_continuous_motion_cadence()
+
+    assert motion.action_ball_current_task_receipt_active.tolist() == [
+        False,
+        True,
+    ]
+    assert motion.action_ball_task_timing_active.tolist() == [False, True]
+
+    racket, _, _ = _racket_and_sources(
+        2, runtime_device="cpu", monkeypatch=monkeypatch
+    )
+    racket._action_ball_attempt_active = torch.ones(2, dtype=torch.bool)
+    racket._action_ball_diagnostic_unauthorized = False
+    racket._motion = lambda: motion
+
+    racket._compute_strike_timing()
+
+    assert racket.time_to_strike[0] == 1.0e6
 
 
 @pytest.mark.parametrize("runtime_device", ("cpu", "cuda:0"))
