@@ -2041,9 +2041,10 @@ def test_full_assembly_caches_component_geometry_and_blade_local_axes(term_mod):
     expected_axes = torch.diag(
         torch.tensor([0.082, 0.008, 0.082], dtype=torch.float32)
     )
-    assert component_indices.shape == (62,)
-    assert component_centers.shape == (62, 3)
-    assert component_local_axes.shape == (62, 3, 3)
+    count = term_mod._A3_COLLISION_PROXY_COMPONENT_COUNT
+    assert component_indices.shape == (count,)
+    assert component_centers.shape == (count, 3)
+    assert component_local_axes.shape == (count, 3, 3)
     assert torch.equal(blade_local_axes, expected_axes)
 
     component_ptr = component_local_axes.data_ptr()
