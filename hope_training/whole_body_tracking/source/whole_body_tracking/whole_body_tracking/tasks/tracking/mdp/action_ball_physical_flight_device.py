@@ -46,7 +46,7 @@ SCHEMA_VERSION = 1
 TOKEN_BYTES = 32
 STATE_WIDTH = 13
 CONTRACT_SOURCE_SHA256 = (
-    "beff093949dda4fb8aab963217cd31d37c1d59875440a7043526864d224f2675"
+    "6407294f4bfb582b2e464971a1d0266ade8f2e9356e5c5886c7c680b5fc8c836"
 )
 # The terminal owner derives CENSOR facts from owner-issued evidence and closes
 # its authority bind window before the first business operation or state read.

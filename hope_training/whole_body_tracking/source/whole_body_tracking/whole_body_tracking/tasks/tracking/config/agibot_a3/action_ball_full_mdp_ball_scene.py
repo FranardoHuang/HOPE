@@ -31,7 +31,7 @@ import action_ball_physical_flight_contract as _flight
 
 SCHEMA_VERSION = 1
 CONTRACT_SOURCE_SHA256 = (
-    "beff093949dda4fb8aab963217cd31d37c1d59875440a7043526864d224f2675"
+    "6407294f4bfb582b2e464971a1d0266ade8f2e9356e5c5886c7c680b5fc8c836"
 )
 SCENE_SPEC_KIND = "action_ball_full_mdp_ball_scene_spec_v1"
 DIAGNOSTIC_SCENE_SPEC_KIND = (
