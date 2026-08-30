@@ -169,6 +169,16 @@ FULL_A_FAMILY = "backhand"
 FULL_A_NUM_ENVS = FULL_MDP_PPO_RECIPE.num_envs
 FULL_A_NUM_UPDATES = FULL_MDP_PPO_RECIPE.max_iterations
 FULL_A_SAVE_INTERVAL = FULL_MDP_PPO_RECIPE.save_interval
+DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE = (
+    "split_ready_bridge"
+)
+DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_DIRECT_FRAME0 = (
+    "direct_frame0_playback"
+)
+DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_MODES = (
+    DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE,
+    DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_DIRECT_FRAME0,
+)
 RATE_PROBE_WARMUP_UPDATES = 10
 RATE_PROBE_MEASURED_UPDATES = 50
 RATE_PROBE_TAIL_UPDATES = 1
@@ -1819,7 +1829,6 @@ def main(
     teacher_replay = diagnostic_teacher_replay or (
         diagnostic_teacher_replay_output is not None
     )
-    teacher_helper = _teacher_replay_module()
     if (
         type(num_envs) is not int
         or num_envs <= 0
@@ -1832,7 +1841,7 @@ def main(
         or type(diagnostic_teacher_replay_steps) is not int
         or type(diagnostic_teacher_replay_handoff_mode) is not str
         or diagnostic_teacher_replay_handoff_mode
-        not in teacher_helper.TEACHER_REPLAY_HANDOFF_MODES
+        not in DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_MODES
         or type(_test_allow_small_full_a) is not bool
         or type(save_interval) is not int or save_interval != FULL_A_SAVE_INTERVAL
     ):
@@ -1840,7 +1849,7 @@ def main(
     if (
         not teacher_replay
         and diagnostic_teacher_replay_handoff_mode
-        != teacher_helper.TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE
+        != DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE
     ):
         raise ValueError(
             "direct frame-zero handoff requires diagnostic teacher replay"
@@ -2340,8 +2349,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--diagnostic-teacher-replay-handoff-mode",
-        choices=_teacher_replay_module().TEACHER_REPLAY_HANDOFF_MODES,
-        default="split_ready_bridge",
+        choices=DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_MODES,
+        default=DIAGNOSTIC_TEACHER_REPLAY_HANDOFF_SPLIT_READY_BRIDGE,
     )
     parser.add_argument("--evidence-jsonl")
     parser.add_argument("--snapshot-dir")
