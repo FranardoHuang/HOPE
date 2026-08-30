@@ -237,6 +237,40 @@ def test_full_mdp_rate_probe_keeps_the_typed_cli_budget_authority(monkeypatch):
         )
 
 
+def test_full_mdp_contact_tick_trace_is_fresh_absolute_noppo(tmp_path):
+    output = tmp_path / "trace.json"
+    task = {
+        "action_ball_full_mdp_runtime": True,
+        "action_ball_full_mdp_contact_tick_trace_output_path": str(output),
+    }
+    assert train_mod._action_ball_full_mdp_contact_tick_trace_output(task) == output
+    assert train_mod._action_ball_full_mdp_contact_tick_trace_output(
+        {"action_ball_full_mdp_runtime": True}
+    ) is None
+    output.write_text("spent\n", encoding="utf-8")
+    with pytest.raises(train_mod._OverrideError, match="absent absolute path"):
+        train_mod._action_ball_full_mdp_contact_tick_trace_output(task)
+
+
+def test_full_mdp_contact_tick_trace_rejects_foreign_runtime_and_competing_probe(
+    tmp_path,
+):
+    output = str(tmp_path / "trace.json")
+    with pytest.raises(train_mod._OverrideError, match="fresh full-MDP runtime"):
+        train_mod._action_ball_full_mdp_contact_tick_trace_output(
+            {
+                "action_ball_full_mdp_runtime": False,
+                "action_ball_full_mdp_contact_tick_trace_output_path": output,
+            }
+        )
+    with pytest.raises(train_mod._OverrideError, match="mutually exclusive"):
+        train_mod._action_ball_full_mdp_contact_tick_trace_output(
+            {
+                "action_ball_full_mdp_runtime": True,
+                "action_ball_full_mdp_rate_probe": True,
+                "action_ball_full_mdp_contact_tick_trace_output_path": output,
+            }
+        )
 def test_full_mdp_profile_probe_is_bounded_profiler_on_and_rate_exclusive(
     monkeypatch,
 ):
@@ -1024,7 +1058,7 @@ class _PreGymReached(RuntimeError):
 
 
 def _exercise_full_mdp_num_env_preflight(
-    monkeypatch, *, num_envs, oracle=False
+    monkeypatch, *, num_envs, oracle=False, contact_tick_trace=None
 ):
     class _ImportStub:
         def __init__(self, **attrs):
@@ -1084,6 +1118,10 @@ def _exercise_full_mdp_num_env_preflight(
     cfg = _Cfg(task=task, num_envs=num_envs)
     if oracle:
         cfg["action_ball_teacher_qdes_oracle_output_path"] = "oracle.json"
+    if contact_tick_trace is not None:
+        task["action_ball_full_mdp_contact_tick_trace_output_path"] = (
+            str(contact_tick_trace)
+        )
     return train_mod._run_with_environment_close_owner(cfg, object())
 
 
@@ -1104,6 +1142,23 @@ def test_full_mdp_oracle_forces_n1_without_v6_training_shape_rejection(
             monkeypatch, num_envs=4_096, oracle=True
         )
     assert caught.value.num_envs == 1
+
+
+def test_full_mdp_contact_tick_trace_forces_n1_before_gym(monkeypatch, tmp_path):
+    with pytest.raises(_PreGymReached) as caught:
+        _exercise_full_mdp_num_env_preflight(
+            monkeypatch,
+            num_envs=512,
+            contact_tick_trace=tmp_path / "trace.json",
+        )
+    assert caught.value.num_envs == 1
+
+
+def test_contact_tick_trace_is_terminal_and_does_not_construct_ppo_runner():
+    source = inspect.getsource(train_mod._run_with_environment_close_owner)
+    trace = source.index("_run_action_ball_full_mdp_isaac_contact_tick_trace(")
+    runner = source.index("runner_type = (")
+    assert trace < runner
 
 
 @pytest.mark.parametrize("num_envs", [1, 2, 64, 4096])
