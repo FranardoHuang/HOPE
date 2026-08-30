@@ -28,12 +28,18 @@ try:
     from . import mujoco_full_mdp_portable_outcome as portable_outcome
     from . import mujoco_full_mdp_teacher_replay as teacher_replay
     from .mujoco_gpu_ac_table_keepout import DeviceExactTableKeepout
+    from .mujoco_teacher_exact_table_narrowphase import (
+        TeacherExactTableNarrowphase,
+    )
 except ImportError:  # Direct execution with mjlab_lane on PYTHONPATH.
     from a3_train_ppo import A3ReadyBallVecEnv, SimCfg, TaskCfg
     import mujoco_full_mdp_portable_question as portable_question
     import mujoco_full_mdp_portable_outcome as portable_outcome
     import mujoco_full_mdp_teacher_replay as teacher_replay
     from mujoco_gpu_ac_table_keepout import DeviceExactTableKeepout
+    from mujoco_teacher_exact_table_narrowphase import (
+        TeacherExactTableNarrowphase,
+    )
 
 
 _HERE = Path(__file__).resolve().parent
@@ -624,6 +630,140 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._capture_diagnostic_table_attribution
         )
 
+    def enable_diagnostic_exact_table_narrowphase(
+        self, *, runtime_mjb_sha256: str
+    ) -> None:
+        """Install the source-triangle rare path for N=1 teacher replay only.
+
+        The live OBB kernel remains the no-false-negative broad phase.  This
+        opt-in consumer is reached only after that kernel is positive, pays a
+        one-world device-to-host pose copy, and may clear only a source-mesh
+        proven OBB false positive.  Training never calls this method.
+        """
+
+        if (
+            not getattr(self, "full_a_mode", False)
+            or self.num_envs != 1
+            or not hasattr(self, "_diagnostic_contact_patch_consumer")
+            or hasattr(self, "_diagnostic_exact_table_narrowphase")
+        ):
+            raise RuntimeError(
+                "exact table narrow phase requires one enabled teacher replay"
+            )
+        try:
+            import mujoco
+
+            nativeccd_bit = int(mujoco.mjtDisableBit.mjDSBL_NATIVECCD)
+            disableflags = int(self.mj_model.opt.disableflags)
+            nativeccd_enabled = not bool(disableflags & nativeccd_bit)
+            authority = __import__(
+                "mujoco_native.table_termination",
+                fromlist=("table_termination",),
+            )
+            guard = self._table_keepout
+            self._diagnostic_exact_table_narrowphase = (
+                TeacherExactTableNarrowphase(
+                    repo_root=_HERE.parents[2],
+                    artifact_path=authority.COLLISION_PROXY_ARTIFACT,
+                    source_urdf=authority.PLANT_SOURCE_URDF,
+                    runtime_mjb_sha256=runtime_mjb_sha256,
+                    mujoco_version=mujoco.__version__,
+                    nativeccd_enabled=nativeccd_enabled,
+                    disableflags=disableflags,
+                    component_ids=guard._component_ids,
+                    owner_body_names=FULLMDP_TRACKED_BODY_NAMES,
+                    component_owner_indices=(
+                        guard.component_owner_indices.detach().cpu().numpy()
+                    ),
+                    component_local_centers=(
+                        guard.component_local_centers.detach().cpu().numpy()
+                    ),
+                    component_local_half_axes=(
+                        guard.component_local_half_axes.detach().cpu().numpy()
+                    ),
+                    table_lo=guard.table_lo.detach().cpu().numpy(),
+                    table_hi=guard.table_hi.detach().cpu().numpy(),
+                    blade_owner_index=guard.racket_body_index,
+                    blade_center_offset=(
+                        guard.blade_center_offset.detach().cpu().numpy()
+                    ),
+                    blade_local_half_axes=(
+                        guard.blade_local_half_axes.detach().cpu().numpy()
+                    ),
+                    plant_identity=dict(guard.plant_identity_receipt),
+                    table_geometry_sha256=(
+                        authority.EXPECTED_ACTION_BALL_TABLE_GEOMETRY_SHA256
+                    ),
+                )
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "teacher exact table narrow-phase identity differs"
+            ) from exc
+
+    def _diagnostic_exact_table_host_pose(self):
+        """Copy only the 32 bound owner poses after a broad-positive row."""
+
+        try:
+            import warp as wp
+
+            xpos = wp.to_torch(self.sim.data.struct.xpos)
+            xquat = wp.to_torch(self.sim.data.struct.xquat)
+            ids = self._table_keepout.body_ids
+            positions = xpos[0].index_select(0, ids)
+            quaternions = xquat[0].index_select(0, ids)
+            origin = self._table_keepout.env_origins[0]
+            if (
+                tuple(positions.shape) != (32, 3)
+                or tuple(quaternions.shape) != (32, 4)
+                or tuple(origin.shape) != (3,)
+            ):
+                raise RuntimeError("teacher exact table pose shape differs")
+            return (
+                (positions - origin).detach().cpu().numpy().copy(),
+                quaternions.detach().cpu().numpy().copy(),
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "teacher exact table pose bridge differs"
+            ) from exc
+
+    def _diagnostic_refine_table_keepout(
+        self, keepout, *, capture_boundary: str, substep_index
+    ):
+        evaluator = getattr(
+            self, "_diagnostic_exact_table_narrowphase", None
+        )
+        if evaluator is None:
+            return keepout
+        if tuple(keepout.shape) != (1,):
+            raise RuntimeError("teacher exact table broad verdict shape differs")
+        if not bool(keepout[0].detach().cpu().item()):
+            return keepout
+        try:
+            positions, quaternions = self._diagnostic_exact_table_host_pose()
+            decision = evaluator.evaluate(
+                body_position_env_m=positions,
+                body_quaternion_wxyz=quaternions,
+                capture_boundary=capture_boundary,
+                physics_substep_index=substep_index,
+            )
+            # Fail-closed is represented by exact_hit=True.  No exception or
+            # backend-contact absence is allowed to clear the live broad bit.
+            return self._torch.full_like(
+                keepout, bool(decision["exact_hit"])
+            )
+        except Exception:
+            return keepout
+
+    def diagnostic_exact_table_narrowphase_receipt(self) -> dict:
+        evaluator = getattr(
+            self, "_diagnostic_exact_table_narrowphase", None
+        )
+        if evaluator is None:
+            raise RuntimeError("teacher exact table narrow phase is not enabled")
+        return evaluator.receipt()
+
     def _begin_diagnostic_table_attribution_tick(self) -> None:
         self._diagnostic_table_tick_first_positive = None
         self._diagnostic_table_tick_keepout = False
@@ -646,6 +786,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             and self._diagnostic_first_table_terminal_source is None
         )
         if needs_keepout_witness:
+            exact = getattr(
+                self, "_diagnostic_exact_table_narrowphase", None
+            )
+            if keepout_witness is None and exact is not None:
+                keepout_witness = exact.current_exact_witness
             if keepout_witness is None:
                 keepout_witness = self._table_keepout.diagnostic_first_positive_witness(
                     self.sim.data
@@ -2895,6 +3040,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # below supplies post-state 20 without adding 20 redundant forwards.
         if substep_index > 0:
             keepout = self._table_keepout.sample(self.sim.data)
+            keepout = FullMdpInitialWaitVecEnv._diagnostic_refine_table_keepout(
+                self,
+                keepout,
+                capture_boundary="physics_substep_poststate",
+                substep_index=substep_index,
+            )
             self._cur_table_keepout |= keepout
             if getattr(self, "full_a_mode", False) and self._fullmdp_initialized:
                 if contact_census is None:
@@ -2920,6 +3071,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
 
     def _latch_post_forward_table_keepout(self):
         keepout = self._table_keepout.sample(self.sim.data)
+        keepout = FullMdpInitialWaitVecEnv._diagnostic_refine_table_keepout(
+            self,
+            keepout,
+            capture_boundary="post_forward_final",
+            substep_index=None,
+        )
         self._cur_table_keepout |= keepout
         return keepout
 

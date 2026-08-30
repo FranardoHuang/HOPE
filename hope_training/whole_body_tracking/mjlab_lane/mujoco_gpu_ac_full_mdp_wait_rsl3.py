@@ -1372,6 +1372,17 @@ def _run_teacher_replay(
         raise ValueError("teacher replay dimensions/delay differ")
     env.enable_controller_trace()
     env.enable_diagnostic_first_generic_contact_patch()
+    try:
+        runtime_mjb_sha256 = identity["plant_model"]["runtime_attach"][
+            "final_augmented_mjb"
+        ]["sha256"]
+    except (KeyError, TypeError) as exc:
+        raise RuntimeError(
+            "teacher replay runtime MJB identity differs"
+        ) from exc
+    env.enable_diagnostic_exact_table_narrowphase(
+        runtime_mjb_sha256=runtime_mjb_sha256
+    )
     direct_frame0 = (
         handoff_mode == helper.TEACHER_REPLAY_HANDOFF_DIRECT_FRAME0
     )
@@ -1967,6 +1978,9 @@ def _run_teacher_replay(
         "first_resolved_substep": (
             table_attribution["first_resolved_substep"]
             if rows["common_step"] else None
+        ),
+        "exact_table_narrowphase": (
+            env.diagnostic_exact_table_narrowphase_receipt()
         ),
         "event_counts": {
             name: int(np.count_nonzero(arrays[name]))
