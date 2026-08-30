@@ -4726,6 +4726,27 @@ class MotionCommand(CommandTerm):
         last_closed_ordinal = tensors["last_closed_ordinal"]
         opportunities_consumed = tensors["opportunities_consumed"]
         active_canonical = canonical_phase <= ACTION_BALL_CONTINUOUS_CANONICAL_FOLLOW_THROUGH
+        # These are construction-time invariants, not hot-path gates.  A
+        # recomputed envelope digest must not make an impossible accepted
+        # task frame resumable.
+        frozen_valid = tensors["frozen_root_valid"]
+        task_yaw = tensors["accepted_task_yaw_wxyz"]
+        task_translation = tensors["accepted_task_translation_w"]
+        frame_valid = (
+            torch.isfinite(task_yaw).all(dim=1)
+            & torch.isfinite(task_translation).all(dim=1)
+            & torch.isclose(
+                torch.linalg.vector_norm(task_yaw, dim=1),
+                torch.ones_like(task_yaw[:, 0]),
+                rtol=0.0,
+                atol=1.0e-5,
+            )
+            & task_yaw[:, 1].abs().le(1.0e-6)
+            & task_yaw[:, 2].abs().le(1.0e-6)
+            & task_translation[:, 2].abs().le(1.0e-6)
+        )
+        if bool((active_canonical & (~frozen_valid | ~frame_valid)).any()):
+            raise ValueError("Motion active checkpoint frozen task frame is invalid")
         expected_last_closed = torch.where(
             control_tick >= deadline_tick,
             scheduled_ordinal,
@@ -6877,6 +6898,44 @@ class MotionCommand(CommandTerm):
             + self._env.scene.env_origins[:, None, :]
         )
         body_orientation = self.motion.body_quat_w[starts][:, body_slots]
+        task_yaw = self._action_ball_full_mdp_task_yaw_wxyz
+        task_translation = self._action_ball_full_mdp_task_translation_w
+        if task_yaw is None or task_translation is None:
+            raise RuntimeError("Motion R07 has no accepted task frame")
+        completed_yaw = task_yaw
+        completed_translation = task_translation
+        transformed_root_position = (
+            quat_apply(completed_yaw, root_position - self._env.scene.env_origins)
+            + completed_translation
+            + self._env.scene.env_origins
+        )
+        transformed_root_orientation = quat_mul(
+            completed_yaw, root_orientation
+        )
+        transformed_body_position = (
+            quat_apply(
+                completed_yaw[:, None, :].expand_as(body_orientation),
+                body_position - self._env.scene.env_origins[:, None, :],
+            )
+            + completed_translation[:, None, :]
+            + self._env.scene.env_origins[:, None, :]
+        )
+        transformed_body_orientation = quat_mul(
+            completed_yaw[:, None, :].expand_as(body_orientation),
+            body_orientation,
+        )
+        root_position = torch.where(
+            completed_reference[:, None], transformed_root_position, root_position
+        )
+        root_orientation = torch.where(
+            completed_reference[:, None], transformed_root_orientation, root_orientation
+        )
+        body_position = torch.where(
+            completed_reference[:, None, None], transformed_body_position, body_position
+        )
+        body_orientation = torch.where(
+            completed_reference[:, None, None], transformed_body_orientation, body_orientation
+        )
         epoch_action_uid = public_key.action_uid[:, 0]
         selected_uid = torch.where(
             upcoming_reference,
