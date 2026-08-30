@@ -12202,3 +12202,8 @@ label却来自替换文件的TOCTOU。后继把component IDs加入authority同�
 pose/quaternion，非有限或zero quaternion也会把terminal置true。witness现使用相同顺序和typed reason；
 `invalid_origin/invalid_body_pose/zero_quaternion`具名失败且不继续SAT，只有`sat_overlap`能产出component/table
 几何结论。witness同时记录collision artifact SHA与content SHA，避免标签证据脱离已验source。
+
+`d8a240d7…`真实CUDA replay在180-step前自然RC1：Warp首次编译witness kernel时发现`winner_i64[0] = -1`
+把literal推断成`int32`，不能写`array<int64>`；spent root无summary/NPZ且不复用。后继审计该kernel全部
+winner stores并显式使用`wp.int64`，同时扩展既有`ACTIONBALL_RUN_MUJOCO_GPU_DIRECT=1`门，使其真正launch
+witness kernel而非只跑host decoder。该门和CPU union通过以前禁止再发replay。

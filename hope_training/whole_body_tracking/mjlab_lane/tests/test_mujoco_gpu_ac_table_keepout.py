@@ -451,6 +451,53 @@ def _cuda_bound_verdict(inputs, device, *, full_body=False):
     return bound.sample(SimpleNamespace(struct=wp_data))
 
 
+def _cuda_compile_first_witness_kernel(inputs, device):
+    """Launch the replay-only kernel, not merely its host result decoder."""
+
+    live_rows = {"body_pos_w", "body_quat_w", "env_origins"}
+    tensor_inputs = {
+        key: value[16:17].to(device) if key in live_rows else value.to(device)
+        for key, value in inputs.items()
+        if isinstance(value, torch.Tensor)
+    }
+    bound = object.__new__(keepout.DeviceExactTableKeepout)
+    bound.env_origins = tensor_inputs["env_origins"]
+    bound.body_ids = torch.arange(32, dtype=torch.long, device=device)
+    bound.component_owner_indices = tensor_inputs["component_owner_indices"]
+    bound.component_local_centers = tensor_inputs["component_local_centers"]
+    bound.component_local_half_axes = tensor_inputs["component_local_half_axes"]
+    bound.table_lo = tensor_inputs["table_lo"]
+    bound.table_hi = tensor_inputs["table_hi"]
+    bound.racket_body_index = inputs["racket_body_index"]
+    bound.blade_center_offset = tensor_inputs["blade_center_offset"]
+    bound.blade_local_half_axes = tensor_inputs["blade_local_half_axes"]
+    bound._bind_cuda_kernel(body_count=32)
+    positions = tensor_inputs["body_pos_w"]
+    quaternions = tensor_inputs["body_quat_w"]
+    wp_pos = keepout._wp.from_torch(
+        positions, dtype=keepout._wp.vec3, requires_grad=False
+    )
+    wp_quat = keepout._wp.from_torch(
+        quaternions, dtype=keepout._wp.quat, requires_grad=False
+    )
+    winner = torch.full((4,), -1, dtype=torch.int64, device=device)
+    witness = torch.full((15,), float("nan"), dtype=torch.float32, device=device)
+    keepout._wp.launch(
+        keepout._warp_table_keepout_first_witness_f32,
+        dim=1,
+        inputs=(wp_pos, wp_quat, *bound._cuda_warp_static_inputs),
+        outputs=(
+            keepout._wp.from_torch(winner, requires_grad=False),
+            keepout._wp.from_torch(witness, requires_grad=False),
+        ),
+        device=bound._cuda_warp_device,
+        stream=bound._current_warp_stream(),
+        record_tape=False,
+    )
+    torch.cuda.synchronize(torch.device(device))
+    return winner.cpu(), witness.cpu()
+
+
 def _tape_verdict(inputs, device):
     if torch.device(device).type == "cuda":
         return _cuda_bound_verdict(inputs, device)
@@ -891,3 +938,7 @@ def test_warp_gpu_guard_matches_existing_numpy_authority_exactly():
     _assert_fixed_tape_strata(kernel)
     full_body_kernel = _full_body_tape_verdict(inputs, device).cpu()
     assert torch.equal(full_body_kernel, oracle)
+    winner, witness = _cuda_compile_first_witness_kernel(inputs, device)
+    assert winner.shape == (4,)
+    assert int(winner[3]) == 4
+    assert torch.isfinite(witness).all()

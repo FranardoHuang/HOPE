@@ -488,24 +488,24 @@ if _wp is not None:
     ):
         env = _wp.tid()
         origin = env_origins[env]
-        winner_i64[0] = -1
-        winner_i64[1] = -1
-        winner_i64[2] = -1
-        winner_i64[3] = 0
+        winner_i64[0] = _wp.int64(-1)
+        winner_i64[1] = _wp.int64(-1)
+        winner_i64[2] = _wp.int64(-1)
+        winner_i64[3] = _wp.int64(0)
         if not _wp.isfinite(origin):
-            winner_i64[3] = 1
+            winner_i64[3] = _wp.int64(1)
             return
         for local_body in range(32):
             body = int(body_ids[local_body])
             body_pos = body_pos_w[env, body]
             body_quat = body_quat_w[env, body]
             if (not _wp.isfinite(body_pos)) or (not _wp.isfinite(body_quat)):
-                winner_i64[2] = local_body
-                winner_i64[3] = 2
+                winner_i64[2] = _wp.int64(local_body)
+                winner_i64[3] = _wp.int64(2)
                 return
             if _wp.dot(body_quat, body_quat) <= 0.0:
-                winner_i64[2] = local_body
-                winner_i64[3] = 3
+                winner_i64[2] = _wp.int64(local_body)
+                winner_i64[3] = _wp.int64(3)
                 return
         for obb in range(63):
             local_body = racket_body_index
@@ -542,10 +542,10 @@ if _wp is not None:
                     root_quat = root_quat / _wp.sqrt(
                         _wp.max(_wp.dot(root_quat, root_quat), 1.1754943508222875e-38)
                     )
-                    winner_i64[0] = obb
-                    winner_i64[1] = table
-                    winner_i64[2] = local_body
-                    winner_i64[3] = 4
+                    winner_i64[0] = _wp.int64(obb)
+                    winner_i64[1] = _wp.int64(table)
+                    winner_i64[2] = _wp.int64(local_body)
+                    winner_i64[3] = _wp.int64(4)
                     witness_f32[0] = _warp_sat_signed_margin_f32(
                         center, half_axes, lo, hi
                     )

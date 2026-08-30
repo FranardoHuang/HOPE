@@ -5410,6 +5410,8 @@
 - 后续review补出production keepout会先对origin与全部32 body pose/quaternion fail-closed，而初版witness未镜像。
   候选现同序输出`invalid_origin/invalid_body_pose/zero_quaternion/sat_overlap`；只有`sat_overlap`可形成几何
   attribution，其余具名fail-closed，并把collision artifact/content SHA一并写入witness。
+- `d8a240d7…`真实CUDA在witness首次JIT时拒绝把Python `int32` literal写入`int64` output，未产summary/NPZ；
+  后继把该kernel全部winner stores显式转为Warp `int64`，并将真实witness kernel launch纳入既有Pod CUDA门。
 
 ## HISTORICAL / SUPERSEDED — 2026-08-25 V6候选冻结、尚未Pod重验
 

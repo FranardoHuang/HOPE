@@ -2705,3 +2705,5 @@ component label现与几何共同来自production authority首轮strict+SHA解�
 二次读取artifact，避免文件替换造成TOCTOU错标签。该修复的Pod CPU复测仍未完成，Gate状态不变。
 此外witness已镜像production在SAT前的origin/32-body pose/zero-quaternion检查；非几何阳性不得被误标成
 较早的SAT overlap。只有typed `sat_overlap`进入component/table归因，其余reason具名fail-closed。
+`d8a240d7…`首次真实JIT暴露winner output的Python literal被Warp推断为`int32`；后继已逐store显式
+`wp.int64`并新增直接launch witness kernel的CUDA门，Pod复测仍待完成，Gate状态不变。
