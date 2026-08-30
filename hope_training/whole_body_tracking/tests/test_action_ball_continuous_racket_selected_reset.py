@@ -643,16 +643,9 @@ def test_fresh_selected_reset_interoperates_with_real_device_r05_owner_cuda():
     }
     _seed_reset_surface(racket, skip=fresh_only)
     racket._initialize_action_ball_full_mdp_racket_protocol_state()
-    # Production binding must remain closed until Device-R05 freezes its
-    # independent current-task/current-shot observation ABI.  This focused
-    # selected-reset fixture seeds only the pre-existing genesis relationship;
-    # it is not evidence of R08 production graph closure.
-    with pytest.raises(
-        HC.ActionBallContinuousRacketObservationHold,
-        match="current-observation projection/validator ABI",
-    ):
-        racket.bind_action_ball_full_mdp_racket_staging(harness.owner)
-    assert harness.owner._genesis_child_projections == {}
+    # Seed the same D05 genesis relationship that the live epoch-source binder
+    # installs.  The removed R08 token registry never participated in this
+    # selected-reset transaction.
     genesis_capability = harness.owner.project_owned_genesis_for_child(
         owner_kind="racket"
     )
@@ -726,33 +719,6 @@ def test_fresh_selected_reset_interoperates_with_real_device_r05_owner_cuda():
             assert torch.equal(
                 live[1], _expected_selected(before[name], disposition)
             ), name
-
-
-@pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="requires the exact Pod CUDA lane"
-)
-def test_fresh_device_r05_binder_holds_before_instance_genesis_replacement():
-    harness = _device_r05_harness_with_open_true_reset_window(
-        2, device="cuda:0"
-    )
-    racket = HC.RacketTargetCommand.__new__(HC.RacketTargetCommand)
-    racket.num_envs = 2
-    racket.device = "cuda:0"
-    racket._action_ball_enabled = False
-    racket._action_ball_full_mdp_enabled = True
-
-    # Instance replacement must fail before any genesis capability is minted;
-    # returning a publicly constructible lookalike view is not owner proof.
-    real_project = harness.owner.project_owned_genesis_for_child
-    harness.owner.project_owned_genesis_for_child = lambda *, owner_kind: (
-        real_project(owner_kind=owner_kind)
-    )
-    with pytest.raises(
-        HC.ActionBallContinuousRacketObservationHold,
-        match="current-observation projection/validator ABI",
-    ):
-        racket.bind_action_ball_full_mdp_racket_staging(harness.owner)
-    assert harness.owner._genesis_child_projections == {}
 
 
 def test_production_selected_reset_rejects_named_bound_method_lookalikes():
