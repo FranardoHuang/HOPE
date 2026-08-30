@@ -22,8 +22,8 @@ from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 
 
 RUN_MODE = "single_action_lean"
-TELEMETRY_SCHEMA_VERSION = 13
-TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v13"
+TELEMETRY_SCHEMA_VERSION = 14
+TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v14"
 TRAINING_CONTRACT_SCHEMA_VERSION = 3
 ACTOR_OBSERVATION_CONTRACT = "action_ball_full_mdp_semantic_actor_v3"
 ACTOR_OBSERVATION_WIDTH = 215
@@ -33,9 +33,9 @@ OBSERVATION_KIND = "action_ball_full_mdp_semantic_observation_v3"
 SNAPSHOT_RECEIPT_SCHEMA_VERSION = 2
 SNAPSHOT_RECEIPT_KIND = "action_ball_full_mdp_diagnostic_snapshot_receipt_v2"
 SNAPSHOT_PAYLOAD_KIND = "policy_optimizer_diagnostic_nonresumable_v2"
+DIAGNOSTIC_ROWS_SCHEMA_VERSION = 1
+DIAGNOSTIC_ROWS_KIND = "action_ball_epoch_diagnostic_rows_v1"
 _STDOUT_WARNING_PREFIX = "HOPE_NONAUTHORITATIVE_STDOUT_WARNING_JSON="
-_SHOT_SAMPLE_LIMIT = 4
-_RESET_SAMPLE_LIMIT = 8
 
 _SNAPSHOT_IDENTITY_KEYS = {
     "action_ball_full_mdp_snapshot_kind",
@@ -808,18 +808,6 @@ def _shot_strata(
     ]
 
 
-def _bounded_rows(
-    rows: tuple[object, ...], *, limit: int, projector: Callable[[object], dict]
-) -> dict:
-    sample = [projector(row) for row in rows[:limit]]
-    return {
-        "row_count": len(rows),
-        "sample_limit": limit,
-        "sample_rows": sample,
-        "dropped_row_count": len(rows) - len(sample),
-    }
-
-
 def _telemetry(summary: object, runtime_module: object) -> dict:
     """Project one exact owner-produced summary without re-owning its facts."""
 
@@ -844,9 +832,11 @@ def _telemetry(summary: object, runtime_module: object) -> dict:
         "terminal_reset_reason_robot_hit_table_count": 0,
     }
     for reset in reset_rows:
-        row = asdict(reset)
+        reason_bits = getattr(reset, "reason_bits", None)
+        if type(reason_bits) is not int:
+            raise RuntimeError("FullMDP terminal reset reason bits differ")
         for name, bit in zip(reset_counts, (1, 2, 4, 8, 16)):
-            reset_counts[name] += int(bool(row["reason_bits"] & bit))
+            reset_counts[name] += int(bool(reason_bits & bit))
     settlement = summary.settlement
     commits = summary.reveal_commit
     lifecycle = summary.lifecycle
@@ -902,29 +892,135 @@ def _telemetry(summary: object, runtime_module: object) -> dict:
         "terminal_shot_strata": _shot_strata(
             summary.terminal_shots, lifecycle_flags=lifecycle_flags
         ),
-        "completed_shot_diagnostic_sample": _bounded_rows(
-            summary.completed_shots,
-            limit=_SHOT_SAMPLE_LIMIT,
-            projector=lambda row: _shot_row(
-                row, lifecycle_flags=lifecycle_flags
-            ),
-        ),
-        "terminal_shot_diagnostic_sample": _bounded_rows(
-            summary.terminal_shots,
-            limit=_SHOT_SAMPLE_LIMIT,
-            projector=lambda row: _shot_row(
-                row, lifecycle_flags=lifecycle_flags
-            ),
-        ),
-        "terminal_reset_diagnostic_sample": _bounded_rows(
-            reset_rows,
-            limit=_RESET_SAMPLE_LIMIT,
-            projector=asdict,
-        ),
+        "diagnostic_row_materialization": {
+            "status": "not_materialized_at_optimizer_ack",
+            "boundary": "explicit_diagnostic_snapshot",
+            "coverage": "latest_acknowledged_update_only",
+            "action_opportunity_row_count": len(summary.action_opportunities),
+            "completed_shot_row_count": len(summary.completed_shots),
+            "terminal_shot_row_count": len(summary.terminal_shots),
+            "terminal_reset_row_count": len(reset_rows),
+        },
         "terminal_reset_rows": len(reset_rows),
         "milestone": summary.milestone.as_json(tuple(rewards.MANAGER_NAMES)),
         **reset_counts,
     }
+
+
+def _diagnostic_rows_payload(summary: object, runtime_module: object) -> dict:
+    """Materialize full rows only at an explicit diagnostic boundary.
+
+    This payload is deliberately non-authoritative and covers exactly the most
+    recently acknowledged update retained by the adapter.  It is not a replay
+    log for the interval since the previous snapshot.
+    """
+
+    summary_type = runtime_module.ActionEpochPpoBoundarySummary
+    frontier_type = runtime_module.EpochDrainFrontier
+    if type(summary) is not summary_type or type(summary.frontier) is not frontier_type:
+        raise RuntimeError("FullMDP diagnostic row owner returned a foreign summary")
+    lifecycle_flags = runtime_module.drain_v2.SHOT_LIFECYCLE_FLAGS
+    if type(lifecycle_flags) is not tuple:
+        raise RuntimeError("FullMDP lifecycle ABI differs")
+    frontier = summary.frontier
+    rows = {
+        "action_opportunities": [
+            asdict(row) for row in summary.action_opportunities
+        ],
+        "completed_shots": [
+            _shot_row(row, lifecycle_flags=lifecycle_flags)
+            for row in summary.completed_shots
+        ],
+        "terminal_shots": [
+            _shot_row(row, lifecycle_flags=lifecycle_flags)
+            for row in summary.terminal_shots
+        ],
+        "terminal_resets": [asdict(row) for row in summary.terminal_resets],
+    }
+    return {
+        "schema_version": DIAGNOSTIC_ROWS_SCHEMA_VERSION,
+        "kind": DIAGNOSTIC_ROWS_KIND,
+        "diagnostic_unauthorized": True,
+        "checkpoint_authority": False,
+        "resume_authority": False,
+        "status": "latest_acknowledged_update_complete",
+        "coverage": "latest_acknowledged_update_only",
+        "ppo_update": frontier.update_index,
+        "completed_environment_steps": frontier.completed_environment_steps,
+        "epoch_operation_sequence": frontier.operation_sequence,
+        "epoch_drain_sequence": frontier.drain_sequence,
+        "epoch_commit_start": frontier.start_commit,
+        "epoch_commit_end": frontier.end_commit,
+        "row_counts": {name: len(value) for name, value in rows.items()},
+        **rows,
+    }
+
+
+def _unavailable_diagnostic_rows_payload() -> dict:
+    return {
+        "schema_version": DIAGNOSTIC_ROWS_SCHEMA_VERSION,
+        "kind": DIAGNOSTIC_ROWS_KIND,
+        "diagnostic_unauthorized": True,
+        "checkpoint_authority": False,
+        "resume_authority": False,
+        "status": "no_acknowledged_update",
+        "coverage": "none",
+        "ppo_update": None,
+        "completed_environment_steps": None,
+        "epoch_operation_sequence": None,
+        "epoch_drain_sequence": None,
+        "epoch_commit_start": None,
+        "epoch_commit_end": None,
+        "row_counts": {
+            "action_opportunities": 0,
+            "completed_shots": 0,
+            "terminal_shots": 0,
+            "terminal_resets": 0,
+        },
+        "action_opportunities": [],
+        "completed_shots": [],
+        "terminal_shots": [],
+        "terminal_resets": [],
+    }
+
+
+def _write_exclusive_json(path: Path, payload: dict) -> Path:
+    if not path.is_absolute() or not path.parent.is_dir() or path.parent.is_symlink():
+        raise RuntimeError("single_action_lean diagnostic row path differs")
+    encoded = (
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        + "\n"
+    ).encode("utf-8")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        written = 0
+        while written < len(encoded):
+            count = os.write(fd, encoded[written:])
+            if count <= 0:
+                raise OSError("single_action_lean diagnostic row write was short")
+            written += count
+        os.fsync(fd)
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_size != len(encoded)
+        ):
+            raise RuntimeError(
+                "single_action_lean diagnostic row file identity differs"
+            )
+    finally:
+        os.close(fd)
+    directory_fd = os.open(
+        path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    )
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+    return path
 
 
 class ActionBallFullMdpRsl3Adapter:
@@ -1018,11 +1114,38 @@ class ActionBallFullMdpRsl3Adapter:
         self._path, self._identity, self._segment = self._create_wal(log_dir)
         self._size = 0
         self._last_update = -1
+        self._last_acknowledged_summary = None
+        self._last_acknowledged_wal_binding = None
         self._safety_pending = None
         self._safety_last_completed_environment_steps = 0
         self._safety_last_consume_sequence = None
         self._safety_last_policy_step_sequence = None
         self._require_healthy()
+
+    def materialize_latest_acknowledged_rows(self, path: str) -> Path:
+        """Write the full latest-ACK rows at an explicit diagnostic boundary."""
+
+        if type(path) is not str or not path:
+            raise RuntimeError(
+                "single_action_lean diagnostic row materialization path differs"
+            )
+        summary = self._last_acknowledged_summary
+        wal_binding = self._last_acknowledged_wal_binding
+        if summary is None:
+            if wal_binding is not None:
+                raise RuntimeError(
+                    "single_action_lean diagnostic row ACK binding differs"
+                )
+            payload = _unavailable_diagnostic_rows_payload()
+            payload["durable_wal_binding"] = None
+        else:
+            if type(wal_binding) is not dict:
+                raise RuntimeError(
+                    "single_action_lean diagnostic row ACK binding differs"
+                )
+            payload = _diagnostic_rows_payload(summary, self._runtime)
+            payload["durable_wal_binding"] = dict(wal_binding)
+        return _write_exclusive_json(Path(path), payload)
 
     @staticmethod
     def _create_wal(log_dir: str) -> tuple[Path, tuple[int, int], str]:
@@ -1249,6 +1372,18 @@ class ActionBallFullMdpRsl3Adapter:
             ]
             self._safety_pending = None
             self._last_update = update_index
+            self._last_acknowledged_summary = summary
+            self._last_acknowledged_wal_binding = {
+                "segment_id": self._segment,
+                "rank": self._rank,
+                "telemetry_schema_version": TELEMETRY_SCHEMA_VERSION,
+                "telemetry_kind": TELEMETRY_KIND,
+                "telemetry_sha256": hashlib.sha256(canonical).hexdigest(),
+                "pending_byte_start": pending_start,
+                "pending_byte_end": pending_end,
+                "ack_byte_start": ack_start,
+                "ack_byte_end": ack_end,
+            }
         except BaseException as exc:
             reason = (
                 "single_action_lean optimizer boundary failed; retry forbidden: "
@@ -1528,6 +1663,9 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
             }
         )
         super().save(str(snapshot), infos=snapshot_identity)
+        diagnostic_rows = self._full_mdp_adapter.materialize_latest_acknowledged_rows(
+            str(snapshot.with_name(snapshot.name + ".action_epoch_rows.json"))
+        )
         receipt = _write_snapshot_receipt(
             snapshot,
             learning_iteration=learning_iteration,
@@ -1535,7 +1673,7 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
         )
         print(
             "[ActionBallFullMdpRsl3Runner] wrote non-resumable diagnostic snapshot: "
-            f"{snapshot} receipt={receipt}",
+            f"{snapshot} receipt={receipt} diagnostic_rows={diagnostic_rows}",
             flush=True,
         )
 

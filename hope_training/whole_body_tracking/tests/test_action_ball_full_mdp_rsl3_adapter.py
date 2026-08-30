@@ -135,6 +135,67 @@ class _Summary:
     milestone: object = _Milestone()
 
 
+@dataclass(frozen=True)
+class _ShotEvidence:
+    lifecycle_bits: int = 0b111111
+    r03_valid_bits: int = 3
+    r03_source_step: int = 17
+    physical_valid_bits: int = 7
+    physical_actor_pair_contact_source_step: int = 18
+    r06_valid_bits: int = 5
+    r06_outcome_code: int = 2
+    r06_predicate_bits: int = 9
+    r07_valid_bits: int = 1
+    r07_qualified_source_step: int = 19
+    r07_first_ready_source_step: int = 20
+
+
+@dataclass(frozen=True)
+class _Shot:
+    env_row: int = 7
+    slot_index: int = 0
+    reset_generation: int = 2
+    ball_generation: int = 3
+    action_uid: int = 11
+    action_slot: int = 0
+    shot_index: int = 4
+    task_identity: int = 5
+    outcome_identity: int = 6
+    ball_identity: int = 7
+    target_x_m: float = 1.25
+    target_y_m: float = -0.25
+    motion_close_reason: int = 4
+    settlement_step: int = 21
+    payment_step: int = 22
+    stroke_family: str = "backhand"
+    attribution_valid: bool = True
+    evidence: object = _ShotEvidence()
+
+
+@dataclass(frozen=True)
+class _Opportunity:
+    env_row: int = 7
+    slot_index: int = 0
+    action_uid: int = 11
+    action_slot: int = 0
+    stroke_family: str = "backhand"
+    attribution_valid: bool = True
+    selected: bool = True
+    accepted: bool = True
+    censored: bool = False
+    rejected: bool = False
+    deferred: bool = False
+
+
+@dataclass(frozen=True)
+class _Reset:
+    env_row: int = 7
+    reset_generation: int = 3
+    common_step: int = 23
+    episode_tick: int = 24
+    reason_bits: int = 18
+
+
 class _Tensor:
     """Dependency-light tensor algebra used only by the direct adapter test."""
 
@@ -564,7 +625,7 @@ def test_schedule_telemetry_uses_existing_public_due_plus_terminal_overlap(
     assert "d05_public_due_rows" not in telemetry
 
 
-def test_compact_telemetry_keeps_exact_action_side_denominators_and_bounded_samples():
+def test_compact_telemetry_keeps_exact_action_side_denominators():
     def opportunity(**overrides):
         values = {
             "action_uid": 11,
@@ -619,17 +680,112 @@ def test_compact_telemetry_keeps_exact_action_side_denominators_and_bounded_samp
             "deferred_rows": 0,
         },
     ]
-    sample = adapter._bounded_rows(
-        tuple(range(9)), limit=4, projector=lambda value: {"value": value}
+
+
+def test_optimizer_ack_keeps_counts_without_materializing_diagnostic_rows(
+    _fake_imports, monkeypatch
+):
+    summary = _Summary(
+        frontier=_Frontier(update_index=2, completed_environment_steps=144),
+        action_opportunities=(_Opportunity(),),
+        completed_shots=(_Shot(),),
+        terminal_shots=(_Shot(env_row=8),),
+        terminal_resets=(_Reset(),),
     )
-    assert sample == {
-        "row_count": 9,
-        "sample_limit": 4,
-        "sample_rows": [
-            {"value": 0}, {"value": 1}, {"value": 2}, {"value": 3}
-        ],
-        "dropped_row_count": 5,
+
+    def forbidden_asdict(_row):
+        raise AssertionError("optimizer ACK must not materialize dataclass rows")
+
+    monkeypatch.setattr(adapter, "asdict", forbidden_asdict)
+    telemetry = adapter._telemetry(summary, _fake_imports)
+
+    assert telemetry["schema_version"] == 14
+    assert telemetry["kind"] == (
+        "action_ball_epoch_optimizer_update_ack_telemetry_v14"
+    )
+    assert telemetry["terminal_reset_rows"] == 1
+    assert telemetry["terminal_reset_reason_base_fell_tilt_count"] == 1
+    assert telemetry["terminal_reset_reason_robot_hit_table_count"] == 1
+    assert telemetry["diagnostic_row_materialization"] == {
+        "status": "not_materialized_at_optimizer_ack",
+        "boundary": "explicit_diagnostic_snapshot",
+        "coverage": "latest_acknowledged_update_only",
+        "action_opportunity_row_count": 1,
+        "completed_shot_row_count": 1,
+        "terminal_shot_row_count": 1,
+        "terminal_reset_row_count": 1,
     }
+    assert not any("diagnostic_sample" in key for key in telemetry)
+    assert "sample_rows" not in json.dumps(telemetry, sort_keys=True)
+    assert sum(
+        row["opportunity_rows"]
+        for row in telemetry["action_opportunity_strata"]
+    ) == 1
+    assert sum(
+        row["shot_rows"] for row in telemetry["completed_shot_strata"]
+    ) == 1
+    assert sum(
+        row["shot_rows"] for row in telemetry["terminal_shot_strata"]
+    ) == 1
+
+
+def test_optimizer_ack_payload_size_is_constant_in_row_cardinality(_fake_imports):
+    opportunity = _Opportunity()
+    small = adapter._telemetry(
+        _Summary(
+            frontier=_Frontier(update_index=0, completed_environment_steps=48),
+            action_opportunities=(opportunity,) * 8,
+        ),
+        _fake_imports,
+    )
+    large = adapter._telemetry(
+        _Summary(
+            frontier=_Frontier(update_index=0, completed_environment_steps=48),
+            action_opportunities=(opportunity,) * 4096,
+        ),
+        _fake_imports,
+    )
+    small_bytes = json.dumps(small, sort_keys=True, separators=(",", ":"))
+    large_bytes = json.dumps(large, sort_keys=True, separators=(",", ":"))
+    assert len(large_bytes) - len(small_bytes) < 256
+    assert "env_row" not in large_bytes
+
+
+def test_explicit_diagnostic_payload_materializes_full_latest_ack_rows(
+    _fake_imports,
+):
+    summary = _Summary(
+        frontier=_Frontier(
+            update_index=5,
+            completed_environment_steps=288,
+            operation_sequence=6,
+            drain_sequence=7,
+            start_commit=8,
+            end_commit=9,
+        ),
+        action_opportunities=(_Opportunity(),),
+        completed_shots=(_Shot(),),
+        terminal_shots=(_Shot(env_row=8),),
+        terminal_resets=(_Reset(),),
+    )
+
+    payload = adapter._diagnostic_rows_payload(summary, _fake_imports)
+
+    assert payload["status"] == "latest_acknowledged_update_complete"
+    assert payload["coverage"] == "latest_acknowledged_update_only"
+    assert payload["ppo_update"] == 5
+    assert payload["epoch_commit_start"] == 8
+    assert payload["epoch_commit_end"] == 9
+    assert payload["row_counts"] == {
+        "action_opportunities": 1,
+        "completed_shots": 1,
+        "terminal_shots": 1,
+        "terminal_resets": 1,
+    }
+    assert payload["action_opportunities"][0]["env_row"] == 7
+    assert payload["completed_shots"][0]["target_x_m"] == 1.25
+    assert payload["terminal_shots"][0]["env_row"] == 8
+    assert payload["terminal_resets"][0]["reason_bits"] == 18
 
 
 def test_compact_shot_strata_preserve_lifecycle_and_outcome_histograms():
@@ -802,9 +958,9 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
         "action_ball_epoch_durable_ack_v2",
     ]
     assert rows[0]["pending_ack_telemetry"]["diagnostic_unauthorized"] is True
-    assert rows[0]["pending_ack_telemetry"]["schema_version"] == 13
+    assert rows[0]["pending_ack_telemetry"]["schema_version"] == 14
     assert rows[0]["pending_ack_telemetry"]["kind"] == (
-        "action_ball_epoch_optimizer_update_ack_telemetry_v13"
+        "action_ball_epoch_optimizer_update_ack_telemetry_v14"
     )
     assert {
         key: rows[0]["pending_ack_telemetry"][key]
@@ -1351,6 +1507,41 @@ def test_compact_small_capacity_survives_five_n4096_updates(
     )
 
 
+def test_explicit_row_materialization_uses_latest_durable_ack_and_no_clobber(
+    tmp_path, _fake_imports
+):
+    env = _Env()
+    boundary = adapter.ActionBallFullMdpRsl3Adapter(
+        env=env, owner=env.owner, log_dir=str(tmp_path)
+    )
+    boundary.update(lambda: None, update_index=0, completed_environment_steps=48)
+    path = tmp_path / "latest_rows.json"
+
+    assert boundary.materialize_latest_acknowledged_rows(str(path)) == path
+    payload = json.loads(path.read_text())
+    assert payload["status"] == "latest_acknowledged_update_complete"
+    assert payload["coverage"] == "latest_acknowledged_update_only"
+    assert payload["ppo_update"] == 0
+    assert payload["row_counts"] == {
+        "action_opportunities": 0,
+        "completed_shots": 0,
+        "terminal_shots": 0,
+        "terminal_resets": 0,
+    }
+    binding = payload["durable_wal_binding"]
+    assert binding["rank"] == 0
+    assert binding["telemetry_schema_version"] == 14
+    assert binding["telemetry_kind"] == (
+        "action_ball_epoch_optimizer_update_ack_telemetry_v14"
+    )
+    assert len(binding["telemetry_sha256"]) == 64
+    assert binding["pending_byte_start"] == 0
+    assert binding["pending_byte_end"] == binding["ack_byte_start"]
+    assert binding["ack_byte_start"] < binding["ack_byte_end"]
+    with pytest.raises(FileExistsError):
+        boundary.materialize_latest_acknowledged_rows(str(path))
+
+
 def test_finite_nonzero_actual_hard_edge_is_consumed(tmp_path, _fake_imports):
     env = _Env()
     env.action_term.snapshot = _compact_snapshot(
@@ -1672,6 +1863,16 @@ def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
             "critic_obs_total_dim",
         }
     }
+
+    class _DiagnosticRows:
+        def materialize_latest_acknowledged_rows(self, path):
+            payload = adapter._unavailable_diagnostic_rows_payload()
+            payload["durable_wal_binding"] = None
+            return adapter._write_exclusive_json(
+                Path(path), payload
+            )
+
+    runner._full_mdp_adapter = _DiagnosticRows()
     requested = tmp_path / "model_1000.pt"
     with pytest.raises(RuntimeError, match="forbids caller infos"):
         runner.save(
@@ -1693,6 +1894,12 @@ def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
     receipt_path = tmp_path / (
         "model_1000.diagnostic_nonresumable.pt.receipt.json"
     )
+    rows_path = tmp_path / (
+        "model_1000.diagnostic_nonresumable.pt.action_epoch_rows.json"
+    )
+    unavailable_rows = adapter._unavailable_diagnostic_rows_payload()
+    unavailable_rows["durable_wal_binding"] = None
+    assert json.loads(rows_path.read_text()) == unavailable_rows
     assert json.loads(receipt_path.read_text()) == {
         "schema_version": 2,
         "kind": "action_ball_full_mdp_diagnostic_snapshot_receipt_v2",
