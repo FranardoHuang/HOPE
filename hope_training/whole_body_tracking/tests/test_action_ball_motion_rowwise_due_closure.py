@@ -521,7 +521,14 @@ def test_selected_reset_clears_only_selected_close_edge() -> None:
 
     stage = command.prepare_selected_reset(r05_owner.prepared)
     armed = command.arm_prevalidated_selected_reset(stage)
-    command.commit_prevalidated_selected_reset(armed)
+    terminal = command.commit_prevalidated_selected_reset(armed)
+    completion = command.complete_selected_reset_after_r05(
+        terminal, r05_owner.receipt
+    )
+    command.consume_owned_selected_reset_completion(
+        completion,
+        expected_prepared_true_reset=r05_owner.prepared,
+    )
 
     assert not command._action_ball_continuous_closed_mask[1]
     assert command._action_ball_continuous_close_reason[1] == (

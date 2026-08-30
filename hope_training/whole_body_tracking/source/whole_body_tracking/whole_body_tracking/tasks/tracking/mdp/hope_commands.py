@@ -25853,13 +25853,8 @@ class RacketTargetCommand(CommandTerm):
                         "FullMDP Motion current-receipt mask is malformed"
                     )
                 _action_ball_validate_tensor_predicate(
-                    ~(receipt_active & ~timing_active),
-                    "active action-ball task has no receipt-owned Motion timing",
-                    async_validate=async_validate,
-                )
-                _action_ball_validate_tensor_predicate(
-                    ~(~receipt_active & timing_active),
-                    "FullMDP Motion timing has no current task receipt",
+                    receipt_active.eq(timing_active),
+                    "FullMDP Motion current receipt and timing activity differ",
                     async_validate=async_validate,
                 )
             elif hasattr(self, "_action_ball_attempt_active"):
