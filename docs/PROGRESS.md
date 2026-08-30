@@ -11,7 +11,10 @@
   ball/task/lifecycle逐位不变、requested/executable q0、后继实际执行自然frame1和exactly-one
   intervention都fail closed。trace schema升为v2并对两种handoff都记录pre-step teacher qdes/
   reveal/wait与mode；direct receipt明确`diagnostic_unauthorized=true / ppo_update_calls=0`。
-  已补CPU fixture和边界反例，本地只做静态diff，不跑Python；Pod CPU targeted及fresh CUDA
+  已补CPU fixture和边界反例，本地只做静态diff，不跑Python。exact Pod clean
+  checkout `dd62e8ca5e0ebae9e62017df6103762bdaab08ff`补入已登记的A3P0807 ignored
+  mesh closure后，四个直接相关module union=`167 passed / 8 skipped / 0 failed`；首轮还暴露
+  并修复了非replay `main()`过早import helper、破坏EPA48 pre-import order的真回归。fresh CUDA
   replay仍`unverified`，未访问或修改任何active run。
 
 ## 2026-08-30 — frozen-teacher Pod targeted失败修复候选

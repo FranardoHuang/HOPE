@@ -13,9 +13,11 @@ intervention和typed `diagnostic_unauthorized / zero PPO`都fail closed；安装
 transition前的keepout与backend-resolved robot/table contact单独只读取证，不写lifecycle latch。默认
 `split_ready_bridge`、生产训练、Observation、Reward、termination不变。
 
-当前只有branch code/CPU fixture与`git diff --check`；本地不跑Python。exact Pod CPU targeted与
-fresh GPU CUDA replay仍`unverified`，因此不是physical-birth、physics parity、训练或部署证据，
-G06不升级。
+本地不跑Python。exact Pod clean checkout
+`dd62e8ca5e0ebae9e62017df6103762bdaab08ff`补入受管A3P0807 ignored mesh closure后，
+teacher replay / initial WAIT env / WAIT transition / RSL3四module union=`167 passed / 8 skipped / 0 failed`。
+首轮targeted抓到并修复了非replay `main()`过早import helper对EPA48 pre-import order的真回归。
+fresh GPU CUDA replay仍`unverified`，因此还不是physical-birth、physics parity、训练或部署证据，G06不升级。
 
 ## 2026-08-30 frozen-teacher targeted修复候选（仍`Partial`）
 

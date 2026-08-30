@@ -37,9 +37,11 @@ installed-frame0的table keepout与backend-resolved robot/table contact，不写
 0次、重放、live-ball、已launch、q0/root/zero-history不精确或任一保留量变化都fail closed。
 
 输出仍是typed `diagnostic_unauthorized=true / ppo_update_calls=0`，不构造optimizer或checkpoint，
-不允许把teleport解释成physical-birth、训练、physics parity或部署证据。当前代码及CPU fixture
-仅在分支候选；本地未跑Python。下一证据顺序是exact Pod CPU targeted，通过后才能在自然
-空闲GPU发fresh N=1 CUDA replay。在那之前状态为`unverified`，Gate不升级。
+不允许把teleport解释成physical-birth、训练、physics parity或部署证据。本地未跑Python。
+exact Pod clean checkout `dd62e8ca5e0ebae9e62017df6103762bdaab08ff`恢复受管A3P0807
+ignored mesh closure后，四个直接相关module union=`167 passed / 8 skipped / 0 failed`；第一轮还抓到
+非replay `main()`过早import helper会破坏EPA48 pre-import order，已在同一SHA的前驱修复。
+下一证据是自然空闲GPU上fresh N=1 CUDA replay；在那之前仍为`unverified`，Gate不升级。
 
 ## 2026-08-30 frozen-teacher targeted修复候选
 
