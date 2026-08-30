@@ -291,7 +291,9 @@ def _singleton_profile(*, ball_b: np.ndarray, incoming_b: np.ndarray,
     return result
 
 
-def _materialize_profile_pins(template_path: Path, ball_physics: Path) -> tuple[Mapping[str, Any], bytes]:
+def _materialize_profile_pins(
+    template_path: Path, ball_physics: Path, repo_root: Path
+) -> tuple[Mapping[str, Any], bytes]:
     template = deepcopy(dict(_read_json(template_path, "profile-pins template")))
     solver = template.get("solver_payload")
     physics = template.get("physics_payload")
@@ -313,7 +315,12 @@ def _materialize_profile_pins(template_path: Path, ball_physics: Path) -> tuple[
     venue = physics.get("venue_source")
     if not isinstance(venue, dict):
         raise BundleError("profile-pins physics venue_source missing")
-    venue["file_sha256"] = _sha256_file(ball_physics)
+    resolved_physics = ball_physics.resolve(strict=True)
+    try:
+        venue["path"] = resolved_physics.relative_to(repo_root).as_posix()
+    except ValueError:
+        venue["path"] = str(resolved_physics)
+    venue["file_sha256"] = _sha256_file(resolved_physics)
     physics_sha = _sha256_bytes(json.dumps(
         physics, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8"))
@@ -396,8 +403,9 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     prototype_bytes = _json_bytes(prototype)
     prototype_sha = _sha256_bytes(prototype_bytes)
     profile_pins, profile_pins_bytes = _materialize_profile_pins(
-        args.profile_pins_template, args.ball_physics
+        args.profile_pins_template, args.ball_physics, root
     )
+    ball_physics_file_sha = _sha256_file(args.ball_physics)
     out_rel = Path(args.output_dir_rel)
     if out_rel.is_absolute() or ".." in out_rel.parts:
         raise BundleError("output-dir-rel must be normalized and repo-relative")
@@ -456,6 +464,7 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
             "task.motion.motion_file": str(root / motion_rel),
             "fitted_ball_profile_pins": str(root / profile_pins_rel),
             "fitted_ball_profile_pins_sha256": _sha256_bytes(profile_pins_bytes),
+            "HOPE_BALL_PHYSICS_YAML": str(args.ball_physics.resolve()),
         },
         "timing": {"t_hit_s": t_hit, "t_cycle_s": t_cycle, "fps": effective_fps},
         "exact_center": {"ball_center_w_m": ball_w.tolist(),
@@ -474,7 +483,10 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
             "phase4_npz": {"path": str(npz_path), "sha256": _sha256_file(npz_path)},
             "dynamic_ready": {"path": str(ready_path), "sha256": _sha256_file(ready_path)},
             "mjcf": {"path": str(args.mjcf.resolve()), "sha256": _sha256_file(args.mjcf)},
-            "ball_physics": {"path": str(args.ball_physics.resolve()), "sha256": physics_sha}},
+            "ball_physics": {
+                "path": str(args.ball_physics.resolve()),
+                "sha256": ball_physics_file_sha,
+            }},
         "outputs": {"motion": {"path": motion_rel.as_posix(), "sha256": motion_sha},
             "prototype": {"path": prototype_rel.as_posix(), "sha256": prototype_sha},
             "manifest": {"path": manifest_rel.as_posix(), "sha256": _sha256_bytes(manifest_bytes)},
