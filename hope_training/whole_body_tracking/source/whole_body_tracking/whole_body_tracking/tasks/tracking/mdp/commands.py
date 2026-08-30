@@ -4754,6 +4754,13 @@ class MotionCommand(CommandTerm):
             source_xy = torch.zeros((1, 2), dtype=task_translation.dtype)
             source_yaw = torch.zeros((1, 4), dtype=task_yaw.dtype)
             source_yaw[:, 0] = 1.0
+        else:
+            source_xy = source_xy.detach().to(
+                device=task_translation.device, dtype=task_translation.dtype
+            )
+            source_yaw = source_yaw.detach().to(
+                device=task_yaw.device, dtype=task_yaw.dtype
+            )
         safe_slot = tensors["action_slot"].clamp(
             min=0, max=source_xy.shape[0] - 1
         )
@@ -4768,9 +4775,13 @@ class MotionCommand(CommandTerm):
             (source_xy[safe_slot], torch.zeros_like(source_xy[safe_slot, :1])),
             dim=1,
         )
+        env_origins = self._env.scene.env_origins.detach().to(
+            device=task_translation.device, dtype=task_translation.dtype
+        )
+        frozen_root_local = tensors["frozen_root_pos_w"] - env_origins
         expected_translation = torch.cat(
             (
-                tensors["frozen_root_pos_w"][:, :2]
+                frozen_root_local[:, :2]
                 - quat_apply(expected_yaw, source_xyz)[:, :2],
                 torch.zeros_like(source_xyz[:, :1]),
             ),
