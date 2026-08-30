@@ -614,12 +614,12 @@ def test_full_mdp_racket_timing_keeps_d05_task_clock(
         (
             (True, False),
             (False, False),
-            "active action-ball task has no receipt-owned Motion timing",
+            "FullMDP Motion current receipt and timing activity differ",
         ),
         (
             (False, False),
             (True, False),
-            "FullMDP Motion timing has no current task receipt",
+            "FullMDP Motion current receipt and timing activity differ",
         ),
     ),
 )
