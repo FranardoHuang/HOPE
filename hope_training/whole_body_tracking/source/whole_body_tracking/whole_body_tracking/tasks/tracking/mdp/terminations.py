@@ -60,6 +60,21 @@ _A3_COLLISION_PROXY_PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v2"
 _A3_COLLISION_PROXY_PLANT_ASSET_ROOT_NAME = "agibot_a3p_p1_0807_v1"
 _A3_COLLISION_PROXY_SOURCE_COMPONENT_COUNT = 62
 _A3_COLLISION_PROXY_COMPONENT_COUNT = 63
+_A3_COLLISION_PROXY_MUJOCO_MJCF_RELATIVE = (
+    "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
+    "a3_pingpong/a3_pingpong.xml"
+)
+_A3_COLLISION_PROXY_MUJOCO_MJCF_SHA256 = (
+    "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a"
+)
+_A3_COLLISION_PROXY_MUJOCO_TARGET_COLLIDERS = (
+    "right_hand_finger_collision",
+    "right_hand_palm_collision",
+    "right_hand_thumb_collision",
+    "right_racket_collision",
+    "right_racket_handle_collision",
+    "right_wrist_yaw_collision",
+)
 # The 20 OmniPicker3 left-gripper collision links.  The 0409 plant carried one
 # coarse ``left_hand_link`` placeholder box here; the 0807 plant carries the
 # real gripper, and its volume enters this guard for the first time.  Naming
@@ -1514,6 +1529,48 @@ def _load_table_collision_proxy_artifact(
         raise RuntimeError(
             "robot_hit_table collision proxy converter configuration is not "
             "the pinned bundle's config.yaml"
+        )
+    mujoco_binding = document.get("mujoco_actual_collision_binding")
+    target_colliders = (
+        mujoco_binding.get("target_colliders")
+        if isinstance(mujoco_binding, dict)
+        else None
+    )
+    binding_sha256 = (
+        mujoco_binding.get("content_sha256")
+        if isinstance(mujoco_binding, dict)
+        else None
+    )
+    if (
+        not isinstance(mujoco_binding, dict)
+        or mujoco_binding.get("collision_semantics")
+        != "mesh_convex_hull_plus_analytic_primitives"
+        or mujoco_binding.get("mjcf_path")
+        != _A3_COLLISION_PROXY_MUJOCO_MJCF_RELATIVE
+        or mujoco_binding.get("mjcf_sha256")
+        != _A3_COLLISION_PROXY_MUJOCO_MJCF_SHA256
+        or not isinstance(target_colliders, list)
+        or any(not isinstance(row, dict) for row in target_colliders)
+        or tuple(row.get("name") for row in target_colliders)
+        != _A3_COLLISION_PROXY_MUJOCO_TARGET_COLLIDERS
+        or not _is_lower_sha256(binding_sha256)
+    ):
+        raise RuntimeError(
+            "robot_hit_table collision proxy does not bind the exact live "
+            "MuJoCo wrist collision inventory"
+        )
+    unsigned_mujoco_binding = dict(mujoco_binding)
+    unsigned_mujoco_binding.pop("content_sha256", None)
+    if hashlib.sha256(
+        json.dumps(
+            unsigned_mujoco_binding,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+    ).hexdigest() != binding_sha256:
+        raise RuntimeError(
+            "robot_hit_table MuJoCo collision binding content SHA mismatch"
         )
     content_sha256 = document.get("content_sha256")
     if not _is_lower_sha256(content_sha256):

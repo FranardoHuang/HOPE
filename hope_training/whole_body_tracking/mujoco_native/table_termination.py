@@ -70,6 +70,9 @@ ISAAC_TERMINATION_CALLABLE_SELECTORS = (
     ("assignment", "_A3_COLLISION_PROXY_PLANT_ASSET_ROOT_NAME"),
     ("assignment", "_A3_COLLISION_PROXY_SOURCE_COMPONENT_COUNT"),
     ("assignment", "_A3_COLLISION_PROXY_COMPONENT_COUNT"),
+    ("assignment", "_A3_COLLISION_PROXY_MUJOCO_MJCF_RELATIVE"),
+    ("assignment", "_A3_COLLISION_PROXY_MUJOCO_MJCF_SHA256"),
+    ("assignment", "_A3_COLLISION_PROXY_MUJOCO_TARGET_COLLIDERS"),
     ("assignment", "_A3_COLLISION_PROXY_LEFT_GRIPPER_SOURCE_LINKS"),
     ("assignment", "_A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256"),
     ("assignment", "_A3_COLLISION_PROXY_RUNTIME_USD_TOTAL_FILE_BYTES"),
@@ -121,10 +124,18 @@ COLLISION_PROXY_ARTIFACT = (
     "a3_table_collision_components.v2.json"
 )
 EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256 = (
-    "66b3ddc4b6a158ffc92172a313dd147f74994ebcddafa98363a7986112f72918"
+    "7f26e55b2f24b02f751c7b078f94426ec2524c810b0ff6cb5cfea58e884e07cc"
 )
 EXPECTED_COLLISION_PROXY_SOURCE_COMPONENT_COUNT = 62
 EXPECTED_COLLISION_PROXY_COMPONENT_COUNT = 63
+EXPECTED_COLLISION_PROXY_MUJOCO_TARGET_COLLIDERS = (
+    "right_hand_finger_collision",
+    "right_hand_palm_collision",
+    "right_hand_thumb_collision",
+    "right_racket_collision",
+    "right_racket_handle_collision",
+    "right_wrist_yaw_collision",
+)
 ##
 # Plant identity for the collision proxy.
 #
@@ -1101,6 +1112,55 @@ def _load_collision_components_cached(
     if hashlib.sha256(canonical).hexdigest() != content_sha:
         raise TableTerminationContractError("collision proxy content SHA mismatch")
     _verify_collision_proxy_plant_identity(document)
+    mujoco_binding = document.get("mujoco_actual_collision_binding")
+    target_colliders = (
+        mujoco_binding.get("target_colliders")
+        if isinstance(mujoco_binding, dict)
+        else None
+    )
+    binding_sha = (
+        mujoco_binding.get("content_sha256")
+        if isinstance(mujoco_binding, dict)
+        else None
+    )
+    try:
+        expected_mjcf_relative = CANONICAL_MJCF.relative_to(REPO_ROOT).as_posix()
+    except ValueError as exc:
+        raise TableTerminationContractError(
+            "canonical MuJoCo model escaped the repository"
+        ) from exc
+    if (
+        not isinstance(mujoco_binding, dict)
+        or mujoco_binding.get("collision_semantics")
+        != "mesh_convex_hull_plus_analytic_primitives"
+        or mujoco_binding.get("mjcf_path") != expected_mjcf_relative
+        or mujoco_binding.get("mjcf_sha256")
+        != EXPECTED_CANONICAL_MJCF_SHA256
+        or not isinstance(target_colliders, list)
+        or any(not isinstance(row, dict) for row in target_colliders)
+        or tuple(row.get("name") for row in target_colliders)
+        != EXPECTED_COLLISION_PROXY_MUJOCO_TARGET_COLLIDERS
+        or not isinstance(binding_sha, str)
+        or re.fullmatch(r"[0-9a-f]{64}", binding_sha) is None
+    ):
+        raise TableTerminationContractError(
+            "collision proxy does not bind the exact live MuJoCo wrist "
+            "collision inventory"
+        )
+    unsigned_mujoco_binding = dict(mujoco_binding)
+    unsigned_mujoco_binding.pop("content_sha256", None)
+    if hashlib.sha256(
+        json.dumps(
+            unsigned_mujoco_binding,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest() != binding_sha:
+        raise TableTerminationContractError(
+            "MuJoCo collision binding content SHA mismatch"
+        )
     components = document.get("components")
     if (
         not isinstance(components, list)

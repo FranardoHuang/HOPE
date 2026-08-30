@@ -94,7 +94,7 @@ def test_tracked_multi_obb_artifact_seals_full_hull_tetra_cover():
     assert [row["proxy_box_index"] for row in rows] == [0, 1]
     assert {row["proxy_box_count"] for row in rows} == {2}
     assert {row["coverage_basis"] for row in rows} == {
-        "complete_convex_hull_tetra_fan_pca_obb_union"
+        "complete_convex_hull_tetra_fan_pca_obb_union_plus_complete_mujoco_actual_collision_cover"
     }
     assert {row["coverage_primitive_kind"] for row in rows} == {
         "convex_hull_tetrahedron"
@@ -114,6 +114,20 @@ def test_tracked_multi_obb_artifact_seals_full_hull_tetra_cover():
     assert hull["facet_count"] == hull["tetra_count"] == 610
     assert receipt["leaf_primitive_counts"] == [305, 305]
     assert hull["tetra_fan_volume_abs_error_m3"] <= 1.0e-15
+    mu_binding = document["mujoco_actual_collision_binding"]
+    assert mu_binding["mjcf_sha256"] == M.PINNED_MUJOCO_MJCF_SHA256
+    assert {
+        row["name"] for row in mu_binding["target_colliders"]
+    } == set(M.MUJOCO_COLLISION_SOURCE_GROUPS)
+    mu_cover = receipt["mujoco_actual_collision_cover"]
+    assert mu_cover["max_float32_projection_interval_excess_m"] <= 0.0
+    assert {
+        row["name"] for row in mu_cover["leaf_by_primitive"]
+    } == {
+        name
+        for name, source in M.MUJOCO_COLLISION_SOURCE_GROUPS.items()
+        if source == "right_hand_pingpang_link.stl"
+    }
     assert all(
         row["coverage_primitive_indices_sha256"]
         == receipt["leaf_primitive_indices_sha256"][index]

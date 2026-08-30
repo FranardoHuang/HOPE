@@ -397,7 +397,7 @@ TABLE_COLLISION_PROXY_ARTIFACT_PATH = (
     "a3_table_collision_components.v2.json"
 )
 TABLE_COLLISION_PROXY_ARTIFACT_SHA256 = (
-    "66b3ddc4b6a158ffc92172a313dd147f74994ebcddafa98363a7986112f72918"
+    "7f26e55b2f24b02f751c7b078f94426ec2524c810b0ff6cb5cfea58e884e07cc"
 )
 TABLE_CONTACT_RACKET_BODY_NAME = "right_wrist_yaw_Link"
 #: Conservative OBB for the shipped ``right_racket_face_collision.STL`` in the wrist-yaw frame.

@@ -157,6 +157,7 @@ def _restamped_0409_document() -> dict:
         "source_urdf",
         "runtime_usd_bundle",
         "plant_identity",
+        "mujoco_actual_collision_binding",
         "left_gripper_source_links",
         "decomposition",
         "source_component_count",
@@ -193,6 +194,26 @@ def test_restamped_0409_proxy_is_refused_by_the_mujoco_gate_too(tmp_path):
     path, sha = _write(tmp_path, _restamped_0409_document(), "mj_forged.json")
     term._load_collision_components_cached.cache_clear()
     with pytest.raises(term.TableTerminationContractError, match="63 components"):
+        term._load_collision_components_cached(path, sha)
+    term._load_collision_components_cached.cache_clear()
+
+
+def test_proxy_without_actual_mujoco_collision_binding_is_refused_by_both_lanes(
+    term_mod, tmp_path
+):
+    document = _live_document()
+    document.pop("mujoco_actual_collision_binding")
+    path, sha = _write(tmp_path, document, "missing_mujoco_binding.json")
+    with pytest.raises(RuntimeError, match="MuJoCo wrist collision inventory"):
+        term_mod._load_table_collision_proxy_artifact(path, sha, tuple(BODIES))
+
+    from mujoco_native import table_termination as term
+
+    term._load_collision_components_cached.cache_clear()
+    with pytest.raises(
+        term.TableTerminationContractError,
+        match="MuJoCo wrist collision inventory",
+    ):
         term._load_collision_components_cached(path, sha)
     term._load_collision_components_cached.cache_clear()
 
