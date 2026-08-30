@@ -265,7 +265,11 @@ def test_direct_frame0_diagnostic_can_recenter_only_physical_root_xy():
     torch.testing.assert_close(env._qpos_act(), joint_q0, rtol=0.0, atol=0.0)
     torch.testing.assert_close(
         env.sim.data.qpos[:, :3],
-        torch.tensor([[-0.192232, 0.285279, 0.9]]),
+        torch.tensor([[-0.192232, 0.285279, 0.9]])
+        + torch.cat((
+            env.env.scene.env_origins[:, :2],
+            torch.zeros((1, 1)),
+        ), dim=1),
         rtol=0.0,
         atol=0.0,
     )
