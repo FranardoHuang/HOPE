@@ -50,6 +50,8 @@ physics parity。详细唯一数值真源见
 - [x] filtered-net Mu runtime MJB 从 source MJCF 重编译并 repin；旧派生 plant 不再可加载。
 - [x] Phase2/3/4 的 seed、admission 与最终 plant authority 分层。
 - [x] Phase4 safe follow-through、exact physics YAML 绑定和 policy-grid deadline 闭合。
+- [x] Isaac RSL3 只在成功 `env.step()` 后累加 observed rollout；PPO 前与 storage cursor和
+  typed `H`三方核对，公式只作反例而不再自证。
 - [x] 现役课程和 observation 合同未被上述修复扩成新的状态机。
 
 ### 发 long 前仅剩的阻断项
@@ -60,8 +62,8 @@ physics parity。详细唯一数值真源见
 - [ ] 在 Pod 恢复并核验 private/ignored 输入、EPA48/RSL3、当前 exact MJB 与 physics YAML。
 - [ ] 物化 final Phase4 canonical bundle，reopen 后逐字核身份；证明 trainer 真消费该 bundle、deadline
   和 frozen ActionEpoch，而不是旧默认值。
-- [ ] 跑 final focused/combined Pod tests；Reward bundle、phase producer/consumer、journal/WAL 与
-  interface hostile tests 全部通过。
+- [ ] 跑 final focused/combined Pod tests；Reward bundle、phase producer/consumer、observed-rollout chronology、
+  journal/WAL 与 interface hostile tests 全部通过。
 - [ ] Isaac 与 Mu 分别完成真实 CUDA `512×48×31` fixed-action：finite、0 contract fault，并对齐
   action identity、RNG/tape、reason/counter/safety 和逐项 payment。
 - [ ] Mu 完成 profiler-off matched-strata 墙钟复核；`bf941777` 的 metric transfer 候选只在 fixed-tape

@@ -8,6 +8,8 @@
 - R36 已合入 reveal-relative launch、frozen ActionEpoch 单一 R03 target、Reward 同写者自证减法、
   filtered-net MJB repin，以及 Phase4 seed/admission 分层、safe follow-through、exact physics 绑定和
   policy-grid deadline；Observation V3 `215/231`与自然重叠课程不变。
+- Isaac RSL3 生产入口不再用 update 公式同时生产和自证步数；只有成功返回的
+  `env.step()`才累加 observed counter，PPO 前与 storage cursor和 typed `H`三方核对。
 - final Phase4 bundle consumer、Pod focused tests、双端 CUDA fixed-action、热路 parity/rate 和 fresh ACK
   仍全部为`未测`；当前阻断与停止规则只认
   [双端 TODO §0.6](operations/action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)，

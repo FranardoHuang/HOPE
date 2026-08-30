@@ -577,6 +577,28 @@ def _complete_boundary(owner, *, update, completed):
     return summary
 
 
+def test_observed_rollout_rejects_forged_formula_and_poison_is_sticky():
+    owner, _epoch, _graph = _owner()
+    owner.bind_observed_rollout_chronology()
+    assert owner.record_successful_environment_step() == 2
+    assert owner.observed_completed_environment_steps() == 2
+
+    with pytest.raises(
+        L.ActionBallFullMdpLeanRuntimeError,
+        match="caller completed steps differ",
+    ):
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0,
+            completed_environment_steps=4,
+        )
+    assert owner.poisoned is True
+    with pytest.raises(
+        L.ActionBallFullMdpLeanRuntimeError,
+        match="retry is forbidden",
+    ):
+        owner.require_healthy()
+
+
 def test_preceding_collection_preserves_canonical_sys_modules():
     """A later fixture import must not replace an already canonical graph."""
 

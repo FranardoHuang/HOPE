@@ -1336,6 +1336,23 @@ Pod1 final exact checkout=`b0d7d562`恢复并核过92个A3P0807 Mu mesh、EPA48/
 两个launcher的完整dry-run均RC0。三卡占用下真实Kit/Mu CUDA fixed-action与fresh learning仍`未测`；该证据只
 关闭下一次发射的代码与输入组合，不把dry-run冒充真实GPU probe。
 
+### 11.6 2026-08-30 Isaac lean observed-rollout chronology
+
+审计发现Isaac生产入口`ActionBallFullMdpRsl3Runner`在optimizer前用
+`(update_index + 1) * num_envs * num_steps_per_env`同时铸造并复核
+`completed_environment_steps`。该值是确定性期望，不是独立观测；producer/consumer同源时可共同放过漏步。
+
+采用的最小修复不改变训练问题：runner只在vector `env.step()`成功返回后增加observed step；异常返回不推进。
+optimizer前必须同时满足本轮observed delta=`H`、真实RSL storage step=`H`、累计observed transitions等于成功
+调用数乘`num_envs`。旧公式只保留为独立expected-value反例检查，不再生产事实。任一mismatch在owner prepare、
+joint-safety freeze和optimizer之前sticky-poison。D05、WAL、ACK schema与顺序不变；Reward28、Observation V3、
+课程、physics、PPO和动作身份均不变，因此不做学习A/B。
+
+验证状态：focused Pod与真实Isaac `512×H48×2`均`未测`。focused必须覆盖正常累计、异常step不计数、伪造
+公式但observed少步、storage少步以及retry仍不得optimizer；真实ACK0/ACK1应分别记录`24,576/49,152`累计
+transitions且每轮observed/storage均为48。通过前不发下一条long；即使通过也只闭合证据来源，不证明学习、
+跨引擎physics parity、resume、promotion、部署或真机。
+
 旧Mu到ACK2654：`666/344,720` selected/launch、599 crossing、`0/666` legal、recovery=`0/254,017`；
 最近10轮仍0 contact。旧Isaac到ACK913：`0 R03 / 102,646 launch`，landing仍因0 selected为`未测`。二者分别确认hit→landing/recovery
 和mimic→hit失败。已判负4× Mu继续只读到ACK851，累计`329/28/19/0` raw/selected/cross/legal，最近10轮仍

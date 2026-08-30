@@ -12,10 +12,13 @@ R35 Isaac 的最终冻结窗已给出可信负例：survival/balance 基本形�
 R36 已直接收口 reveal-relative launch、frozen ActionEpoch 单一 R03 target、Reward bundle 同写者自证删除、
 最终 Phase4 plant admission、safe follow-through、exact physics/plant 绑定和 policy-grid deadline。
 这些修复不增加 Stage、Gate、oracle 或 Observation；Observation V3 仍为 `215/231`。
+Isaac RSL3 runner 也已改为只计成功返回的 `env.step()`，并在 optimizer 前把 observed
+delta、storage cursor 和 typed `H`三方核对；不再用 `(update+1)×N×H` 公式自证训练已发生。
 
 本 Gate 只在以下 Isaac 事实闭合后才能从 `Partial`推进：
 
-- [ ] final exact Pod checkout 的 focused/combined tests（含 Reward owner、phase consumer、journal/WAL）。
+- [ ] final exact Pod checkout 的 focused/combined tests（含 Reward owner、phase consumer、journal/WAL
+  和 observed-rollout forged-caller/storage hostile cases）。
 - [ ] final Phase4 bundle materialize/reopen，且 Isaac trainer 真消费 frozen ActionEpoch 与 deadline。
 - [ ] 真实 CUDA `512×48×31` fixed-action 为 finite、0 contract fault，并保持
   identity/RNG/reason/counter/safety/payment parity。
