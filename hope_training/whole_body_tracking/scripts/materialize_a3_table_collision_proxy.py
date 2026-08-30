@@ -60,6 +60,22 @@ DEFAULT_OUTPUT = (
     / "a3_table_collision_proxy_a3p0807_20260808"
     / "a3_table_collision_components.v2.json"
 )
+DEFAULT_MUJOCO_MJCF = (
+    REPO_ROOT
+    / "agi"
+    / "A3_MuJoCo_Sim"
+    / "aimrt_mujoco_sim"
+    / "src"
+    / "models"
+    / "bin"
+    / "cfg"
+    / "model"
+    / "a3_pingpong"
+    / "a3_pingpong.xml"
+)
+PINNED_MUJOCO_MJCF_SHA256 = (
+    "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a"
+)
 SCHEMA_VERSION = 2
 ARTIFACT_TYPE = "a3_table_collision_component_multi_obb_v2"
 PINNED_RUNTIME_USD_BUNDLE_TREE_SHA256 = (
@@ -136,6 +152,14 @@ PINNED_HULL_SCIPY_VERSION = "1.11.4"
 PINNED_HULL_QHULL_OPTIONS = "Qt"
 PCA_EIGENVALUE_TIE_RTOL = 1.0e-10
 PROXY_OBB_OUTWARD_PAD_M = 1.0e-6
+MUJOCO_COLLISION_SOURCE_GROUPS = {
+    "right_wrist_yaw_collision": "right_wrist_yaw_link.stl",
+    "right_hand_palm_collision": "right_hand_pingpang_link.stl",
+    "right_hand_finger_collision": "right_hand_pingpang_link.stl",
+    "right_hand_thumb_collision": "right_hand_pingpang_link.stl",
+    "right_racket_collision": "right_hand_pingpang_link.stl",
+    "right_racket_handle_collision": "right_hand_pingpang_link.stl",
+}
 # The 20 OmniPicker3 left-gripper collision links.  They enter the table guard
 # for the first time with the 0807 plant, and a later "cleanup" that quietly
 # drops them would silently re-open the volume they occupy.  Naming them here
@@ -171,6 +195,15 @@ def _parse_args() -> argparse.Namespace:
         "--body-order-source", type=Path, default=DEFAULT_BODY_ORDER_SOURCE
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--mujoco-mjcf",
+        type=Path,
+        default=DEFAULT_MUJOCO_MJCF,
+        help=(
+            "Tracked canonical A3 MJCF whose actual wrist collision meshes "
+            "and analytic primitives must also fit inside the shared proxy."
+        ),
+    )
     parser.add_argument(
         "--runtime-usd-bundle-root",
         type=Path,
@@ -349,6 +382,201 @@ def _stl_triangles(
     ):
         raise ValueError(f"STL has no finite triangles: {path}")
     return triangles
+
+
+def _mujoco_actual_wrist_collision_primitives(
+    mjcf_path: Path,
+) -> tuple[dict[str, list[dict[str, object]]], dict[str, object]]:
+    """Read the exact live MuJoCo wrist collision inventory.
+
+    The canonical MuJoCo plant does not collide the visual hand/racket STL.
+    It uses one optimized wrist mesh, three analytic hand primitives, one
+    optimized racket-face mesh, and one analytic handle capsule.  These shapes
+    are therefore part of the proxy's coverage authority, not optional
+    diagnostics.
+    """
+
+    mjcf_path = mjcf_path.resolve(strict=True)
+    if REPO_ROOT.resolve() not in mjcf_path.parents:
+        raise ValueError("canonical MuJoCo MJCF must remain inside the repo")
+    mjcf_bytes = mjcf_path.read_bytes()
+    if _sha256_bytes(mjcf_bytes) != PINNED_MUJOCO_MJCF_SHA256:
+        raise ValueError("canonical MuJoCo MJCF differs from the reviewed pin")
+    root = ET.fromstring(mjcf_bytes)
+    compiler = root.find("compiler")
+    if compiler is None or compiler.get("convexhull") not in (None, "true"):
+        raise ValueError("canonical MuJoCo mesh convex-hull semantics differ")
+    meshdir = str(compiler.get("meshdir") or "")
+    if not meshdir:
+        raise ValueError("canonical MuJoCo MJCF has no meshdir")
+    mesh_root = (mjcf_path.parent / meshdir).resolve(strict=True)
+    if not mesh_root.is_dir() or mjcf_path.parent.resolve() not in mesh_root.parents:
+        raise ValueError("canonical MuJoCo meshdir escapes its model root")
+    mesh_assets = {}
+    for row in root.findall("asset/mesh"):
+        name = str(row.get("name") or "")
+        if not name or name in mesh_assets:
+            raise ValueError("canonical MuJoCo mesh names are malformed")
+        mesh_assets[name] = row
+    wrist_bodies = [
+        row
+        for row in root.iter("body")
+        if row.get("name") == "right_wrist_yaw_Link"
+    ]
+    if len(wrist_bodies) != 1:
+        raise ValueError("canonical MuJoCo wrist body inventory differs")
+    collision_geoms = {
+        str(row.get("name")): row
+        for row in wrist_bodies[0].findall("geom")
+        if row.get("class") == "collision"
+    }
+    if set(collision_geoms) != set(MUJOCO_COLLISION_SOURCE_GROUPS):
+        raise ValueError("canonical MuJoCo wrist collision inventory differs")
+
+    expected_kinds = {
+        "right_wrist_yaw_collision": "mesh",
+        "right_hand_palm_collision": "ellipsoid",
+        "right_hand_finger_collision": "capsule",
+        "right_hand_thumb_collision": "capsule",
+        "right_racket_collision": "mesh",
+        "right_racket_handle_collision": "capsule",
+    }
+    grouped = {
+        source_name: []
+        for source_name in sorted(set(MUJOCO_COLLISION_SOURCE_GROUPS.values()))
+    }
+    receipts = []
+    for name in sorted(collision_geoms):
+        row = collision_geoms[name]
+        kind = str(row.get("type") or "")
+        if kind != expected_kinds[name]:
+            raise ValueError(f"canonical MuJoCo collider type differs: {name}")
+        if any(row.get(field) is not None for field in ("quat", "euler", "axisangle")):
+            raise ValueError(f"rotated MuJoCo target collider is unsupported: {name}")
+        position = _float_triplet(
+            row.get("pos"), default=(0.0, 0.0, 0.0)
+        )
+        primitive: dict[str, object] = {
+            "kind": kind,
+            "name": name,
+        }
+        receipt: dict[str, object] = {
+            "kind": kind,
+            "name": name,
+            "position_owner_m": list(position),
+            "source_component_mesh": MUJOCO_COLLISION_SOURCE_GROUPS[name],
+        }
+        if kind == "mesh":
+            mesh_name = str(row.get("mesh") or "")
+            mesh_asset = mesh_assets.get(mesh_name)
+            if mesh_asset is None:
+                raise ValueError(f"MuJoCo collider mesh asset is missing: {name}")
+            filename = str(mesh_asset.get("file") or "")
+            mesh_path = (mesh_root / filename).resolve(strict=True)
+            if mesh_root not in mesh_path.parents or not mesh_path.is_file():
+                raise ValueError(f"MuJoCo collider mesh escapes meshdir: {name}")
+            scale = _float_triplet(
+                mesh_asset.get("scale"), default=(1.0, 1.0, 1.0)
+            )
+            if not all(value > 0.0 for value in scale):
+                raise ValueError("MuJoCo collision mesh scale must be positive")
+            triangles = _stl_triangles(mesh_path)
+            vertices = tuple(
+                sorted(
+                    {
+                        tuple(
+                            float(vertex[axis]) * scale[axis] + position[axis]
+                            for axis in range(3)
+                        )
+                        for triangle in triangles
+                        for vertex in triangle
+                    }
+                )
+            )
+            primitive["vertices"] = vertices
+            receipt.update(
+                {
+                    "mesh_path": mesh_path.relative_to(REPO_ROOT).as_posix(),
+                    "mesh_sha256": _sha256_bytes(mesh_path.read_bytes()),
+                    "mesh_scale": list(scale),
+                    "source_triangle_count": len(triangles),
+                    "unique_vertex_count": len(vertices),
+                    "vertices_owner_sha256": _sha256_bytes(
+                        _canonical_json_bytes(vertices)
+                    ),
+                }
+            )
+        elif kind == "ellipsoid":
+            radii = _float_triplet(row.get("size"), default=())
+            if not all(value > 0.0 for value in radii):
+                raise ValueError("MuJoCo ellipsoid radii must be positive")
+            primitive.update({"center": position, "radii": radii})
+            receipt["radii_m"] = list(radii)
+        else:
+            values = tuple(
+                float(value) for value in str(row.get("fromto") or "").split()
+            )
+            size = tuple(
+                float(value) for value in str(row.get("size") or "").split()
+            )
+            if (
+                len(values) != 6
+                or len(size) != 1
+                or not all(math.isfinite(value) for value in (*values, *size))
+                or size[0] <= 0.0
+            ):
+                raise ValueError("MuJoCo capsule geometry is malformed")
+            start = values[:3]
+            end = values[3:]
+            primitive.update(
+                {"end": end, "radius": size[0], "start": start}
+            )
+            receipt.update(
+                {
+                    "end_owner_m": list(end),
+                    "radius_m": size[0],
+                    "start_owner_m": list(start),
+                }
+            )
+        grouped[MUJOCO_COLLISION_SOURCE_GROUPS[name]].append(primitive)
+        receipts.append(receipt)
+    binding = {
+        "collision_semantics": "mesh_convex_hull_plus_analytic_primitives",
+        "mjcf_path": mjcf_path.relative_to(REPO_ROOT).as_posix(),
+        "mjcf_sha256": _sha256_bytes(mjcf_bytes),
+        "target_colliders": receipts,
+    }
+    binding["content_sha256"] = _sha256_bytes(_canonical_json_bytes(binding))
+    return grouped, binding
+
+
+def _primitive_projection_interval(
+    primitive: Mapping[str, object],
+    unit_axes: Any,
+) -> tuple[Any, Any]:
+    """Return exact min/max support on each OBB axis for one Mu primitive."""
+
+    import numpy as np
+
+    kind = primitive["kind"]
+    if kind == "mesh":
+        projected = np.asarray(primitive["vertices"], dtype=np.float64) @ unit_axes.T
+        return projected.min(axis=0), projected.max(axis=0)
+    if kind == "ellipsoid":
+        center = np.asarray(primitive["center"], dtype=np.float64)
+        radii = np.asarray(primitive["radii"], dtype=np.float64)
+        middle = unit_axes @ center
+        support = np.sqrt(np.sum((unit_axes * radii) ** 2, axis=1))
+        return middle - support, middle + support
+    start = np.asarray(primitive["start"], dtype=np.float64)
+    end = np.asarray(primitive["end"], dtype=np.float64)
+    radius = float(primitive["radius"])
+    first = unit_axes @ start
+    second = unit_axes @ end
+    return (
+        np.minimum(first, second) - radius,
+        np.maximum(first, second) + radius,
+    )
 
 
 def _convex_hull_tetrahedra(
@@ -680,6 +908,135 @@ def _partition_pca_obbs(
     return result, receipts
 
 
+def _expand_obbs_for_mujoco_primitives(
+    obbs: Sequence[
+        tuple[
+            Sequence[float],
+            Sequence[Sequence[float]],
+        ]
+    ],
+    primitives: Sequence[Mapping[str, object]],
+) -> tuple[
+    list[
+        tuple[
+            tuple[float, float, float],
+            tuple[tuple[float, float, float], ...],
+        ]
+    ],
+    dict[str, object],
+]:
+    """Assign complete Mu colliders to leaves and expand by exact support.
+
+    Assignment is exhaustive (the target has five primitives and two leaves),
+    minimizes summed OBB volume, then breaks equal-volume ties by the
+    lexicographic assignment tuple.  Every analytic primitive is assigned as a
+    whole object; no surface sampling can create a false coverage proof.
+    """
+
+    import itertools
+    import numpy as np
+
+    if not obbs or len(obbs) > 8 or len(primitives) > 12:
+        raise ValueError("MuJoCo target primitive assignment width is unsupported")
+    base_frames = []
+    for center_raw, axes_raw in obbs:
+        center = np.asarray(center_raw, dtype=np.float64)
+        axes = np.asarray(axes_raw, dtype=np.float64)
+        half = np.linalg.norm(axes, axis=1)
+        unit = axes / half[:, None]
+        middle = unit @ center
+        base_frames.append((unit, middle - half, middle + half))
+
+    def fit(leaf_index: int, selected: Sequence[Mapping[str, object]]):
+        unit, base_lower, base_upper = base_frames[leaf_index]
+        lower = base_lower.copy()
+        upper = base_upper.copy()
+        for primitive in selected:
+            primitive_lower, primitive_upper = _primitive_projection_interval(
+                primitive, unit
+            )
+            lower = np.minimum(lower, primitive_lower)
+            upper = np.maximum(upper, primitive_upper)
+        middle = (lower + upper) * 0.5
+        half = (upper - lower) * 0.5 + PROXY_OBB_OUTWARD_PAD_M
+        center = unit.T @ middle
+        axes = unit * half[:, None]
+        return center, axes, float(np.prod(2.0 * half))
+
+    best = None
+    for assignment in itertools.product(
+        range(len(obbs)), repeat=len(primitives)
+    ):
+        fitted = tuple(
+            fit(
+                leaf,
+                [
+                    primitive
+                    for primitive, assigned in zip(primitives, assignment)
+                    if assigned == leaf
+                ],
+            )
+            for leaf in range(len(obbs))
+        )
+        candidate = (sum(row[2] for row in fitted), assignment, fitted)
+        if best is None or candidate[:2] < best[:2]:
+            best = candidate
+    if best is None:
+        raise ValueError("MuJoCo primitive assignment produced no candidate")
+    _objective, assignment, fitted = best
+
+    expanded = []
+    max_interval_excess_f32 = float("-inf")
+    for leaf, (center, axes, _volume) in enumerate(fitted):
+        center_f32 = center.astype(np.float32).astype(np.float64)
+        axes_f32 = axes.astype(np.float32).astype(np.float64)
+        half_f32 = np.linalg.norm(axes_f32, axis=1)
+        unit_f32 = axes_f32 / half_f32[:, None]
+        middle_f32 = unit_f32 @ center_f32
+        for primitive, assigned in zip(primitives, assignment):
+            if assigned != leaf:
+                continue
+            lower, upper = _primitive_projection_interval(
+                primitive, unit_f32
+            )
+            excess = max(
+                float(np.max((middle_f32 - half_f32) - lower)),
+                float(np.max(upper - (middle_f32 + half_f32))),
+            )
+            max_interval_excess_f32 = max(max_interval_excess_f32, excess)
+            if excess > 0.0:
+                raise ValueError(
+                    "float32 proxy OBB does not contain its complete MuJoCo "
+                    f"primitive: {primitive['name']}"
+                )
+        expanded.append(
+            (
+                tuple(float(value) for value in center),
+                tuple(
+                    tuple(float(value) for value in axis)
+                    for axis in axes
+                ),
+            )
+        )
+    receipt = {
+        "assignment_algorithm": (
+            "exhaustive_min_sum_full_obb_volume_then_lexicographic_v1"
+        ),
+        "leaf_by_primitive": [
+            {"leaf_index": assigned, "name": primitive["name"]}
+            for primitive, assigned in zip(primitives, assignment)
+        ],
+        "max_float32_projection_interval_excess_m": (
+            max_interval_excess_f32
+        ),
+        "objective_sum_full_obb_volume_m3": best[0],
+    }
+    receipt["content_sha256"] = _sha256_bytes(
+        _canonical_json_bytes(receipt)
+    )
+    return expanded, receipt
+
+
 def _bounds(
     vertices: Iterable[Sequence[float]],
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
@@ -910,6 +1267,7 @@ def _runtime_usd_binding(bundle_root: Path) -> dict[str, object]:
 def _artifact(
     source_urdf: Path,
     body_order_source: Path,
+    mujoco_mjcf: Path,
     runtime_usd_bundle_root: Path,
 ) -> dict[str, object]:
     source_urdf = source_urdf.resolve()
@@ -920,6 +1278,10 @@ def _artifact(
     order = _body_order(body_order_source.resolve())
     order_set = set(order)
     root = ET.parse(source_urdf).getroot()
+    mujoco_primitives_by_source, mujoco_collision_binding = (
+        _mujoco_actual_wrist_collision_primitives(mujoco_mjcf)
+    )
+    consumed_mujoco_sources: set[str] = set()
 
     parent: dict[
         str,
@@ -1033,7 +1395,11 @@ def _artifact(
             source_vertices_sha256 = _sha256_bytes(
                 _canonical_json_bytes(source_vertices)
             )
+            mujoco_primitives = mujoco_primitives_by_source.get(
+                relative_mesh.lower(), []
+            )
             hull_receipt: dict[str, object] | None = None
+            mujoco_cover_receipt: dict[str, object] | None = None
             if leaf_count == 1:
                 mesh_center, mesh_half = _bounds(source_vertices)
                 mesh_half = tuple(
@@ -1077,6 +1443,15 @@ def _artifact(
                 )
                 coverage_basis = "complete_convex_hull_tetra_fan_pca_obb_union"
                 coverage_primitive_kind = "convex_hull_tetrahedron"
+            if mujoco_primitives:
+                leaf_obbs, mujoco_cover_receipt = (
+                    _expand_obbs_for_mujoco_primitives(
+                        leaf_obbs,
+                        mujoco_primitives,
+                    )
+                )
+                consumed_mujoco_sources.add(relative_mesh.lower())
+                coverage_basis += "_plus_complete_mujoco_actual_collision_cover"
             link_from_mesh_rotation, link_from_mesh_translation = (
                 _origin_transform(collision.find("origin"))
             )
@@ -1120,6 +1495,10 @@ def _artifact(
             }
             if hull_receipt is not None:
                 partition_receipt["convex_hull"] = hull_receipt
+            if mujoco_cover_receipt is not None:
+                partition_receipt["mujoco_actual_collision_cover"] = (
+                    mujoco_cover_receipt
+                )
             partition_receipts.append(partition_receipt)
             for leaf_index, (
                 (mesh_center, mesh_half_axes),
@@ -1170,6 +1549,10 @@ def _artifact(
     if any(count <= 0 for count in owner_counts.values()):
         missing = [name for name, count in owner_counts.items() if count <= 0]
         raise ValueError(f"runtime A3 bodies lack collision components: {missing}")
+    if consumed_mujoco_sources != set(mujoco_primitives_by_source):
+        raise ValueError(
+            "MuJoCo actual collision sources were not all bound into the proxy"
+        )
     observed_gripper_links = sorted(
         {
             str(row["source_link_name"])
@@ -1194,13 +1577,16 @@ def _artifact(
         "decomposition": {
             "algorithm": TRIANGLE_PARTITION_ALGORITHM,
             "backend_collision_authority": (
-                "convex hull: Isaac convexHull approximation and MuJoCo mesh"
+                "Isaac split meshes under convexHull plus exact canonical "
+                "MuJoCo mesh hulls and analytic wrist primitives"
             ),
             "coverage_contract": (
                 "one-box rows contain every source vertex and therefore its "
                 "convex hull; split rows partition the complete hull tetra "
                 "fan exactly once and each PCA OBB contains every vertex of "
-                "its complete tetrahedra"
+                "its complete tetrahedra; exact MuJoCo mesh vertices and "
+                "analytic primitive support intervals are assigned whole to "
+                "one leaf and revalidated after float32 conversion"
             ),
             "float32_coverage_validated": True,
             "hull_toolchain": {
@@ -1223,6 +1609,7 @@ def _artifact(
         "plant_identity": _plant_identity(
             source_urdf, source_urdf_sha256, mesh_receipts, bundle_root
         ),
+        "mujoco_actual_collision_binding": mujoco_collision_binding,
         "runtime_usd_bundle": _runtime_usd_binding(
             runtime_usd_bundle_root
         ),
@@ -1242,6 +1629,7 @@ def main() -> int:
     document = _artifact(
         args.source_urdf,
         args.body_order_source,
+        args.mujoco_mjcf,
         args.runtime_usd_bundle_root,
     )
     encoded = _canonical_json_bytes(document) + b"\n"
