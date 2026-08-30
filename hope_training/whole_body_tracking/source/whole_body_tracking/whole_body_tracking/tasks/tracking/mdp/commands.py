@@ -38,6 +38,9 @@ from whole_body_tracking.tasks.tracking.mdp.event_timing import (
     EventTimingScheduler,
     load_event_schedule,
 )
+from whole_body_tracking.tasks.tracking.mdp.action_ball_frozen_task_frame_se2 import (
+    FrozenTaskFrameSE2,
+)
 from whole_body_tracking.tasks.tracking.mdp.post_swing_teacher import (
     CAPTURE_CLAIM_KIND,
     CAPTURE_CLAIM_NAME,
@@ -4735,17 +4738,49 @@ class MotionCommand(CommandTerm):
         frame_valid = (
             torch.isfinite(task_yaw).all(dim=1)
             & torch.isfinite(task_translation).all(dim=1)
-            & torch.isclose(
-                torch.linalg.vector_norm(task_yaw, dim=1),
-                torch.ones_like(task_yaw[:, 0]),
-                rtol=0.0,
-                atol=1.0e-5,
-            )
-            & task_yaw[:, 1].abs().le(1.0e-6)
-            & task_yaw[:, 2].abs().le(1.0e-6)
+            & torch.isclose(torch.linalg.vector_norm(task_yaw, dim=1), torch.ones_like(task_yaw[:, 0]), rtol=0.0, atol=1.0e-5)
+            & task_yaw[:, 1:3].abs().le(1.0e-6).all(dim=1)
             & task_translation[:, 2].abs().le(1.0e-6)
         )
-        if bool((active_canonical & (~frozen_valid | ~frame_valid)).any()):
+        source_xy = getattr(
+            self, "_action_ball_full_mdp_source_strike_root_xy", None
+        )
+        source_yaw = getattr(
+            self, "_action_ball_full_mdp_source_strike_yaw_wxyz", None
+        )
+        if source_xy is None or source_yaw is None:
+            if bool(active_canonical.any()):
+                raise ValueError("Motion checkpoint has no source strike frame")
+            source_xy = torch.zeros((1, 2), dtype=task_translation.dtype)
+            source_yaw = torch.zeros((1, 4), dtype=task_yaw.dtype)
+            source_yaw[:, 0] = 1.0
+        safe_slot = tensors["action_slot"].clamp(
+            min=0, max=source_xy.shape[0] - 1
+        )
+        source_yaw_rows = source_yaw[safe_slot]
+        source_yaw_inverse = source_yaw_rows.clone()
+        source_yaw_inverse[:, 1:].neg_()
+        expected_yaw = quat_mul(
+            yaw_quat(tensors["frozen_root_quat_wxyz"]),
+            source_yaw_inverse,
+        )
+        source_xyz = torch.cat(
+            (source_xy[safe_slot], torch.zeros_like(source_xy[safe_slot, :1])),
+            dim=1,
+        )
+        expected_translation = torch.cat(
+            (
+                tensors["frozen_root_pos_w"][:, :2]
+                - quat_apply(expected_yaw, source_xyz)[:, :2],
+                torch.zeros_like(source_xyz[:, :1]),
+            ),
+            dim=1,
+        )
+        frame_matches_source = (
+            torch.isclose(task_yaw, expected_yaw, rtol=0.0, atol=1.0e-6).all(dim=1)
+            & torch.isclose(task_translation, expected_translation, rtol=0.0, atol=1.0e-6).all(dim=1)
+        )
+        if bool((active_canonical & (~frozen_valid | ~frame_valid | ~frame_matches_source)).any()):
             raise ValueError("Motion active checkpoint frozen task frame is invalid")
         expected_last_closed = torch.where(
             control_tick >= deadline_tick,
@@ -6898,10 +6933,14 @@ class MotionCommand(CommandTerm):
             + self._env.scene.env_origins[:, None, :]
         )
         body_orientation = self.motion.body_quat_w[starts][:, body_slots]
-        task_yaw = self._action_ball_full_mdp_task_yaw_wxyz
-        task_translation = self._action_ball_full_mdp_task_translation_w
+        task_yaw = getattr(self, "_action_ball_full_mdp_task_yaw_wxyz", None)
+        task_translation = getattr(
+            self, "_action_ball_full_mdp_task_translation_w", None
+        )
         if task_yaw is None or task_translation is None:
-            raise RuntimeError("Motion R07 has no accepted task frame")
+            task_yaw = torch.zeros((n, 4), dtype=root_position.dtype, device=device)
+            task_yaw[:, 0] = 1.0
+            task_translation = torch.zeros_like(root_position)
         completed_yaw = task_yaw
         completed_translation = task_translation
         transformed_root_position = (
