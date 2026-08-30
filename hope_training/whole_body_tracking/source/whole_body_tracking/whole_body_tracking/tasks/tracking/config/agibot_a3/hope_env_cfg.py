@@ -2995,7 +2995,7 @@ def action_ball_full_mdp_reward_template_blockers(value) -> tuple[str, ...]:
     )
     if tuple(
         term.payment_consumer for term in value.terms[:lifecycle_count]
-    ) != mdp.ORDERED_CONSUMERS:
+    ) != _full_mdp_lean_rewards.ORDERED_CONSUMERS:
         blockers.append("reward_template_payment_order_differs")
     if tuple(
         term.payment_consumer

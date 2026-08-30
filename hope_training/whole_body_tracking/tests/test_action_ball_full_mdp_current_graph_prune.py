@@ -84,6 +84,12 @@ def test_current_ast_and_callsites_exclude_retired_modules_and_gate():
         assert "fresh_full_mdp_pre_reward_done_term" not in source
 
 
+def test_current_reward_template_reads_the_explicit_lean_consumer_order():
+    source = CURRENT_ENV_CFG.read_text(encoding="utf-8")
+    assert "_full_mdp_lean_rewards.ORDERED_CONSUMERS" in source
+    assert "mdp.ORDERED_CONSUMERS" not in source
+
+
 def test_current_config_constructs_exact_five_live_termination_terms():
     tree = _tree(CURRENT_ENV_CFG)
     order = next(
