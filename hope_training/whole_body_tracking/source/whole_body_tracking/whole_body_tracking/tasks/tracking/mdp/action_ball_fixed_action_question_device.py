@@ -321,7 +321,10 @@ def solve_fixed_action_question_device(
         motion_task_f32=motion,
         racket_task_f32=racket,
         physical_state_f32=physical_state,
-        contact_tick=contact_tick,
+        # Reuse the Physical leaf's already-cloned clock fact.  Returning the
+        # caller tensor would let later adapter mutation rewrite this frozen
+        # numerical result through shared storage.
+        contact_tick=physical.contact_tick,
         launch_tick=launch_tick,
         chosen_horizon_ticks=chosen_horizon,
         construction_reason=reason,
