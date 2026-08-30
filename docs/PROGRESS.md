@@ -1,5 +1,23 @@
 # 简短进度记录
 
+## 2026-08-30 — direct-frame0 post-run验收与失败收据闭环
+
+- `4c28608d`真实CUDA已越过frame0原子安装，但旧runner在summary/NPZ前以
+  一个合并布尔异常自然RC1；spent root
+  `/workspace/franco/runs/fullmdp-direct-frame0-4c28608d-gpu1-20260830T0453Z-r1`保留。独立复算
+  定位确定必败项为`right_shoulder_roll` affine float32回环1 ULP=
+  `5.960464477539063e-8 rad`，低于已有`2e-7 rad` decoder ABI；因此修正的是
+  validator对executable的错误bitwise teacher假设，不是放宽teacher/plant物理合同。
+- `936d0f7406edc4b212e463fd1d249ec668d1d5cb`使requested仍逐位对teacher，executable
+  改为逐位对同一production guard的`nominal_projected_qdes`，q0与next frame都另验
+  teacher delta `<=2e-7 rad`且guard介入必须false。共28个predicate有逐项mutation，
+  not-evaluated的typed expected与reason分字段。失败在raise前O_EXCL写mode-0600 JSON，
+  自带run/source/runtime/motion/ready/task/plant identity与可复算payload SHA，file/parent dir都
+  `fsync`，marker/exception携带path+SHA。fresh exact Pod四module union=
+  `174 passed / 8 skipped / 0 failed`，evidence root=
+  `/workspace/franco/mktemp/direct-frame0-evidence-936d0f74-cpu-test-20260830T0530Z-r1`，source clean。
+  未重发真实CUDA，不声称physical/table/guard结果。
+
 ## 2026-08-30 — direct-frame0 actor-boundary假设修正
 
 - `5e7be7a6` 真实CUDA在teacher step前因旧boundary gate自然RC1。production时序证明

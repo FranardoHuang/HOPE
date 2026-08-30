@@ -38,6 +38,31 @@ Pod首轮`29e3ed29`为`169 passed / 8 skipped / 1 failed`，唯一红项是新so
 前后clean。这关闭CPU构造/时序回归，不关闭真实CUDA intervention、q0/frame1或物理证据；
 G06仍`Partial`。
 
+`4c28608d`的第二次真实CUDA replay已越过actor-boundary安装，但在runner的
+post-run合并验收处自然RC1；spent root=
+`/workspace/franco/runs/fullmdp-direct-frame0-4c28608d-gpu1-20260830T0453Z-r1`，旧实现在
+summary/NPZ之前只报`intervention receipt differs`，所以当场没有可审计的逐字段收据。
+对同一frame0/frame1/frame2 affine inverse+decode的独立复算定位了一个确定必败项：
+runtime-order `right_shoulder_roll`的production float32回环相对teacher差1 ULP=
+`5.960464477539063e-8 rad`。它低于已有ready decoder ABI `2e-7 rad`，也不需要
+qdes guard介入；因此旧的`executable == teacher bitwise`是validator错问法，不是
+teacher/plant物理错位证据。
+
+`b8110d04`先把两个合并布尔门拆成逐predicate
+`actual / expected / delta`，并在raise前用O_EXCL保留JSON-safe failure artifact；Pod四module
+union=`173 passed / 8 skipped`。终版候选
+`936d0f7406edc4b212e463fd1d249ec668d1d5cb`不放宽安全条件：requested qdes仍逐位
+对teacher，executable则逐位对比同一production guard计算并写入controller trace的
+`nominal_projected_qdes`，q0与next natural frame分别另报相对teacher的max delta并要求
+`<=2e-7 rad`，guard intervention仍必须为false。共28个predicate都有mutation反例；
+not-evaluated保留真实typed expected并另列reason。失败artifact独立绑定
+run/source/runtime/motion/ready/task/plant七类identity，包含可复算canonical payload SHA256，
+mode `0600`，file与parent directory都`fsync`，且stdout marker/exception均携带path+SHA。
+fresh exact Pod四module union=`174 passed / 8 skipped / 0 failed`（6.25 s pytest，wall 7 s），
+source clean，evidence root=
+`/workspace/franco/mktemp/direct-frame0-evidence-936d0f74-cpu-test-20260830T0530Z-r1`。尚未重发
+936真实CUDA，所以table/guard/physical intervention结果仍`unverified`，G06仍`Partial`。
+
 ## 2026-08-30 frozen-teacher targeted修复候选（仍`Partial`）
 
 为区分“保守SAT keepout”与“MuJoCo backend真实resolved contact”，后继只在opt-in

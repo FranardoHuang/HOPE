@@ -8,7 +8,8 @@
 > 状态：`V8 stopped read-only / V9 dual-fresh running / no authorized formal run`
 > 证据边界：`diagnostic_unauthorized=true`；本记录不授权 resume、promotion、export、部署或真机。
 
-> **阅读边界（2026-08-28）：**§1--§10保留课程故障发现、旧运行和被替换实现史；当前结论只认§11。
+> **阅读边界（2026-08-30）：**§1--§10保留课程故障发现、旧运行和被替换实现史；当前训练结论认§11，
+> direct-frame0反事实的最新证据边界另见§12。
 > 尤其是旧文中tick295首次曝光、混源Take058/Take061和“V8只需更多step”均已supersede，不能反向覆盖
 > V9同源ready→teacher、tick48重叠课程或当前证据边界。
 
@@ -1341,3 +1342,27 @@ Pod1 final exact checkout=`b0d7d562`恢复并核过92个A3P0807 Mu mesh、EPA48/
 和mimic→hit失败。已判负4× Mu继续只读到ACK851，累计`329/28/19/0` raw/selected/cross/legal，最近10轮仍
 0 contact；它没有翻转ACK623裁决。现有snapshot均明确无resume authority；Build4 warm-start不能从这些字节伪造。三张GPU
 未自然空闲前只完成exact source、CPU/fixed-action与launch准备，不停止只读run换卡。
+
+## 12. 2026-08-30 current diagnostic：direct-frame0验收闭环
+
+`4c28608d`真实CUDA zero-PPO replay已越过actor-boundary原子安装，但旧runner在
+post-run合并验收处RC1，且在summary/NPZ前只抛出无字段的异常。spent root=
+`/workspace/franco/runs/fullmdp-direct-frame0-4c28608d-gpu1-20260830T0453Z-r1`保留不复用。
+对同一q0/frame1/frame2的production affine inverse+decode独立复算发现：
+runtime-order `right_shoulder_roll`相对teacher差1 ULP=`5.960464477539063e-8 rad`，但guard不介入
+且误差低于已绑定ready decoder ABI `2e-7 rad`。因此被证伪的是
+`executable == teacher bitwise`验收假设，不是teacher/plant物理合同。
+
+`936d0f7406edc4b212e463fd1d249ec668d1d5cb`保留requested与teacher逐位一致，改为要求
+executable与同一production guard写入trace的`nominal_projected_qdes`逐位一致；q0与next frame
+都另验teacher max delta `<=2e-7 rad`，qdes guard intervention仍必须false。共28个predicate
+都有typed `actual/expected/delta/comparison`和mutation反例；not-evaluated保留真实typed expected，
+reason独立存放。失败在raise前O_EXCL写mode-0600 JSON，独立绑定
+run/source/runtime/motion/ready/task/plant identity，并给出可复算canonical payload SHA256；file和
+parent directory都`fsync`，stdout marker/异常携带absolute path+SHA。
+
+fresh exact Pod四module CPU union=`174 passed / 8 skipped / 0 failed`（6.25 s pytest，wall 7 s），
+source clean，evidence root=
+`/workspace/franco/mktemp/direct-frame0-evidence-936d0f74-cpu-test-20260830T0530Z-r1`。该证据只关闭
+validator语义、逐项反例和失败可审计性；936真实CUDA尚`unverified`，不声称
+frame0 table/guard/physical、teacher动力学、训练或部署通过。
