@@ -117,7 +117,11 @@ def _rebuild_noncyclic_schema2(*, q: np.ndarray, qd: np.ndarray,
     fabricated recovery segment that was never plant-certified by Phase 4.
     """
     mujoco = schema2._load_mujoco(None)
-    model = mujoco.MjModel.from_xml_path(str(mjcf.resolve()))
+    model_path = mjcf.resolve()
+    if model_path.suffix.lower() == ".mjb":
+        model = mujoco.MjModel.from_binary_path(str(model_path))
+    else:
+        model = mujoco.MjModel.from_xml_path(str(model_path))
     body_names = schema2._read_body_order(body_order.resolve())
     binding = schema2._bind_model(mujoco, model, body_names)
     schema2._validate_joint_limits(model, binding, q)
