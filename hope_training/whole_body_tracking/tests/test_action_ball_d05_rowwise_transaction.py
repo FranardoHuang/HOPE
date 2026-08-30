@@ -739,7 +739,7 @@ def test_question_rng_is_unreachable_before_epoch_due_freeze():
     assert calls == []
 
 
-def test_k0_epoch_return_skips_question_numeric_writers_and_second_projection(
+def test_k0_epoch_publishes_typed_empty_device_mask_to_d05(
     monkeypatch,
 ):
     monkeypatch.setitem(sys.modules, _FAKE_R06.__name__, _FAKE_R06)
@@ -781,24 +781,16 @@ def test_k0_epoch_return_skips_question_numeric_writers_and_second_projection(
     r06 = _EmptyR06(epoch_owner, current_epoch, paid_rows_type)
     epoch_owner.bind_fact_owner("r06_landing_outcome", r06)
     epoch_owner.bind_async_owner("r06_landing_outcome", r06)
-    def bomb(*_args, **_kwargs):
-        raise AssertionError("K0 entered Question/RNG numeric composition")
-
-    owner._internal_question_compose = bomb
-    owner._cadence_authority = motion
-    for name in (
-        "_current_row_cadence",
-        "_prepare_many_impl",
-        "_preview_impl",
-        "_build_row_transaction",
-    ):
-        setattr(owner, name, bomb)
     head_before = epoch_owner.commit_head
 
-    assert owner.advance_action_ball_full_mdp_rows() is None
+    due = epoch_owner.prepare_after_command_rows()
 
     assert motion.calls == 1
-    assert epoch_owner.commit_head == head_before
+    assert type(due) is current_epoch.ActionEpochDueRows
+    assert not due.due_mask.any()
+    assert not due.construct_mask.any()
+    assert epoch_owner.commit_head > head_before
+    epoch_owner.abort_d05_transaction(owner=owner)
 
 
 def test_canonical_epoch_idle_gate_needs_no_pre_materialized_commit_log():

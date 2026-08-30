@@ -257,6 +257,7 @@ class _RealD05Harness:
         self.candidate = candidate
         self.calls: list[str] = []
         self.accepted_masks: list[torch.Tensor] = []
+        self.afterimage_faults: list[torch.Tensor] = []
         self.motion = _MotionLeaf(owner)
         self.racket = _RacketLeaf(owner)
         self.physical = _PhysicalLeaf(owner)
@@ -272,7 +273,7 @@ class _RealD05Harness:
         accepted: torch.Tensor,
         settled_due: torch.Tensor,
     ) -> None:
-        assert torch.equal(accepted & settled_due, accepted)
+        self.afterimage_faults.append(accepted & ~settled_due)
         self.accepted_masks.append(accepted[:, None].clone())
         self.calls.append("r05_runtime")
 
@@ -283,7 +284,23 @@ class _RealD05Harness:
             r05_write=self.owner._commit_action_epoch_r05_write,
         )
 
-    def arm(self) -> object:
+    def arm(
+        self,
+        *,
+        due_mask: torch.Tensor | None = None,
+        construct_mask: torch.Tensor | None = None,
+    ) -> object:
+        if due_mask is None:
+            due_mask = torch.ones(
+                2, dtype=torch.bool, device=self.owner._device
+            )
+        else:
+            due_mask = due_mask.clone()
+        if construct_mask is None:
+            construct_mask = due_mask.clone()
+        else:
+            construct_mask = construct_mask.clone()
+        accept_mask = construct_mask.clone()
         token = object.__new__(D05.DeviceR05RowTransaction)
         prepared = types.SimpleNamespace(
             selected_target_xy_m=torch.ones(
@@ -295,11 +312,11 @@ class _RealD05Harness:
             candidate=self.candidate,
             prepared=prepared,
             preview=types.SimpleNamespace(prepared=prepared),
-            due_mask=torch.ones(2, dtype=torch.bool, device=self.owner._device),
-            construct_mask=torch.ones(2, dtype=torch.bool, device=self.owner._device),
-            accept_mask=torch.ones(2, dtype=torch.bool, device=self.owner._device),
-            reject_mask=torch.zeros(2, dtype=torch.bool, device=self.owner._device),
-            defer_mask=torch.zeros(2, dtype=torch.bool, device=self.owner._device),
+            due_mask=due_mask,
+            construct_mask=construct_mask,
+            accept_mask=accept_mask,
+            reject_mask=torch.zeros_like(due_mask),
+            defer_mask=due_mask & ~construct_mask,
             censor_mask=torch.zeros(2, dtype=torch.bool, device=self.owner._device),
             candidate_consumed=False,
             accepted_consumers=set(),
@@ -488,7 +505,11 @@ class _PlaybackOwner:
 class _NoHostTensorObservation(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         del types
-        if str(func) in ("aten._local_scalar_dense.default", "aten.item.default"):
+        if str(func) in (
+            "aten._local_scalar_dense.default",
+            "aten.item.default",
+            "aten.equal.default",
+        ):
             raise AssertionError("hot ActionEpoch path observed a tensor scalar")
         return func(*args, **(kwargs or {}))
 
@@ -817,7 +838,19 @@ def _assert_runtime_fault_state(epoch: E.ActionEpochOwner, expected) -> None:
     assert epoch.poisoned is expected.poisoned is False
 
 
-def test_k0_after_command_advances_only_scalar_chronology():
+def _settle_after_command_rows(
+    epoch: E.ActionEpochOwner, d05: _RealD05Harness
+) -> E.ActionEpochDueRows:
+    rows = epoch.prepare_after_command_rows()
+    token = d05.arm(
+        due_mask=rows.due_mask,
+        construct_mask=rows.construct_mask,
+    )
+    epoch.settle_d05_transaction(token)
+    return rows
+
+
+def test_k0_after_command_uses_empty_device_mask_without_host_verdict():
     epoch, d05, cadence, r06, *_ = _ready_epoch()
     cadence.projection = _MotionProjection(
         1,
@@ -829,18 +862,86 @@ def test_k0_after_command_advances_only_scalar_chronology():
     head_before = epoch.commit_head
 
     with _NoHostTensorObservation():
-        rows = epoch.prepare_after_command_rows()
+        rows = _settle_after_command_rows(epoch, d05)
 
-    assert rows is None
+    assert not rows.due_mask.any()
+    assert not rows.construct_mask.any()
     after = epoch.current()
-    assert (after.epoch, after.version) == (before.epoch, before.version)
     _assert_record_tensors_equal(after, before)
-    assert epoch.commit_head == head_before
+    assert epoch.commit_head > head_before
     assert epoch._next_epoch == 1
     assert epoch._last_motion_common_step == 1
-    assert d05.motion.calls == d05.racket.calls == 0
-    assert d05.calls == []
-    assert r06.consumed is None
+    assert d05.motion.calls == d05.racket.calls == d05.physical.calls == 1
+    assert d05.calls == ["r05_runtime"]
+    assert all(not fault.any() for fault in d05.afterimage_faults)
+    assert all(not mask.any() for mask in d05.accepted_masks)
+    assert r06.consumed is not None and not r06.consumed.valid.any()
+    assert not epoch._undrained_row_fault_bits.any()
+
+
+def test_h48_plus_one_after_command_defers_one_device_fault_to_packed_boundary(
+    monkeypatch,
+):
+    epoch, d05, cadence, _r06, *_ = _ready_epoch()
+    baseline_record = epoch.current()
+    baseline_i64 = epoch.milestone.i64.clone()
+    baseline_f32 = epoch.milestone.f32.clone()
+    baseline_payment = epoch.project_current_reward_payment_rows()
+
+    with _NoHostTensorObservation():
+        for common_step in range(1, 49):
+            cadence.projection = _MotionProjection(
+                common_step,
+                torch.zeros(2, dtype=torch.bool),
+                torch.zeros(2, dtype=torch.bool),
+                torch.zeros(2, dtype=torch.int64),
+            )
+            rows = _settle_after_command_rows(epoch, d05)
+            if rows.due_mask.dtype is not torch.bool:
+                raise AssertionError("H48 due mask dtype differs")
+
+        cadence.projection = _MotionProjection(
+            49,
+            torch.zeros(2, dtype=torch.bool),
+            torch.zeros(2, dtype=torch.bool),
+            torch.tensor(
+                [E.MOTION_CLOSE_UNPLAYED, E.MOTION_CLOSE_NONE],
+                dtype=torch.int64,
+            ),
+        )
+        fault_rows = _settle_after_command_rows(epoch, d05)
+        if fault_rows.construct_mask.dtype is not torch.bool:
+            raise AssertionError("H+1 construct mask dtype differs")
+
+    assert all(not fault.any() for fault in d05.afterimage_faults)
+    assert all(not mask.any() for mask in d05.accepted_masks)
+    _assert_record_tensors_equal(epoch.current(), baseline_record)
+    assert torch.equal(epoch.milestone.i64, baseline_i64)
+    assert torch.equal(epoch.milestone.f32, baseline_f32)
+    payment = epoch.project_current_reward_payment_rows()
+    assert torch.equal(payment.valid, baseline_payment.valid)
+    assert torch.equal(payment.payment_step, baseline_payment.payment_step)
+    assert epoch._undrained_row_fault_bits.tolist() == [
+        E.ROW_FAULT_MOTION_CLOSE_CONTRACT,
+        0,
+    ]
+
+    transfers = []
+    real_transfer = E._single_d2h_packed_bytes
+
+    def counted_transfer(device_bytes):
+        transfers.append(device_bytes.numel())
+        return real_transfer(device_bytes)
+
+    monkeypatch.setattr(E, "_single_d2h_packed_bytes", counted_transfer)
+    start, end = epoch.prepare_drain()
+    materialized = epoch.materialize_drain(start=start, end=end)
+    assert len(transfers) == 1
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_MOTION_CLOSE_CONTRACT,
+        0,
+    ]
+    assert epoch.poisoned
 
 
 def test_k0_then_kpositive_fixed_tape_preserves_counters_reason_and_rng():
@@ -851,7 +952,8 @@ def test_k0_then_kpositive_fixed_tape_preserves_counters_reason_and_rng():
         torch.zeros(2, dtype=torch.bool),
         torch.zeros(2, dtype=torch.int64),
     )
-    assert epoch.prepare_after_command_rows() is None
+    first = _settle_after_command_rows(epoch, d05)
+    assert not first.due_mask.any()
 
     cadence.projection = _MotionProjection(
         2,
@@ -870,7 +972,8 @@ def test_k0_then_kpositive_fixed_tape_preserves_counters_reason_and_rng():
         torch.zeros(2, dtype=torch.bool),
         torch.zeros(2, dtype=torch.int64),
     )
-    assert epoch.prepare_after_command_rows() is None
+    third = _settle_after_command_rows(epoch, d05)
+    assert not third.due_mask.any()
     assert epoch._undrained_row_fault_bits.tolist() == [0, E.ROW_FAULT_MOTION_CLOSE_CONTRACT]
 
     cadence.projection = _MotionProjection(
@@ -895,13 +998,14 @@ def test_k0_then_kpositive_fixed_tape_preserves_counters_reason_and_rng():
     settled = next(
         entry
         for entry in epoch._publication.pending_log
-        if entry.transition == "D05_SETTLED"
+        if entry.transition == "D05_SETTLED" and entry.epoch == 3
     )
     decision = dict(zip(settled.delta.names, settled.delta.values))["decision"]
     assert decision[:, 0].tolist() == [E.D05_DECISION_ACCEPT, E.D05_DECISION_NONE]
     assert settled.epoch == 3
-    assert d05.motion.calls == d05.racket.calls == 1
-    assert d05.calls == ["r05_runtime"]
+    assert d05.motion.calls == d05.racket.calls == d05.physical.calls == 3
+    assert d05.calls == ["r05_runtime"] * 3
+    assert all(not fault.any() for fault in d05.afterimage_faults)
 
 
 def test_invalid_previous_paid_row_is_business_without_highwater_advance():
@@ -965,16 +1069,12 @@ def test_paid_outcome_holds_without_close_then_retires_once_on_played_suffix(
     )
 
     # Payment and Motion close are independent edges.  R06 retains the same
-    # paid mailbox until close; repeatedly validating that assertion must not
-    # manufacture empty Motion/retirement events or a zero-mask D05 writer
-    # transaction.  Only scalar Motion chronology advances on these ticks.
+    # paid mailbox until close.  The hot path now advances an explicit empty
+    # device-masked transaction instead of synchronizing a tensor-wide host
+    # verdict; all business tensors and payment/fault counters remain exact.
     pending_record = epoch.current()
     pending_head = epoch.commit_head
     pending_next_epoch = epoch._next_epoch
-    pending_consumed = r06.consumed
-    pending_checkpoint_tensors = tuple(
-        (name, value.clone()) for name, value in epoch._checkpoint_extra_items()
-    )
     writer_counts = (
         d05.motion.calls,
         d05.racket.calls,
@@ -989,31 +1089,22 @@ def test_paid_outcome_holds_without_close_then_retires_once_on_played_suffix(
             torch.zeros(2, dtype=torch.bool),
             torch.full((2,), E.MOTION_CLOSE_NONE, dtype=torch.int64),
         )
-        assert epoch.prepare_after_command_rows() is None
-        assert epoch.commit_head == pending_head
-        assert epoch.current().version == pending_record.version
+        rows = _settle_after_command_rows(epoch, d05)
+        assert not rows.due_mask.any()
+        assert not rows.construct_mask.any()
+        assert epoch.commit_head > pending_head
         _assert_record_tensors_equal(epoch.current(), pending_record)
-        current_checkpoint_tensors = epoch._checkpoint_extra_items()
-        assert tuple(name for name, _value in current_checkpoint_tensors) == tuple(
-            name for name, _value in pending_checkpoint_tensors
-        )
-        assert all(
-            torch.equal(current_value, pending_value)
-            for (_name, current_value), (_name, pending_value) in zip(
-                current_checkpoint_tensors, pending_checkpoint_tensors
-            )
-        )
         assert epoch._next_epoch == pending_next_epoch + offset
         assert epoch._last_motion_common_step == common_step
         assert epoch._active_d05 is None
-        assert r06.consumed is pending_consumed
+        assert r06.consumed is not None and not r06.consumed.valid.any()
         assert (
             d05.motion.calls,
             d05.racket.calls,
             d05.physical.calls,
             len(d05.calls),
             len(d05.accepted_masks),
-        ) == writer_counts
+        ) == tuple(value + offset for value in writer_counts)
 
     assert epoch.current().phase[:, 0].tolist() == [
         E.PHASE_OUTCOME_SETTLED,
@@ -1066,7 +1157,8 @@ def test_paid_outcome_holds_without_close_then_retires_once_on_played_suffix(
         torch.full((2,), E.MOTION_CLOSE_NONE, dtype=torch.int64),
         episode_tick=torch.tensor([97, 6], dtype=torch.int64),
     )
-    assert epoch.prepare_after_command_rows() is None
+    pending_rows = _settle_after_command_rows(epoch, d05)
+    assert not pending_rows.due_mask.any()
     assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
     assert epoch.project_current_reward_payment_rows().valid.tolist() == [
         True,
@@ -1139,7 +1231,8 @@ def test_invalid_r07_terminal_fact_faults_exactly_at_local_deadline_plus_78(
         torch.full((2,), E.MOTION_CLOSE_NONE, dtype=torch.int64),
         episode_tick=torch.tensor([97, 4], dtype=torch.int64),
     )
-    assert epoch.prepare_after_command_rows() is None
+    pending_rows = _settle_after_command_rows(epoch, d05)
+    assert not pending_rows.due_mask.any()
     assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
 
     if terminal_fault != "missing":

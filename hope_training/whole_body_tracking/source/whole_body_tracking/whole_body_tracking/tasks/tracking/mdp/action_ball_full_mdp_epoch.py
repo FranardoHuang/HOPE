@@ -1992,8 +1992,15 @@ class ActionEpochOwner:
     # ------------------------------------------------------------------
     # Motion after-command close/due and D05-private opportunity transaction
 
-    def prepare_after_command_rows(self) -> Optional[ActionEpochDueRows]:
-        """Freeze a real D05 opportunity, or advance an exactly idle tick."""
+    def prepare_after_command_rows(self) -> ActionEpochDueRows:
+        """Freeze one device-masked D05 opportunity for this Motion tick.
+
+        Empty work is represented by all-false ``due_mask`` and
+        ``construct_mask`` tensors.  The hot CUDA path must not branch on a
+        tensor-wide host verdict merely to return ``None``: all row faults stay
+        device resident and are decoded by the existing packed optimizer
+        boundary.
+        """
 
         with self._operation("prepare after command rows"):
             self._healthy()
@@ -2125,20 +2132,6 @@ class ActionEpochOwner:
                 r07_terminal_fault,
                 reason_bit=ROW_FAULT_R07_TERMINAL_FACT_CONTRACT,
             )
-            external_business_rows = (
-                due
-                | closed
-                | close_reason_rows.ne(MOTION_CLOSE_NONE)
-            )
-            business_rows = (
-                external_business_rows | paid.valid | r07_terminal_fault
-            )
-            if torch.equal(business_rows, torch.zeros_like(business_rows)):
-                # Preserve scalar chronology without manufacturing a private
-                # transaction, empty journal rows, or neutral writer calls.
-                self._next_epoch += 1
-                self._last_motion_common_step = common_step
-                return None
             valid_reason = (
                 close_reason_rows.eq(MOTION_CLOSE_NONE)
                 | close_reason_rows.eq(MOTION_CLOSE_PLAYED_SUFFIX)
@@ -2249,26 +2242,6 @@ class ActionEpochOwner:
                 & ~paid.valid
                 & paid_safe
             )
-            # R06 retains one paid mailbox until Motion close and the terminal
-            # R07 producer cell both join.  Re-reading that same valid assertion
-            # is chronology validation, not a new lifecycle event.  Keep scalar
-            # Motion time monotonic, but do not manufacture two empty epoch
-            # events plus a zero-mask D05/writer transaction on every pending
-            # tick.  A real due/close, malformed assertion, exact terminal
-            # fault, or three-debt retirement still takes the journal path.
-            actionable_rows = (
-                external_business_rows
-                | invalid_paid_assertion
-                | (paid_close_matches & r07_window_complete)
-                | r07_terminal_fault
-            )
-            if torch.equal(
-                actionable_rows, torch.zeros_like(actionable_rows)
-            ):
-                self._next_epoch += 1
-                self._last_motion_common_step = common_step
-                return None
-
             key = record.identity.shot_key
             names, values = self._event(close_slots, key)
             record = self._append(
