@@ -1341,7 +1341,7 @@ def _prepare_and_settle(env, dones=None):
 
 @pytest.mark.parametrize("mutation", (
     "missing", "wrong_type", "wrong_dtype", "wrong_device",
-    "nonfinite", "invalid_positive", "invalid_integer",
+    "collective_wrong_device", "nonfinite", "invalid_positive", "invalid_integer",
 ))
 def test_full_a_builder_failure_is_bitwise_zero_write(mutation):
     env = _host_full_a_lifecycle_env()
@@ -1365,6 +1365,13 @@ def test_full_a_builder_failure_is_bitwise_zero_write(mutation):
             if not torch.cuda.is_available():
                 pytest.skip("CUDA required for cross-device staged payload")
             question["teacher_rate"] = question["teacher_rate"].cuda()
+        elif mutation == "collective_wrong_device":
+            if not torch.cuda.is_available():
+                pytest.skip("CUDA required for collective cross-device payload")
+            question = {
+                name: value.cuda() if type(value) is torch.Tensor else value
+                for name, value in question.items()
+            }
         elif mutation == "nonfinite":
             question["teacher_rate"] = question["teacher_rate"].clone()
             question["teacher_rate"][0] = torch.nan
