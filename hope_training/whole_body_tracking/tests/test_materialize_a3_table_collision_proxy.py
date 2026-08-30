@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+import hashlib
 import importlib.util
 import json
 import sys
@@ -20,6 +22,15 @@ assert SPEC is not None and SPEC.loader is not None
 M = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = M
 SPEC.loader.exec_module(M)
+
+SPLIT_PRODUCER = REPO_ROOT / "scripts/derive_a3p0807_split_rubber_usd.py"
+SPLIT_SPEC = importlib.util.spec_from_file_location(
+    "_test_derive_a3p0807_split_rubber_usd", SPLIT_PRODUCER
+)
+assert SPLIT_SPEC is not None and SPLIT_SPEC.loader is not None
+SPLIT = importlib.util.module_from_spec(SPLIT_SPEC)
+sys.modules[SPLIT_SPEC.name] = SPLIT
+SPLIT_SPEC.loader.exec_module(SPLIT)
 
 
 def test_complete_tetra_partition_is_deterministic_and_covered_by_leaf_obbs():
@@ -59,6 +70,69 @@ def test_pca_degenerate_eigenspace_has_canonical_right_handed_tie_rule():
     assert groups == (3,)
     assert np.array_equal(basis, np.eye(3, dtype=np.float64))
     assert np.linalg.det(basis) == 1.0
+
+
+def test_isaac_split_colliders_are_complete_source_triangle_subsets():
+    """Close the actual-Isaac side of the shared conservative-cover proof.
+
+    The live scene independently checks that its four convexHull meshes equal
+    this tracked producer.  Here we prove that every producer triangle is a
+    complete triangle from the exact source mesh covered by the proxy.  The
+    handle hull is therefore a subset of the full hand hull covered by the two
+    tetra leaves; the three other hulls are contained by their one-box source
+    rows.  No sampled surface point stands in for a triangle or convex hull.
+    """
+
+    assert hashlib.sha256(SPLIT_PRODUCER.read_bytes()).hexdigest() == (
+        "e730e126b2eef4a42cd000291d6d80c101bd164add6f2994f1348257aa9e0217"
+    )
+    source_root = (
+        REPO_ROOT / "agi/URDF/A3P-P1-32dof-0807-OP3-pingpang"
+    )
+    urdf_facts, output_meshes, evidence = SPLIT._source_geometry(
+        source_urdf=source_root / "urdf/model.urdf",
+        source_mesh_root=source_root / "meshes",
+    )
+    assert evidence["output_triangle_counts"] == {
+        "black_rubber_collider": 178,
+        "racket_handle_collider": 9654,
+        "red_rubber_collider": 178,
+        "wrist_shell_collider": 2806,
+    }
+    source_by_output = {
+        "black_rubber_collider": "pingpang_black_link",
+        "racket_handle_collider": "right_hand_pingpang_link",
+        "red_rubber_collider": "pingpang_red_link",
+        "wrist_shell_collider": "right_wrist_yaw_link",
+    }
+    component_by_source = {
+        component.source_name: component for component in SPLIT.SOURCE_MESHES
+    }
+    for output_name, source_name in source_by_output.items():
+        source_mesh = SPLIT._component_mesh_path(
+            source_root / "meshes", component_by_source[source_name]
+        )
+        assert hashlib.sha256(source_mesh.read_bytes()).hexdigest() == (
+            component_by_source[source_name].mesh_sha256
+        )
+        source_triangles = SPLIT._binary_stl_triangles(source_mesh)
+        source_counts = Counter(source_triangles)
+        output_counts = Counter(output_meshes[output_name])
+        assert all(
+            count <= source_counts[triangle]
+            for triangle, count in output_counts.items()
+        )
+        translation = urdf_facts["translations"][source_name]
+        assert len(translation) == 3
+        assert all(np.isfinite(value) for value in translation)
+    assert len(output_meshes["racket_handle_collider"]) < len(
+        SPLIT._binary_stl_triangles(
+            SPLIT._component_mesh_path(
+                source_root / "meshes",
+                component_by_source["right_hand_pingpang_link"],
+            )
+        )
+    )
 
 
 def test_tracked_multi_obb_artifact_seals_full_hull_tetra_cover():
