@@ -420,6 +420,27 @@ def _command(*, bind_stub=True):
             command._action_ball_safe_ready_body_quat_w
         )
         command.body_quat_relative_w[..., 0] = 1.0
+    # The focused harness bypasses the production FullMDP table binding that
+    # allocates the checkpointed physical/task scene-frame tensors.
+    n = command.num_envs
+    dtype = command.motion.body_pos_w.dtype
+    command._action_ball_full_mdp_frozen_root_pos_w = torch.zeros(
+        n, 3, dtype=dtype, device=command.device
+    )
+    command._action_ball_full_mdp_frozen_root_quat_wxyz = torch.zeros(
+        n, 4, dtype=dtype, device=command.device
+    )
+    command._action_ball_full_mdp_frozen_root_quat_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_frozen_root_valid = torch.ones(
+        n, dtype=torch.bool, device=command.device
+    )
+    command._action_ball_full_mdp_task_yaw_wxyz = torch.zeros(
+        n, 4, dtype=dtype, device=command.device
+    )
+    command._action_ball_full_mdp_task_yaw_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_task_translation_w = torch.zeros(
+        n, 3, dtype=dtype, device=command.device
+    )
     r05_owner = _DeviceR05Authority(
         command=command,
         mask=torch.tensor([False, True, False], dtype=torch.bool)
@@ -1158,7 +1179,7 @@ def test_motion_global_drain_uses_one_transfer_exact_ack_and_persists_highwater(
     assert command._action_ball_continuous_motion_terminal_resolution_total == 0
 
     leaf = command._action_ball_continuous_motion_checkpoint_payload()
-    assert leaf["schema_version"] == 7
+    assert leaf["schema_version"] == 8
     assert leaf["terminal_resolution_total"] == 0
     assert leaf["terminal_resolution_total_device"].tolist() == [0]
     assert leaf["global_drain_sequence"] == 1
@@ -1233,6 +1254,11 @@ _READY_CHECKPOINT_FIELDS = (
     "_action_ball_safe_ready_body_pos_w",
     "_action_ball_safe_ready_body_quat_w",
     "_action_ball_safe_ready_reference_pending",
+    "_action_ball_full_mdp_frozen_root_pos_w",
+    "_action_ball_full_mdp_frozen_root_quat_wxyz",
+    "_action_ball_full_mdp_frozen_root_valid",
+    "_action_ball_full_mdp_task_yaw_wxyz",
+    "_action_ball_full_mdp_task_translation_w",
     "body_pos_relative_w",
     "body_quat_relative_w",
 )
@@ -1257,18 +1283,23 @@ def _assert_ready_checkpoint_snapshot(command, expected) -> None:
     )
 
 
-def test_schema7_exact_resume_roundtrip_restores_complete_ready_teacher():
+def test_schema8_exact_resume_roundtrip_restores_complete_ready_teacher():
     command = _checkpointable_fresh_exact_command()
     saved = command.exact_resume_state_dict()
     leaf = saved["action_ball_birth"]["continuous_motion_leaf"]
 
     assert saved["schema_version"] == 5
-    assert leaf["schema_version"] == 7
+    assert leaf["schema_version"] == 8
     assert "safe_ready_pending_count" not in leaf
     for name in (
         "reset_ready_body_pos_w",
         "reset_ready_body_quat_w",
         "reset_ready_reference_pending",
+        "frozen_root_pos_w",
+        "frozen_root_quat_wxyz",
+        "frozen_root_valid",
+        "accepted_task_yaw_wxyz",
+        "accepted_task_translation_w",
         "body_pos_relative_w",
         "body_quat_relative_w",
     ):
@@ -1278,6 +1309,11 @@ def test_schema7_exact_resume_roundtrip_restores_complete_ready_teacher():
     command._action_ball_safe_ready_body_pos_w.fill_(-101.0)
     command._action_ball_safe_ready_body_quat_w.fill_(-102.0)
     command._action_ball_safe_ready_reference_pending.zero_()
+    command._action_ball_full_mdp_frozen_root_pos_w.fill_(-105.0)
+    command._action_ball_full_mdp_frozen_root_quat_wxyz.fill_(-106.0)
+    command._action_ball_full_mdp_frozen_root_valid.zero_()
+    command._action_ball_full_mdp_task_yaw_wxyz.fill_(-107.0)
+    command._action_ball_full_mdp_task_translation_w.fill_(-108.0)
     command.body_pos_relative_w.fill_(-103.0)
     command.body_quat_relative_w.fill_(-104.0)
     command._action_ball_safe_ready_pending_count = 0
@@ -1300,7 +1336,7 @@ def test_schema7_exact_resume_roundtrip_restores_complete_ready_teacher():
         ("drift", "checkpoint root differs"),
     ),
 )
-def test_schema7_ready_teacher_missing_type_shape_and_drift_fail_closed(
+def test_schema8_ready_teacher_missing_type_shape_and_drift_fail_closed(
     mutation,
     message,
 ):
@@ -1336,7 +1372,7 @@ def test_schema7_ready_teacher_missing_type_shape_and_drift_fail_closed(
     _assert_ready_checkpoint_snapshot(command, before)
 
 
-def test_schema7_pending_work_cache_cannot_disagree_with_device_mask():
+def test_schema8_pending_work_cache_cannot_disagree_with_device_mask():
     command = _checkpointable_fresh_exact_command()
     assert bool(command._action_ball_safe_ready_reference_pending.any())
     command._action_ball_safe_ready_pending_count = 0
@@ -1345,7 +1381,7 @@ def test_schema7_pending_work_cache_cannot_disagree_with_device_mask():
         command.exact_resume_state_dict()
 
 
-def test_schema7_ready_teacher_load_rollback_restores_prior_live_state(
+def test_schema8_ready_teacher_load_rollback_restores_prior_live_state(
     monkeypatch,
 ):
     command = _checkpointable_fresh_exact_command()
@@ -1354,6 +1390,11 @@ def test_schema7_ready_teacher_load_rollback_restores_prior_live_state(
     command._action_ball_safe_ready_body_pos_w.add_(101.0)
     command._action_ball_safe_ready_body_quat_w.mul_(-1.0)
     command._action_ball_safe_ready_reference_pending.zero_()
+    command._action_ball_full_mdp_frozen_root_pos_w.add_(105.0)
+    command._action_ball_full_mdp_frozen_root_quat_wxyz.mul_(-1.0)
+    command._action_ball_full_mdp_frozen_root_valid.logical_not_()
+    command._action_ball_full_mdp_task_yaw_wxyz.mul_(-1.0)
+    command._action_ball_full_mdp_task_translation_w.sub_(108.0)
     command.body_pos_relative_w.sub_(55.0)
     command.body_quat_relative_w.mul_(-1.0)
     command._action_ball_safe_ready_pending_count = 0

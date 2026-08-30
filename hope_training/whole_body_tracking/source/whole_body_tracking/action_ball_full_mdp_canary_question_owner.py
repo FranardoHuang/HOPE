@@ -332,7 +332,9 @@ def _compose_recurring_question_projection(
     # Selected reset owns the actual action station.  Transform every cold
     # strike-reference row into that one frozen episode frame before any ball
     # solve.  This keeps contact, face, base goal and launch mutually
-    # equivariant and makes no-move mean goal == the physical reset spawn.
+    # equivariant and makes no-move's public XY goal equal the physical reset
+    # XY spawn.  Vertical ready-to-clip feasibility is a separate plant
+    # contract; the public task does not carry a base-z goal.
     safe_env_index = selected_env_index.clamp(
         min=0, max=bundle._num_envs - 1
     )
@@ -1069,6 +1071,13 @@ def construct_recurring_d05_internal_question_bundle(
         raise CanaryQuestionError("Racket recurring static table exact type differs")
     if type(timing) is not _timing.DiagnosticActionTimingStaticTableProjection:
         raise CanaryQuestionError("timing recurring static table exact type differs")
+    motion_owner.bind_action_ball_full_mdp_source_strike_frame(
+        (
+            static.reference_racket_site_position_w_m[:, :2]
+            - static.reference_reach_offset_xy_m
+        ).contiguous(),
+        static.reference_base_root_quat_wxyz,
+    )
     device = profile.targets_xy_m.device
     if device != motion_time_steps.device:
         raise CanaryQuestionError(
