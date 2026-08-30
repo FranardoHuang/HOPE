@@ -121,6 +121,13 @@ class _Milestone:
 
 
 @dataclass(frozen=True)
+class _ResetAggregate:
+    row_count: int = 0
+    episode_length_sum: int = 0
+    reason_bit_counts: tuple = (0, 0, 0, 0, 0)
+
+
+@dataclass(frozen=True)
 class _Summary:
     frontier: _Frontier
     settlement: _Settlement = _Settlement()
@@ -132,6 +139,7 @@ class _Summary:
     completed_shots: tuple = ()
     terminal_shots: tuple = ()
     terminal_resets: tuple = ()
+    terminal_reset_aggregate: object = _ResetAggregate()
     milestone: object = _Milestone()
 
 
@@ -545,6 +553,8 @@ def _fake_imports(monkeypatch):
         ActionEpochPpoBoundarySummary=_Summary,
         EpochDrainFrontier=_Frontier,
         drain_v2=types.SimpleNamespace(
+            ResetTelemetryAggregate=_ResetAggregate,
+            RESET_TELEMETRY_EXAMPLE_LIMIT=8,
             SHOT_LIFECYCLE_FLAGS=(
                 "reveal_committed",
                 "playback_started",
@@ -691,6 +701,11 @@ def test_optimizer_ack_keeps_counts_without_materializing_diagnostic_rows(
         completed_shots=(_Shot(),),
         terminal_shots=(_Shot(env_row=8),),
         terminal_resets=(_Reset(),),
+        terminal_reset_aggregate=_ResetAggregate(
+            row_count=1,
+            episode_length_sum=24,
+            reason_bit_counts=(0, 1, 0, 0, 1),
+        ),
     )
 
     def forbidden_asdict(_row):
@@ -714,6 +729,8 @@ def test_optimizer_ack_keeps_counts_without_materializing_diagnostic_rows(
         "completed_shot_row_count": 1,
         "terminal_shot_row_count": 1,
         "terminal_reset_row_count": 1,
+        "terminal_reset_example_count": 1,
+        "terminal_reset_episode_length_sum": 24,
     }
     assert not any("diagnostic_sample" in key for key in telemetry)
     assert "sample_rows" not in json.dumps(telemetry, sort_keys=True)
@@ -767,6 +784,11 @@ def test_explicit_diagnostic_payload_materializes_full_latest_ack_rows(
         completed_shots=(_Shot(),),
         terminal_shots=(_Shot(env_row=8),),
         terminal_resets=(_Reset(),),
+        terminal_reset_aggregate=_ResetAggregate(
+            row_count=1,
+            episode_length_sum=24,
+            reason_bit_counts=(0, 1, 0, 0, 1),
+        ),
     )
 
     payload = adapter._diagnostic_rows_payload(summary, _fake_imports)
@@ -782,6 +804,7 @@ def test_explicit_diagnostic_payload_materializes_full_latest_ack_rows(
         "terminal_shots": 1,
         "terminal_resets": 1,
     }
+    assert payload["source_row_counts"] == payload["row_counts"]
     assert payload["action_opportunities"][0]["env_row"] == 7
     assert payload["completed_shots"][0]["target_x_m"] == 1.25
     assert payload["terminal_shots"][0]["env_row"] == 8

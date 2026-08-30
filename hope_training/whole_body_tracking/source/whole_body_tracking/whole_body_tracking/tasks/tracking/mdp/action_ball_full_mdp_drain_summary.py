@@ -306,6 +306,16 @@ class ResetTelemetry:
     reason_bits: int
 
 
+RESET_TELEMETRY_EXAMPLE_LIMIT = 8
+
+
+@dataclass(frozen=True)
+class ResetTelemetryAggregate:
+    row_count: int
+    episode_length_sum: int
+    reason_bit_counts: tuple[int, int, int, int, int]
+
+
 @dataclass(frozen=True)
 class ActionEpochPpoBoundarySummary:
     frontier: EpochDrainFrontier
@@ -318,6 +328,7 @@ class ActionEpochPpoBoundarySummary:
     completed_shots: tuple[CompletedActionEpochShot, ...]
     terminal_shots: tuple[TerminalActionEpochShot, ...]
     terminal_resets: tuple[ResetTelemetry, ...]
+    terminal_reset_aggregate: ResetTelemetryAggregate
     milestone: milestone_tensors.MilestoneWindowTelemetry
 
 
@@ -442,6 +453,7 @@ class DecodedEpochDrain:
     completed_shots: tuple[CompletedActionEpochShot, ...]
     terminal_shots: tuple[TerminalActionEpochShot, ...]
     terminal_resets: tuple[ResetTelemetry, ...]
+    terminal_reset_aggregate: ResetTelemetryAggregate
     due_terminal_overlap_rows: int
     milestone: milestone_tensors.MilestoneWindowTelemetry
     next_continuation: ActionEpochDrainContinuation
@@ -460,6 +472,7 @@ class DecodedEpochDrain:
             self.completed_shots,
             self.terminal_shots,
             self.terminal_resets,
+            self.terminal_reset_aggregate,
             self.milestone,
         )
 
@@ -801,6 +814,10 @@ def decode_epoch_drain_suffix(
     opportunities: list[D05ActionOpportunity] = []
     completed: list[CompletedActionEpochShot] = []
     terminal_resets: list[ResetTelemetry] = []
+    terminal_reset_row_count = 0
+    terminal_reset_episode_length_sum = 0
+    terminal_reset_reason_counts = [0, 0, 0, 0, 0]
+    due_terminal_overlap_rows = 0
     terminal_shots: list[TerminalActionEpochShot] = []
 
     for offset, entry in enumerate(entries):
@@ -913,9 +930,49 @@ def decode_epoch_drain_suffix(
                         raise ActionEpochDrainDecodeError(
                             "selected-reset telemetry differs"
                         )
-                    for env_row in torch.nonzero(
+                    selected_env_rows = torch.nonzero(
                         selected_rows, as_tuple=False
-                    ).flatten().tolist():
+                    ).flatten()
+                    reset_fact_rows = torch.stack(
+                        (
+                            selected_env_rows,
+                            generations[selected_env_rows],
+                            common_step[selected_env_rows],
+                            episode_tick[selected_env_rows],
+                            reason_bits[selected_env_rows],
+                        ),
+                        dim=1,
+                    ).tolist()
+                    for (
+                        env_row,
+                        generation_after,
+                        reset_common_step,
+                        reset_episode_tick,
+                        reset_reason_bits,
+                    ) in reset_fact_rows:
+                        terminal_reset_row_count += 1
+                        terminal_reset_episode_length_sum += reset_episode_tick
+                        for ordinal, bit in enumerate((1, 2, 4, 8, 16)):
+                            terminal_reset_reason_counts[ordinal] += int(
+                                bool(reset_reason_bits & bit)
+                            )
+                        due_terminal_overlap_rows += int(
+                            reset_episode_tick
+                            in portable_catalog.FRESH_REFERENCE_DUE_TICKS
+                        )
+                        if (
+                            len(terminal_resets)
+                            < RESET_TELEMETRY_EXAMPLE_LIMIT
+                        ):
+                            terminal_resets.append(
+                                ResetTelemetry(
+                                    env_row=env_row,
+                                    reset_generation=generation_after,
+                                    common_step=reset_common_step,
+                                    episode_tick=reset_episode_tick,
+                                    reason_bits=reset_reason_bits,
+                                )
+                            )
                         for slot_index in torch.nonzero(
                             state.occupied[env_row], as_tuple=False
                         ).flatten().tolist():
@@ -924,31 +981,20 @@ def decode_epoch_drain_suffix(
                                     env_row, slot_index
                                 ].item()
                             )
-                            if int(generations[env_row].item()) <= prior_generation:
+                            if generation_after <= prior_generation:
                                 raise ActionEpochDrainDecodeError(
                                     "selected reset did not advance the active shot generation"
                                 )
                             terminal_shots.append(
                                 TerminalActionEpochShot(
                                     **_shot_snapshot(state, env_row, slot_index),
-                                    reset_generation_after=int(
-                                        generations[env_row].item()
-                                    ),
-                                    reset_common_step=int(common_step[env_row].item()),
-                                    reset_episode_tick=int(episode_tick[env_row].item()),
-                                    reset_reason_bits=int(reason_bits[env_row].item()),
+                                    reset_generation_after=generation_after,
+                                    reset_common_step=reset_common_step,
+                                    reset_episode_tick=reset_episode_tick,
+                                    reset_reason_bits=reset_reason_bits,
                                 )
                             )
                             count["terminal"] += 1
-                        terminal_resets.append(
-                            ResetTelemetry(
-                                env_row=int(env_row),
-                                reset_generation=int(generations[env_row].item()),
-                                common_step=int(common_step[env_row].item()),
-                                episode_tick=int(episode_tick[env_row].item()),
-                                reason_bits=int(reason_bits[env_row].item()),
-                            )
-                        )
                 _clear(state, selected_rows[:, None].expand(shape))
             continue
 
@@ -1283,12 +1329,12 @@ def decode_epoch_drain_suffix(
         milestone_tensors.EPISODE_I64_NAMES, milestone.episode_i64_counts
     ))
     expected_episode = {
-        "completed": len(terminal_resets),
-        "length_sum": sum(reset.episode_tick for reset in terminal_resets),
+        "completed": terminal_reset_row_count,
+        "length_sum": terminal_reset_episode_length_sum,
         **{
-            name: sum(bool(reset.reason_bits & bit) for reset in terminal_resets)
-            for name, bit in zip(
-                milestone_tensors.EPISODE_I64_NAMES[2:], (1, 2, 4, 8, 16)
+            name: terminal_reset_reason_counts[ordinal]
+            for ordinal, name in enumerate(
+                milestone_tensors.EPISODE_I64_NAMES[2:]
             )
         },
     }
@@ -1343,10 +1389,12 @@ def decode_epoch_drain_suffix(
         completed_shots=tuple(completed),
         terminal_shots=tuple(terminal_shots),
         terminal_resets=tuple(terminal_resets),
-        due_terminal_overlap_rows=sum(
-            reset.episode_tick in portable_catalog.FRESH_REFERENCE_DUE_TICKS
-            for reset in terminal_resets
+        terminal_reset_aggregate=ResetTelemetryAggregate(
+            row_count=terminal_reset_row_count,
+            episode_length_sum=terminal_reset_episode_length_sum,
+            reason_bit_counts=tuple(terminal_reset_reason_counts),
         ),
+        due_terminal_overlap_rows=due_terminal_overlap_rows,
         milestone=milestone,
         next_continuation=state,
     )

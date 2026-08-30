@@ -824,19 +824,40 @@ def _telemetry(summary: object, runtime_module: object) -> dict:
         "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_lean_rewards"
     )
     reset_rows = tuple(summary.terminal_resets)
-    reset_counts = {
-        "terminal_reset_reason_time_out_count": 0,
-        "terminal_reset_reason_base_fell_tilt_count": 0,
-        "terminal_reset_reason_base_too_low_count": 0,
-        "terminal_reset_reason_joint_qdes_forbidden_count": 0,
-        "terminal_reset_reason_robot_hit_table_count": 0,
-    }
-    for reset in reset_rows:
-        reason_bits = getattr(reset, "reason_bits", None)
-        if type(reason_bits) is not int:
-            raise RuntimeError("FullMDP terminal reset reason bits differ")
-        for name, bit in zip(reset_counts, (1, 2, 4, 8, 16)):
-            reset_counts[name] += int(bool(reason_bits & bit))
+    reset_aggregate = getattr(summary, "terminal_reset_aggregate", None)
+    reset_aggregate_type = drain.ResetTelemetryAggregate
+    reset_reason_counts = getattr(reset_aggregate, "reason_bit_counts", None)
+    reset_row_count = getattr(reset_aggregate, "row_count", None)
+    reset_episode_length_sum = getattr(
+        reset_aggregate, "episode_length_sum", None
+    )
+    if (
+        type(reset_aggregate) is not reset_aggregate_type
+        or type(reset_row_count) is not int
+        or reset_row_count < len(reset_rows)
+        or type(reset_episode_length_sum) is not int
+        or reset_episode_length_sum < reset_row_count
+        or len(reset_rows) > drain.RESET_TELEMETRY_EXAMPLE_LIMIT
+        or type(reset_reason_counts) is not tuple
+        or len(reset_reason_counts) != 5
+        or any(
+            type(value) is not int or value < 0 or value > reset_row_count
+            for value in reset_reason_counts
+        )
+    ):
+        raise RuntimeError("FullMDP terminal reset aggregate differs")
+    reset_counts = dict(
+        zip(
+            (
+                "terminal_reset_reason_time_out_count",
+                "terminal_reset_reason_base_fell_tilt_count",
+                "terminal_reset_reason_base_too_low_count",
+                "terminal_reset_reason_joint_qdes_forbidden_count",
+                "terminal_reset_reason_robot_hit_table_count",
+            ),
+            reset_reason_counts,
+        )
+    )
     settlement = summary.settlement
     commits = summary.reveal_commit
     lifecycle = summary.lifecycle
@@ -899,9 +920,11 @@ def _telemetry(summary: object, runtime_module: object) -> dict:
             "action_opportunity_row_count": len(summary.action_opportunities),
             "completed_shot_row_count": len(summary.completed_shots),
             "terminal_shot_row_count": len(summary.terminal_shots),
-            "terminal_reset_row_count": len(reset_rows),
+            "terminal_reset_row_count": reset_row_count,
+            "terminal_reset_example_count": len(reset_rows),
+            "terminal_reset_episode_length_sum": reset_episode_length_sum,
         },
-        "terminal_reset_rows": len(reset_rows),
+        "terminal_reset_rows": reset_row_count,
         "milestone": summary.milestone.as_json(tuple(rewards.MANAGER_NAMES)),
         **reset_counts,
     }
@@ -923,6 +946,7 @@ def _diagnostic_rows_payload(summary: object, runtime_module: object) -> dict:
     if type(lifecycle_flags) is not tuple:
         raise RuntimeError("FullMDP lifecycle ABI differs")
     frontier = summary.frontier
+    reset_aggregate = summary.terminal_reset_aggregate
     rows = {
         "action_opportunities": [
             asdict(row) for row in summary.action_opportunities
@@ -937,20 +961,42 @@ def _diagnostic_rows_payload(summary: object, runtime_module: object) -> dict:
         ],
         "terminal_resets": [asdict(row) for row in summary.terminal_resets],
     }
+    source_row_counts = {
+        "action_opportunities": len(summary.action_opportunities),
+        "completed_shots": len(summary.completed_shots),
+        "terminal_shots": len(summary.terminal_shots),
+        "terminal_resets": reset_aggregate.row_count,
+    }
+    terminal_reset_coverage = (
+        "complete"
+        if len(summary.terminal_resets) == reset_aggregate.row_count
+        else "bounded_examples"
+    )
     return {
         "schema_version": DIAGNOSTIC_ROWS_SCHEMA_VERSION,
         "kind": DIAGNOSTIC_ROWS_KIND,
         "diagnostic_unauthorized": True,
         "checkpoint_authority": False,
         "resume_authority": False,
-        "status": "latest_acknowledged_update_complete",
+        "status": (
+            "latest_acknowledged_update_complete"
+            if terminal_reset_coverage == "complete"
+            else "latest_acknowledged_update_mixed_coverage"
+        ),
         "coverage": "latest_acknowledged_update_only",
+        "coverage_by_stream": {
+            "action_opportunities": "complete",
+            "completed_shots": "complete",
+            "terminal_shots": "complete",
+            "terminal_resets": terminal_reset_coverage,
+        },
         "ppo_update": frontier.update_index,
         "completed_environment_steps": frontier.completed_environment_steps,
         "epoch_operation_sequence": frontier.operation_sequence,
         "epoch_drain_sequence": frontier.drain_sequence,
         "epoch_commit_start": frontier.start_commit,
         "epoch_commit_end": frontier.end_commit,
+        "source_row_counts": source_row_counts,
         "row_counts": {name: len(value) for name, value in rows.items()},
         **rows,
     }
@@ -965,12 +1011,24 @@ def _unavailable_diagnostic_rows_payload() -> dict:
         "resume_authority": False,
         "status": "no_acknowledged_update",
         "coverage": "none",
+        "coverage_by_stream": {
+            "action_opportunities": "none",
+            "completed_shots": "none",
+            "terminal_shots": "none",
+            "terminal_resets": "none",
+        },
         "ppo_update": None,
         "completed_environment_steps": None,
         "epoch_operation_sequence": None,
         "epoch_drain_sequence": None,
         "epoch_commit_start": None,
         "epoch_commit_end": None,
+        "source_row_counts": {
+            "action_opportunities": 0,
+            "completed_shots": 0,
+            "terminal_shots": 0,
+            "terminal_resets": 0,
+        },
         "row_counts": {
             "action_opportunities": 0,
             "completed_shots": 0,
