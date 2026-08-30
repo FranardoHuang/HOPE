@@ -432,6 +432,69 @@ def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypat
     )
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_shared_fixed_question_cuda_fixed_tape_is_deterministic_and_causal(
+    monkeypatch,
+):
+    """Exercise the complete shared numerical owner on one real CUDA tape."""
+
+    captured = {}
+    solve = fixed_question.solve_fixed_action_question_device
+
+    def capture(**kwargs):
+        captured["kwargs"] = kwargs
+        return solve(**kwargs)
+
+    monkeypatch.setattr(
+        fixed_question, "solve_fixed_action_question_device", capture
+    )
+    _direct_projection(
+        num_envs=1,
+        source_rows=(0,),
+        selected_env_index=torch.tensor([0], dtype=torch.int64),
+    )
+    cuda_kwargs = {
+        name: value.to(device="cuda").contiguous()
+        if type(value) is torch.Tensor
+        else value
+        for name, value in captured["kwargs"].items()
+    }
+    first = solve(**cuda_kwargs)
+    repeated = solve(**cuda_kwargs)
+    for field in first.__dataclass_fields__:
+        assert torch.equal(getattr(first, field), getattr(repeated, field)), field
+
+    attempted = int(first.construction_reason.numel())
+    admitted = int(first.admitted.sum().item())
+    rejected = int(first.construction_reason.ge(0).sum().item())
+    assert attempted == admitted + rejected
+    assert first.producer_fault.count_nonzero().item() == 0
+    assert bool(first.admitted.any())
+
+    changed_aim = dict(cuda_kwargs)
+    changed_aim["landing_aim_xy_m"] = (
+        cuda_kwargs["landing_aim_xy_m"]
+        + torch.tensor((0.04, -0.03), device="cuda", dtype=torch.float32)
+    ).contiguous()
+    aim_result = solve(**changed_aim)
+    both = first.admitted & aim_result.admitted
+    assert bool(both.any())
+    assert not torch.equal(
+        first.racket_task_f32[both], aim_result.racket_task_f32[both]
+    )
+
+    changed_speed = dict(cuda_kwargs)
+    changed_speed["incoming_linear_velocity_world_mps"] = (
+        cuda_kwargs["incoming_linear_velocity_world_mps"] * 1.02
+    ).contiguous()
+    speed_result = solve(**changed_speed)
+    both = first.admitted & speed_result.admitted
+    assert bool(both.any())
+    assert not torch.equal(
+        first.racket_task_f32[both], speed_result.racket_task_f32[both]
+    )
+
+
 @pytest.mark.parametrize("num_envs", (1, 2, 64))
 def test_recurring_question_bundle_is_cardinality_generic(num_envs):
     harness = _bundle_harness(num_envs=num_envs)
