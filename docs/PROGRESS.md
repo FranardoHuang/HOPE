@@ -2,6 +2,11 @@
 
 ## 2026-08-30 — frozen-teacher Pod targeted失败修复候选
 
+- teacher replay新增pre-reset表碰归因，不改默认训练和termination：仅在已启用
+  N=1 diagnostic consumer时，每个policy tick独立记录`keepout_source`与
+  `backend_resolved_table_contact`，并在reset前把bit16首个positive的physics substep/
+  final-forward边界冻结一次。terminal bit与两类source不匹配时fail closed。本轮不为
+  body/role/SAT深归因新增热路；先用这一分流决定是keepout bridge、重定时还是base shift。
 - `eff08cc4` Pod CPU的`93+154` module unions（含mesh closure）已全绿，但首个真实
   GPU1 CUDA replay在180-step前自然RC1：MJLab的live contact field是显式Torch-facing
   proxy，它有`torch.device`但不是`torch.Tensor`或Warp array；旧桥接把所有非Tensor

@@ -22,6 +22,13 @@
 
 ## 2026-08-30 frozen-teacher targeted修复候选
 
+为下一次fresh replay增加最小pre-reset归因：每tick的`keepout_source`和
+`backend_resolved_table_contact`分别进NPZ，首个bit16之前观测到的首个阳性
+physics-substep/final-forward边界只冻结一次并进summary。这一diagnostic latch仅由
+teacher replay的opt-in enable创建；正常FullMDP训练不有该callback、不增buffer或D2H，
+termination bit语义不变。bit/source不匹配为unknown fail-closed。本轮先回答“SAT guard
+还是backend resolved contact”，不为body/component/table role新增另一条热路。
+
 `eff08cc4` Pod CPU `93+154` unions（含mesh closure）全绿后，首个真实GPU1 CUDA replay
 于180-step前自然RC1。未进入teacher回放或contact physics判决：启用patch时MJLab
 live contact field的Torch-facing proxy被误当Warp array，`wp.to_torch`读其`torch.device`时

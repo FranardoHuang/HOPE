@@ -4,6 +4,12 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 
 ## 2026-08-30 frozen-teacher targeted修复候选（仍`Partial`）
 
+为区分“保守SAT keepout”与“MuJoCo backend真实resolved contact”，后继只在opt-in
+teacher replay装了pre-reset source latch：NPZ每tick分列两个bool source，summary冻结首个
+bit16的first-positive substep与boundary。两类source都无而bit16存在，或source存在而
+bit16不存在，均为typed unknown并fail closed。非replay路径不创建buffer、不D2H、不改
+termination。body/component/table-role归因暂不新建热路，等首次source分流后再决定。
+
 `eff08cc4` Pod CPU `93+154` unions已全绿；首个真实CUDA N=1在启用contact patch时
 于180-step前自然RC1。根因是MJLab live field的Torch-facing proxy有`torch.device`却不是
 Tensor，旧代码仅用`torch.is_tensor`二分后误传`wp.to_torch`。后继候选只接受三个

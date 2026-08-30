@@ -962,7 +962,8 @@ def _run_teacher_replay(
         "launch", "r03", "generic_contact", "selected_contact",
         "opposite_contact", "edge_contact", "between_contact",
         "invalid_contact", "crossing", "legal_landing", "done",
-        "termination_bits", "qdes_guard_intervention",
+        "termination_bits", "qdes_guard_intervention", "keepout_source",
+        "backend_resolved_table_contact",
     )}
     question = launch = None
     question_reset_generation = None
@@ -997,6 +998,13 @@ def _run_teacher_replay(
                 action_scale=env.act_scale,
             )
             _obs, _reward, done, extras = env.step(action)
+            table_attribution = env.diagnostic_table_attribution_tick(
+                extras["termination_bits"]
+            )
+            if table_attribution["backend_resolved_table_contact"] != bool(
+                extras["backend_resolved_table_contact"][0]
+            ):
+                raise RuntimeError("teacher replay resolved-table source differs")
             trace = env.controller_trace()
             racket = env._full_a_racket_kinematics()
             if bool(extras["full_a_reveal_event"][0]) and question is None:
@@ -1051,6 +1059,12 @@ def _run_teacher_replay(
             rows["qdes_guard_intervention"].append(host(
                 extras["full_a_qdes_guard_intervention_event"]
             ))
+            rows["keepout_source"].append([
+                table_attribution["keepout_source"]
+            ])
+            rows["backend_resolved_table_contact"].append([
+                table_attribution["backend_resolved_table_contact"]
+            ])
             previous_qdes = requested
             if bool(done[0]):
                 if question is None:
@@ -1123,6 +1137,10 @@ def _run_teacher_replay(
         "trace_npz": "teacher_replay.npz",
         "trace_npz_sha256": hashlib.sha256(trace_bytes).hexdigest(),
         "generic_contact_patch": contact_patch,
+        "first_table_terminal_source": (
+            table_attribution["first_table_terminal_source"]
+            if rows["common_step"] else None
+        ),
         "event_counts": {
             name: int(np.count_nonzero(arrays[name]))
             for name in (

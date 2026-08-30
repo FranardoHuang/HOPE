@@ -320,6 +320,104 @@ def test_contact_patch_bridge_distinguishes_torch_proxy_warp_and_device_duck():
         )
 
 
+def _table_attribution_rig():
+    return types.SimpleNamespace(
+        _torch=torch,
+        decimation=20,
+        _diagnostic_contact_patch_transition_start_step=41,
+        _diagnostic_first_table_terminal_source=None,
+        _diagnostic_table_tick_first_positive=None,
+        _diagnostic_table_tick_keepout=False,
+        _diagnostic_table_tick_resolved=False,
+        _diagnostic_table_attribution_consumer=True,
+    )
+
+
+def test_table_attribution_freezes_first_positive_before_reset_once_only():
+    env = _table_attribution_rig()
+    capture = wait_env.FullMdpInitialWaitVecEnv._capture_diagnostic_table_attribution
+    finalize = wait_env.FullMdpInitialWaitVecEnv.diagnostic_table_attribution_tick
+    capture(
+        env,
+        keepout=torch.tensor([False]),
+        resolved=torch.tensor([False]),
+        substep_index=1,
+        capture_boundary="physics_substep_poststate",
+    )
+    capture(
+        env,
+        keepout=torch.tensor([True]),
+        resolved=torch.tensor([False]),
+        substep_index=2,
+        capture_boundary="physics_substep_poststate",
+    )
+    capture(
+        env,
+        keepout=torch.tensor([False]),
+        resolved=torch.tensor([True]),
+        substep_index=3,
+        capture_boundary="physics_substep_poststate",
+    )
+    result = finalize(
+        env,
+        torch.tensor([
+            wait_env.FULLMDP_TERMINATION_BITS["robot_hit_table"]
+        ]),
+    )
+    assert result["keepout_source"] is True
+    assert result["backend_resolved_table_contact"] is True
+    assert result["first_table_terminal_source"] == {
+        "transition_start_step": 41,
+        "capture_boundary": "physics_substep_poststate",
+        "physics_substep_index": 2,
+        "completed_physics_substeps": 2,
+        "keepout_source": True,
+        "backend_resolved_table_contact": False,
+    }
+
+    wait_env.FullMdpInitialWaitVecEnv._begin_diagnostic_table_attribution_tick(env)
+    capture(
+        env,
+        keepout=torch.tensor([False]),
+        resolved=torch.tensor([True]),
+        substep_index=None,
+        capture_boundary="post_forward_final",
+    )
+    second = finalize(
+        env,
+        torch.tensor([
+            wait_env.FULLMDP_TERMINATION_BITS["robot_hit_table"]
+        ]),
+    )
+    assert second["first_table_terminal_source"] == result[
+        "first_table_terminal_source"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("keepout", "resolved", "terminal"),
+    ((False, False, True), (True, False, False), (False, True, False)),
+)
+def test_table_attribution_unknown_or_unmatched_source_fails_closed(
+    keepout, resolved, terminal
+):
+    env = _table_attribution_rig()
+    wait_env.FullMdpInitialWaitVecEnv._capture_diagnostic_table_attribution(
+        env,
+        keepout=torch.tensor([keepout]),
+        resolved=torch.tensor([resolved]),
+        substep_index=None,
+        capture_boundary="post_forward_final",
+    )
+    bits = (
+        wait_env.FULLMDP_TERMINATION_BITS["robot_hit_table"] if terminal else 0
+    )
+    with pytest.raises(RuntimeError, match="source is unknown"):
+        wait_env.FullMdpInitialWaitVecEnv.diagnostic_table_attribution_tick(
+            env, torch.tensor([bits])
+        )
+
+
 def test_teacher_replay_cli_is_n1_zero_ppo_and_reuses_live_owner():
     signature = inspect.signature(runner.main)
     assert signature.parameters["diagnostic_teacher_replay"].default is False
