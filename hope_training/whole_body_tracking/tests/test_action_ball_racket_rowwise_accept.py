@@ -9,7 +9,7 @@ semantics can be checked directly.
 from __future__ import annotations
 
 import ast
-from dataclasses import fields
+from dataclasses import fields, replace
 import importlib
 import inspect
 import textwrap
@@ -239,6 +239,18 @@ def _candidate(n: int, device: torch.device):
         playback_admissible=torch.ones(shape, dtype=torch.bool, device=device),
         owner_fault_bits=torch.zeros(
             n, 1, len(epoch.OWNER_ORDER), dtype=torch.int64, device=device
+        ),
+    )
+
+
+def _candidate_at_contact_step(candidate, step: int):
+    """Return the same D05 tape with one explicit absolute contact tick."""
+
+    return replace(
+        candidate,
+        clocks=replace(
+            candidate.clocks,
+            contact_tick=torch.full_like(candidate.clocks.contact_tick, step),
         ),
     )
 
@@ -725,7 +737,9 @@ def test_rowwise_accept_arms_r03_and_publishes_real_fk(
     r03_owner = racket_test._bind_epoch_r03(racket, epoch_owner)
     physical_owner = _bind_physical_launch_owner(epoch_owner)
     r06_owner = _bind_r06_outcome_owner(epoch_owner)
-    candidate = _candidate(2, racket.device)
+    candidate = _candidate_at_contact_step(
+        _candidate(2, racket.device), 5
+    )
     racket_before = _snapshot(racket)
     fact_before = {
         name: _bytes(getattr(epoch_owner.current(), name)[1])
@@ -749,9 +763,10 @@ def test_rowwise_accept_arms_r03_and_publishes_real_fk(
         epoch.PHASE_LAUNCH_SETTLED,
         epoch.PHASE_IDLE,
     ]
-    racket._action_ball_strike_fact_exact_eligibility.copy_(
-        torch.tensor([True, False], dtype=torch.bool, device=racket.device)
-    )
+    # The manager-metric latch is deliberately stale/false here.  R03 must use
+    # D05's integer contact tick, otherwise the production call order publishes
+    # the post-contact control step instead of this transition.
+    racket._action_ball_strike_fact_exact_eligibility.zero_()
     racket.arm_action_ball_full_mdp_epoch_strike_fact()
     assert r03_owner._epoch_arm_mask.tolist() == [True, False]
     assert racket._action_ball_strike_fact_expected_publish_step == 5
@@ -793,12 +808,12 @@ def test_rowwise_accept_arms_r03_and_publishes_real_fk(
         for name in ("fact_valid_bits", "fact_source_step", "fact_f32")
     }
 
-    # The producer clears its exact one-shot on the following command step;
+    # The next control step is outside D05's one integer contact tick;
     # LAUNCH_SETTLED alone must not make the same strike eligible again.
-    racket._action_ball_strike_fact_exact_eligibility.zero_()
+    racket._env.common_step_counter = 5
     racket.arm_action_ball_full_mdp_epoch_strike_fact()
     assert r03_owner._epoch_arm_mask.tolist() == [False, False]
-    racket.publish_action_ball_full_mdp_epoch_strike_fact(source_step=5)
+    racket.publish_action_ball_full_mdp_epoch_strike_fact(source_step=6)
     record = epoch_owner.current()
     assert record.fact_valid_bits[:, 0, owner_slot].tolist() == [3, 0]
     for name, expected in sticky.items():
@@ -822,11 +837,14 @@ def test_r03_exact_strike_rejects_every_nonlaunch_phase(
         2, runtime_device="cpu", monkeypatch=monkeypatch
     )
     r03_owner = racket_test._bind_epoch_r03(racket, epoch_owner)
+    candidate = _candidate_at_contact_step(
+        _candidate(2, racket.device), 5
+    )
     _, settled = _settle_candidate(
         racket,
         d05_owner,
         epoch_owner,
-        _candidate(2, racket.device),
+        candidate,
         torch.ones(2, dtype=torch.bool),
     )
     assert settled.phase[:, 0].tolist() == [
@@ -849,11 +867,14 @@ def test_rowwise_r03_rejects_foreign_racket_and_wrong_postphysics_step(
         2, runtime_device="cpu", monkeypatch=monkeypatch
     )
     owner = racket_test._bind_epoch_r03(racket, epoch_owner)
+    candidate = _candidate_at_contact_step(
+        _candidate(2, racket.device), 5
+    )
     _settle_candidate(
         racket,
         d05_owner,
         epoch_owner,
-        _candidate(2, racket.device),
+        candidate,
         torch.ones(2, dtype=torch.bool),
     )
     racket._action_ball_strike_fact_exact_eligibility[0] = True

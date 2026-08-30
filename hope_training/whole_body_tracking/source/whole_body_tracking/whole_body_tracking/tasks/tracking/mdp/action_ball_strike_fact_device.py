@@ -910,10 +910,12 @@ class ActionBallStrikeFactDeviceCoordinator:
     ) -> None:
         """Arm from the bound epoch and Racket's independent integer state.
 
-        Eligibility is the intersection of the launched epoch phase/task slot
-        and the exact one-shot bit from the cold-bound Racket producer.  It is
-        a causal fact, not a caller verdict.  This lean path never reads or
-        manufactures the legacy birth/sample/task SHA fields.
+        Eligibility is the intersection of the launched epoch phase, the
+        admitted task-valid row, and D05's absolute contact tick.  The latter
+        is the integer chronology authority for the shot: deriving the event
+        from Racket's manager-metric latch would observe the clock before the
+        command update and publish one 20 ms control step late.  This lean path
+        never reads or manufactures the legacy birth/sample/task SHA fields.
         """
 
         if self._action_epoch_owner is None:
@@ -949,14 +951,14 @@ class ActionBallStrikeFactDeviceCoordinator:
         shot_key_valid = epoch_module.row_identity.action_epoch_shot_key_valid(
             selected_shot_key
         )
-        exact = self._mask(
-            getattr(racket_owner, "_action_ball_strike_fact_exact_eligibility", None),
-            "bound_racket.exact_strike_eligible",
-        )
-        eligible = (
+        contact_tick = selected(epoch.clocks.contact_tick)
+        task_valid = selected(epoch.task.task_valid)
+        exact = steps.eq(contact_tick)
+        launched_task = (
             selected(epoch.phase).eq(epoch_module.PHASE_LAUNCH_SETTLED)
-            & exact
+            & task_valid
         )
+        eligible = launched_task & exact
         identity_fault = eligible & (
             ~shot_key_valid
             | (identity.reset_generation != epoch.reset_generation)
@@ -973,7 +975,7 @@ class ActionBallStrikeFactDeviceCoordinator:
             "ball_position": self._vector(ball_position, "ball_position"),
             "ball_velocity": self._vector(ball_velocity, "ball_velocity"),
         }
-        stale_source = eligible & steps.lt(0)
+        stale_source = launched_task & steps.lt(0)
         nonfinite = eligible & self._vectors_nonfinite(target_vectors)
         epoch_safe = self._latch_action_epoch_producer_faults(
             epoch_module=epoch_module,
