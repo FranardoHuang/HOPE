@@ -123,7 +123,9 @@ def solve(args):
     target_face = faces.copy()
     effective_dt = float(phase2["selected"]["timewarp"]) / fps
     for frame in range(args.hit_frame - 1, args.hit_frame + 2):
-        target_pos[frame] = sites[args.hit_frame] + desired_velocity * (
+        target_pos[frame] = sites[args.hit_frame] + desired_velocity * float(
+            args.contact_velocity_gain
+        ) * (
             (frame - args.hit_frame) * effective_dt
         )
         target_face[frame] = desired_face
@@ -246,6 +248,7 @@ def solve(args):
             "t_hit_s": args.reference_t_hit_s * chosen["timewarp"],
             "t_cycle_s": args.reference_t_cycle_s * chosen["timewarp"],
         },
+        "contact_velocity_gain": float(args.contact_velocity_gain),
         "candidate_count": len(candidates),
         "closest_candidates": [
             {
@@ -309,6 +312,7 @@ def parser():
     p.add_argument("--net-top-z", type=float, default=0.9325)
     p.add_argument("--reference-t-hit-s", type=float, default=0.96)
     p.add_argument("--reference-t-cycle-s", type=float, default=1.12)
+    p.add_argument("--contact-velocity-gain", type=float, default=1.0)
     return p
 
 
