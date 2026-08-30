@@ -296,7 +296,7 @@ EPA-only wire或从已import module自报身份。
 
 live env构造完成后，runner核实际geometry source SHA，把已经augmented的live `env.mj_model`经private
 stage→hash/fsync→no-clobber hardlink发布为run-owned `runtime.mjb`，并逐字节核当前诊断预注册MJB
-`95f08350…2c3ba / 113,765,945 bytes`，再独立绑定policy clock、Warp capacity与从verified base派生的
+`d9c88297…286685 / 113,765,788 bytes`，再独立绑定policy clock、Warp capacity与从verified base派生的
 owner-local-frame digest；完整字段见
 [`runtime_attach v2`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)。这些path-free事实进入schema-6
 update/evidence与schema-5 completion。dry-run只打印固定H48 argv/env、plant locator与expected identity，

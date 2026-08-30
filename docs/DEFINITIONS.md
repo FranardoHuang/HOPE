@@ -74,11 +74,12 @@ portable identity、root/完整source closure、base compiled MJB、compiler too
 `df71f12a21fedb4b8caed182906288f573b2f05c731441a5f529996baaf056b2`、policy clock
 `decimation=20 / step_dt=0.02`、Warp allocation capacity
 `njmax_per_world=572 / nconmax_per_world=128`、实际augmented model保存出的MJB
-`sha256=95f08350b39f3d6e5b703906b5d4ac7cc5d8bca504d273056b03da743d42c3ba /
-size_bytes=113,765,945`，以及从exact verified base独立派生的`owner_local_frame_sha256`。
+`sha256=d9c88297d4a687815c347a064792c66d99b61965ecea3576d235c8b13c286685 /
+size_bytes=113,765,788`，以及从exact verified base独立派生的`owner_local_frame_sha256`。
 
-该augmented MJB已在隔离Pod CPU上用`N=1`与`N=2`、两个绝对checkout路径、三个fresh进程构造，
-三份bytes完全一致；实测保存内容覆盖cone、contact pairs、spawn、MuJoCo options与model counts。
+该augmented MJB对应`eb1a340d`起采用的单一球网判决语义：球不再与渲染网发生物理碰撞，
+低过网只由实测中心穿越判OUT。它已由b91一次、db5两次独立exact-Pod `512xH48` fixed-action
+构造得到完全相同的bytes；实测保存内容覆盖cone、contact pairs、spawn、MuJoCo options与model counts。
 Warp allocation capacity不存进MJB，所以必须作为独立字段绑定，不能靠MJB摘要推断。base MJB也不得被
 错写成augmented runtime MJB。runner把live `env.mj_model`经private stage→hash/fsync→no-clobber hardlink
 发布为run-owned `runtime.mjb`，consumer先独立hash/加载再读ACK。以上只是diagnostic pre-registration与消费

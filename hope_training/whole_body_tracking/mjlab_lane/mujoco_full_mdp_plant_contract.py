@@ -34,15 +34,16 @@ TRUSTED_GEOMETRY_SOURCE_SHA256 = (
 RUNTIME_ATTACH_CONTRACT_TYPE = "action_ball_mjlab_runtime_attach_v2"
 RUNTIME_MJB_RELATIVE_LOCATOR = "runtime.mjb"
 
-# Pinned diagnostic candidate from the clean exact-Pod 512xH48 construction
-# recorded by the fixed-action probe.  The artifact chain below proves that a
-# run used these bytes; it does not turn this diagnostic into formal plant or
-# training authority.  Every downstream record remains
-# ``diagnostic_unauthorized``.
+# Pinned diagnostic candidate after ``eb1a340d`` deliberately removed physical
+# ball/net collision and kept net clearance as adjudication.  Independent
+# exact-Pod 512xH48 fixed-action constructions (one b91 source and two db5
+# sources) saved these same bytes.  This proves which live model a run used; it
+# does not turn the diagnostic into formal plant or training authority.  Every
+# downstream record remains ``diagnostic_unauthorized``.
 EXPECTED_FINAL_AUGMENTED_MJB_SHA256 = (
-    "95f08350b39f3d6e5b703906b5d4ac7cc5d8bca504d273056b03da743d42c3ba"
+    "d9c88297d4a687815c347a064792c66d99b61965ecea3576d235c8b13c286685"
 )
-EXPECTED_FINAL_AUGMENTED_MJB_SIZE_BYTES = 113_765_945
+EXPECTED_FINAL_AUGMENTED_MJB_SIZE_BYTES = 113_765_788
 
 POLICY_CLOCK = {
     "decimation": 20,
