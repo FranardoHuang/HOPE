@@ -49,6 +49,40 @@ def test_contact_deadline_rounds_up_to_policy_grid_without_losing_reaction_margi
     assert M._ceil_to_policy_tick(raw) - 5.088 / 0.9816630367871384 >= 0.1
 
 
+def test_grid_retime_preserves_exact_contact_and_emits_one_row_per_policy_tick():
+    q = np.arange(57 * 2, dtype=np.float64).reshape(57, 2)
+    root_pos = np.arange(57 * 3, dtype=np.float64).reshape(57, 3)
+    root_quat = np.tile(np.asarray([1.0, 0.0, 0.0, 0.0]), (57, 1))
+    q_grid, qd_grid, root_grid, quat_grid, hit = M._retime_to_policy_grid(
+        q=q,
+        root_pos=root_pos,
+        root_quat=root_quat,
+        t_hit_s=5.04,
+        t_cycle_s=5.88,
+    )
+    assert hit == 252
+    assert q_grid.shape == qd_grid.shape == (295, 2)
+    assert root_grid.shape == (295, 3)
+    assert quat_grid.shape == (295, 4)
+    assert np.array_equal(q_grid[hit], q[M.HIT_FRAME])
+    assert np.array_equal(root_grid[hit], root_pos[M.HIT_FRAME])
+    assert np.array_equal(q_grid[-1], q[-1])
+
+
+def test_grid_retime_rejects_non_policy_aligned_phase4_timing():
+    q = np.zeros((57, 2), dtype=np.float64)
+    root_pos = np.zeros((57, 3), dtype=np.float64)
+    root_quat = np.tile(np.asarray([1.0, 0.0, 0.0, 0.0]), (57, 1))
+    with pytest.raises(M.BundleError, match="not aligned to the policy grid"):
+        M._retime_to_policy_grid(
+            q=q,
+            root_pos=root_pos,
+            root_quat=root_quat,
+            t_hit_s=5.088,
+            t_cycle_s=5.936,
+        )
+
+
 def test_output_path_rejects_parent_escape(tmp_path):
     args = M.parser().parse_args([
         "--phase4-report", "x", "--phase4-npz", "y", "--dynamic-ready", "z",

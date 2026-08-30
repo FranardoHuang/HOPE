@@ -191,7 +191,83 @@ def _rebuild_noncyclic_schema2(*, q: np.ndarray, qd: np.ndarray,
     }
 
 
-def _prototype(*, motion_sha: str, frames: int, fps: float,
+def _policy_grid_index(seconds: float, label: str) -> int:
+    if not math.isfinite(seconds) or seconds <= 0.0:
+        raise BundleError(f"{label} must be positive and finite")
+    ticks = round(seconds / POLICY_STEP_S)
+    if abs(seconds - ticks * POLICY_STEP_S) > 1.0e-9:
+        raise BundleError(f"{label} is not aligned to the policy grid")
+    return int(ticks)
+
+
+def _retime_to_policy_grid(
+    *,
+    q: np.ndarray,
+    root_pos: np.ndarray,
+    root_quat: np.ndarray,
+    t_hit_s: float,
+    t_cycle_s: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+    """Interpolate the admitted slow path onto Motion's one-frame-per-tick ABI.
+
+    Phase 4 certifies 57 keyframes at the selected timewarp.  FullMDP Motion
+    advances one motion row per 20 ms policy step, so publishing those sparse
+    keyframes directly would silently play the action about five times too
+    fast.  Grid-aligned Phase-3 timewarps make the hit and endpoint exact
+    target samples; no contact pose is invented or rounded.
+    """
+
+    if q.ndim != 2 or len(q) < 3:
+        raise BundleError("Phase4 trajectory has no retimeable segment")
+    source_hit_s = HIT_FRAME * t_cycle_s / (len(q) - 1)
+    if abs(source_hit_s - t_hit_s) > 1.0e-9:
+        raise BundleError("Phase4 hit/cycle timing differs from source hit frame")
+    hit_frame = _policy_grid_index(t_hit_s, "Phase4 t_hit_s")
+    cycle_frame = _policy_grid_index(t_cycle_s, "Phase4 t_cycle_s")
+    if not 0 < hit_frame < cycle_frame:
+        raise BundleError("policy-grid hit must be inside the motion segment")
+
+    source_t = np.linspace(0.0, t_cycle_s, len(q), dtype=np.float64)
+    target_t = np.arange(cycle_frame + 1, dtype=np.float64) * POLICY_STEP_S
+
+    def interpolate(values: np.ndarray) -> np.ndarray:
+        return np.stack(
+            [
+                np.interp(target_t, source_t, values[:, column])
+                for column in range(values.shape[1])
+            ],
+            axis=1,
+        )
+
+    q_grid = interpolate(q)
+    root_pos_grid = interpolate(root_pos)
+    continuous_quat, _ = schema2._continuous_unit_quaternions(root_quat)
+    root_quat_grid = interpolate(continuous_quat)
+    root_quat_grid /= np.linalg.norm(root_quat_grid, axis=1, keepdims=True)
+
+    # Contact and endpoints are certified source samples and must survive the
+    # interpolation bit-for-bit at the semantic seam.
+    q_grid[0], q_grid[hit_frame], q_grid[-1] = q[0], q[HIT_FRAME], q[-1]
+    root_pos_grid[0], root_pos_grid[hit_frame], root_pos_grid[-1] = (
+        root_pos[0],
+        root_pos[HIT_FRAME],
+        root_pos[-1],
+    )
+    root_quat_grid[0], root_quat_grid[hit_frame], root_quat_grid[-1] = (
+        continuous_quat[0],
+        continuous_quat[HIT_FRAME],
+        continuous_quat[-1],
+    )
+    qd_grid = np.gradient(q_grid, POLICY_STEP_S, axis=0, edge_order=2)
+    if not all(
+        np.isfinite(value).all()
+        for value in (q_grid, qd_grid, root_pos_grid, root_quat_grid)
+    ):
+        raise BundleError("policy-grid retime produced non-finite values")
+    return q_grid, qd_grid, root_pos_grid, root_quat_grid, hit_frame
+
+
+def _prototype(*, motion_sha: str, frames: int, fps: float, hit_frame: int,
                ball_b: np.ndarray, face_b: np.ndarray,
                face_velocity_b: np.ndarray, mount_sign: int) -> Mapping[str, Any]:
     speed = float(np.linalg.norm(face_velocity_b))
@@ -200,16 +276,16 @@ def _prototype(*, motion_sha: str, frames: int, fps: float,
     row = {
         "motion_id": ACTION_ID, "scope": SCOPE, "family": FAMILY,
         "clip_index": 0, "npz_sha256": motion_sha, "frames": frames,
-        "t_prepare_s": HIT_FRAME / fps, "t_prepare_min_s": HIT_FRAME / fps,
-        "t_prepare_max_s": HIT_FRAME / fps,
+        "t_prepare_s": hit_frame / fps, "t_prepare_min_s": hit_frame / fps,
+        "t_prepare_max_s": hit_frame / fps,
         "band_b_x": [float(ball_b[0]), float(ball_b[0])],
         "band_b_y": [float(ball_b[1]), float(ball_b[1])],
         "band_z_w": [float(ball_b[2]), float(ball_b[2])],
         "slack_b_xy_m": 0.0, "slack_z_w_m": 0.0,
         "p_contact_b": ball_b.tolist(), "n_hat_b": face_b.tolist(),
         "face_sign": float(mount_sign), "priority": 0, "enabled": True,
-        "strike_phase": HIT_FRAME / (frames - 1), "contact_frame": HIT_FRAME,
-        "contact_window_frames": [HIT_FRAME, HIT_FRAME],
+        "strike_phase": hit_frame / (frames - 1), "contact_frame": hit_frame,
+        "contact_window_frames": [hit_frame, hit_frame],
         "racket_face_center_velocity_hat_b": velocity_hat.tolist(),
         "racket_face_center_elevation_deg": elevation,
         "racket_face_center_window_dir_cone_deg": 0.0,
@@ -377,12 +453,25 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
         raise BundleError("dynamic ready lacks physical_ready")
     root0 = _finite(physical.get("root_pos_w_m"), (3,), "ready root position")
     quat0 = _finite(physical.get("root_quat_wxyz"), (4,), "ready root quaternion")
-    frames = len(q)
-    root_pos = np.repeat(root0[None, :], frames, axis=0)
-    root_quat = np.repeat(quat0[None, :], frames, axis=0)
-    effective_fps = (frames - 1) / float(report["timing"]["t_cycle_s"])
+    source_frames = len(q)
+    root_pos = np.repeat(root0[None, :], source_frames, axis=0)
+    root_quat = np.repeat(quat0[None, :], source_frames, axis=0)
+    t_hit = float(report["timing"]["t_hit_s"])
+    t_cycle = float(report["timing"]["t_cycle_s"])
+    q_grid, qd_grid, root_pos_grid, root_quat_grid, hit_frame = (
+        _retime_to_policy_grid(
+            q=q,
+            root_pos=root_pos,
+            root_quat=root_quat,
+            t_hit_s=t_hit,
+            t_cycle_s=t_cycle,
+        )
+    )
+    frames = len(q_grid)
+    effective_fps = 1.0 / POLICY_STEP_S
     motion_bytes, fk = _rebuild_noncyclic_schema2(
-        q=q, qd=qd, root_pos=root_pos, root_quat=root_quat, fps=effective_fps,
+        q=q_grid, qd=qd_grid, root_pos=root_pos_grid,
+        root_quat=root_quat_grid, fps=effective_fps,
         mjcf=args.mjcf, body_order=args.body_order,
     )
     motion_sha = _sha256_bytes(motion_bytes)
@@ -412,6 +501,7 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     face_velocity_w = site_vel[HIT_FRAME] + np.cross(omega_w, offset_w)
     face_velocity_b = _world_to_heading(face_velocity_w, yaw)
     prototype = _prototype(motion_sha=motion_sha, frames=frames, fps=effective_fps,
+                           hit_frame=hit_frame,
                            ball_b=ball_b, face_b=face_b,
                            face_velocity_b=face_velocity_b,
                            mount_sign=int(exact["mount_normal_sign"]))
@@ -429,8 +519,6 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     manifest_rel = out_rel / "take061_slow_block_phase4_v1.action_ball.v3.json"
     profile_pins_rel = out_rel / "take061_slow_block_phase4_v1.profile_pins.v1.json"
     aim = _finite(action_ball["landing_aim_w_xy_m"], (2,), "landing aim")
-    t_hit = float(report["timing"]["t_hit_s"])
-    t_cycle = float(report["timing"]["t_cycle_s"])
     reaction = 0.1
     teacher_rate_min = float(exact["teacher_rate"])
     if not 0.0 < teacher_rate_min <= 1.0:
@@ -453,7 +541,7 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
         "action_order": [ACTION_ID],
         "actions": [{"action_id": ACTION_ID, "action_uid": action_uid,
             "motion_path": motion_rel.as_posix(), "motion_sha256": motion_sha,
-            "strike_phase": HIT_FRAME / (frames - 1), "reference_t_hit_s": t_hit,
+            "strike_phase": hit_frame / (frames - 1), "reference_t_hit_s": t_hit,
             "reference_t_cycle_s": t_cycle,
             "reference_racket_site_speed_mps": float(np.linalg.norm(site_vel[HIT_FRAME])),
             "reaction_margin_s": reaction, "teacher_rate_min": teacher_rate_min,
@@ -483,6 +571,8 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
             "HOPE_BALL_PHYSICS_YAML": str(args.ball_physics.resolve()),
         },
         "timing": {"t_hit_s": t_hit, "t_cycle_s": t_cycle, "fps": effective_fps,
+                   "source_frames": source_frames, "policy_grid_frames": frames,
+                   "policy_grid_hit_frame": hit_frame,
                    "time_to_contact_raw_s": raw_ttc,
                    "time_to_contact_policy_grid_s": ttc,
                    "policy_step_s": POLICY_STEP_S},
