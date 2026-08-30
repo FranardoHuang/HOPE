@@ -577,6 +577,20 @@ def _complete_boundary(owner, *, update, completed):
     return summary
 
 
+def test_preceding_collection_preserves_canonical_sys_modules():
+    """A later fixture import must not replace an already canonical graph."""
+
+    canonical_modules = (
+        epoch_rowwise.E,
+        epoch_rowwise.LEAN_REWARDS,
+        epoch_rowwise.LEAN,
+        epoch_rowwise.R06_MODULE,
+        epoch_rowwise.PHYSICAL_MODULE,
+    )
+    for module in canonical_modules:
+        assert sys.modules.get(module.__name__) is module, module.__name__
+
+
 def test_preceding_import_same_process_reuses_canonical_module_identities():
     # A preceding collected copy of this test must not be invalidated when a
     # later copy imports its fixtures in the same process.  In particular, the

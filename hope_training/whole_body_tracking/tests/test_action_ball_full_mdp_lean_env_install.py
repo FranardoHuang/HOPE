@@ -32,7 +32,33 @@ MODULE_PATH = (
 )
 
 
+def _test_namespace_snapshot() -> dict[str, object]:
+    return {
+        name: module
+        for name, module in tuple(sys.modules.items())
+        if name == "whole_body_tracking"
+        or name.startswith("whole_body_tracking.")
+        or name == "isaaclab"
+        or name.startswith("isaaclab.")
+    }
+
+
+def _clear_test_namespace() -> None:
+    for name in tuple(sys.modules):
+        if (
+            name == "whole_body_tracking"
+            or name.startswith("whole_body_tracking.")
+            or name == "isaaclab"
+            or name.startswith("isaaclab.")
+        ):
+            sys.modules.pop(name, None)
+
+
+_PRIOR_TEST_NAMESPACE = _test_namespace_snapshot()
 M = load_canonical_full_mdp_env(MODULE_PATH, retain_namespace=True)
+_CANONICAL_TEST_NAMESPACE = _test_namespace_snapshot()
+_clear_test_namespace()
+sys.modules.update(_PRIOR_TEST_NAMESPACE)
 
 
 def test_cold_import_uses_launcher_canonical_namespace_without_ambient_kit():
@@ -96,8 +122,10 @@ _REWARD_MODULE.seal_env_reward_hot_path = _seal_env_reward_hot_path
 
 @pytest.fixture(autouse=True)
 def _install_lean_env_lazy_import_stubs(monkeypatch):
-    """Scope synthetic lazy imports to this module's individual tests."""
+    """Scope the canonical graph and synthetic lazy imports to each test."""
 
+    for name, module in _CANONICAL_TEST_NAMESPACE.items():
+        monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setitem(
         sys.modules, _OBSERVATION_MODULE.__name__, _OBSERVATION_MODULE
     )
