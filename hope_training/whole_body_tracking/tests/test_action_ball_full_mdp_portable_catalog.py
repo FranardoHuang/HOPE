@@ -18,6 +18,15 @@ if str(MDP) not in sys.path:
 import action_ball_full_mdp_portable_catalog as catalog  # noqa: E402
 
 
+def test_runtime_math_pin_excludes_broad_racket_telemetry_module():
+    assert catalog.PINNED_SOLVER_MATH_MODULE_NAMES == (
+        "continuous_questions.py",
+        "stroke_adapt_torch.py",
+        "virtual_ball.py",
+    )
+    assert "hope_commands.py" not in catalog.PINNED_SOLVER_MATH_MODULE_NAMES
+
+
 def test_portable_fresh_cadence_freezes_due_ticks_not_verdicts():
     table = catalog.load_portable_action_center_table()
     cadence = catalog.derive_portable_fresh_cadence(table)
