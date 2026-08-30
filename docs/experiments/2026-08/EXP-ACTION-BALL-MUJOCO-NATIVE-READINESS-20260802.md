@@ -8,7 +8,7 @@
 - 复核/决策负责人：Franco
 - 本 successor 当前最高证据等级：最终V3/PPO V6两端各自runtime/rate与fresh prefix达到诊断`E2`；
   跨引擎physics parity、formal learning与promotion仍低于`E2`，历史negative-control的`E3`不向新系统传递
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-29
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-30
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
@@ -20,14 +20,19 @@
 > 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
 
-## 2026-08-30 exact FullMDP metric-row边界候选
+## 2026-08-30 exact + hold/recovery FullMDP metric-row边界候选
 
-为隔离Isaac H48 command metric的逐step host同步，临时候选在`8200c4a2`代码基线上仅延迟exact FullMDP
-质量指标rows；保持H/H+1行数、逐行decay与Python float EMA顺序。drain先进入有效owner optimizer
-transaction，再materialize/assert；任一失败都必须在optimizer前poison且不可重试。save必须拒绝active、
-poisoned、joint-safety pending和exact metric tape pending。该切口不包含Reward28，也不代表其他command
-D2H已收敛。现在只完成实现与静态检查，Pod test/CUDA parity、finite snapshot及matched profiler-off
-wall-time仍`未测`，不得写成性能或学习结论。
+候选`0200b2c8c`以`e6958d2a`的exact device tape为基础，又将H/H+1的hold/recovery五标量逐行
+留在device。materialize前对paired tape的行数、decay chronology、dtype/device做共同检查；两批
+D2H的finite/shape检查都成功后，再exact-first、hold-second复演原Python-double recurrence，并一次刷新
+public metrics。这保留原step chronology，也保证坏hold tape不会先发布exact EMA。任一边界
+失败仍在optimizer前sticky poison，save仍对active/poisoned、joint-safety pending及两种metric tape
+pending fail-closed。本切口不改Reward/Observation/Stage/safety。
+
+Pod1 exact=`/workspace/franco/mktemp/fullmdp-commandmetric-hold-0200b2c8c-U9xVcX.exact`的focused CPU套件
+分跑`34+69+8+161 passed`，同进程`272 passed`；H/H+1计数将steady command metric row D2H调用
+收成`exact1 + hold1`。这是CPU语义与调用计数证据；真实CUDA同步数、fixed-action parity、
+finite snapshot及matched profiler-off wall-time仍`未测`，不得写成性能或学习结论。
 
 ## 2026-08-29 current correction
 

@@ -2,14 +2,18 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
-## 2026-08-30 exact FullMDP metric-row合批候选（仍`Partial`）
+## 2026-08-30 exact + hold/recovery FullMDP metric-row合批候选（仍`Partial`）
 
-基于`8200c4a2`的独立候选只收敛exact FullMDP quality metric rows：H/H+1逐command compute的device
-reduction按原顺序保留，到既有owner optimizer transaction内一次D2H并逐行复演原Python EMA。它不改
-Reward28、H48、PPO、task/physics/safety，也不声称command侧所有D2H都已合并。候选同时把
-materialize/assert失败纳入有效active boundary并在optimizer前sticky poison，snapshot在active/poisoned、
-joint-safety pending或exact metric tape pending时fail-closed。当前只有静态检查，Pod聚焦测试、真实CUDA
-fixed-tape/finite与profiler-off wall-time均`未测`，所以不改变本Gate状态。
+`e6958d2a`的exact-row边界之上，`0200b2c8c`又把H/H+1逐command compute的hold/recovery五标量
+收成device tape。exact与hold先在任何D2H前共同核行数/decay/dtype/device，两批都通过
+finite/shape后才在同一owner optimizer transaction中按历史顺序复演Python-double EMA；可见public
+metric与旧逐step路径逐位相等。H/H+1测试把steady command metric transfer数从至少`49/update`
+收成`exact1 + hold1`。这不改Reward28、H48、PPO、task/physics/safety或现役run。
+
+Pod1 fresh exact=`/workspace/franco/mktemp/fullmdp-commandmetric-hold-0200b2c8c-U9xVcX.exact`全绿：四模块
+分跑=`34+69+8+161 passed`，同进程=`272 passed, 0 failed, 0 skipped`。这闭合了fixed CPU tape、
+H/H+1、public metric exact、materialize计数、pending/poison/save/order边界；真实CUDA同步计数、
+fixed-action/finite与profiler-off wall-time仍`未测`，所以不改变本Gate状态。
 
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 

@@ -1,13 +1,16 @@
 # 简短进度记录
 
-## 2026-08-30 — exact FullMDP metric-row合批候选待Pod验收
+## 2026-08-30 — exact + hold/recovery FullMDP metric-row合批已过Pod CPU验收
 
-- 基于`8200c4a2`的独立候选只把H/H+1 exact FullMDP quality metric rows从逐command D2H改为owner
-  optimizer transaction内一次materialize，并按原顺序复演Python EMA；Reward28与其他command D2H不在
-  本切口。
-- 失败边界补齐：materialize/assert在optimizer前对有效active boundary sticky poison且不可重试；snapshot
-  对active/poisoned、joint-safety pending和exact metric tape pending fail-closed。当前仅静态检查；Pod
-  聚焦测试、CUDA fixed-tape/payment/safety parity、finite snapshot与profiler-off wall-time均未测。
+- 在exact-row候选`e6958d2a`上继续的`0200b2c8c`把H/H+1的hold/recovery五标量也保留为
+  device tape，同exact tape在既有owner optimizer transaction的同一materialize边界排空。两批先共同
+  核行数、decay chronology、dtype/device和finite，两次批量D2H都成功后才按原顺序复演
+  Python-double EMA；第二批失败不会半发布exact结果。Reward、Observation、Stage、safety和现役run均未改。
+- Pod1 fresh exact=`/workspace/franco/mktemp/fullmdp-commandmetric-hold-0200b2c8c-U9xVcX.exact`；
+  `test_metric_d2h_batch.py=34 passed`、adapter=`69 passed`、diagnostic packet=`8 passed`、reward flags=
+  `161 passed`，四模块同进程=`272 passed`。H/H+1计数测试确认steady command metric边界只调用
+  `exact1 + hold1`两次row transfer，不再是exact合批后仍剩的至少`49/update`。这是CPU调用计数与
+  语义证据；真实CUDA同步计数、fixed-action parity、finite snapshot和profiler-off wall-time仍`未测`。
 
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 

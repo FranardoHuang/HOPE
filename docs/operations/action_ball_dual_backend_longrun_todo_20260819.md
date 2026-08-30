@@ -300,12 +300,14 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    D2H从48次/update收为一次；(b) selected reset保留唯一preflight而让各owner只写`K`行；(c) Reward28同周期
    staged pack。三者整段硬上界分别`.978/1.863/1.066 s`，都不是预期收益且不能线性相加。已实测回归的逐轮
    unresolved D05 compaction继续拒绝，不因`3,584/290/22`稀疏度再次引入host/device控制流。
-   2026-08-30已形成(a)的独立候选，但尚未Pod验收：它只把exact FullMDP质量指标的H/H+1有序reduction rows
-   留在device，并在已打开的owner optimizer transaction中一次materialize后逐行复演原Python EMA；不声称
-   command的所有D2H都已合并。materialize/assert失败在optimizer前poison同一有效boundary且禁止重试，save
-   对active/poisoned、未清joint-safety或未清exact-metric tape一律拒绝。Reward28没有并入该候选。item 14仍
-   开放，须在Pod完成聚焦测试、固定tape/RNG/reason/counter/safety/payment parity、finite snapshot和
-   profiler-off matched-strata wall-time后才能采纳。
+   2026-08-30的(a)已延伸到`0200b2c8c`：exact与hold/recovery两份H/H+1有序reduction tape都留在
+   device，在已打开的owner optimizer transaction的同一materialize边界各做一次row D2H，再逐行
+   复演原Python EMA。paired count/decay/dtype/device先于D2H共同验证，两批finite/shape都过才开始
+   发布；因此steady command metric调用计数从至少`49/update`收到`exact1 + hold1`。Pod1 fresh
+   exact聚焦套件分跑`34+69+8+161 passed`，同进程`272 passed`；pending/poison/save/order与旧public
+   metric逐位语义已闭合。Reward28没有并入该候选。item 14仍开放：CPU调用计数不等于CUDA
+   wall证据，仍须固定CUDA tape/RNG/reason/counter/safety/payment parity、finite snapshot和profiler-off
+   matched-strata wall-time才能采纳。
 15. [ ] 修复direct-paddle经济轴并fresh双端验证。无条件`4/4/4/2` Mu到ACK623后已最终判负：matched
    ACK0..623相对旧baseline，raw/selected/crossing=`56/5/2` vs `1,665/334/281`；ACK614..623新run的
    position/velocity/face/long-axis误差=`.50920/1.31197/.74428/.61476`，四项都坏于旧baseline的
