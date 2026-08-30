@@ -60,6 +60,7 @@ def solve(args):
     hit = int(args.hit_frame)
     xyzw = Rotation.from_matrix(rotations[hit]).as_quat()
     reference_quat = tuple(float(v) for v in (xyzw[3], xyzw[0], xyzw[1], xyzw[2]))
+    reference_long_axis = rotations[hit] @ P1.ROBOT_BUTT_TO_BLADE_AXIS_LOCAL
     dt = float(source["selected"]["timewarp"]) / float(args.fps)
     reference_omega = tuple(float(v) for v in Rotation.from_matrix(
         rotations[hit + 1] @ rotations[hit - 1].T
@@ -70,6 +71,8 @@ def solve(args):
     ball_center = site + np.asarray(GEOMETRY.quat_rotate_wxyz(
         reference_quat, GEOMETRY.ball_center_from_site_local(args.mount_normal_sign)
     ))
+    face_offset_local = GEOMETRY.face_center_from_site_local(args.mount_normal_sign)
+    face_offset_w = GEOMETRY.quat_rotate_wxyz(reference_quat, face_offset_local)
     center = {
         "site_w_m": ball_center.tolist(),
         "velocity_w_mps": site_velocity.tolist(),
@@ -105,6 +108,7 @@ def solve(args):
     arrays.update({
         "racket_quat_wxyz": np.asarray(reference_quat, np.float32),
         "racket_omega_w_radps": np.asarray(reference_omega, np.float32),
+        "racket_long_axis_w": np.asarray(reference_long_axis, np.float32),
         "ball_center_w_m": ball_center.astype(np.float32),
         "exact_racket_site_target_w_m": np.asarray(exact.racket_site_target_w_m, np.float32),
         "exact_racket_site_velocity_w_mps": np.asarray(exact.racket_site_velocity_w_mps, np.float32),
@@ -125,6 +129,12 @@ def solve(args):
             "ball_center_w_m": ball_center.tolist(),
             "reference_racket_quat_wxyz": list(reference_quat),
             "reference_racket_angular_velocity_w_radps": list(reference_omega),
+            "reference_racket_long_axis_w": reference_long_axis.tolist(),
+            "face_center_from_site_local_m": list(face_offset_local),
+            "face_center_from_site_w_m": list(face_offset_w),
+            "ball_center_from_site_local_m": list(
+                GEOMETRY.ball_center_from_site_local(args.mount_normal_sign)
+            ),
             "racket_command_quat_wxyz": list(exact.racket_command_quat_wxyz),
             "racket_command_angular_velocity_w_radps": list(exact.racket_command_angular_velocity_w_radps),
             "racket_site_target_w_m": list(exact.racket_site_target_w_m),
