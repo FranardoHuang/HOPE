@@ -1441,6 +1441,7 @@ def _run_teacher_replay(
         direct_frame0_applied = torch_module.zeros(
             env.num_envs, dtype=torch_module.bool, device=env.device
         )
+    installed_physical_root_xy_m = None
     question = launch = None
     question_reset_generation = None
     shot_boundary_reason = None
@@ -1473,6 +1474,11 @@ def _run_teacher_replay(
                             handoff_ids
                         )
                     )
+                    installed_physical_root_xy_m = [
+                        float(value) for value in direct_receipt[
+                            "physical_root_xy_m"
+                        ][0].detach().cpu().tolist()
+                    ]
                     direct_frame0_applied |= handoff_due
                 requested = helper.direct_frame0_teacher_qdes(
                     torch=torch_module,
@@ -1797,9 +1803,7 @@ def _run_teacher_replay(
             "diagnostic_unauthorized": True,
             "training_authorized": False,
             "physical_root_xy_m": [
-                float(value) for value in direct_receipt[
-                    "physical_root_xy_m"
-                ][0].detach().cpu().tolist()
+                float(value) for value in installed_physical_root_xy_m
             ],
             "ppo_update_calls": 0,
             "applied": True,
