@@ -553,8 +553,11 @@ def test_full_a_projection_predicted_brake_and_actual_edge_are_nonterminal_telem
     assert env._qdes_guard_terminal.tolist() == [False, False, True, False]
     assert env._actual_hard_edge_latch.tolist() == [False, False, False, True]
     assert env._qdes_guard_intervention.tolist() == [False, True, True, True]
+    # Crossing rows brake by one velocity horizon and never jump to the
+    # opposite joint endpoint.  q=.85,qd=5 -> qdes=.75 -> tau=-.10;
+    # q=1,qd=0 -> nearest executable edge .81 -> tau=-.19.
     torch.testing.assert_close(
-        env.sim.data.ctrl[:, 0], torch.tensor([0.81, -1.66, 0.0, -1.81])
+        env.sim.data.ctrl[:, 0], torch.tensor([0.81, -0.10, 0.0, -0.19])
     )
     terminated, truncated, bits, _resolved = _fullmdp_termination(env)
     assert terminated.tolist() == [False, False, True, False]

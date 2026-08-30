@@ -39,7 +39,6 @@ class ActionBallQdesGuardResult:
     lower_crossing_risk: torch.Tensor
     upper_crossing_risk: torch.Tensor
     unambiguous_crossing_risk: torch.Tensor
-    maximum_inward_target: torch.Tensor
     state_finite: torch.Tensor
 
     @property
@@ -176,12 +175,13 @@ def action_ball_qdes_guard(
     lower_only = lower_crossing_risk & ~upper_crossing_risk
     upper_only = upper_crossing_risk & ~lower_crossing_risk
     unambiguous_crossing_risk = lower_only | upper_only
-    maximum_inward_target = torch.where(
-        lower_only, target_upper, target_lower
-    )
-    guard_target = torch.where(
-        unambiguous_crossing_risk, maximum_inward_target, brake_target
-    )
+    # A measured/ballistic crossing is recoverable.  Use the already bounded
+    # one-step velocity-cancelling target.  At a stationary slight excess this
+    # is exactly the nearest legal boundary; with outward velocity it moves
+    # farther inward by only the distance needed to cancel one policy-step of
+    # momentum.  The former opposite-endpoint target crossed the full joint
+    # range and could itself create a dangerous command discontinuity.
+    guard_target = brake_target
     nominal_source = torch.where(qdes_nonfinite, brake_target, sanitized)
     nominal_target = torch.clamp(
         nominal_source, min=target_lower, max=target_upper
@@ -209,7 +209,6 @@ def action_ball_qdes_guard(
         lower_crossing_risk=lower_crossing_risk,
         upper_crossing_risk=upper_crossing_risk,
         unambiguous_crossing_risk=unambiguous_crossing_risk,
-        maximum_inward_target=maximum_inward_target,
         state_finite=state_finite,
     )
 
