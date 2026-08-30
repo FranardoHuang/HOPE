@@ -983,8 +983,8 @@ def test_reward_template_matches_exact_shared_reward28_contract():
     )
 
     terms = reward_cfg.terms
-    assert mdp.EXPECTED_PAYMENT_COUNT == 14
     contract = H._full_mdp_reward_contract
+    assert contract.LIFECYCLE_PAYMENT_COUNT == 14
     assert len(terms) == contract.REWARD_TERM_COUNT == 28
     assert tuple(term.manager_name for term in terms) == (
         H.ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER
@@ -993,7 +993,9 @@ def test_reward_template_matches_exact_shared_reward28_contract():
     lifecycle_count = contract.LIFECYCLE_PAYMENT_COUNT
     common_end = lifecycle_count + len(contract.COMMON_DENSE_SPECS)
     paddle_end = common_end + len(contract.PADDLE_MOTION_PRIOR_SPECS)
-    assert tuple(term.payment_consumer for term in terms[:lifecycle_count]) == mdp.ORDERED_CONSUMERS
+    assert tuple(term.payment_consumer for term in terms[:lifecycle_count]) == (
+        H._full_mdp_lean_rewards.ORDERED_CONSUMERS
+    )
     assert tuple(
         term.payment_consumer for term in terms[lifecycle_count:common_end]
     ) == tuple(
@@ -1008,32 +1010,7 @@ def test_reward_template_matches_exact_shared_reward28_contract():
         f"regularization:{term.manager_name}" for term in terms[paddle_end:]
     )
     assert tuple(term.func for term in terms) == (
-        mdp.r03_racket_position,
-        mdp.r03_racket_velocity,
-        mdp.r03_racket_normal,
-        mdp.r03_racket_position_coarse,
-        mdp.r03_racket_velocity_coarse,
-        mdp.r03_racket_normal_coarse,
-        mdp.r03_racket_position_precision,
-        mdp.r03_racket_velocity_precision,
-        mdp.r03_racket_normal_precision,
-        mdp.r03_paddle_center_proximity,
-        mdp.physical_selected_contact,
-        mdp.r06_common_on_table_outcome,
-        mdp.r06_post_contact_placement_guidance,
-        mdp.r07_continuous_recovery,
-        *(
-            H._full_mdp_lean_rewards.common_dense_reward
-            for _ in contract.COMMON_DENSE_SPECS
-        ),
-        *(
-            H._full_mdp_lean_rewards.paddle_motion_prior_reward
-            for _ in contract.PADDLE_MOTION_PRIOR_SPECS
-        ),
-        *(
-            H._full_mdp_lean_rewards.regularization_reward
-            for _ in contract.REGULARIZATION_SPECS
-        ),
+        H._full_mdp_lean_rewards.REWARD_TERM_CALLABLES
     )
     assert tuple(term.owner_role for term in terms) == (
         *("r03_owner" for _ in range(10)),
@@ -1162,7 +1139,7 @@ def test_placement_shell_is_common_positive_while_treatment_stays_owner_bound():
     assert not hasattr(right, "action_ball_full_mdp_placement_gain")
 
 
-def test_termination_cfg_is_dedicated_publisher_timeout_and_plant_terminal_graph():
+def test_termination_cfg_is_exact_five_live_terminal_graph():
     _require_live_isaac_import_surface()
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking import mdp
@@ -1171,14 +1148,12 @@ def test_termination_cfg_is_dedicated_publisher_timeout_and_plant_terminal_graph
     assert not isinstance(cfg, H.HOPEActionBallTerminationsCfg)
     assert _public_terms(cfg) == H.ACTION_BALL_FULL_MDP_TERMINATION_MANAGER_ORDER
     assert tuple(getattr(cfg, name).func for name in _public_terms(cfg)) == (
-        mdp.fresh_full_mdp_pre_reward_done_term,
         mdp.time_out,
         mdp.bad_orientation,
         mdp.root_height_below_minimum,
         mdp.pre_clamp_qdes_forbidden_zone,
         mdp.robot_hit_table,
     )
-    assert cfg.fresh_pre_reward_publish.time_out is False
     assert cfg.time_out.time_out is True
     assert all(
         getattr(cfg, name).time_out is False
@@ -1196,6 +1171,22 @@ def test_termination_cfg_is_dedicated_publisher_timeout_and_plant_terminal_graph
         "action_ball_single_stroke_timeout",
         "action_ball_strike_fact_publish",
     }.isdisjoint(_public_terms(cfg))
+
+    terminations = importlib.import_module(
+        "whole_body_tracking.tasks.tracking.mdp.terminations"
+    )
+    materialized = (
+        terminations.materialize_action_ball_full_mdp_lean_termination_manager_cfg(
+            cfg
+        )
+    )
+    assert tuple(materialized) == (
+        terminations.ACTION_BALL_FULL_MDP_LEAN_TERMINATION_MANAGER_ORDER
+    )
+    assert tuple(term.func for term in materialized.values()) == tuple(
+        getattr(cfg, name).func for name in _public_terms(cfg)
+    )
+    assert all(materialized[name] is not getattr(cfg, name) for name in materialized)
 
 
 @pytest.mark.parametrize(

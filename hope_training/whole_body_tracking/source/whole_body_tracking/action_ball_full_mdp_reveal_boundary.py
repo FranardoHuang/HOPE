@@ -1502,7 +1502,6 @@ class ActionBallFullMdpRevealBoundaryOwner:
         self._transfer_success_count = 0
         self._transfer_bytes_total = 0
         self._transfer_elapsed_ns_total = 0
-        self._minted_receipt_count = 0
         self._lane_authorities = tuple(
             ActionBallFullMdpRevealBoundaryLaneAuthority(
                 self,
@@ -1556,11 +1555,6 @@ class ActionBallFullMdpRevealBoundaryOwner:
     def transfer_elapsed_ns_total(self) -> int:
         with self._lock:
             return self._transfer_elapsed_ns_total
-
-    @property
-    def minted_receipt_count(self) -> int:
-        with self._lock:
-            return self._minted_receipt_count
 
     @property
     def lane_authorities(
@@ -2191,7 +2185,6 @@ class ActionBallFullMdpRevealBoundaryOwner:
             _owner_identity=self._identity,
             _auth_token=_RECEIPT_AUTH_TOKEN,
         )
-        self._minted_receipt_count += 1
         self._receipt_registry[receipt.canonical_sha256] = receipt
         self._active_attempt = None
         return receipt

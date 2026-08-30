@@ -1179,7 +1179,7 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     torch.testing.assert_close(critic, expected_critic)
     torch.testing.assert_close(critic[:, :215], policy)
     assert policy.abs().max().item() > 1.0
-    assert bundle.source.semantic_publication_count == 4
+    assert not hasattr(bundle.source, "semantic_publication_count")
 
     # Poison is checked before the hot cache and cannot return a previously
     # finite observation from the same step.
@@ -1355,7 +1355,7 @@ def test_nonfinite_direct_fact_reaches_existing_optimizer_finite_boundary(
     assert torch.isinf(policy[1, 14])
     assert torch.isnan(critic[0, 14])
     assert torch.isinf(critic[1, 14])
-    assert source.semantic_publication_count == 1
+    assert not hasattr(source, "semantic_publication_count")
 
 
 def test_source_has_no_superseded_observation_or_zero_prefix_adapter():

@@ -196,11 +196,6 @@ ACTION_BALL_FULL_MDP_LEAN_TERMINATION_MANAGER_ORDER = (
     "joint_qdes_forbidden",
     "robot_hit_table",
 )
-_ACTION_BALL_FULL_MDP_LEGACY_PRE_REWARD_TERM = "fresh_pre_reward_publish"
-_ACTION_BALL_FULL_MDP_SOURCE_TERMINATION_MANAGER_ORDER = (
-    _ACTION_BALL_FULL_MDP_LEGACY_PRE_REWARD_TERM,
-    *ACTION_BALL_FULL_MDP_LEAN_TERMINATION_MANAGER_ORDER,
-)
 
 
 class ActionBallFullMdpLeanTerminationConstructionHold(RuntimeError):
@@ -227,14 +222,12 @@ def _lean_termination_cfg_items(source_cfg: object) -> tuple[tuple[str, object],
 def materialize_action_ball_full_mdp_lean_termination_manager_cfg(
     source_cfg: object,
 ) -> dict[str, object]:
-    """Cut the retired DoneTerm publisher out of the diagnostic manager graph.
+    """Validate and copy the exact five live termination consumers.
 
     The full-MDP top owns post-physics fact publication before this manager is
-    evaluated.  A non-terminating DoneTerm that publishes the same facts would
-    therefore be a second writer disguised as a timing gate.  This materializer
-    removes exactly that one legacy bridge and preserves the five existing,
-    live consumers: Isaac's episode limit and plant fall checks, the action
-    owner's pre-clamp hard fault, and the live table keep-out.
+    evaluated.  The source therefore contains only Isaac's episode limit and
+    plant fall checks, the action owner's pre-clamp hard fault, and the live
+    table keep-out.
 
     This is a construction join, not safety evidence.  It validates callable
     identity and the frozen narrow parameters so a caller cannot replace a real
@@ -244,7 +237,7 @@ def materialize_action_ball_full_mdp_lean_termination_manager_cfg(
 
     items = _lean_termination_cfg_items(source_cfg)
     if tuple(name for name, _ in items) != (
-        _ACTION_BALL_FULL_MDP_SOURCE_TERMINATION_MANAGER_ORDER
+        ACTION_BALL_FULL_MDP_LEAN_TERMINATION_MANAGER_ORDER
     ):
         raise ActionBallFullMdpLeanTerminationConstructionHold(
             "full-MDP termination source order/surface differs"
@@ -259,19 +252,6 @@ def materialize_action_ball_full_mdp_lean_termination_manager_cfg(
         raise ActionBallFullMdpLeanTerminationConstructionHold(
             "Isaac termination cfg/callables are unavailable"
         ) from exc
-
-    publisher = by_name[_ACTION_BALL_FULL_MDP_LEGACY_PRE_REWARD_TERM]
-    publisher_func = getattr(publisher, "func", None)
-    if (
-        type(publisher) is not termination_cfg_type
-        or getattr(publisher_func, "__name__", None)
-        != "fresh_full_mdp_pre_reward_done_term"
-        or getattr(publisher, "time_out", None) is not False
-        or getattr(publisher, "params", None) not in ({}, None)
-    ):
-        raise ActionBallFullMdpLeanTerminationConstructionHold(
-            "retired pre-reward publisher term differs"
-        )
 
     exact_specs = {
         "time_out": (getattr(isaac_mdp, "time_out", None), True, {}),
