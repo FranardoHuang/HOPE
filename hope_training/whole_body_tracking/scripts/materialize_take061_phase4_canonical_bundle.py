@@ -390,8 +390,12 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     t_hit = float(report["timing"]["t_hit_s"])
     t_cycle = float(report["timing"]["t_cycle_s"])
     reaction = 0.1
+    teacher_rate_min = float(exact["teacher_rate"])
+    if not 0.0 < teacher_rate_min <= 1.0:
+        raise BundleError("Phase4 exact-face teacher rate must lie in (0,1]")
     profile = _singleton_profile(ball_b=ball_b, incoming_b=incoming_b,
-                                 base_xy=root0[:2], ttc=t_hit + reaction)
+                                 base_xy=root0[:2],
+                                 ttc=t_hit / teacher_rate_min + reaction)
     action_uid = manifest_contract.derive_action_ball_action_uid(ACTION_ID, FAMILY, motion_sha)
     solver_sha = profile_pins["solver_profile_sha256"]
     physics_sha = profile_pins["physics_profile_sha256"]
@@ -409,7 +413,8 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
             "strike_phase": HIT_FRAME / (frames - 1), "reference_t_hit_s": t_hit,
             "reference_t_cycle_s": t_cycle,
             "reference_racket_site_speed_mps": float(np.linalg.norm(site_vel[HIT_FRAME])),
-            "reaction_margin_s": reaction, "teacher_rate_min": 0.6, "teacher_rate_max": 1.0,
+            "reaction_margin_s": reaction, "teacher_rate_min": teacher_rate_min,
+            "teacher_rate_max": 1.0,
             "family": FAMILY, "mount_normal_sign": int(exact["mount_normal_sign"]),
             "ball_profile": profile}],
         "curriculum": {"min_proposals": 256, "min_safe_closed": 256,
