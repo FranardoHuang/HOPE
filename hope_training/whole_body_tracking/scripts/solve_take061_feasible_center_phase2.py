@@ -100,47 +100,59 @@ def solve(args):
             robot_ids.append(gid)
 
     candidates = []
+    wrist_index = ready["names"].index("right_wrist_yaw_joint")
     for window in args.windows:
         if window % 2 != 1 or window < 5:
             raise P1.ProducerError("smoothing windows must be odd and >=5")
-        q = _smooth_with_contact_taper(q_seed, ready["ready"], args.hit_frame, window, savgol_filter)
-        sites, faces, longs = _fk_path(mujoco, model, qbase, qadr, site_id, q)
-        faces *= mount_sign
-        for timewarp in args.timewarps:
-            plant = P1._plant_eval(
-                mujoco=mujoco, model=model, qbase=qbase, qadr=qadr, dadr=dadr,
-                root_dadr=root_dadr, q_ref=q, fps=fps, timewarp=timewarp,
-                kp=kp, kd=kd, effort=effort, qdes_lower=qdes_lo,
-                qdes_upper=qdes_hi, table_geom_ids=table_ids,
-                robot_geom_ids=robot_ids,
+        base_q = _smooth_with_contact_taper(
+            q_seed, ready["ready"], args.hit_frame, window, savgol_filter
+        )
+        distance = np.abs(np.arange(len(base_q)) - int(args.hit_frame))
+        inward_taper = np.clip(1.0 - distance / max(2.0, float(window)), 0.0, 1.0)
+        for wrist_bias in args.wrist_inward_biases:
+            q = base_q.copy()
+            q[:, wrist_index] += float(wrist_bias) * inward_taper
+            q[:, wrist_index] = np.clip(
+                q[:, wrist_index], ready["lower"][wrist_index], ready["upper"][wrist_index]
             )
-            velocity = np.gradient(sites, float(timewarp) / fps, axis=0)
-            hit = args.hit_frame
-            row = {
-                "window": int(window),
-                "timewarp": float(timewarp),
-                "q_ref": q,
-                "sites": sites,
-                "faces": faces,
-                "longs": longs,
-                "velocity": velocity,
-                "plant": plant,
-                "center": {
-                    "site_w_m": sites[hit].tolist(),
-                    "velocity_w_mps": velocity[hit].tolist(),
-                    "signed_face_w": faces[hit].tolist(),
-                    "canonical_site_error_m": float(np.linalg.norm(sites[hit] - old_site[hit])),
-                    "canonical_face_error_deg": float(P1._angle_deg(faces[hit], old_face[hit])),
-                    "canonical_long_error_deg": float(P1._angle_deg(longs[hit], old_long[hit])),
-                },
-            }
-            row["mechanically_admitted"] = bool(
-                plant["qdes_margin_min"] >= 0
-                and plant["torque_margin_min"] >= 0
-                and plant["table_distance_min_m"] >= P1.TABLE_CLEARANCE_M - P1.NUMERIC_TOL_M
-                and plant["bilateral_support_frame_fraction"] >= 1.0
-            )
-            candidates.append(row)
+            sites, faces, longs = _fk_path(mujoco, model, qbase, qadr, site_id, q)
+            faces *= mount_sign
+            for timewarp in args.timewarps:
+                plant = P1._plant_eval(
+                    mujoco=mujoco, model=model, qbase=qbase, qadr=qadr, dadr=dadr,
+                    root_dadr=root_dadr, q_ref=q, fps=fps, timewarp=timewarp,
+                    kp=kp, kd=kd, effort=effort, qdes_lower=qdes_lo,
+                    qdes_upper=qdes_hi, table_geom_ids=table_ids,
+                    robot_geom_ids=robot_ids,
+                )
+                velocity = np.gradient(sites, float(timewarp) / fps, axis=0)
+                hit = args.hit_frame
+                row = {
+                    "window": int(window),
+                    "wrist_inward_bias_rad": float(wrist_bias),
+                    "timewarp": float(timewarp),
+                    "q_ref": q,
+                    "sites": sites,
+                    "faces": faces,
+                    "longs": longs,
+                    "velocity": velocity,
+                    "plant": plant,
+                    "center": {
+                        "site_w_m": sites[hit].tolist(),
+                        "velocity_w_mps": velocity[hit].tolist(),
+                        "signed_face_w": faces[hit].tolist(),
+                        "canonical_site_error_m": float(np.linalg.norm(sites[hit] - old_site[hit])),
+                        "canonical_face_error_deg": float(P1._angle_deg(faces[hit], old_face[hit])),
+                        "canonical_long_error_deg": float(P1._angle_deg(longs[hit], old_long[hit])),
+                    },
+                }
+                row["mechanically_admitted"] = bool(
+                    plant["qdes_margin_min"] >= 0
+                    and plant["torque_margin_min"] >= 0
+                    and plant["table_distance_min_m"] >= P1.TABLE_CLEARANCE_M - P1.NUMERIC_TOL_M
+                    and plant["bilateral_support_frame_fraction"] >= 1.0
+                )
+                candidates.append(row)
 
     admitted = [row for row in candidates if row["mechanically_admitted"]]
     chosen = min(
@@ -174,6 +186,7 @@ def solve(args):
         "typed_reject_reasons": reject,
         "selected": {
             "window": chosen["window"],
+            "wrist_inward_bias_rad": chosen["wrist_inward_bias_rad"],
             "timewarp": chosen["timewarp"],
             "center": chosen["center"],
             "plant": plant_summary(chosen["plant"]),
@@ -181,6 +194,7 @@ def solve(args):
         "candidate_summaries": [
             {
                 "window": row["window"], "timewarp": row["timewarp"],
+                "wrist_inward_bias_rad": row["wrist_inward_bias_rad"],
                 "mechanically_admitted": row["mechanically_admitted"],
                 "center": row["center"], "plant": plant_summary(row["plant"]),
             }
@@ -229,6 +243,10 @@ def parser():
     result.add_argument("--hit-frame", type=int, default=48)
     result.add_argument("--windows", type=int, nargs="+", default=[5, 7, 9, 11, 15, 21])
     result.add_argument("--timewarps", type=float, nargs="+", default=[1.0, 1.25, 1.5, 1.75, 2.0])
+    result.add_argument(
+        "--wrist-inward-biases", type=float, nargs="+",
+        default=[0.0, 0.02, 0.04, 0.06, 0.08],
+    )
     return result
 
 
