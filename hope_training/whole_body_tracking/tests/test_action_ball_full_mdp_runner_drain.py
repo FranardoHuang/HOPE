@@ -445,6 +445,58 @@ def _prepare_pending_epoch_summary(runner_module, owner, runner):
     return boundary, summary, active
 
 
+class _CommandMetricBoundaryProbe:
+    _action_ball_full_mdp_command_metrics_device_enabled = True
+
+    def __init__(self, owner, failure=None):
+        self.owner = owner
+        self.failure = failure
+        self.calls = []
+        self.saw_prepared_epoch = False
+
+    def materialize_action_ball_diagnostic_metrics_for_report(
+        self, *, expected_full_mdp_command_metric_steps=None
+    ):
+        self.calls.append(expected_full_mdp_command_metric_steps)
+        self.saw_prepared_epoch = self.owner.epoch_owner._pending_drain is not None
+        if self.failure is not None:
+            raise self.failure
+
+
+def test_command_metric_boundary_runs_after_epoch_prepare_and_counts_genesis(
+    runner_module,
+):
+    owner, _env, _lean, _epoch = _lean_owner(runner_module, [])
+    probe = _CommandMetricBoundaryProbe(owner)
+    owner._racket = probe
+
+    owner.prepare_pre_optimizer_ppo_boundary(
+        update_index=0, completed_environment_steps=4
+    )
+
+    assert probe.calls == [3]
+    assert probe.saw_prepared_epoch is True
+
+
+def test_command_metric_boundary_failure_is_sticky_and_not_retried(runner_module):
+    owner, _env, _lean, _epoch = _lean_owner(runner_module, [])
+    probe = _CommandMetricBoundaryProbe(owner, RuntimeError("metric failure"))
+    owner._racket = probe
+
+    with pytest.raises(RuntimeError, match="metric failure"):
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=4
+        )
+    assert probe.calls == [3]
+    assert probe.saw_prepared_epoch is True
+    assert owner.poisoned is True
+    with pytest.raises(RuntimeError, match="retry is forbidden"):
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=4
+        )
+    assert probe.calls == [3]
+
+
 def _durable_wal_path(runner):
     return (
         Path(runner.log_dir)

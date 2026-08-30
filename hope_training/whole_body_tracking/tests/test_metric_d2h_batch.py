@@ -12,6 +12,7 @@ import inspect
 import math
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -21,6 +22,24 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 from test_reward_flags_mdp import hope_commands_mod  # noqa: E402
+
+
+def test_full_mdp_metric_deferral_recipe_rejects_a_real_rollout_consumer():
+    cfg = SimpleNamespace(
+        action_ball_diagnostic_unauthorized=True,
+        adaptive_sigma=False,
+        adaptive_sigma_monotonic=False,
+        adaptive_sigma_normal=False,
+        virtual_ball=False,
+        vb_metrics_only=False,
+        shadow_ball=False,
+        physical_ball=False,
+        achieved_target_mix_prob=0.0,
+    )
+    predicate = hope_commands_mod._full_mdp_command_metric_deferral_recipe
+    assert predicate(cfg, {0: "take061"}, True) is True
+    cfg.adaptive_sigma = True
+    assert predicate(cfg, {0: "take061"}, True) is False
 
 
 def _exact_reductions(
@@ -203,3 +222,138 @@ def test_per_clip_batched_values_keep_the_legacy_state_transition_order():
     # The single D2H happens early, but the per-clip EMA mutation stays after the historic
     # swing-completion read and immediately before the exact-quality report.
     assert buffered < completion_report < per_clip_update < exact_quality_report
+
+
+def _full_mdp_metric_boundary_command(device):
+    command = hope_commands_mod.RacketTargetCommand.__new__(
+        hope_commands_mod.RacketTargetCommand
+    )
+    command.device = device
+    command.cfg = SimpleNamespace(exact_success_min_count=1.0)
+    command._action_ball_full_mdp_command_metrics_device_enabled = True
+    command._action_ball_full_mdp_command_metric_state = torch.arange(
+        1, 24, dtype=torch.float64, device=device
+    )
+    command._action_ball_full_mdp_command_metric_pending_row = None
+    command._action_ball_full_mdp_command_metric_step_count = 49
+    for name in (
+        "_exact_n_acc", "_exact_pass_comp_acc", "_exact_pass_pos_acc",
+        "_exact_pass_vel_acc", "_exact_pass_5cm_acc", "_exact_pass_10cm_acc",
+        "_exact_pass_normal_acc", "_exact_pos_err_sum", "_exact_vel_err_sum",
+        "_exact_nrm_err_sum", "_heading_expiry_sum_acc", "_heading_expiry_n_acc",
+        "_recovery_spawn_sum_acc", "_recovery_expiry_sum_acc", "_recovery_n_acc",
+    ):
+        setattr(command, name, -1.0)
+    for name in (
+        "_exact_n_acc_c", "_exact_pass_pos_acc_c", "_exact_pass_vel_acc_c",
+        "_exact_pass_normal_acc_c", "_exact_pass_comp_acc_c",
+        "_exact_pos_err_sum_c", "_exact_vel_err_sum_c", "_exact_nrm_err_sum_c",
+    ):
+        setattr(command, name, {0: -1.0})
+    command._exact_composite_rate = -1.0
+    return command
+
+
+def _full_mdp_metric_host_snapshot(command):
+    return (
+        command._exact_n_acc,
+        command._exact_pass_comp_acc,
+        command._exact_n_acc_c[0],
+        command._heading_expiry_sum_acc,
+        command._recovery_n_acc,
+        command._exact_composite_rate,
+    )
+
+
+def test_full_mdp_metric_boundary_validates_before_host_mutation():
+    command = _full_mdp_metric_boundary_command(torch.device("cpu"))
+    before = _full_mdp_metric_host_snapshot(command)
+    with pytest.raises(RuntimeError, match="PPO span differs"):
+        command._materialize_action_ball_full_mdp_command_metrics(48)
+    assert command._action_ball_full_mdp_command_metric_step_count == 49
+    assert _full_mdp_metric_host_snapshot(command) == before
+
+    command._exact_n_acc_c.pop(0)
+    with pytest.raises(RuntimeError, match="bucket key is missing"):
+        command._materialize_action_ball_full_mdp_command_metrics(49)
+    assert command._action_ball_full_mdp_command_metric_step_count == 49
+    command._exact_n_acc_c[0] = -1.0
+    assert _full_mdp_metric_host_snapshot(command) == before
+
+    state_before = command._action_ball_full_mdp_command_metric_state.clone()
+    with pytest.raises(RuntimeError, match="complete device 0-D tensors"):
+        command._action_ball_full_mdp_command_metric_row(
+            (torch.zeros(1),) * 5, width=5
+        )
+    assert torch.equal(command._action_ball_full_mdp_command_metric_state, state_before)
+
+
+def test_full_mdp_metric_boundary_success_commits_fixed_snapshot():
+    command = _full_mdp_metric_boundary_command(torch.device("cpu"))
+    command._action_ball_full_mdp_command_metric_state[0] = 3.21
+    command._action_ball_full_mdp_command_metric_state[1] = 0.1
+    command._materialize_action_ball_full_mdp_command_metrics(49)
+    assert command._action_ball_full_mdp_command_metric_step_count == 0
+    assert command._exact_n_acc == 3.21
+    assert command._exact_n_acc_c[0] == 11.0
+    assert command._heading_expiry_sum_acc == 19.0
+    assert command._recovery_n_acc == 23.0
+    assert command._exact_composite_rate == 0.1 / 3.21
+    assert command._exact_composite_rate != 0.1 * (1.0 / 3.21)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA profiler unavailable")
+def test_full_mdp_metric_boundary_cuda_counts_physical_d2h_and_failure_order():
+    device = torch.device("cuda:0")
+
+    def transfer_count(command, expected, error=None):
+        torch.cuda.synchronize(device)
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ]
+        ) as profiler:
+            if error is None:
+                command._materialize_action_ball_full_mdp_command_metrics(expected)
+            else:
+                with pytest.raises(RuntimeError, match=error):
+                    command._materialize_action_ball_full_mdp_command_metrics(expected)
+            torch.cuda.synchronize(device)
+        return sum(
+            event.name.startswith("Memcpy DtoH")
+            for event in profiler.events()
+        )
+
+    mismatch = _full_mdp_metric_boundary_command(device)
+    assert transfer_count(mismatch, 48, "PPO span differs") == 0
+    assert mismatch._action_ball_full_mdp_command_metric_step_count == 49
+
+    nonfinite = _full_mdp_metric_boundary_command(device)
+    nonfinite._action_ball_full_mdp_command_metric_state[7] = float("nan")
+    before = _full_mdp_metric_host_snapshot(nonfinite)
+    assert transfer_count(nonfinite, 49, "non-finite") == 1
+    assert nonfinite._action_ball_full_mdp_command_metric_step_count == 49
+    assert _full_mdp_metric_host_snapshot(nonfinite) == before
+
+    success = _full_mdp_metric_boundary_command(device)
+    assert transfer_count(success, 49) == 1
+    assert success._action_ball_full_mdp_command_metric_step_count == 0
+
+
+def test_full_mdp_metric_hot_path_keeps_host_packets_off_active_branch():
+    update = inspect.getsource(hope_commands_mod.RacketTargetCommand._update_metrics)
+    hold = inspect.getsource(
+        hope_commands_mod.RacketTargetCommand._update_hold_recovery_metrics
+    )
+    materialize = inspect.getsource(
+        hope_commands_mod.RacketTargetCommand._materialize_action_ball_full_mdp_command_metrics
+    )
+    assert update.index("command_metric_state[:10]") < update.index(
+        "_batched_host_scalar_values(_exact_metric_tensors)"
+    )
+    assert hold.index("command_metric_state[18:].add_") < hold.index(
+        "_batched_host_scalar_values(metric_scalars)"
+    )
+    assert '.to(device="cpu", non_blocking=False)' in materialize
+    assert "reciprocal" not in update
