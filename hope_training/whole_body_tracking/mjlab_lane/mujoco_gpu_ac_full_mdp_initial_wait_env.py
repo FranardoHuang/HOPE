@@ -2213,7 +2213,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
 
     def enable_diagnostic_direct_frame0_playback(
-        self, *, physical_root_xy_m=None
+        self, *, physical_root_xy_m=None, preserve_boundary_root_pose=False
     ) -> None:
         """Enable one N=1 replay-only frame-zero plant intervention.
 
@@ -2230,6 +2230,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             raise RuntimeError("direct frame-zero diagnostic enable differs")
         self._diagnostic_direct_frame0_consumed = self._torch.zeros(
             self.num_envs, dtype=self._torch.bool, device=self.device
+        )
+        if type(preserve_boundary_root_pose) is not bool:
+            raise ValueError(
+                "direct frame-zero diagnostic root-pose mode differs"
+            )
+        self._diagnostic_direct_frame0_preserve_boundary_root_pose = (
+            preserve_boundary_root_pose
         )
         if physical_root_xy_m is None:
             self._diagnostic_direct_frame0_root_xy_m = None
@@ -2472,6 +2479,22 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_teacher.body_pos_w[0, pelvis_index].unsqueeze(0)
             + self.env.scene.env_origins[ids]
         )
+        root_quat_q0 = self._full_a_teacher.body_quat_w[
+            0, pelvis_index
+        ].unsqueeze(0)
+        boundary_root_velocity = data.qvel[
+            ids, self.root_vadr : self.root_vadr + 6
+        ].clone()
+        boundary_root_warmstart = data.qacc_warmstart[
+            ids, self.root_vadr : self.root_vadr + 6
+        ].clone()
+        if self._diagnostic_direct_frame0_preserve_boundary_root_pose:
+            root_pos_q0 = data.qpos[
+                ids, self.root_qadr : self.root_qadr + 3
+            ].clone()
+            root_quat_q0 = data.qpos[
+                ids, self.root_qadr + 3 : self.root_qadr + 7
+            ].clone()
         diagnostic_root_xy = self._diagnostic_direct_frame0_root_xy_m
         if diagnostic_root_xy is not None:
             root_pos_q0 = root_pos_q0.clone()
@@ -2480,9 +2503,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 dtype=root_pos_q0.dtype,
                 device=root_pos_q0.device,
             ).unsqueeze(0) + self.env.scene.env_origins[ids, :2]
-        root_quat_q0 = self._full_a_teacher.body_quat_w[
-            0, pelvis_index
-        ].unsqueeze(0)
         frame0_action = (
             joint_q0 - self.action_offset.unsqueeze(0)
         ) / self.act_scale.unsqueeze(0)
@@ -2537,15 +2557,25 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             data.qpos[ids, self._q_slice] = joint_q0
         else:
             data.qpos[ids[:, None], self.q_adr_act[None, :]] = joint_q0
-        data.qvel[ids, self.root_vadr : self.root_vadr + 6] = 0.0
+        if self._diagnostic_direct_frame0_preserve_boundary_root_pose:
+            data.qvel[
+                ids, self.root_vadr : self.root_vadr + 6
+            ] = boundary_root_velocity
+        else:
+            data.qvel[ids, self.root_vadr : self.root_vadr + 6] = 0.0
         if self._v_slice is not None:
             data.qvel[ids, self._v_slice] = 0.0
         else:
             data.qvel[ids[:, None], self.v_adr_act[None, :]] = 0.0
         def clear_robot_warmstart():
-            data.qacc_warmstart[
-                ids, self.root_vadr : self.root_vadr + 6
-            ] = 0.0
+            if self._diagnostic_direct_frame0_preserve_boundary_root_pose:
+                data.qacc_warmstart[
+                    ids, self.root_vadr : self.root_vadr + 6
+                ] = boundary_root_warmstart
+            else:
+                data.qacc_warmstart[
+                    ids, self.root_vadr : self.root_vadr + 6
+                ] = 0.0
             if self._v_slice is not None:
                 data.qacc_warmstart[ids, self._v_slice] = 0.0
             else:
@@ -2645,6 +2675,14 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         robot_qacc_warmstart_zero = (
             root_warmstart_zero & joint_warmstart_zero
         )
+        root_state_preserved = (
+            data.qvel[ids, self.root_vadr : self.root_vadr + 6]
+            .eq(boundary_root_velocity)
+            .all(dim=1)
+            & data.qacc_warmstart[
+                ids, self.root_vadr : self.root_vadr + 6
+            ].eq(boundary_root_warmstart).all(dim=1)
+        )
         ctrl_zero = data.ctrl[ids].eq(0).all(dim=1)
         controller_history_exact = (
             self.actions[ids].eq(frame0_action).all(dim=1)
@@ -2679,6 +2717,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "frame0_pose_exact": frame0_pose_exact,
             "robot_velocity_zero": robot_velocity_zero,
             "robot_qacc_warmstart_zero": robot_qacc_warmstart_zero,
+            "root_state_preserved": root_state_preserved,
+            "joint_velocity_zero": self._qvel_act()[ids].eq(0).all(dim=1),
+            "joint_qacc_warmstart_zero": joint_warmstart_zero,
             "ctrl_zero": ctrl_zero,
             "controller_history_exact": controller_history_exact,
             "teacher_cache_refreshed": torch.ones(
@@ -2689,6 +2730,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             ),
             "physical_root_xy_m": root_pos_q0[:, :2]
             - self.env.scene.env_origins[ids, :2],
+            "physical_root_pose_source": (
+                "preserved_boundary_with_optional_xy_override"
+                if self._diagnostic_direct_frame0_preserve_boundary_root_pose
+                else "teacher_frame0_with_optional_xy_override"
+            ),
             "installed_frame0_table_keepout": installed_table_keepout,
             "installed_frame0_backend_resolved_table_contact": (
                 installed_resolved_table_contact

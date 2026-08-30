@@ -956,18 +956,16 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
     decoder_abi_atol_rad = float(
         _teacher_replay_module().TEACHER_REPLAY_DECODER_ABI_ATOL_RAD
     )
-    required_bits = (
+    required_bits = [
         "direct_frame0_ball_unchanged",
         "direct_frame0_task_unchanged",
         "direct_frame0_lifecycle_unchanged",
         "direct_frame0_frame0_pose_exact",
-        "direct_frame0_robot_velocity_zero",
-        "direct_frame0_robot_qacc_warmstart_zero",
         "direct_frame0_ctrl_zero",
         "direct_frame0_controller_history_exact",
         "direct_frame0_teacher_cache_refreshed",
         "direct_frame0_actuator_state_absent",
-    )
+    ]
     predicates: dict[str, dict[str, object]] = {}
 
     def add_exact(name, actual, expected) -> None:
@@ -1084,6 +1082,22 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
         "intervention_count_exactly_one", int(intervention_rows.size), 1
     )
     index = int(intervention_rows[0]) if intervention_rows.size > 0 else None
+    preserve_root = bool(
+        index is not None
+        and arrays["direct_frame0_preserve_boundary_root_state"][index, 0]
+    )
+    required_bits.extend(
+        (
+            "direct_frame0_root_state_preserved",
+            "direct_frame0_joint_velocity_zero",
+            "direct_frame0_joint_qacc_warmstart_zero",
+        )
+        if preserve_root
+        else (
+            "direct_frame0_robot_velocity_zero",
+            "direct_frame0_robot_qacc_warmstart_zero",
+        )
+    )
     if index is None:
         for name in required_bits:
             add_not_evaluated(name, True, "no intervention row")
@@ -1356,6 +1370,7 @@ def _validate_or_raise_direct_frame0(
 def _run_teacher_replay(
     *, env, root: Path, identity: dict, ready_pose_payload: bytes,
     steps: int, handoff_mode: str, torch_module, physical_root_xy_m=None,
+    preserve_boundary_root_pose: bool = False,
 ) -> dict:
     """Drive the live FullMDP owner with its own frozen measured teacher."""
 
@@ -1388,9 +1403,10 @@ def _run_teacher_replay(
     )
     if direct_frame0:
         env.enable_diagnostic_direct_frame0_playback(
-            physical_root_xy_m=physical_root_xy_m
+            physical_root_xy_m=physical_root_xy_m,
+            preserve_boundary_root_pose=preserve_boundary_root_pose,
         )
-    elif physical_root_xy_m is not None:
+    elif physical_root_xy_m is not None or preserve_boundary_root_pose:
         raise ValueError(
             "teacher replay root XY requires direct frame-zero playback"
         )
@@ -1406,6 +1422,8 @@ def _run_teacher_replay(
         "actual_root_position_w", "actual_root_quaternion_wxyz",
         "actual_root_velocity_w", "tau_raw_abs_max",
         "tau_clamped_abs_max",
+        "teacher_racket_site_w", "teacher_racket_velocity_w",
+        "teacher_racket_normal_w",
         "ball_center_w", "ball_lin_vel_w", "racket_site_w",
         "racket_velocity_w", "racket_normal_w", "scheduled_due", "reveal",
         "launch", "r03", "generic_contact", "selected_contact",
@@ -1430,6 +1448,10 @@ def _run_teacher_replay(
             "direct_frame0_frame0_pose_exact",
             "direct_frame0_robot_velocity_zero",
             "direct_frame0_robot_qacc_warmstart_zero",
+            "direct_frame0_preserve_boundary_root_state",
+            "direct_frame0_root_state_preserved",
+            "direct_frame0_joint_velocity_zero",
+            "direct_frame0_joint_qacc_warmstart_zero",
             "direct_frame0_ctrl_zero",
             "direct_frame0_controller_history_exact",
             "direct_frame0_teacher_cache_refreshed",
@@ -1445,6 +1467,7 @@ def _run_teacher_replay(
             env.num_envs, dtype=torch_module.bool, device=env.device
         )
     installed_physical_root_xy_m = None
+    installed_physical_root_pose_source = None
     question = launch = None
     question_reset_generation = None
     shot_boundary_reason = None
@@ -1481,6 +1504,9 @@ def _run_teacher_replay(
                         float(value) for value in direct_receipt[
                             "physical_root_xy_m"
                         ][0].detach().cpu().tolist()
+                    ]
+                    installed_physical_root_pose_source = direct_receipt[
+                        "physical_root_pose_source"
                     ]
                     direct_frame0_applied |= handoff_due
                 requested = helper.direct_frame0_teacher_qdes(
@@ -1574,6 +1600,15 @@ def _run_teacher_replay(
             rows["tau_clamped_abs_max"].append(host(
                 trace["tau_clamped_abs_max"]
             ))
+            rows["teacher_racket_site_w"].append(host(
+                env._aligned_teacher_racket_site_pos_w
+            ))
+            rows["teacher_racket_velocity_w"].append(host(
+                env._aligned_teacher_racket_site_lin_vel_w
+            ))
+            rows["teacher_racket_normal_w"].append(host(
+                env._aligned_teacher_racket_signed_normal_w
+            ))
             rows["ball_center_w"].append(host(env.sim.data.qpos[:, env.b_q:env.b_q + 3]))
             rows["ball_lin_vel_w"].append(host(env.sim.data.qvel[:, env.b_v:env.b_v + 3]))
             rows["racket_site_w"].append(host(racket[0] + env.env.scene.env_origins))
@@ -1636,6 +1671,10 @@ def _run_teacher_replay(
                     "direct_frame0_frame0_pose_exact": direct_bool,
                     "direct_frame0_robot_velocity_zero": direct_bool,
                     "direct_frame0_robot_qacc_warmstart_zero": direct_bool,
+                    "direct_frame0_preserve_boundary_root_state": direct_bool,
+                    "direct_frame0_root_state_preserved": direct_bool,
+                    "direct_frame0_joint_velocity_zero": direct_bool,
+                    "direct_frame0_joint_qacc_warmstart_zero": direct_bool,
                     "direct_frame0_ctrl_zero": direct_bool,
                     "direct_frame0_controller_history_exact": direct_bool,
                     "direct_frame0_teacher_cache_refreshed": direct_bool,
@@ -1697,6 +1736,21 @@ def _run_teacher_replay(
                         ],
                         "direct_frame0_robot_qacc_warmstart_zero": direct_receipt[
                             "robot_qacc_warmstart_zero"
+                        ],
+                        "direct_frame0_preserve_boundary_root_state": (
+                            torch_module.full_like(
+                                direct_receipt["applied"],
+                                preserve_boundary_root_pose,
+                            )
+                        ),
+                        "direct_frame0_root_state_preserved": direct_receipt[
+                            "root_state_preserved"
+                        ],
+                        "direct_frame0_joint_velocity_zero": direct_receipt[
+                            "joint_velocity_zero"
+                        ],
+                        "direct_frame0_joint_qacc_warmstart_zero": direct_receipt[
+                            "joint_qacc_warmstart_zero"
                         ],
                         "direct_frame0_ctrl_zero": direct_receipt[
                             "ctrl_zero"
@@ -1829,6 +1883,9 @@ def _run_teacher_replay(
             "physical_root_xy_m": [
                 float(value) for value in installed_physical_root_xy_m
             ],
+            "physical_root_pose_source": (
+                installed_physical_root_pose_source
+            ),
             "ppo_update_calls": 0,
             "applied": True,
             "validation": validation,
@@ -2286,6 +2343,7 @@ def main(
     diagnostic_teacher_replay_steps: int = 180,
     diagnostic_teacher_replay_handoff_mode: str = "split_ready_bridge",
     diagnostic_teacher_replay_physical_root_xy_m=None,
+    diagnostic_teacher_replay_preserve_boundary_root_pose: bool = False,
     _test_allow_small_full_a: bool = False,
 ) -> int:
     num_steps_per_env = NUM_STEPS_PER_ENV
@@ -2306,6 +2364,7 @@ def main(
         or type(diagnostic_rate_probe) is not bool
         or type(diagnostic_controller_trace_steps) is not int
         or type(diagnostic_teacher_replay) is not bool
+        or type(diagnostic_teacher_replay_preserve_boundary_root_pose) is not bool
         or type(diagnostic_teacher_replay_steps) is not int
         or type(diagnostic_teacher_replay_handoff_mode) is not str
         or diagnostic_teacher_replay_handoff_mode
@@ -2507,6 +2566,9 @@ def main(
             steps=diagnostic_teacher_replay_steps,
             handoff_mode=diagnostic_teacher_replay_handoff_mode,
             physical_root_xy_m=diagnostic_teacher_replay_physical_root_xy_m,
+            preserve_boundary_root_pose=(
+                diagnostic_teacher_replay_preserve_boundary_root_pose
+            ),
             torch_module=torch,
         )
         _best_effort_stdout_marker(
@@ -2826,6 +2888,10 @@ if __name__ == "__main__":
         nargs=2,
         type=float,
         metavar=("X_M", "Y_M"),
+    )
+    parser.add_argument(
+        "--diagnostic-teacher-replay-preserve-boundary-root-pose",
+        action="store_true",
     )
     parser.add_argument("--evidence-jsonl")
     parser.add_argument("--snapshot-dir")

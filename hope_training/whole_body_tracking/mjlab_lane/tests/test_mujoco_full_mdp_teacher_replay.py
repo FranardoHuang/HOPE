@@ -284,6 +284,48 @@ def test_direct_frame0_diagnostic_can_recenter_only_physical_root_xy():
     assert bool(receipt["frame0_pose_exact"][0])
 
 
+def test_direct_frame0_can_preserve_boundary_root_state_and_recenter_xy():
+    env, joint_q0, _forward_calls = _direct_frame0_install_rig()
+    ids = torch.tensor([0], dtype=torch.long)
+    env.sim.data.qpos[0, :7] = torch.tensor(
+        [0.07, -0.04, 1.13, 0.98, 0.02, -0.03, 0.19]
+    )
+    env.sim.data.qpos[0, 3:7] /= torch.linalg.vector_norm(
+        env.sim.data.qpos[0, 3:7]
+    )
+    root_quat = env.sim.data.qpos[:, 3:7].clone()
+    root_velocity = torch.arange(6, dtype=torch.float32).unsqueeze(0) / 10
+    root_warmstart = -root_velocity.clone()
+    env.sim.data.qvel[:, :6] = root_velocity
+    env.sim.data.qacc_warmstart[:, :6] = root_warmstart
+    ball_before = env.sim.data.qpos[:, env.b_q:env.b_q + 7].clone()
+    task_before = env._epoch_task_f32.clone()
+    env.enable_diagnostic_direct_frame0_playback(
+        physical_root_xy_m=(-0.192232, 0.285279),
+        preserve_boundary_root_pose=True,
+    )
+    receipt = env.install_diagnostic_direct_frame0_playback(ids)
+    torch.testing.assert_close(env._qpos_act(), joint_q0, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(env.sim.data.qpos[:, 2:3], torch.tensor([[1.13]]))
+    torch.testing.assert_close(env.sim.data.qpos[:, 3:7], root_quat)
+    torch.testing.assert_close(env.sim.data.qvel[:, :6], root_velocity)
+    torch.testing.assert_close(
+        env.sim.data.qacc_warmstart[:, :6], root_warmstart
+    )
+    assert torch.equal(env.sim.data.qvel[:, 6:37], torch.zeros((1, 31)))
+    assert torch.equal(
+        env.sim.data.qacc_warmstart[:, 6:37], torch.zeros((1, 31))
+    )
+    assert torch.equal(env.sim.data.qpos[:, env.b_q:env.b_q + 7], ball_before)
+    assert torch.equal(env._epoch_task_f32, task_before)
+    assert bool(receipt["root_state_preserved"][0])
+    assert bool(receipt["joint_velocity_zero"][0])
+    assert bool(receipt["joint_qacc_warmstart_zero"][0])
+    assert receipt["physical_root_pose_source"] == (
+        "preserved_boundary_with_optional_xy_override"
+    )
+
+
 @pytest.mark.parametrize("value", ((float("nan"), 0.0), (0.0,), "bad"))
 def test_direct_frame0_diagnostic_root_xy_is_finite_pair(value):
     env, _joint_q0, _forward_calls = _direct_frame0_install_rig()
@@ -425,6 +467,9 @@ def _valid_direct_frame0_validation_arrays():
         "post_teacher_frame": np.asarray([[1], [2]], dtype=np.int64),
         "pre_teacher_frame": np.asarray([[0], [1]], dtype=np.int64),
         "done": np.zeros((2, 1), dtype=np.bool_),
+        "direct_frame0_preserve_boundary_root_state": np.zeros(
+            (2, 1), dtype=np.bool_
+        ),
     }
     for name in (
         "direct_frame0_ball_unchanged",
@@ -437,6 +482,9 @@ def _valid_direct_frame0_validation_arrays():
         "direct_frame0_controller_history_exact",
         "direct_frame0_teacher_cache_refreshed",
         "direct_frame0_actuator_state_absent",
+        "direct_frame0_root_state_preserved",
+        "direct_frame0_joint_velocity_zero",
+        "direct_frame0_joint_qacc_warmstart_zero",
     ):
         arrays[name] = np.asarray([[True], [False]], dtype=np.bool_)
     for name in (
