@@ -42,6 +42,35 @@ def _five_boxes():
     return lo, hi
 
 
+def _sat_separation_reserve_m(center, half_axes, lo, hi):
+    """Return the largest normalized separating-axis gap in metres."""
+
+    box_center = 0.5 * (lo + hi)
+    box_half = 0.5 * (hi - lo)
+    delta = box_center - center
+    axis_norms = np.linalg.norm(half_axes, axis=1)
+    unit_axes = half_axes / axis_norms[:, None]
+    candidate_axes = [*np.eye(3, dtype=np.float64), *unit_axes]
+    candidate_axes.extend(
+        np.cross(obb_axis, world_axis)
+        for obb_axis in unit_axes
+        for world_axis in np.eye(3, dtype=np.float64)
+    )
+    reserve = -np.inf
+    for axis in candidate_axes:
+        norm = float(np.linalg.norm(axis))
+        if norm <= np.finfo(np.float64).tiny:
+            continue
+        direction = axis / norm
+        separation = abs(float(np.dot(delta, direction)))
+        obb_radius = float(
+            np.sum(np.abs(np.sum(half_axes * direction[None, :], axis=-1)))
+        )
+        box_radius = float(np.sum(box_half * np.abs(direction)))
+        reserve = max(reserve, separation - obb_radius - box_radius)
+    return float(reserve)
+
+
 def test_component_ids_are_immutable_output_of_the_verified_artifact_parse(
     monkeypatch, tmp_path
 ):
@@ -93,9 +122,17 @@ def test_measured_hand_racket_empty_corner_is_removed_with_five_mm_reserve():
         "ij,cj->ci", rotation, local_centers
     )
     axes = np.einsum("ij,ckj->cki", rotation, local_axes)
+    standard_lo = np.asarray((0.48, -0.7825, 0.69), dtype=np.float64)
+    standard_hi = np.asarray((3.26, 0.7825, 0.78), dtype=np.float64)
+    standard_reserve = min(
+        _sat_separation_reserve_m(center, half_axes, standard_lo, standard_hi)
+        for center, half_axes in zip(centers, axes)
+    )
+    assert standard_reserve == pytest.approx(0.0248838, abs=1.0e-6)
+
     # Existing 20 mm top bounds, then another 5 mm on every face.
-    lo = np.asarray(((0.475, -0.7875, 0.685),), dtype=np.float64)
-    hi = np.asarray(((3.265, 0.7875, 0.785),), dtype=np.float64)
+    lo = np.asarray((standard_lo - 0.005,), dtype=np.float64)
+    hi = np.asarray((standard_hi + 0.005,), dtype=np.float64)
     exact = term._obb_aabb_sat_overlap(
         centers,
         axes,
@@ -104,6 +141,11 @@ def test_measured_hand_racket_empty_corner_is_removed_with_five_mm_reserve():
         np.ones((2, 1), dtype=bool),
     )
     assert not bool(np.any(exact))
+    expanded_reserve = min(
+        _sat_separation_reserve_m(center, half_axes, lo[0], hi[0])
+        for center, half_axes in zip(centers, axes)
+    )
+    assert expanded_reserve == pytest.approx(0.0198838, abs=1.0e-6)
 
 
 def test_numpy_guard_matches_inclusive_exact_and_nonfinite_semantics():

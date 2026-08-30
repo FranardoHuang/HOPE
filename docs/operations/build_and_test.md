@@ -79,6 +79,41 @@ python3 -m pytest -q \
 [action-ball 实验](../experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md)，
 不能只写聊天摘要。
 
+<a id="a3-table-collision-proxy-v2"></a>
+
+## A3 table collision proxy v2（Pod-only）
+
+v2 将 `right_hand_pingpang_link.stl` 的完整 convex hull 切成最少两个保守
+OBB，并将 canonical MuJoCo 的真实 wrist/racket mesh hull 和 analytic primitives
+一起纳入覆盖。物化依赖钉死的 Linux 系统 NumPy/SciPy/Qhull，因此不允许在
+macOS host 用另一套 Python 生成或验收；运行时 loader 只读物化字节，
+不在训练热路重算。
+
+在 clean exact Pod checkout 上检查工件可复现：
+
+```bash
+PYTHONPATH=/usr/lib/python3/dist-packages /usr/bin/python3 -S \
+  hope_training/whole_body_tracking/scripts/materialize_a3_table_collision_proxy.py \
+  --runtime-usd-bundle-root \
+  /workspace/franco/runtime_assets/a3p0807_preconverted_usd_13e5ecfe \
+  --check
+```
+
+聚焦 CPU 回归：
+
+```bash
+/workspace/hope_isaac_venv/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_materialize_a3_table_collision_proxy.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_native_table_termination.py \
+  hope_training/whole_body_tracking/tests/test_table_proxy_plant_identity.py \
+  hope_training/whole_body_tracking/tests/test_table_obstacle_termination.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_native_isaac_live_constants.py
+```
+
+MJLab device SAT 回归只能在确认无 owner 冲突的空闲 GPU 上跑；不得为此
+signal/停掉或污染 active run。任意 pass count 只证明 materializer/loader/SAT 合同，
+不代表 teacher 轨迹、Reward 或训练通过。
+
 ## Planner Unit Tests
 
 Run from the package directory:

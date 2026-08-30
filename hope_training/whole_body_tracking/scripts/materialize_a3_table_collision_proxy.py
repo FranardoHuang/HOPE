@@ -1416,8 +1416,11 @@ def _artifact(
                         ),
                     )
                 ]
-                # A convex box containing every source vertex contains their
-                # convex hull, exactly the geometry used by both backends.
+                # A convex box containing every source vertex contains the
+                # Isaac convex-hull collider.  MuJoCo's canonical plant does
+                # not use the same collision inventory; its exact mesh and
+                # analytic primitives are incorporated below before this row
+                # is allowed into the shared guard artifact.
                 leaf_primitive_indices = [tuple(range(len(source_vertices)))]
                 leaf_fit_receipts = [
                     {

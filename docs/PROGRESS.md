@@ -1,5 +1,21 @@
 # 简短进度记录
 
+## 2026-08-30 — component-55 multi-OBB shared-guard 候选
+
+- 确认 frozen-teacher 的 `right_hand_pingpang_link.stl` single OBB 是空角误报：
+  旧 20 mm guard margin `-1.018 mm`，原 mesh/hull 垂直净空 `72.239 mm`。不改
+  20 mm，不删 component；完整 convex hull 以 610 个 tetra 确定性分为 2 个
+  PCA OBB，只把 runtime row 从 `62` 增到 `63`（约 `+1.6%`）。
+- 纠正“双端都用 whole hand STL hull”的旧表述：Isaac split collider 与
+  MuJoCo optimized mesh + analytic primitive 库不同。v2 物化 exact MuJoCo
+  MJCF/inventory 并用 support interval 覆盖完整 collider；双 loader 钉死
+  schema/plant/artifact/MJCF/binding identity，运行时不重算 hull。
+- 冻结 witness 在标准 20 mm guard 下的新 reserve 为 `+24.884 mm`，同一桌盒
+  额外扩 5 mm 后仍 `+19.884 mm`。当前只是功能分支候选，未触碰
+  active run；Pod exact materializer/check、回归与合入后双端 replay 未完成前，
+  不写成 teacher/Reward/训练通过。详见
+  [collision proxy 实验 §9](experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#9-2026-08-30-v2从-single-obb-空角改为双端-actual-collider-union)。
+
 ## 2026-08-30 — frozen-teacher Pod targeted失败修复候选
 
 - teacher replay新增pre-reset表碰归因，不改默认训练和termination：仅在已启用

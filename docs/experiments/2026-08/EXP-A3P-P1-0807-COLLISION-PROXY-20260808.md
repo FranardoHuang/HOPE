@@ -1,7 +1,9 @@
 # EXP-A3P-P1-0807-COLLISION-PROXY-20260808
 
-Status: 代理已重做并落库；两个引擎的门已同强度；变异测试 23 条全绿；
-Isaac 实跑 C0/A0 `materialize → recipe → oracle32` 见 §7。
+Status: v1 代理已重做并落库；两个引擎的门已同强度；变异测试 23 条全绿；
+Isaac 实跑 C0/A0 `materialize → recipe → oracle32` 见 §7。2026-08-30 的 v2
+multi-OBB 是功能分支候选：已绑定双端实际 collider 并集与不变的 20 mm
+no-touch；合入/现役运行替换仍未授权，详见 §9。
 
 Evidence: 纯 CPU 几何重算（可复现）＋ pod 上对真 bundle 的派生证明 ＋ 变异测试 ＋ Isaac 实跑
 解释器：`/workspace/hope_isaac_venv/bin/python`（Python 3.10.18）
@@ -354,3 +356,83 @@ commit `d724faaa`，USD bundle
   （`configs/phase1_balance_action_slew_launch_manifest_20260720.json`、
   `configs/phase1_lower_body_stability_launch_manifest_20260720.json`）
   是历史作业记录，不动。
+
+## 9. 2026-08-30 v2：从 single OBB 空角改为双端 actual-collider union
+
+### 9.1 根因与不可改的边界
+
+frozen-teacher replay 的 component 55
+`right_hand_pingpang_link.stl` 在现有 20 mm 桌面守卫上给出
+`-1.018 mm` SAT overlap，但原 mesh / convex hull 对同一桌面的垂直净空是
+`72.239 mm`。这是非凸手掌+球拍被一个大盒子包住后产生的空角误报，
+不是真实触桌。处置边界因此是：
+
+- `20 mm` no-touch 原样保留；
+- 不删 component，不缩 margin，不用 raw surface 冒充 backend collision volume；
+- shared guard 必须保守覆盖 Isaac 与 MuJoCo **实际 live collider 的并集**。
+
+这也纠正一个旧表述：两端并不是都用整个
+`right_hand_pingpang_link.stl` 的 whole-mesh convex hull。Isaac FullMDP split live stage
+关掉旧的 merged wrist collision，打开 red / black / handle / wrist-shell 四个
+`convexHull` mesh；其中 handle 是原 hand STL 的完整三角形子集。MuJoCo
+canonical MJCF 则用 optimized wrist/racket mesh，再加 palm ellipsoid、finger/thumb
+capsule 和 handle capsule。所以 v2 同时封存 Isaac source-hull cover 与 exact
+MuJoCo collision inventory，不再用一句“双端同 STL”代签。
+
+### 9.2 最小保守分解
+
+`right_hand_pingpang_link.stl` 共 `10,258` 三角形、`4,584` 唯一顶点。在钉死的
+NumPy `1.26.4` / SciPy `1.11.4` / Qhull `Qt` 上，全局 convex hull 为
+`307` 顶点、`610` facet。生产器用一个严格内部点将每个完整 facet
+连成 `610` 个 tetrahedron，每个 tetrahedron 只归一个 leaf；后验钉死：
+
+- tetra 体积和与 hull 体积 `0.0016095072911877638 m³` 的绝对误差为
+  `6.505e-19 m³`；
+- 两个 leaf 各 `305` tetra，每个 tetra 的四顶点均在所属 OBB 内；
+- PCA 基的 eigenvalue 降序、`1e-10` 近简并 tie group、轴符号和右手系
+  都显式 canonicalize，不接受平台任意 eigenvector 符号；
+- 序列化为 float32 后再做全顶点覆盖后验，并有 `1 µm` 外扩。
+
+只有这一个 source component 从 1 leaf 切为 2 leaves；其余 61 个仍为
+1 leaf。因此 source component 仍是 `62`，runtime proxy row 是 `63`，相对 v1
+只增 `1/62 ≈ 1.6%` SAT row，不是 64-leaf 或成倍 guard。两个 row
+共用同一 `source_component_id`，但各有独立 `component_id=#obb0000/0001`；
+报表不得把 `63` 误写成 `63` 个 source mesh。
+
+MuJoCo 实际 wrist 形状不全在 source hull 内，所以生产器又将每个完整
+mesh hull / ellipsoid / capsule 分配给其中一个 leaf，用解析 support interval
+扩展该 OBB，再做 float32 后验。最坏 projection interval 仍有
+`1.001 µm` 内含 reserve；没有靠表面采样声称覆盖整个几何体。
+
+### 9.3 冻结 witness 与身份
+
+在 frozen component-55 owner pose 上，v2 两个 expanded leaf 对原 20 mm table-top
+guard 的最小归一化 SAT reserve 为 `+24.884 mm`；将同一 table AABB 六面
+再扩 `5 mm` 后仍为 `+19.884 mm`。这比“把 -1.018 mm 翻成一个很小正数”
+更强，且不改 20 mm 语义。回归用同一 owner pose 与 production 15-axis SAT
+直接钉住这两个数。
+
+v2 工件与身份（分支候选，不代表现役 run 已替换）：
+
+| 项 | 值 |
+| --- | --- |
+| schema / artifact type | `2` / `a3_table_collision_component_multi_obb_v2` |
+| artifact file SHA-256 | `7f26e55b2f24b02f751c7b078f94426ec2524c810b0ff6cb5cfea58e884e07cc` |
+| artifact `content_sha256` | `249030faeabce9a99908cbb441e00baddca2d8fcc1bbe5a4bfe81e16b591f17d` |
+| plant identity | `a3_collision_proxy_plant_identity_v2` |
+| target hull geometry SHA-256 | `96b05900b79150be2546423adf8a4f2e9db700ed9870e1c9148a57a72ee288a0` |
+| MuJoCo MJCF SHA-256 | `70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a` |
+| MuJoCo collision binding content SHA-256 | `e81780c50f3c92da4ea6561c26c7da3faf0be24ecd8cfd7025cde159b9bdad3e` |
+
+loader 只消费已物化字节，不在训练热路重算 hull/PCA。Isaac 与 MuJoCo
+都校验 v2 schema、file/content SHA、plant identity、source/proxy count，并校验
+exact MuJoCo MJCF / collider inventory / binding SHA。任一漂移都 fail closed。
+
+### 9.4 证据边界
+
+此 v2 只修 shared geometric table guard 的 conservative cover，不改 Reward、teacher、
+policy observation、PPO、table margin 或 active run。生产器与聚焦回归只允许在
+Pod exact checkout 执行，命令见
+[Build And Test](../../operations/build_and_test.md#a3-table-collision-proxy-v2)。通过回归只能将
+v2 称为 merge candidate；未在 clean adopted source 上重放真实双端的同一
+teacher tape 前，不能把它写成新的训练/物理结果。

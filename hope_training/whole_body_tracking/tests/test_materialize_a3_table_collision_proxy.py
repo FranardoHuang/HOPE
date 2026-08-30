@@ -75,7 +75,10 @@ def test_tracked_multi_obb_artifact_seals_full_hull_tetra_cover():
     assert document["plant_identity"]["kind"] == M.PLANT_IDENTITY_KIND
     decomposition = document["decomposition"]
     assert decomposition["algorithm"] == M.TRIANGLE_PARTITION_ALGORITHM
-    assert decomposition["backend_collision_authority"].startswith("convex hull")
+    assert decomposition["backend_collision_authority"] == (
+        "Isaac split meshes under convexHull plus exact canonical MuJoCo "
+        "mesh hulls and analytic wrist primitives"
+    )
     assert decomposition["float32_coverage_validated"] is True
     assert decomposition["hull_toolchain"] == {
         "numpy_version": M.PINNED_HULL_NUMPY_VERSION,
@@ -112,6 +115,9 @@ def test_tracked_multi_obb_artifact_seals_full_hull_tetra_cover():
     hull = receipt["convex_hull"]
     assert hull["hull_vertex_count"] == 307
     assert hull["facet_count"] == hull["tetra_count"] == 610
+    assert hull["hull_geometry_sha256"] == (
+        "96b05900b79150be2546423adf8a4f2e9db700ed9870e1c9148a57a72ee288a0"
+    )
     assert receipt["leaf_primitive_counts"] == [305, 305]
     assert hull["tetra_fan_volume_abs_error_m3"] <= 1.0e-15
     mu_binding = document["mujoco_actual_collision_binding"]
@@ -121,6 +127,7 @@ def test_tracked_multi_obb_artifact_seals_full_hull_tetra_cover():
     } == set(M.MUJOCO_COLLISION_SOURCE_GROUPS)
     mu_cover = receipt["mujoco_actual_collision_cover"]
     assert mu_cover["max_float32_projection_interval_excess_m"] <= 0.0
+    assert mu_cover["max_float32_projection_interval_excess_m"] <= -1.0e-6
     assert {
         row["name"] for row in mu_cover["leaf_by_primitive"]
     } == {

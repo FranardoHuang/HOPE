@@ -7024,3 +7024,20 @@ clean `3343fe90` centered record两端48 tick均无Done，却显示Isaac相对�
 先逼近hard-inner的后果。shared decoder错误已排除。旧nominal-hold PASS末端其实已是
 `waist_roll=-.3205 rad, dq=-1.19 rad/s`，今后只称60-tick nonterminal prefix，不称稳定hold/readiness。
 G05继续`Partial`且`diagnostic_unauthorized=true`。
+
+### 2026-08-30 component-55 multi-OBB v2 候选（Gate 仍 `Partial`）
+
+frozen witness 已证明旧 single OBB 在 20 mm 桌面守卫上产生
+`-1.018 mm` 空角误报，而原 mesh/hull 仍有 `72.239 mm` 垂直净空。候选
+v2 不改 20 mm，不删 component；它将完整 610-tetra convex hull 确定性分为
+2 个 PCA OBB，并把 exact canonical MuJoCo wrist/racket mesh hull 与 analytic
+primitives 保守扩入同两个 leaf。source `62` 个 component 只变成 `63` 个
+runtime row，预期 SAT row 增量约 `1.6%`。冻结 owner pose 上新 reserve 为
+`+24.884 mm`；桌盒再扩 5 mm 仍为 `+19.884 mm`。
+
+Isaac 与 MuJoCo 的 actual collider 不同；不得再写成“双端都是整个
+hand STL hull”。v2 artifact/schema/plant identity 及 exact MuJoCo MJCF/inventory 已版本化，
+loader 只读物化字节。它尚是 branch candidate，不改 active run；clean Pod
+materializer/check、聚焦回归和合入后同带 replay 前，不能将这一几何修复写成
+teacher/Reward/训练通过。详见
+[collision proxy 实验 §9](../experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#9-2026-08-30-v2从-single-obb-空角改为双端-actual-collider-union)。

@@ -36,7 +36,7 @@ ISAAC_TERMINATION_CONFIG = (
     "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
 )
 EXPECTED_ISAAC_TERMINATION_CONFIG_SEMANTIC_AST_SHA256 = (
-    "a6607ef2df55d25ab37d41ea40f1c8ab51b31ad41b278450c2848f5a2fdff4d3"
+    "5f181db22f4d30e3582b13364eda4bcd70c0d8cc1a7c3d3dcf5a71ed135b6e21"
 )
 ISAAC_TERMINATION_CALLABLES = (
     REPO_ROOT
@@ -44,7 +44,7 @@ ISAAC_TERMINATION_CALLABLES = (
     "whole_body_tracking/tasks/tracking/mdp/terminations.py"
 )
 EXPECTED_ISAAC_TERMINATION_CALLABLES_SEMANTIC_AST_SHA256 = (
-    "25683f03897c252577ae8384e4bca6d4d62ab7ac1c60c2b02f329a8a57a37de9"
+    "53e3e1c7f5258756fe3e77cbf97092fc646623453d1db3387f0112fc6a465597"
 )
 #: Hoisted so the re-pin helpers in the tests read the live selector list
 #: instead of keeping a fourth hand-copy of it.  A selector added here is

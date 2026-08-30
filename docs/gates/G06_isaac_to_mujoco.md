@@ -2707,3 +2707,22 @@ component label现与几何共同来自production authority首轮strict+SHA解�
 较早的SAT overlap。只有typed `sat_overlap`进入component/table归因，其余reason具名fail-closed。
 `d8a240d7…`首次真实JIT暴露winner output的Python literal被Warp推断为`int32`；后继已逐store显式
 `wp.int64`并新增直接launch witness kernel的CUDA门，Pod复测仍待完成，Gate状态不变。
+
+### 2026-08-30 shared actual-collider union 候选（Gate 仍 `Partial`）
+
+双端实际 collision geometry 已复核为不同语义：Isaac split live stage 使用
+4 个具名 `convexHull` mesh，MuJoCo canonical MJCF 使用 optimized wrist/racket
+mesh hull 与 palm/finger/thumb/handle analytic primitives。因此 portable guard 不能只保守
+覆盖 raw STL surface，也不能把 Isaac source proxy 冒充 MuJoCo authority。
+
+v2 候选将完整 source convex hull 做 610-tetra fan 覆盖，再将 exact MuJoCo
+collision inventory 按整 primitive 的解析 support interval 扩入同两个 leaf；只增 1 个
+SAT row（`62→63`），20 mm no-touch 不变。工件钉住 canonical MJCF
+SHA=`70c4fd65…36c0a`、6 个 target collider 的 exact inventory/geometry 与自封 content
+SHA；双 loader 都拒绝 schema/plant/MJCF/inventory 漂移。冻结 witness 在标准 20 mm
+下有 `+24.884 mm` reserve，额外 5 mm 压力下仍 `+19.884 mm`。
+
+此项是共享 guard 几何/身份修复，不是双端 physics parity 或训练结果；Pod exact
+回归与合入后同带 replay 仍需分别给出。G06 不晋级，不授权 resume/export/
+deployment。细节见
+[collision proxy 实验 §9](../experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#9-2026-08-30-v2从-single-obb-空角改为双端-actual-collider-union)。
