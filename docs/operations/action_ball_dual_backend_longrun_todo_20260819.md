@@ -311,6 +311,12 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    P2边界审查已于`ec04a7c8c`删除exact-only/hold-only两个无生产caller的private flush旁路；
    调用者和fixture都只能走paired统一materializer。Pod CPU关键集=`103 passed`、原四模块集=
    `272 passed`；item 14的CUDA/wall验收项不因此关闭。
+   GPU1后续验收于`766062c0c`闭合CUDA/fixed/runner三层：H/H+1为两次CUDA row
+   transfer，fixed portable tape与`8200c4a2`逐byte exact，两轮512×H48 PPO自然完成并产生
+   finite snapshot。`766062c0c`只修复FullMDP predicate误读legacy-only diagnostic instance镜像的
+   runner-construction blocker，不恢复旧D2H。update-0 policy/optimizer、joint-safety和epoch ACK与
+   基线exact。剩下唯一未测是profiler-off matched `p50/p90`；GPU1/GPU2共NUMA且GPU2
+   现役，须等独占stratum，不用受干扰的wall数据关item 14。
 15. [ ] 修复direct-paddle经济轴并fresh双端验证。无条件`4/4/4/2` Mu到ACK623后已最终判负：matched
    ACK0..623相对旧baseline，raw/selected/crossing=`56/5/2` vs `1,665/334/281`；ACK614..623新run的
    position/velocity/face/long-axis误差=`.50920/1.31197/.74428/.61476`，四项都坏于旧baseline的

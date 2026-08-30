@@ -1,5 +1,21 @@
 # 简短进度记录
 
+## 2026-08-30 — command metric CUDA/runner闭环，wall matched仍待独占stratum
+
+- GPU1真实CUDA tape在`ec04a7c8c`上完成H+1=`49`与steady H=`48`：每轮恰好
+  `exact1 + hold1`两次CUDA row transfer，两组Python-double host state与public metric逐值匹配，
+  CPU/CUDA RNG state不变。同卡Isaac `512×48×31` fixed-action probe与`8200c4a2`基线所有portable
+  arrays逐byte相等，`done/time_out=0/0`。
+- 真实PPO构造首次暴露集成缺口：FullMDP不进入legacy ActionBall constructor，因此
+  instance镜像`_action_ball_diagnostic_unauthorized`为`None`；defer predicate应读已构造验证的
+  live cfg exact bool。`766062c0c`完成该最小修复，不恢复任何逐step/private flush。Pod
+  四模块同进程=`272 passed`；GPU1两轮512×H48 PPO自然完成并产生finite
+  `model_0/model_1.diagnostic_nonresumable.pt`及收据。update-0 policy/optimizer/iter与
+  `8200c4a2` Isaac基线逐tensor exact，joint-safety与ActionEpoch ACK逐字段exact。
+- profiler-on归因轮仅记录`8.209/6.294 s`，不是wall speed evidence。GPU1与现役GPU2共享
+  NUMA/CPU affinity，因此未为了补`p50/p90`污染GPU2；profiler-off matched 61-update rate
+  仍须等同stratum独占窗口。
+
 ## 2026-08-30 — exact + hold/recovery FullMDP metric-row合批已过Pod CPU验收
 
 - 在exact-row候选`e6958d2a`上继续的`0200b2c8c`把H/H+1的hold/recovery五标量也保留为

@@ -2,6 +2,17 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-30 command metric CUDA/runner验收（wall子门仍`Partial`）
+
+`ec04a7c8c`的GPU1 CUDA H/H+1 tape已证实steady只有`exact1 + hold1`两次row transfer，
+Python-double/public metric逐值与RNG均不变；Isaac `512×48×31` fixed tape与`8200c4a2`
+portable arrays全部逐byte相等。真实runner同时捕获并由`766062c0c`修复了一个构造契约
+缺口：FullMDP defer predicate改读construction-validated cfg diagnostic bool，而不是仅legacy
+ActionBall初始化的instance镜像。Pod原四模块=`272 passed`；GPU1两轮H48 PPO自然结束，
+finite `model_0/model_1`+收据完整，update-0 policy/optimizer/iter、joint-safety JSON与
+ActionEpoch ACK均与`8200c4a2`基线exact。GPU1/GPU2共NUMA且GPU2现役，故不用共享
+stratum的拥堵数字伪装matched wall；profiler-off `p50/p90`仍待独占窗口，Gate不变。
+
 ## 2026-08-30 exact + hold/recovery FullMDP metric-row合批候选（仍`Partial`）
 
 `e6958d2a`的exact-row边界之上，`0200b2c8c`又把H/H+1逐command compute的hold/recovery五标量

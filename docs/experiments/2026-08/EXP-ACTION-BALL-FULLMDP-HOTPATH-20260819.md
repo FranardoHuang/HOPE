@@ -1,5 +1,20 @@
 # EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819
 
+## 2026-08-30 command metric CUDA/runner evidence
+
+GPU1在`ec04a7c8c`上用真实CUDA tensor回放49-row首轮和48-row steady tape：每例都只调用
+`_batched_host_scalar_rows` 两次（exact width 18、hold width 5），两类host accumulator与独立
+Python-double recurrence逐值相等，public metrics finite，CPU/CUDA RNG state不变。同卡真实Isaac
+fixed-action `512×48×31`与`8200c4a2`基线所有arrays exact，`done/time_out=0/0`。
+
+首个真实PPO构造暴露`deferred_exact_metrics_disabled`：根因是FullMDP不走legacy ActionBall
+constructor，但predicate读了只在该legacy分支设置的instance diagnostic镜像。`766062c0c`
+改为读取construction-validated cfg exact bool；不改Reward/Observation/Stage/safety，不增加任何
+D2H或旁路。Pod四模块=`272 passed`。GPU1 profile-2自然完成两轮H48，finite
+`model_0/model_1`+收据存在；update-0 policy/optimizer/iter、joint-safety和ActionEpoch ACK与
+`8200c4a2` exact。profiler-on的`8.209/6.294 s`只作归因，不作speed evidence。GPU1与现役
+GPU2共NUMA，因此profiler-off matched 61-update rate留待独占窗口。
+
 > 问题：为什么fresh FullMDP `4096×24` rollout从旧诊断校准的约6--9秒变成约22秒，怎样在不删业务语义和证据的前提下恢复吞吐？
 >
 > 人类负责人：Franco
