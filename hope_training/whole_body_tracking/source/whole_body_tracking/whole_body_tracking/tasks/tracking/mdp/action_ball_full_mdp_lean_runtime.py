@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import fields
 import importlib
-import struct
 import sys
 import threading
 from typing import Optional
@@ -88,15 +87,6 @@ class _OptimizerBoundary:
     """Owner-issued identity with no caller-readable authority fields."""
 
     __slots__ = ()
-
-
-class _SelectedResetPackedPreflight:
-    """Opaque identity minted only after the sole packed D2H is clean."""
-
-    __slots__ = ()
-
-    def __new__(cls):
-        raise TypeError("selected-reset preflight is owner-minted")
 
 
 def _plain_nonnegative_int(value: object, *, label: str) -> int:
@@ -220,17 +210,14 @@ class ActionBallFullMdpLeanRuntimeOwner:
         self._business_generation = 0
         self._durable_ack_business_generation = -1
         self._pending_durable_ack_summary = None
-        self._selected_reset_event: Optional[object] = None
-        self._selected_reset_projection: Optional[object] = None
+        self._selected_reset_transaction: Optional[object] = None
         self._selected_reset_prepared: Optional[object] = None
         self._selected_reset_child_commits: Optional[tuple[object, ...]] = None
         self._selected_reset_child_commits_started = False
         self._selected_reset_r05_receipt: Optional[object] = None
         self._selected_reset_completions: Optional[dict[str, object]] = None
-        self._selected_reset_env_record: Optional[object] = None
         self._selected_reset_live_ledger_identity: Optional[object] = None
         self._selected_reset_epoch_prepared: Optional[object] = None
-        self._selected_reset_packed_preflight: Optional[object] = None
         self._selected_reset_leaf_completions_consumed = False
         self._lock = threading.RLock()
         self._lean_carry_coordinator = None
@@ -384,14 +371,11 @@ class ActionBallFullMdpLeanRuntimeOwner:
             or self._business_generation != self._durable_ack_business_generation
             or self._pending_durable_ack_summary is not None
             or self._pending_after_command_control_step is not None
-            or self._selected_reset_event is not None
-            or self._selected_reset_projection is not None
+            or self._selected_reset_transaction is not None
             or self._selected_reset_prepared is not None
             or self._selected_reset_child_commits_started
             or self._selected_reset_r05_receipt is not None
-            or self._selected_reset_env_record is not None
             or self._selected_reset_epoch_prepared is not None
-            or self._selected_reset_packed_preflight is not None
             or not self._genesis_after_command_completed
             or type(self._last_prephysics_position) is not tuple
             or type(self._last_postphysics_position) is not tuple
@@ -1554,17 +1538,14 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 self._leave()
 
     def _clear_selected_reset_locked(self) -> None:
-        self._selected_reset_event = None
-        self._selected_reset_projection = None
+        self._selected_reset_transaction = None
         self._selected_reset_prepared = None
         self._selected_reset_child_commits = None
         self._selected_reset_child_commits_started = False
         self._selected_reset_r05_receipt = None
         self._selected_reset_completions = None
-        self._selected_reset_env_record = None
         self._selected_reset_live_ledger_identity = None
         self._selected_reset_epoch_prepared = None
-        self._selected_reset_packed_preflight = None
         self._selected_reset_leaf_completions_consumed = False
 
     def _poison_selected_reset_locked(self, reason: str) -> None:
@@ -1679,45 +1660,38 @@ class ActionBallFullMdpLeanRuntimeOwner:
             )
         return value
 
-    def _validate_env_selected_reset_locked(
-        self, event: object, projection: object
-    ) -> None:
-        """Join the clone-only argument back to the env's active record."""
+    def _accept_env_selected_reset_locked(self, transaction: object) -> None:
+        """Accept the env's one typed transaction without a self-projection."""
 
         env_module = importlib.import_module(type(self._env).__module__)
         event_type = getattr(env_module, "FullMdpSelectedResetEvent", None)
-        projection_type = getattr(
-            env_module, "FullMdpSelectedResetProjection", None
+        transaction_type = getattr(
+            env_module, "FullMdpSelectedResetTransaction", None
         )
-        record_type = getattr(
-            env_module, "_FullMdpSelectedResetRecord", None
-        )
-        record = getattr(
+        active = getattr(
             self._env, "_action_ball_full_mdp_active_reset_record", None
         )
         if (
             event_type is None
-            or projection_type is None
-            or record_type is None
-            or type(event) is not event_type
-            or type(projection) is not projection_type
-            or type(record) is not record_type
-            or record.event is not event
-            or record.reset_event_identity is not projection.reset_event_identity
-            or record.projected is not True
+            or transaction_type is None
+            or type(transaction) is not transaction_type
+            or active is not transaction
+            or type(transaction.event) is not event_type
+            or transaction.reset_event_identity is None
+            or transaction.handed_to_top is not True
         ):
             raise ActionBallFullMdpLeanRuntimeError(
-                "selected-reset event is not the env's exact active projection"
+                "selected-reset transaction is stale, foreign, or replayed"
             )
         device = self._epoch.device
         count = self._epoch.num_envs
         index = self._require_reset_tensor(
-            projection.selected_env_index,
+            transaction.selected_env_index,
             label="selected-reset index",
             device=device,
-            shape=(projection.selected_env_index.shape[0],)
-            if type(projection.selected_env_index) is torch.Tensor
-            and projection.selected_env_index.ndim == 1
+            shape=(transaction.selected_env_index.shape[0],)
+            if type(transaction.selected_env_index) is torch.Tensor
+            and transaction.selected_env_index.ndim == 1
             else (-1,),
             dtype=torch.int64,
         )
@@ -1733,43 +1707,20 @@ class ActionBallFullMdpLeanRuntimeOwner:
         )
         for name, dtype in tensor_specs:
             self._require_reset_tensor(
-                getattr(projection, name, None),
+                getattr(transaction, name, None),
                 label="selected-reset " + name,
                 device=device,
                 shape=(count,),
                 dtype=dtype,
             )
-            self._require_reset_tensor(
-                getattr(record, name, None),
-                label="env selected-reset " + name,
-                device=device,
-                shape=(count,),
-                dtype=dtype,
-            )
         self._require_reset_tensor(
-            getattr(projection, "terminal_reset_facts_i64", None),
+            getattr(transaction, "terminal_reset_facts_i64", None),
             label="selected-reset terminal_reset_facts_i64",
             device=device,
             shape=(count, 3),
             dtype=torch.int64,
         )
-        self._require_reset_tensor(
-            getattr(record, "terminal_reset_facts_i64", None),
-            label="env selected-reset terminal_reset_facts_i64",
-            device=device,
-            shape=(count, 3),
-            dtype=torch.int64,
-        )
-        original_index = self._require_reset_tensor(
-            record.selected_env_index,
-            label="env selected-reset index",
-            device=device,
-            shape=(index.shape[0],),
-            dtype=torch.int64,
-        )
-        self._selected_reset_event = event
-        self._selected_reset_projection = projection
-        self._selected_reset_env_record = record
+        self._selected_reset_transaction = transaction
 
     def project_r05_true_reset(
         self,
@@ -1780,16 +1731,14 @@ class ActionBallFullMdpLeanRuntimeOwner:
         live_reset_ledger_identity: object,
         live_reset_generation: torch.Tensor,
     ) -> device_r05.DeviceTrueResetEventProjection:
-        """Project only the env-bound selection after independent preflight."""
+        """Expose the env-owned selection once to independent Device-R05."""
 
         with self._lock:
             carry_txn._require_leaf_mutable(self)
-            projection = self._selected_reset_projection
-            record = self._selected_reset_env_record
+            transaction = self._selected_reset_transaction
             if (
-                receipt is not self._selected_reset_event
-                or projection is None
-                or record is None
+                transaction is None
+                or receipt is not transaction.event
                 or self._selected_reset_prepared is not None
                 or self._selected_reset_live_ledger_identity is not None
                 or type(num_envs) is not int
@@ -1802,14 +1751,14 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 )
             count = self._epoch.num_envs
             index = self._require_reset_tensor(
-                projection.selected_env_index,
+                transaction.selected_env_index,
                 label="Device-R05 selected-reset index",
                 device=self._epoch.device,
-                shape=(projection.selected_env_index.shape[0],),
+                shape=(transaction.selected_env_index.shape[0],),
                 dtype=torch.int64,
             )
             selected = self._require_reset_tensor(
-                projection.selected_mask,
+                transaction.selected_mask,
                 label="Device-R05 selected-reset mask",
                 device=self._epoch.device,
                 shape=(count,),
@@ -1822,28 +1771,35 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 shape=(count,),
                 dtype=torch.int64,
             )
+            # This is the first genuinely independent join: Device-R05 owns
+            # ``live`` while the environment owns the transaction ledger.  Keep
+            # it on device; a forced host verdict on every reset is unnecessary.
+            torch._assert_async(
+                torch.all(live == transaction.generation_before)
+            )
             self._selected_reset_live_ledger_identity = (
                 live_reset_ledger_identity
             )
             return device_r05.DeviceTrueResetEventProjection(
-                reset_event_identity=projection.reset_event_identity,
-                selected_env_index=index.clone(),
-                selected_mask=selected.clone(),
+                reset_event_identity=transaction.reset_event_identity,
+                selected_env_index=index,
+                selected_mask=selected,
             )
 
-    def _packed_selected_reset_preflight_locked(self, prepared: object) -> None:
-        """Consume one reset-boundary D2H verdict before any leaf method.
+    def _join_selected_reset_independent_facts_locked(
+        self, prepared: object
+    ) -> device_r05.DeviceR05PreparedTrueResetProjection:
+        """Join env, Device-R05, and ActionEpoch facts without host transfer.
 
-        Every packed lane is computed from independently owned live state:
-        the env active record, ActionEpoch, or Device-R05's retained prepare.
-        No caller boolean is interpreted as authorization.
+        Shape and identity checks are synchronous Python facts.  The only
+        numeric comparisons left are between independent owners; they remain on
+        the device and fail-stop the stream through ``torch._assert_async``.
         """
 
-        projection = self._selected_reset_projection
-        record = self._selected_reset_env_record
-        if projection is None or record is None:
+        transaction = self._selected_reset_transaction
+        if transaction is None:
             raise ActionBallFullMdpLeanRuntimeError(
-                "selected-reset packed preflight lacks env authority"
+                "selected-reset transaction lacks env authority"
             )
         claim = self._bound_plain_method(
             self._r05_runtime, "require_owned_prepared_true_reset"
@@ -1853,28 +1809,51 @@ class ActionBallFullMdpLeanRuntimeOwner:
             or claim.prepared_true_reset is not prepared
             or claim.owner_kind != "motion"
             or claim.prepared_identity is not prepared
-            or claim.reset_event_identity is not projection.reset_event_identity
+            or claim.reset_event_identity
+            is not transaction.reset_event_identity
         ):
             raise ActionBallFullMdpLeanRuntimeError(
                 "Device-R05 selected-reset prepare identity differs"
             )
         count = self._epoch.num_envs
         device = self._epoch.device
-        index = self._require_reset_tensor(
-            projection.selected_env_index,
-            label="selected-reset packed index",
-            device=device,
-            shape=(projection.selected_env_index.shape[0],),
-            dtype=torch.int64,
-        )
         selected = self._require_reset_tensor(
-            projection.selected_mask,
-            label="selected-reset packed mask",
+            transaction.selected_mask,
+            label="selected-reset transaction mask",
             device=device,
             shape=(count,),
             dtype=torch.bool,
         )
-        epoch_generation = self._epoch.current().reset_generation
+        env_before = self._require_reset_tensor(
+            transaction.generation_before,
+            label="selected-reset env generation before",
+            device=device,
+            shape=(count,),
+            dtype=torch.int64,
+        )
+        env_after = self._require_reset_tensor(
+            transaction.generation_after,
+            label="selected-reset env generation after",
+            device=device,
+            shape=(count,),
+            dtype=torch.int64,
+        )
+        env_overflow = self._require_reset_tensor(
+            transaction.generation_overflow_fault,
+            label="selected-reset env generation fault",
+            device=device,
+            shape=(count,),
+            dtype=torch.bool,
+        )
+        # ``current()`` clones the entire ActionEpoch record.  The ledger is the
+        # exact independent tensor already retained by ActionEpoch.
+        epoch_generation = self._require_reset_tensor(
+            getattr(self._epoch, "_reset_generation", None),
+            label="ActionEpoch live reset generation",
+            device=device,
+            shape=(count,),
+            dtype=torch.int64,
+        )
         d05_mask = self._require_reset_tensor(
             claim.selected_mask,
             label="Device-R05 prepared mask",
@@ -1910,107 +1889,17 @@ class ActionBallFullMdpLeanRuntimeOwner:
             shape=(),
             dtype=torch.bool,
         )
-        terminal_reset_facts_i64 = self._require_reset_tensor(
-            projection.terminal_reset_facts_i64,
-            label="selected-reset packed terminal_reset_facts_i64",
-            device=device,
-            shape=(count, 3),
-            dtype=torch.int64,
+        independent_join = (
+            torch.all(d05_mask == selected)
+            & torch.all(d05_before == env_before)
+            & torch.all(d05_before == epoch_generation)
+            & torch.all(d05_after == env_after)
+            & torch.all(d05_fault == env_overflow)
+            & ~torch.any(env_overflow)
+            & ~d05_writer_fault
         )
-        env_terminal_reset_facts_i64 = self._require_reset_tensor(
-            record.terminal_reset_facts_i64,
-            label="env selected-reset packed terminal_reset_facts_i64",
-            device=device,
-            shape=(count, 3),
-            dtype=torch.int64,
-        )
-        terminal_common_step = terminal_reset_facts_i64[:, 0]
-        terminal_episode_tick = terminal_reset_facts_i64[:, 1]
-        terminal_reason_bits = terminal_reset_facts_i64[:, 2]
-        unselected = ~selected
-        unknown_reason_bits = torch.bitwise_and(
-            terminal_reason_bits,
-            torch.full_like(terminal_reason_bits, ~31),
-        )
-        safe_index = torch.clamp(index, min=0, max=count - 1)
-        reconstructed = torch.zeros_like(selected)
-        reconstructed.index_fill_(0, safe_index, True)
-        independent_overflow = selected & d05_before.eq(
-            torch.iinfo(torch.int64).max
-        )
-        increment = selected & ~independent_overflow
-        safe_base = torch.where(
-            increment, d05_before, torch.zeros_like(d05_before)
-        )
-        expected_after = torch.where(
-            increment, safe_base + torch.ones_like(d05_before), d05_before
-        )
-
-        def mismatch(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
-            return torch.sum(left != right, dtype=torch.int64)
-
-        packed = torch.stack(
-            (
-                torch.sum((index < 0) | (index >= count), dtype=torch.int64),
-                torch.sum(index[1:] <= index[:-1], dtype=torch.int64),
-                torch.sum(reconstructed != selected, dtype=torch.int64),
-                (~torch.any(selected)).to(torch.int64),
-                mismatch(index, record.selected_env_index),
-                mismatch(selected, record.selected_mask),
-                mismatch(
-                    projection.generation_before, record.generation_before
-                ),
-                mismatch(
-                    projection.generation_after, record.generation_after
-                ),
-                mismatch(
-                    projection.generation_overflow_fault,
-                    record.generation_overflow_fault,
-                ),
-                mismatch(
-                    terminal_reset_facts_i64,
-                    env_terminal_reset_facts_i64,
-                ),
-                torch.sum(
-                    unselected
-                    & (
-                        terminal_common_step.ne(-1)
-                        | terminal_episode_tick.ne(-1)
-                        | terminal_reason_bits.ne(0)
-                    ),
-                    dtype=torch.int64,
-                ),
-                torch.sum(
-                    selected
-                    & (
-                        terminal_common_step.lt(1)
-                        | terminal_episode_tick.lt(1)
-                        | terminal_reason_bits.eq(0)
-                        | unknown_reason_bits.ne(0)
-                    ),
-                    dtype=torch.int64,
-                ),
-                mismatch(d05_mask, selected),
-                mismatch(d05_before, epoch_generation),
-                mismatch(d05_before, projection.generation_before),
-                mismatch(d05_after, expected_after),
-                mismatch(d05_fault, independent_overflow),
-                torch.sum(independent_overflow, dtype=torch.int64),
-                d05_writer_fault.to(torch.int64),
-            )
-        ).contiguous()
-        packed_host = packed.detach().to(device="cpu", non_blocking=False)
-        packed_bytes = bytes(packed_host.untyped_storage())[
-            : packed_host.numel() * 8
-        ]
-        faults = struct.unpack("=" + "q" * packed_host.numel(), packed_bytes)
-        if any(value != 0 for value in faults):
-            raise ActionBallFullMdpLeanRuntimeError(
-                "selected-reset packed preflight rejected env/D05/epoch join"
-            )
-        self._selected_reset_packed_preflight = object.__new__(
-            _SelectedResetPackedPreflight
-        )
+        torch._assert_async(independent_join)
+        return claim
 
     def require_owned_r05_true_reset_preflight(
         self,
@@ -2018,26 +1907,22 @@ class ActionBallFullMdpLeanRuntimeOwner:
         *,
         preflight_capability: object,
     ) -> device_r05.DeviceTrueResetPreflightProjection:
-        """Register the exact clean packed verdict back into Device-R05."""
+        """Register the exact env transaction back into Device-R05."""
 
         with self._lock:
-            projection = self._selected_reset_projection
-            record = self._selected_reset_env_record
+            transaction = self._selected_reset_transaction
             if (
                 prepared is not self._selected_reset_prepared
-                or projection is None
-                or record is None
-                or type(preflight_capability) is not _SelectedResetPackedPreflight
-                or preflight_capability
-                is not self._selected_reset_packed_preflight
+                or transaction is None
+                or preflight_capability is not transaction
                 or self._selected_reset_epoch_prepared is not None
             ):
                 raise ActionBallFullMdpLeanRuntimeError(
-                    "Device-R05 packed preflight is stale or foreign"
+                    "Device-R05 reset transaction is stale or foreign"
                 )
             return device_r05.DeviceTrueResetPreflightProjection(
                 prepared_true_reset=prepared,
-                reset_event_identity=record.reset_event_identity,
+                reset_event_identity=transaction.reset_event_identity,
                 preflight_capability=preflight_capability,
             )
 
@@ -2052,24 +1937,23 @@ class ActionBallFullMdpLeanRuntimeOwner:
         generation_overflow_fault: torch.Tensor,
         terminal_reset_facts_i64: torch.Tensor,
     ) -> object:
-        """Let ActionEpoch consume only this transaction's clean D2H edge."""
+        """Let ActionEpoch consume only this exact env transaction."""
 
         with self._lock:
-            projection = self._selected_reset_projection
+            transaction = self._selected_reset_transaction
             if (
-                type(preflight) is not _SelectedResetPackedPreflight
-                or preflight is not self._selected_reset_packed_preflight
-                or projection is None
+                transaction is None
+                or preflight is not transaction
                 or self._selected_reset_prepared is None
                 or self._selected_reset_epoch_prepared is not None
-                or selected_env_index is not projection.selected_env_index
-                or selected_mask is not projection.selected_mask
-                or generation_before is not projection.generation_before
-                or generation_after is not projection.generation_after
+                or selected_env_index is not transaction.selected_env_index
+                or selected_mask is not transaction.selected_mask
+                or generation_before is not transaction.generation_before
+                or generation_after is not transaction.generation_after
                 or generation_overflow_fault
-                is not projection.generation_overflow_fault
+                is not transaction.generation_overflow_fault
                 or terminal_reset_facts_i64
-                is not projection.terminal_reset_facts_i64
+                is not transaction.terminal_reset_facts_i64
             ):
                 raise ActionBallFullMdpLeanRuntimeError(
                     "ActionEpoch selected-reset preflight is stale or foreign"
@@ -2085,8 +1969,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
 
         with self._lock:
             if (
-                type(preflight) is not _SelectedResetPackedPreflight
-                or preflight is not self._selected_reset_packed_preflight
+                preflight is not self._selected_reset_transaction
                 or prepared_reset is not self._selected_reset_epoch_prepared
                 or self._selected_reset_r05_receipt is None
                 or type(self._selected_reset_completions) is not dict
@@ -2104,20 +1987,18 @@ class ActionBallFullMdpLeanRuntimeOwner:
         owner_view: object,
     ) -> device_r05.DeviceTrueResetCommitProjection:
         with self._lock:
-            record = self._selected_reset_env_record
+            transaction = self._selected_reset_transaction
             commits = self._selected_reset_child_commits
             if (
                 prepared is not self._selected_reset_prepared
-                or record is None
+                or transaction is None
                 or type(commits) is not tuple
                 or len(commits) != len(device_r05.CHILD_OWNER_ORDER)
                 or not self._selected_reset_child_commits_started
-                or type(self._selected_reset_packed_preflight)
-                is not _SelectedResetPackedPreflight
                 or type(owner_view) is not device_r05.DeviceR05TrueResetCommitInput
                 or owner_view.prepared_true_reset is not prepared
                 or owner_view.reset_event_identity
-                is not record.reset_event_identity
+                is not transaction.reset_event_identity
             ):
                 raise ActionBallFullMdpLeanRuntimeError(
                     "Device-R05 selected-reset writer view differs"
@@ -2153,20 +2034,20 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 )
             return device_r05.DeviceTrueResetCommitProjection(
                 prepared_true_reset=prepared,
-                reset_event_identity=record.reset_event_identity,
+                reset_event_identity=transaction.reset_event_identity,
                 child_kinds=device_r05.CHILD_OWNER_ORDER,
                 child_commit_identities=commits,
-                preflight_capability=self._selected_reset_packed_preflight,
+                preflight_capability=transaction,
             )
 
     def require_owned_r05_true_reset_abort(
         self, prepared: object
     ) -> device_r05.DeviceTrueResetAbortProjection:
         with self._lock:
-            projection = self._selected_reset_projection
+            transaction = self._selected_reset_transaction
             if (
                 prepared is not self._selected_reset_prepared
-                or projection is None
+                or transaction is None
                 or self._selected_reset_child_commits_started
                 or self._selected_reset_child_commits is not None
             ):
@@ -2175,7 +2056,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 )
             return device_r05.DeviceTrueResetAbortProjection(
                 prepared_true_reset=prepared,
-                reset_event_identity=projection.reset_event_identity,
+                reset_event_identity=transaction.reset_event_identity,
                 child_commits_started=False,
             )
 
@@ -2203,7 +2084,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 child_receipt=child_receipt,
             )
 
-    def selected_true_reset(self, event: object, projection: object) -> None:
+    def selected_true_reset(self, transaction: object) -> None:
         """Commit one env-selected reset in the fixed leaf-last order."""
 
         with self._lock:
@@ -2219,43 +2100,39 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 if any(
                     value is not None
                     for value in (
-                        self._selected_reset_event,
-                        self._selected_reset_projection,
+                        self._selected_reset_transaction,
                         self._selected_reset_prepared,
                         self._selected_reset_child_commits,
                         self._selected_reset_r05_receipt,
                         self._selected_reset_completions,
                         self._selected_reset_epoch_prepared,
-                        self._selected_reset_packed_preflight,
                     )
                 ):
                     raise ActionBallFullMdpLeanRuntimeError(
                         "one selected-reset transaction is already active"
                     )
-                self._validate_env_selected_reset_locked(event, projection)
+                self._accept_env_selected_reset_locked(transaction)
                 prepared = self._bound_plain_method(
                     self._r05_runtime, "prepare_true_reset_many"
-                )(event)
+                )(transaction.event)
                 self._selected_reset_prepared = prepared
-                # The sole reset-boundary D2H is intentionally outside the
-                # physics/PPO hot paths and precedes every leaf method call.
-                self._packed_selected_reset_preflight_locked(prepared)
+                self._join_selected_reset_independent_facts_locked(prepared)
                 self._bound_plain_method(
                     self._r05_runtime, "register_true_reset_preflight"
-                )(prepared, self._selected_reset_packed_preflight)
+                )(prepared, transaction)
                 self._selected_reset_epoch_prepared = (
                     self._epoch.prepare_selected_true_reset(
                         owner=self,
-                        top_preflight=self._selected_reset_packed_preflight,
-                        selected_env_index=projection.selected_env_index,
-                        selected_mask=projection.selected_mask,
-                        generation_before=projection.generation_before,
-                        generation_after=projection.generation_after,
+                        top_preflight=transaction,
+                        selected_env_index=transaction.selected_env_index,
+                        selected_mask=transaction.selected_mask,
+                        generation_before=transaction.generation_before,
+                        generation_after=transaction.generation_after,
                         generation_overflow_fault=(
-                            projection.generation_overflow_fault
+                            transaction.generation_overflow_fault
                         ),
                         terminal_reset_facts_i64=(
-                            projection.terminal_reset_facts_i64
+                            transaction.terminal_reset_facts_i64
                         ),
                     )
                 )
@@ -2432,11 +2309,9 @@ class ActionBallFullMdpLeanRuntimeOwner:
                         physical_value=physical_value,
                     )
                     # A clean rollback of unpublished child after-images does
-                    # not make the env event reusable.  Its private record is
-                    # already projected and Device-R05 has consumed one
-                    # prepare identity.  Keep the top fail-stop so a caller
-                    # cannot rebuild a value-equal projection for the same
-                    # opaque event and obtain a second prepare.
+                    # not make the env transaction reusable: Device-R05 has
+                    # already consumed one prepare identity.  Keep the top
+                    # fail-stop so the same transaction cannot prepare twice.
                     self._poison_locked(
                         "selected reset failed before irreversible arm: "
                         + type(exc).__name__

@@ -143,6 +143,7 @@ class _LeanOwner:
         self.reset_ids = []
         self.reset_facts = []
         self.reset_events = []
+        self.reset_transactions = []
         self.after_reward_return = None
         self.selected_reset_return = None
         self.action_ball_r10_checkpoint_adapter = None
@@ -189,14 +190,15 @@ class _LeanOwner:
             raise ValueError("after-command counterexample")
         return None
 
-    def selected_true_reset(self, event, projection):
-        self.trace.append(("top_reset", event, projection))
-        self.reset_events.append(event)
+    def selected_true_reset(self, transaction):
+        self.trace.append(("top_reset", transaction))
+        self.reset_transactions.append(transaction)
+        self.reset_events.append(transaction.event)
         if self.fail_at == "reset":
             raise ValueError("reset counterexample")
-        self.reset_ids.append(projection.selected_env_index.clone())
+        self.reset_ids.append(transaction.selected_env_index.clone())
         self.reset_facts.append(
-            projection.terminal_reset_facts_i64.clone()
+            transaction.terminal_reset_facts_i64.clone()
         )
         return self.selected_reset_return
 
@@ -614,6 +616,9 @@ def test_n2_selected_reset_changes_only_selected_native_row():
 
     assert len(owner.reset_ids) == 1
     assert torch.equal(owner.reset_ids[0], torch.tensor([1]))
+    assert len(owner.reset_transactions) == 1
+    assert type(owner.reset_transactions[0]) is M.FullMdpSelectedResetTransaction
+    assert owner.reset_transactions[0].event is owner.reset_events[0]
     assert type(owner.reset_events[0]) is M.FullMdpSelectedResetEvent
     assert not hasattr(owner.reset_events[0], "env_ids")
     assert torch.equal(
@@ -922,41 +927,36 @@ def test_native_failure_after_lean_reset_settlement_is_sticky_poison():
     assert trace == before_retry
 
 
-def test_lean_reset_projection_rejects_foreign_and_replayed_events():
+def test_lean_reset_transaction_is_the_single_env_owned_record():
     env, _owner, *_ = _env(decimation=1)
     env.common_step_counter = 1
     env_ids = torch.tensor([1], dtype=torch.long)
     env._authorize_action_ball_full_mdp_reset_callpoint(
         env_ids, source="step_nonzero"
     )
-    event = env._mint_action_ball_full_mdp_selected_reset_event(env_ids)
-    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="stale, foreign"):
-        env._project_action_ball_full_mdp_lean_selected_reset_event(
-            M.FullMdpSelectedResetEvent()
-        )
-    projection = env._project_action_ball_full_mdp_lean_selected_reset_event(
-        event
+    transaction = env._mint_action_ball_full_mdp_selected_reset_transaction(
+        env_ids
     )
-    projection.selected_env_index.fill_(0)
-    projection.generation_after.fill_(999)
-    record = env._action_ball_full_mdp_active_reset_record
-    assert torch.equal(record.selected_env_index, torch.tensor([1]))
-    assert torch.equal(record.generation_after, torch.tensor([7, 8]))
-    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="stale, foreign"):
-        env._project_action_ball_full_mdp_lean_selected_reset_event(
-            event
-        )
+    assert type(transaction) is M.FullMdpSelectedResetTransaction
+    assert env._action_ball_full_mdp_active_reset_record is transaction
+    assert transaction.selected_env_index is env_ids
+    assert (
+        transaction.generation_before
+        is env._action_ball_full_mdp_reset_generation
+    )
+    assert torch.equal(transaction.generation_after, torch.tensor([7, 8]))
+    assert not hasattr(M, "FullMdpSelectedResetProjection")
 
 
 def test_selected_reset_rejects_any_direct_unowned_ids():
     env, *_ = _env(decimation=1)
     with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="callpoint authority"):
-        env._mint_action_ball_full_mdp_selected_reset_event(
+        env._mint_action_ball_full_mdp_selected_reset_transaction(
             torch.tensor([], dtype=torch.long)
         )
     env, *_ = _env(decimation=1)
     with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="callpoint authority"):
-        env._mint_action_ball_full_mdp_selected_reset_event(
+        env._mint_action_ball_full_mdp_selected_reset_transaction(
             torch.tensor([1, 1], dtype=torch.long)
         )
 
@@ -969,11 +969,16 @@ def test_selected_reset_callpoint_authority_is_exact_identity_and_single_use():
         env_ids, source="step_nonzero"
     )
     with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="callpoint authority"):
-        env._mint_action_ball_full_mdp_selected_reset_event(env_ids.clone())
-    event = env._mint_action_ball_full_mdp_selected_reset_event(env_ids)
-    assert type(event) is M.FullMdpSelectedResetEvent
+        env._mint_action_ball_full_mdp_selected_reset_transaction(
+            env_ids.clone()
+        )
+    transaction = env._mint_action_ball_full_mdp_selected_reset_transaction(
+        env_ids
+    )
+    assert type(transaction) is M.FullMdpSelectedResetTransaction
+    assert type(transaction.event) is M.FullMdpSelectedResetEvent
     with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="callpoint authority"):
-        env._mint_action_ball_full_mdp_selected_reset_event(env_ids)
+        env._mint_action_ball_full_mdp_selected_reset_transaction(env_ids)
 
 
 def test_manual_partial_reset_is_rejected_before_base_reset():
@@ -1001,7 +1006,7 @@ def test_selected_reset_preserves_unselected_generation_bytes_exactly():
     )
 
 
-def test_selected_reset_event_never_wraps_int64_generation():
+def test_selected_reset_transaction_never_wraps_int64_generation():
     env, _owner, *_ = _env(decimation=1)
     env.common_step_counter = 1
     maximum = torch.iinfo(torch.int64).max
@@ -1012,17 +1017,20 @@ def test_selected_reset_event_never_wraps_int64_generation():
     env._authorize_action_ball_full_mdp_reset_callpoint(
         env_ids, source="step_nonzero"
     )
-    event = env._mint_action_ball_full_mdp_selected_reset_event(env_ids)
+    transaction = env._mint_action_ball_full_mdp_selected_reset_transaction(
+        env_ids
+    )
     record = env._action_ball_full_mdp_active_reset_record
+    assert record is transaction
     assert torch.equal(
         record.generation_after,
         torch.tensor([maximum, 7], dtype=torch.int64),
     )
     assert record.generation_overflow_fault.tolist() == [True, False]
     # This fixture proves only the env writer after-image.  The independent
-    # lean top/Device-R05 packed preflight owns the blocking verdict.
-    assert record.event is event
-    assert not record.projected
+    # lean top joins independent Device-R05/ActionEpoch facts on device.
+    assert type(record.event) is M.FullMdpSelectedResetEvent
+    assert not record.handed_to_top
     assert torch.equal(
         env._action_ball_full_mdp_reset_generation,
         torch.tensor([maximum, 7], dtype=torch.int64),
@@ -1031,6 +1039,9 @@ def test_selected_reset_event_never_wraps_int64_generation():
 
 def test_reset_seam_source_has_no_host_observation_api():
     source = MODULE_PATH.read_text(encoding="utf-8")
+    assert "FullMdpSelectedResetProjection" not in source
+    assert "_FullMdpSelectedResetRecord" not in source
+    assert "_project_action_ball_full_mdp_lean_selected_reset_event" not in source
     tree = ast.parse(source)
     owner_class = next(
         node
@@ -1039,11 +1050,10 @@ def test_reset_seam_source_has_no_host_observation_api():
         and node.name == "ActionBallFullMdpManagerBasedRLEnv"
     )
     reset_names = {
-        "_mint_action_ball_full_mdp_selected_reset_event",
-        "_project_action_ball_full_mdp_lean_selected_reset_event",
+        "_mint_action_ball_full_mdp_selected_reset_transaction",
         "_reset_idx",
     }
-    forbidden = {"item", "cpu", "numpy", "tolist", "synchronize"}
+    forbidden = {"clone", "item", "cpu", "numpy", "tolist", "synchronize"}
     for method in owner_class.body:
         if not isinstance(method, ast.FunctionDef):
             continue

@@ -223,24 +223,6 @@ class FullMdpSelectedResetEvent:
 
 
 @dataclass(frozen=True, slots=True)
-class FullMdpSelectedResetProjection:
-    """Clone-only device projection consumed by the construction-bound top.
-
-    ``generation_after`` increments exactly the selected mask.  The environment
-    advances its live ledger only after the lean top accepts the projection and
-    returns successfully.
-    """
-
-    reset_event_identity: object
-    selected_env_index: torch.Tensor
-    selected_mask: torch.Tensor
-    generation_before: torch.Tensor
-    generation_after: torch.Tensor
-    generation_overflow_fault: torch.Tensor
-    terminal_reset_facts_i64: torch.Tensor
-
-
-@dataclass(frozen=True, slots=True)
 class FullMdpResetGenesisProjection:
     """Independent world-reset chronology projected onto the env device."""
 
@@ -249,7 +231,15 @@ class FullMdpResetGenesisProjection:
 
 
 @dataclass(slots=True)
-class _FullMdpSelectedResetRecord:
+class FullMdpSelectedResetTransaction:
+    """The env's sole typed record for one selected native reset.
+
+    The transaction is passed by identity to the construction-bound top.  It is
+    not cloned into a second projection and compared back to itself.  D05 and
+    ActionEpoch retain their independent ledgers and join this transaction on
+    device before any leaf commit.
+    """
+
     event: FullMdpSelectedResetEvent
     reset_event_identity: object
     selected_env_index: torch.Tensor
@@ -258,7 +248,7 @@ class _FullMdpSelectedResetRecord:
     generation_after: torch.Tensor
     generation_overflow_fault: torch.Tensor
     terminal_reset_facts_i64: torch.Tensor
-    projected: bool = False
+    handed_to_top: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -2375,10 +2365,10 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 extras[f"Metrics/{name}/{metric_name}"] = metric_value
         return extras
 
-    def _mint_action_ball_full_mdp_selected_reset_event(
+    def _mint_action_ball_full_mdp_selected_reset_transaction(
         self,
         env_ids: torch.Tensor,
-    ) -> FullMdpSelectedResetEvent:
+    ) -> FullMdpSelectedResetTransaction:
         callpoint = getattr(
             self, "_action_ball_full_mdp_reset_callpoint_authority", None
         )
@@ -2418,12 +2408,15 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
         # Preserve that producer contract.  Device-R05/top owns the independent
         # mask/index equivalence check before any owner commit; a delayed CUDA
         # assertion here would not be a same-batch safety barrier.
-        index = env_ids.clone()
+        index = env_ids
         selected_mask = torch.zeros(
             (self.num_envs,), dtype=torch.bool, device=torch.device(self.device)
         )
         selected_mask.index_fill_(0, index, True)
-        generation_before = generations.clone()
+        # The env ledger cannot mutate until the top transaction returns.  A
+        # same-writer clone here only duplicates N int64 values; retain the
+        # exact live tensor as the transaction's before-image instead.
+        generation_before = generations
         generation_overflow_fault = torch.logical_and(
             selected_mask,
             generation_before == torch.iinfo(torch.int64).max,
@@ -2514,7 +2507,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             dim=1,
         ).contiguous()
         event = FullMdpSelectedResetEvent()
-        record = _FullMdpSelectedResetRecord(
+        transaction = FullMdpSelectedResetTransaction(
             event=event,
             reset_event_identity=object(),
             selected_env_index=index,
@@ -2524,8 +2517,8 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             generation_overflow_fault=generation_overflow_fault,
             terminal_reset_facts_i64=terminal_reset_facts_i64,
         )
-        self._action_ball_full_mdp_active_reset_record = record
-        return event
+        self._action_ball_full_mdp_active_reset_record = transaction
+        return transaction
 
     def _authorize_action_ball_full_mdp_reset_callpoint(
         self,
@@ -2548,40 +2541,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             )
         self._action_ball_full_mdp_reset_callpoint_authority = (
             _FullMdpResetCallpointAuthority(env_ids=env_ids, source=source)
-        )
-
-    def _project_action_ball_full_mdp_lean_selected_reset_event(
-        self,
-        event: FullMdpSelectedResetEvent,
-    ) -> FullMdpSelectedResetProjection:
-        """Project the env-owned reset facts to the installed lean top once."""
-
-        record = getattr(
-            self, "_action_ball_full_mdp_active_reset_record", None
-        )
-        components = getattr(self, "_action_ball_full_mdp_components", None)
-        if (
-            type(components) is not FullMdpLeanRuntimeComponents
-            or type(record) is not _FullMdpSelectedResetRecord
-            or record.event is not event
-            or record.projected
-        ):
-            raise FullMdpPostPhysicsProtocolError(
-                "lean selected-reset event is stale, foreign, or replayed"
-            )
-        record.projected = True
-        return FullMdpSelectedResetProjection(
-            reset_event_identity=record.reset_event_identity,
-            selected_env_index=record.selected_env_index.clone(),
-            selected_mask=record.selected_mask.clone(),
-            generation_before=record.generation_before.clone(),
-            generation_after=record.generation_after.clone(),
-            generation_overflow_fault=(
-                record.generation_overflow_fault.clone()
-            ),
-            terminal_reset_facts_i64=(
-                record.terminal_reset_facts_i64.clone()
-            ),
         )
 
     def _reset_idx(self, env_ids: torch.Tensor) -> None:
@@ -2633,25 +2592,23 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 self._action_ball_full_mdp_reset_callpoint_authority = None
                 self._action_ball_full_mdp_lean_genesis_reset_pending = False
             else:
-                event = self._mint_action_ball_full_mdp_selected_reset_event(
-                    env_ids
-                )
-            if not genesis_reset:
-                projection = (
-                    self._project_action_ball_full_mdp_lean_selected_reset_event(
-                        event
+                transaction = (
+                    self._mint_action_ball_full_mdp_selected_reset_transaction(
+                        env_ids
                     )
                 )
-                result = self._full_mdp_selected_true_reset(event, projection)
+            if not genesis_reset:
+                transaction.handed_to_top = True
+                result = self._full_mdp_selected_true_reset(transaction)
                 if result is not None:
                     raise FullMdpPostPhysicsProtocolError(
                         "lean selected_true_reset must return None"
                     )
                 record = self._action_ball_full_mdp_active_reset_record
                 if (
-                    type(record) is not _FullMdpSelectedResetRecord
-                    or record.event is not event
-                    or not record.projected
+                    type(record) is not FullMdpSelectedResetTransaction
+                    or record is not transaction
+                    or not record.handed_to_top
                 ):
                     raise FullMdpPostPhysicsProtocolError(
                         "lean selected-reset record changed during settlement"
@@ -2704,7 +2661,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             self.extras["log"].update(info)
             self.episode_length_buf[env_ids] = 0
             if not genesis_reset:
-                if type(record) is not _FullMdpSelectedResetRecord:
+                if type(record) is not FullMdpSelectedResetTransaction:
                     raise FullMdpPostPhysicsProtocolError(
                         "completed lean selected-reset record differs"
                     )

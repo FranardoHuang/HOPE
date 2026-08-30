@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections import namedtuple
 from dataclasses import replace
 from enum import IntEnum
@@ -32,6 +33,8 @@ E = epoch_rowwise.E
 R = epoch_rowwise.LEAN_REWARDS
 L = epoch_rowwise.LEAN
 T = L.carry_txn
+
+LEAN_RUNTIME_PATH = MDP / "action_ball_full_mdp_lean_runtime.py"
 
 
 class _CarryRoot:
@@ -467,7 +470,7 @@ def test_prepare_lease_blocks_every_root_mutator_before_state_change():
     )
     calls = (
         lambda: root.before_policy_step(1, torch.zeros((2, 1))),
-        lambda: root.selected_true_reset(object(), object()),
+        lambda: root.selected_true_reset(object()),
         lambda: root._record_durable_epoch_ack_span(
             object(), update_index=0, segment_id="s", rank=0,
             pending_byte_start=0, pending_byte_end=1,
@@ -494,6 +497,47 @@ def test_prepare_lease_blocks_every_root_mutator_before_state_change():
             root._poisoned,
         ) == before
     coordinator._active_lease = None
+
+
+def test_selected_reset_hot_path_has_no_self_projection_clone_or_host_verdict():
+    source = LEAN_RUNTIME_PATH.read_text(encoding="utf-8")
+    for retired in (
+        "_SelectedResetPackedPreflight",
+        "_selected_reset_projection",
+        "_selected_reset_env_record",
+        "_selected_reset_packed_preflight",
+        "_packed_selected_reset_preflight_locked",
+        "struct.unpack",
+    ):
+        assert retired not in source
+    tree = ast.parse(source)
+    owner = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "ActionBallFullMdpLeanRuntimeOwner"
+    )
+    reset_methods = {
+        "_accept_env_selected_reset_locked",
+        "project_r05_true_reset",
+        "_join_selected_reset_independent_facts_locked",
+        "require_owned_r05_true_reset_preflight",
+        "require_owned_epoch_selected_reset_preflight",
+        "require_owned_epoch_selected_reset_commit",
+        "require_owned_r05_true_reset_commit",
+        "require_owned_r05_true_reset_abort",
+        "selected_true_reset",
+    }
+    forbidden = {"clone", "cpu", "item", "numpy", "tolist", "synchronize"}
+    visited = set()
+    for method in owner.body:
+        if not isinstance(method, ast.FunctionDef) or method.name not in reset_methods:
+            continue
+        visited.add(method.name)
+        for node in ast.walk(method):
+            if isinstance(node, ast.Attribute):
+                assert node.attr not in forbidden
+    assert visited == reset_methods
 
 
 def _complete_boundary(owner, *, update, completed):
