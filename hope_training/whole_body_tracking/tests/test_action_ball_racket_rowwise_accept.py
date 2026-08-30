@@ -553,6 +553,46 @@ def test_racket_row_writer_partial_n64_preserves_peer_bytes(
 
 
 @pytest.mark.parametrize("runtime_device", ("cpu", "cuda:0"))
+def test_full_mdp_racket_timing_keeps_d05_task_clock(
+    monkeypatch, runtime_device
+):
+    """Fresh FullMDP must not replace D05 TTC with legacy strike_phase."""
+
+    racket, _, _ = _racket_and_sources(
+        2, runtime_device=runtime_device, monkeypatch=monkeypatch
+    )
+    device = racket.device
+    racket._env.step_dt = 0.02
+    racket._action_ball_attempt_active = torch.ones(
+        2, dtype=torch.bool, device=device
+    )
+    racket.cfg.strike_phase = 0.47
+    racket.cfg.strike_phase_per_clip = ()
+    task_ttc = torch.tensor([0.02, 0.0], dtype=torch.float32, device=device)
+    motion = SimpleNamespace(
+        motion=SimpleNamespace(time_step_total=57),
+        action_ball_task_timing_active=torch.ones(
+            2, dtype=torch.bool, device=device
+        ),
+        just_resampled=torch.zeros(2, dtype=torch.bool, device=device),
+        action_ball_time_to_contact_remaining_s=task_ttc,
+    )
+    racket._motion = lambda: motion
+
+    racket._compute_strike_timing()
+
+    assert torch.equal(racket.time_to_strike, task_ttc)
+    assert racket.pre_strike.tolist() == [True, False]
+    assert racket.strike_window.tolist() == [True, True]
+    # The inherited 0.47 phase would choose frame 26 of 57 and return
+    # [0.52, 0.52] at frame zero.  Make that regression impossible to hide.
+    assert not torch.equal(
+        racket.time_to_strike,
+        torch.full_like(task_ttc, 0.52),
+    )
+
+
+@pytest.mark.parametrize("runtime_device", ("cpu", "cuda:0"))
 def test_racket_row_writer_all_zero_is_business_and_drain_byte_noop(
     monkeypatch, runtime_device
 ):

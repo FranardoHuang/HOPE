@@ -25827,7 +25827,10 @@ class RacketTargetCommand(CommandTerm):
         # helper without running the full action-ball initializer.  Missing the
         # opt-in flag therefore means the legacy clock, never an implicit
         # action-ball task.
-        if getattr(self, "_action_ball_enabled", False):
+        if (
+            getattr(self, "_action_ball_enabled", False)
+            or getattr(self, "_action_ball_full_mdp_enabled", False)
+        ):
             timing_active = motion.action_ball_task_timing_active
             wrapped = getattr(motion, "just_resampled", None)
             if wrapped is None:
