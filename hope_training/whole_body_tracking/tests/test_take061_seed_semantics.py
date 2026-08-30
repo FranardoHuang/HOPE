@@ -38,6 +38,15 @@ def test_phase2_unmatched_solver_solution_is_a_valid_phase3_seed():
     assert phase3.P2._solver_seed_valid({**_valid_inverse(), "solver_signed_face_w": [float("nan"), 0, 0]}) is False
 
 
+def test_phase2_teacher_solver_face_counterexample_does_not_reject_velocity_match():
+    phase3 = _load("take061_phase3_face_counterexample", "solve_take061_joint_ball_phase3.py")
+    face_error_deg = 38.92
+    obsolete_face_threshold_deg = 15.0
+    assert face_error_deg > obsolete_face_threshold_deg
+    assert phase3.P2._phase2_velocity_matched(0.0070603, 0.1) is True
+    assert phase3.P2._phase2_velocity_matched(0.100001, 0.1) is False
+
+
 def test_phase3_requires_explicit_seed_valid_without_requiring_admitted():
     phase3 = _load("take061_phase3_seed_guard_test", "solve_take061_joint_ball_phase3.py")
     phase3._require_seed_valid("phase2", {"seed_valid": True, "admitted": False})

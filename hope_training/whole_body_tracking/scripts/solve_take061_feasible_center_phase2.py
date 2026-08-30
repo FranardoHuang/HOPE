@@ -31,6 +31,20 @@ SPEC.loader.exec_module(P1)
 KIND = "take061_stable_support_feasible_center_phase2_v1"
 
 
+def _phase2_velocity_matched(velocity_error_mps, tolerance_mps):
+    """Phase2 matches the executable centre to solver velocity only.
+
+    The measured teacher face and the solver face encode different intents and
+    have no specification requiring equality.  Their angle remains a recorded
+    diagnostic; Phase3/4 own solver-face retarget and final admission.
+    """
+    return bool(
+        np.isfinite(velocity_error_mps)
+        and np.isfinite(tolerance_mps)
+        and velocity_error_mps <= tolerance_mps
+    )
+
+
 def _load_fixed_solver_math():
     """Load the shipped solver modules by path without importing IsaacLab."""
     root = HERE.parents[0] / "source" / "whole_body_tracking" / "whole_body_tracking"
@@ -100,17 +114,27 @@ def _fixed_solver_inverse_grid(center, args):
     target_face = reference_face / torch.linalg.norm(reference_face, dim=1, keepdim=True)
     face_deg = torch.rad2deg(torch.acos(torch.clamp((unit_face * target_face).sum(1), -1, 1)))
     velocity_error = torch.linalg.norm(solved.v_racket - feasible_velocity, dim=1)
-    score = velocity_error + 0.02 * face_deg
+    # Teacher face and solver face encode different targets.  Do not use their
+    # angle either to select or admit a Phase2 velocity seed.
+    score = velocity_error
     score[~solved.ok] = float("inf")
     best = int(torch.argmin(score))
     if not bool(torch.isfinite(score[best])):
-        return {"matched": False, "admitted_count": 0, "reason_counts": solved.reason_counts}
+        return {
+            "matched": False,
+            "velocity_matched": False,
+            "admitted_count": 0,
+            "face_error_admission_gate": False,
+            "reason_counts": solved.reason_counts,
+        }
     speed, incoming_direction, aim_x, aim_y = rows[best]
+    velocity_matched = _phase2_velocity_matched(
+        float(velocity_error[best]), args.solver_velocity_tolerance_mps
+    )
     return {
-        "matched": bool(
-            velocity_error[best] <= args.solver_velocity_tolerance_mps
-            and face_deg[best] <= args.solver_face_tolerance_deg
-        ),
+        "matched": velocity_matched,
+        "velocity_matched": velocity_matched,
+        "match_basis": "mechanical_center_velocity_only",
         "admitted_count": int(solved.ok.sum()),
         "proposal_count": n,
         "incoming_speed_mps": speed,
@@ -124,6 +148,8 @@ def _fixed_solver_inverse_grid(center, args):
         "face_error_from_feasible_center_deg": float(face_deg[best]),
         "velocity_tolerance_mps": args.solver_velocity_tolerance_mps,
         "face_tolerance_deg": args.solver_face_tolerance_deg,
+        "face_error_admission_gate": False,
+        "face_error_role": "diagnostic_only_teacher_and_solver_faces_need_not_match",
         "reason_counts": solved.reason_counts,
         "solver_sources": {
             "continuous_questions_sha256": P1._sha256(Path(cq.__file__)),
@@ -303,8 +329,8 @@ def solve(args):
     reject = []
     if not chosen["mechanically_admitted"]:
         reject.append("NO_MECHANICALLY_EXECUTABLE_CENTER")
-    elif not solver_inverse["matched"]:
-        reject.append("FIXED_ACTION_SOLVER_HAS_NO_MATCH_IN_REGISTERED_SEARCH")
+    elif not solver_inverse["velocity_matched"]:
+        reject.append("FIXED_ACTION_SOLVER_VELOCITY_HAS_NO_MATCH_IN_REGISTERED_SEARCH")
     seed_valid = bool(
         chosen["mechanically_admitted"] and _solver_seed_valid(solver_inverse)
     )
@@ -329,7 +355,7 @@ def solve(args):
         "admitted": bool(
             chosen["mechanically_admitted"]
             and solver_inverse is not None
-            and solver_inverse["matched"]
+            and solver_inverse["velocity_matched"]
         ),
         "mechanically_admitted": bool(chosen["mechanically_admitted"]),
         "typed_reject_reasons": reject,
