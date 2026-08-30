@@ -5201,6 +5201,10 @@ class RacketTargetCommand(CommandTerm):
         # step fuses these five reductions into the mandatory exact-any host packet; the final
         # rollout step is drained once at the PPO update boundary.
         self._diagnostic_hold_recovery_metric_scalars = ()
+        # FullMDP keeps the same five historical Python-float transitions as an ordered device
+        # tape.  The RSL adapter drains that tape beside the exact-quality rows at the optimizer
+        # boundary, so a clean snapshot can never contain an unmaterialized recurrence.
+        self._action_ball_full_mdp_pending_hold_recovery_metric_rows = []
         self._previous_in_hold = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
@@ -27210,7 +27214,12 @@ class RacketTargetCommand(CommandTerm):
         self._exact_attempt_completed |= exact & ~wrapped
         self._exact_pending_completion |= exact & wrapped
 
-    def _update_footwork_signals(self, racket_dist: torch.Tensor) -> None:
+    def _update_footwork_signals(
+        self,
+        racket_dist: torch.Tensor,
+        *,
+        hold_recovery_decay: Optional[float] = None,
+    ) -> None:
         """Base-FREE footwork-to-strike signals (reward/metric only; NEVER observed). The legs are driven
         to move by racket PROGRESS (reducing the racket->target distance), not by any base target. All
         guards degrade to 0 if a body/sensor cannot resolve, so this can never crash training."""
@@ -27265,7 +27274,10 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["base_dist_from_origin"] = torch.norm(
             self.base_pos_w[:, :2] - self._env.scene.env_origins[:, :2], dim=-1
         )
-        self._update_hold_recovery_metrics(getattr(self._motion(), "in_hold", None))
+        self._update_hold_recovery_metrics(
+            getattr(self._motion(), "in_hold", None),
+            decay=hold_recovery_decay,
+        )
         # Rally: lazy swing-start stamp (fresh base_pos_w — see __init__ rationale).
         _pend = self._swing_start_pending.unsqueeze(-1)
         self._swing_start_base_xy.copy_(
@@ -27347,7 +27359,12 @@ class RacketTargetCommand(CommandTerm):
                 self.pre_strike, self.waist_twist, torch.zeros(self.num_envs, device=self.device)
             )
 
-    def _update_hold_recovery_metrics(self, in_hold) -> None:
+    def _update_hold_recovery_metrics(
+        self,
+        in_hold,
+        *,
+        decay: Optional[float] = None,
+    ) -> None:
         """Book heading recovery on true hold start/expiry edges.
 
         A resample can replace a held state with another held state without a boolean transition;
@@ -27355,7 +27372,19 @@ class RacketTargetCommand(CommandTerm):
         pending zero-length hold records neither edge. This helper is isolated for CPU boundary
         tests because these ledger semantics are easy to regress inside the larger metrics pass.
         """
+        defer_full_mdp = (
+            self._action_ball_full_mdp_deferred_exact_metrics_enabled()
+        )
+        if defer_full_mdp and decay is None:
+            raise RuntimeError(
+                "full-MDP hold/recovery metric decay is unavailable"
+            )
         if in_hold is None:
+            if defer_full_mdp:
+                self._stage_action_ball_full_mdp_hold_recovery_metric_row(
+                    self._hold_start_yaw.new_zeros(5).unbind(),
+                    decay=float(decay),
+                )
             return
         in_hold = in_hold.bool()
         pending = self._hold_edge_pending
@@ -27384,7 +27413,12 @@ class RacketTargetCommand(CommandTerm):
             conditioned_expiry_yaw.sum(),
             conditioned.sum(dtype=yaw_abs.dtype),
         )
-        if self._action_ball_diagnostic_device_telemetry_enabled():
+        if defer_full_mdp:
+            self._stage_action_ball_full_mdp_hold_recovery_metric_row(
+                metric_scalars,
+                decay=float(decay),
+            )
+        elif self._action_ball_diagnostic_device_telemetry_enabled():
             targets = (
                 ("_heading_expiry_sum_acc", None),
                 ("_heading_expiry_n_acc", None),
@@ -27432,6 +27466,115 @@ class RacketTargetCommand(CommandTerm):
         self._recovery_spawn_sum_acc += recovery_spawn_sum
         self._recovery_expiry_sum_acc += recovery_expiry_sum
         self._recovery_n_acc += recovery_n
+
+    def _stage_action_ball_full_mdp_hold_recovery_metric_row(
+        self,
+        values: Sequence[torch.Tensor],
+        *,
+        decay: float,
+    ) -> None:
+        """Keep one historical hold/recovery transition on device."""
+
+        if not math.isfinite(float(decay)) or not 0.0 <= float(decay) <= 1.0:
+            raise RuntimeError("full-MDP hold/recovery metric decay differs")
+        scalars = tuple(values)
+        if len(scalars) != 5:
+            raise RuntimeError("full-MDP hold/recovery metric row width drifted")
+        first = scalars[0]
+        if not torch.is_tensor(first) or first.numel() != 1:
+            raise RuntimeError(
+                "full-MDP hold/recovery metric row requires scalars"
+            )
+        for value in scalars:
+            if (
+                not torch.is_tensor(value)
+                or value.numel() != 1
+                or value.dtype != first.dtype
+                or value.device != first.device
+            ):
+                raise RuntimeError(
+                    "full-MDP hold/recovery metric row "
+                    "dtype/device/shape drifted"
+                )
+        pending = getattr(
+            self,
+            "_action_ball_full_mdp_pending_hold_recovery_metric_rows",
+            None,
+        )
+        if pending is None:
+            pending = []
+            self._action_ball_full_mdp_pending_hold_recovery_metric_rows = (
+                pending
+            )
+        pending.append((float(decay), torch.stack(scalars).detach()))
+
+    def _apply_action_ball_full_mdp_hold_recovery_metric_host_row(
+        self,
+        values: Sequence[float],
+        *,
+        decay: float,
+    ) -> None:
+        """Replay decay-then-increment in the historical Python-float order."""
+
+        if not math.isfinite(float(decay)) or not 0.0 <= float(decay) <= 1.0:
+            raise RuntimeError(
+                "full-MDP hold/recovery metric replay decay differs"
+            )
+        row = tuple(float(value) for value in values)
+        if len(row) != 5:
+            raise RuntimeError("full-MDP hold/recovery metric host row width drifted")
+        if any(not math.isfinite(value) for value in row):
+            raise RuntimeError(
+                "full-MDP hold/recovery metric host row is non-finite"
+            )
+        for attribute in (
+            "_heading_expiry_sum_acc",
+            "_heading_expiry_n_acc",
+            "_recovery_spawn_sum_acc",
+            "_recovery_expiry_sum_acc",
+            "_recovery_n_acc",
+        ):
+            setattr(self, attribute, decay * getattr(self, attribute))
+        self._apply_hold_recovery_host_values(row)
+
+    def _read_action_ball_full_mdp_hold_recovery_metric_rows(
+        self,
+    ) -> tuple[tuple[tuple[float, torch.Tensor], ...], tuple[tuple[float, ...], ...]]:
+        """Transfer and validate the hold tape without mutating Python state."""
+
+        pending = tuple(
+            getattr(
+                self,
+                "_action_ball_full_mdp_pending_hold_recovery_metric_rows",
+                (),
+            )
+        )
+        if not pending:
+            return (), ()
+        host_rows = _batched_host_scalar_rows(
+            tuple(row for _, row in pending)
+        )
+        if len(host_rows) != len(pending):
+            raise RuntimeError(
+                "full-MDP hold/recovery metric row count drifted"
+            )
+        return pending, host_rows
+
+    def _flush_action_ball_full_mdp_hold_recovery_metric_rows(self) -> bool:
+        """Transfer the rollout's five-scalar rows once, then replay them."""
+
+        pending, host_rows = (
+            self._read_action_ball_full_mdp_hold_recovery_metric_rows()
+        )
+        if not pending:
+            return False
+        for (decay, _), row in zip(pending, host_rows):
+            self._apply_action_ball_full_mdp_hold_recovery_metric_host_row(
+                row,
+                decay=decay,
+            )
+        self._action_ball_full_mdp_pending_hold_recovery_metric_rows = []
+        return True
 
     def _action_ball_diagnostic_device_telemetry_enabled(self) -> bool:
         """Whether pure telemetry may stay device-resident until the PPO boundary."""
@@ -27565,20 +27708,36 @@ class RacketTargetCommand(CommandTerm):
                     decay * accumulators[bucket] + next(it)
                 )
 
-    def _flush_action_ball_full_mdp_exact_metric_rows(self) -> bool:
-        """Transfer all rollout rows once and replay them chronologically."""
+    def _read_action_ball_full_mdp_exact_metric_rows(
+        self,
+    ) -> tuple[
+        tuple[tuple[float, torch.Tensor], ...],
+        tuple[int, ...],
+        tuple[tuple[float, ...], ...],
+    ]:
+        """Transfer and validate the exact tape without mutating Python state."""
 
         pending = tuple(
             getattr(self, "_action_ball_full_mdp_pending_exact_metric_rows", ())
         )
         if not pending:
-            return False
+            return (), (), ()
         order = tuple(
             getattr(self, "_action_ball_full_mdp_exact_metric_bucket_order", ())
         )
         host_rows = _batched_host_scalar_rows(tuple(row for _, row in pending))
         if len(host_rows) != len(pending):
             raise RuntimeError("full-MDP exact metric row count drifted")
+        return pending, order, host_rows
+
+    def _flush_action_ball_full_mdp_exact_metric_rows(self) -> bool:
+        """Transfer all rollout rows once and replay them chronologically."""
+
+        pending, order, host_rows = (
+            self._read_action_ball_full_mdp_exact_metric_rows()
+        )
+        if not pending:
+            return False
         for (decay, _), row in zip(pending, host_rows):
             self._apply_action_ball_full_mdp_exact_metric_host_row(
                 row, decay=decay, bucket_order=order
@@ -28041,12 +28200,86 @@ class RacketTargetCommand(CommandTerm):
                     "full-MDP exact metric rollout row count differs: "
                     f"actual={actual}, expected={expected}"
                 )
-        full_mdp_exact = self._flush_action_ball_full_mdp_exact_metric_rows()
+            hold_pending = getattr(
+                self,
+                "_action_ball_full_mdp_pending_hold_recovery_metric_rows",
+                None,
+            )
+            if hold_pending is not None:
+                hold_actual = len(hold_pending)
+                if hold_actual != actual:
+                    raise RuntimeError(
+                        "full-MDP exact/hold metric rollout row counts differ: "
+                        f"exact={actual}, hold={hold_actual}"
+                    )
+                if hold_actual not in expected:
+                    raise RuntimeError(
+                        "full-MDP hold/recovery metric rollout row count differs: "
+                        f"actual={hold_actual}, expected={expected}"
+                    )
+
+        exact_pending = tuple(
+            getattr(self, "_action_ball_full_mdp_pending_exact_metric_rows", ())
+        )
+        hold_pending = tuple(
+            getattr(
+                self,
+                "_action_ball_full_mdp_pending_hold_recovery_metric_rows",
+                (),
+            )
+        )
+        if exact_pending and hold_pending:
+            if len(exact_pending) != len(hold_pending):
+                raise RuntimeError(
+                    "full-MDP exact/hold metric rollout row counts differ: "
+                    f"exact={len(exact_pending)}, hold={len(hold_pending)}"
+                )
+            for (exact_decay, exact_row), (hold_decay, hold_row) in zip(
+                exact_pending, hold_pending
+            ):
+                if exact_decay != hold_decay:
+                    raise RuntimeError(
+                        "full-MDP exact/hold metric decay chronology differs"
+                    )
+                if (
+                    exact_row.dtype != hold_row.dtype
+                    or exact_row.device != hold_row.device
+                ):
+                    raise RuntimeError(
+                        "full-MDP exact/hold metric dtype/device chronology differs"
+                    )
+
+        # Both transfers and all finite/shape checks finish before either
+        # historical Python-double recurrence is replayed.  A bad second tape
+        # therefore cannot partially publish the first tape.
+        exact_pending, exact_order, exact_host_rows = (
+            self._read_action_ball_full_mdp_exact_metric_rows()
+        )
+        hold_pending, hold_host_rows = (
+            self._read_action_ball_full_mdp_hold_recovery_metric_rows()
+        )
+        for (decay, _), row in zip(exact_pending, exact_host_rows):
+            self._apply_action_ball_full_mdp_exact_metric_host_row(
+                row,
+                decay=decay,
+                bucket_order=exact_order,
+            )
+        for (decay, _), row in zip(hold_pending, hold_host_rows):
+            self._apply_action_ball_full_mdp_hold_recovery_metric_host_row(
+                row,
+                decay=decay,
+            )
+        full_mdp_exact = bool(exact_pending)
+        full_mdp_hold_recovery = bool(hold_pending)
+        if full_mdp_exact:
+            self._action_ball_full_mdp_pending_exact_metric_rows = []
+        if full_mdp_hold_recovery:
+            self._action_ball_full_mdp_pending_hold_recovery_metric_rows = []
         self._flush_diagnostic_hold_recovery_metric_scalars()
         diagnostic = self._action_ball_diagnostic_device_telemetry_enabled()
         if diagnostic:
             self._flush_action_ball_diagnostic_device_telemetry()
-        if full_mdp_exact or diagnostic:
+        if full_mdp_exact or full_mdp_hold_recovery or diagnostic:
             self._refresh_action_ball_diagnostic_public_metrics()
         if full_mdp_exact:
             self._refresh_action_ball_exact_public_metrics()
@@ -28059,6 +28292,16 @@ class RacketTargetCommand(CommandTerm):
         if getattr(self, "_action_ball_full_mdp_pending_exact_metric_rows", ()):
             raise RuntimeError(
                 "full-MDP exact metrics are pending on device; call "
+                "materialize_action_ball_diagnostic_metrics_for_report() before reporting"
+            )
+
+        if getattr(
+            self,
+            "_action_ball_full_mdp_pending_hold_recovery_metric_rows",
+            (),
+        ):
+            raise RuntimeError(
+                "full-MDP hold/recovery metrics are pending on device; call "
                 "materialize_action_ball_diagnostic_metrics_for_report() before reporting"
             )
 
@@ -30623,11 +30866,12 @@ class RacketTargetCommand(CommandTerm):
         self._drift_sum_acc = decay * self._drift_sum_acc
         self._drift_fwd_sum_acc = decay * self._drift_fwd_sum_acc
         self._station_offset_start_sum_acc = decay * self._station_offset_start_sum_acc
-        self._heading_expiry_sum_acc = decay * self._heading_expiry_sum_acc
-        self._heading_expiry_n_acc = decay * self._heading_expiry_n_acc
-        self._recovery_spawn_sum_acc = decay * self._recovery_spawn_sum_acc
-        self._recovery_expiry_sum_acc = decay * self._recovery_expiry_sum_acc
-        self._recovery_n_acc = decay * self._recovery_n_acc
+        if not self._action_ball_full_mdp_deferred_exact_metrics_enabled():
+            self._heading_expiry_sum_acc = decay * self._heading_expiry_sum_acc
+            self._heading_expiry_n_acc = decay * self._heading_expiry_n_acc
+            self._recovery_spawn_sum_acc = decay * self._recovery_spawn_sum_acc
+            self._recovery_expiry_sum_acc = decay * self._recovery_expiry_sum_acc
+            self._recovery_n_acc = decay * self._recovery_n_acc
         for _c in self._clip_names:
             self._swing_starts_acc_c[_c] = decay * self._swing_starts_acc_c[_c]
             self._prestrike_fall_acc_c[_c] = decay * self._prestrike_fall_acc_c[_c]
@@ -32056,7 +32300,10 @@ class RacketTargetCommand(CommandTerm):
             # reward signal = SUM over feet (so both slipping feet are penalized); pre_strike-gated in the reward.
             self.foot_slip_in_contact = _slip_sum
         # footwork-to-strike signals (racket progress, foot slip²/vel/drag, arm overreach, strike stability)
-        self._update_footwork_signals(pos_err)
+        self._update_footwork_signals(
+            pos_err,
+            hold_recovery_decay=decay,
+        )
         if self._has_jpos_limits:
             limits = getattr(data, "soft_joint_pos_limits", None)
             if limits is None:

@@ -337,6 +337,7 @@ class RacketTargetCommand:
         # FullMDP performs one canonical genesis command compute before the
         # first H=24 rollout, so update zero must drain H+1 rows.
         self.pending_rows = 25
+        self.pending_hold_rows = 25
         self.materialize_calls = 0
         self.events = None
         self.materialize_failure = None
@@ -346,9 +347,15 @@ class RacketTargetCommand:
         return True
 
     def stage_exact_metric_rows(self, count):
-        if type(count) is not int or count < 1 or self.pending_rows != 0:
+        if (
+            type(count) is not int
+            or count < 1
+            or self.pending_rows != 0
+            or self.pending_hold_rows != 0
+        ):
             raise RuntimeError("fake exact metric row staging differs")
         self.pending_rows = count
+        self.pending_hold_rows = count
 
     def materialize_action_ball_diagnostic_metrics_for_report(
         self, *, expected_full_mdp_exact_row_counts=None
@@ -358,10 +365,19 @@ class RacketTargetCommand:
         if self.materialize_failure is not None:
             raise self.materialize_failure
         if expected_full_mdp_exact_row_counts is not None:
+            if self.pending_hold_rows != self.pending_rows:
+                raise RuntimeError(
+                    "full-MDP exact/hold metric rollout row counts differ"
+                )
             if self.pending_rows not in expected_full_mdp_exact_row_counts:
                 raise RuntimeError("full-MDP exact metric rollout row count differs")
+            if self.pending_hold_rows not in expected_full_mdp_exact_row_counts:
+                raise RuntimeError(
+                    "full-MDP hold/recovery metric rollout row count differs"
+                )
         self.materialize_calls += 1
         self.pending_rows = 0
+        self.pending_hold_rows = 0
 
     def assert_action_ball_diagnostic_metrics_materialized_for_report(self):
         if self.events is not None:
@@ -370,6 +386,10 @@ class RacketTargetCommand:
             raise self.assert_failure
         if self.pending_rows:
             raise RuntimeError("full-MDP exact metrics are pending on device")
+        if self.pending_hold_rows:
+            raise RuntimeError(
+                "full-MDP hold/recovery metrics are pending on device"
+            )
 
 
 RacketTargetCommand.__module__ = (
@@ -803,6 +823,7 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
 
     def update():
         assert env.command_term.pending_rows == 0
+        assert env.command_term.pending_hold_rows == 0
         env.owner.events.append("update")
         return {"loss": 1.0}
 
@@ -1023,6 +1044,30 @@ def test_first_update_requires_genesis_plus_rollout_metric_rows(
 ):
     env = _Env()
     env.command_term.pending_rows = 24
+    env.command_term.pending_hold_rows = 24
+    boundary = adapter.ActionBallFullMdpRsl3Adapter(
+        env=env, owner=env.owner, log_dir=str(tmp_path)
+    )
+    optimizer_calls = []
+
+    with pytest.raises(RuntimeError, match="optimizer boundary failed"):
+        boundary.update(
+            lambda: optimizer_calls.append(True),
+            update_index=0,
+            completed_environment_steps=48,
+        )
+
+    assert optimizer_calls == []
+    assert env.owner.poisoned is True
+    assert env.owner.active is not None
+    assert boundary._last_update == -1
+
+
+def test_first_update_hold_metric_span_failure_poisons_before_optimizer(
+    tmp_path, _fake_imports
+):
+    env = _Env()
+    env.command_term.pending_hold_rows = 24
     boundary = adapter.ActionBallFullMdpRsl3Adapter(
         env=env, owner=env.owner, log_dir=str(tmp_path)
     )
@@ -1140,6 +1185,7 @@ def test_snapshot_guard_rejects_active_optimizer_boundary(
         env=env, owner=env.owner, log_dir=str(tmp_path)
     )
     env.command_term.pending_rows = 0
+    env.command_term.pending_hold_rows = 0
     boundary._safety_pending = {"prepared": True}
 
     with pytest.raises(RuntimeError, match="active optimizer boundary"):
@@ -1180,6 +1226,7 @@ def test_snapshot_guard_rejects_before_owner_prepare(
         ("owner_active", "optimizer boundary is active"),
         ("safety_pending", "prepared consume awaiting"),
         ("metric_pending", "metrics are pending"),
+        ("hold_metric_pending", "hold/recovery metrics are pending"),
     ),
 )
 def test_runner_save_real_adapter_rejects_every_dirty_boundary_before_write(
@@ -1189,7 +1236,12 @@ def test_runner_save_real_adapter_rejects_every_dirty_boundary_before_write(
     boundary = adapter.ActionBallFullMdpRsl3Adapter(
         env=env, owner=env.owner, log_dir=str(tmp_path)
     )
-    if dirty_state != "metric_pending":
+    if dirty_state not in ("metric_pending", "hold_metric_pending"):
+        env.command_term.pending_rows = 0
+        env.command_term.pending_hold_rows = 0
+    elif dirty_state == "metric_pending":
+        env.command_term.pending_hold_rows = 0
+    else:
         env.command_term.pending_rows = 0
     if dirty_state == "owner_poisoned":
         env.owner.poisoned = True
@@ -1197,7 +1249,7 @@ def test_runner_save_real_adapter_rejects_every_dirty_boundary_before_write(
         boundary._prepare(update_index=0, completed_environment_steps=48)
     elif dirty_state == "safety_pending":
         env.action_term.prepare_joint_safety_ledger_consume()
-    elif dirty_state != "metric_pending":
+    elif dirty_state not in ("metric_pending", "hold_metric_pending"):
         raise AssertionError("unknown dirty snapshot state")
 
     base_save_calls = []

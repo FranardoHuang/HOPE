@@ -1,9 +1,10 @@
-"""Exact-strike metric D2H batching and update-boundary parity tests.
+"""Command metric D2H batching and update-boundary parity tests.
 
 The production change keeps every reduction and every Python-float EMA recurrence unchanged.  The
-FullMDP diagnostic path retains chronological reduced rows on device and transfers them once at the
-PPO boundary; configurations with an immediate consumer keep the existing control-step path.  The
-CUDA synchronization and wall-time acceptance remains a Pod-only check.
+FullMDP diagnostic path retains chronological exact-quality and hold/recovery rows on device and
+transfers each fixed-width tape once at the PPO boundary; configurations with an immediate
+consumer keep the existing control-step path.  The CUDA synchronization and wall-time acceptance
+remains a Pod-only check.
 """
 
 from __future__ import annotations
@@ -653,3 +654,289 @@ def test_per_clip_batched_values_keep_the_legacy_state_transition_order():
     # The single D2H happens early, but the per-clip EMA mutation stays after the historic
     # swing-completion read and immediately before the exact-quality report.
     assert buffered < completion_report < per_clip_update < exact_quality_report
+
+
+_HOLD_RECOVERY_ATTRIBUTES = (
+    "_heading_expiry_sum_acc",
+    "_heading_expiry_n_acc",
+    "_recovery_spawn_sum_acc",
+    "_recovery_expiry_sum_acc",
+    "_recovery_n_acc",
+)
+
+
+def _deferred_hold_command():
+    command = _deferred_exact_command()
+    command._action_ball_full_mdp_pending_hold_recovery_metric_rows = []
+    command._hold_edge_pending = torch.zeros(3, dtype=torch.bool)
+    command._previous_in_hold = torch.zeros(3, dtype=torch.bool)
+    command._hold_start_yaw = torch.zeros(3, dtype=torch.float32)
+    command.robot = types.SimpleNamespace(
+        data=types.SimpleNamespace(root_quat_w=torch.zeros(3, 4))
+    )
+    command.robot.data.root_quat_w[:, 0] = 1.0
+    for name in (
+        "base_heading_abs_at_swing_start",
+        "base_heading_hold_expiry_count",
+        "heading_recovery_spawn_yaw",
+        "heading_recovery_expiry_yaw",
+        "heading_recovery_count",
+    ):
+        command.metrics[name] = torch.full((1,), -1.0)
+    return command
+
+
+def test_full_mdp_hold_recovery_fixed_tape_matches_python_double_and_public_metrics():
+    deferred = _deferred_hold_command()
+    legacy = _deferred_hold_command()
+    legacy._action_ball_full_mdp_enabled = False
+    before = (0.125, 1.25, 0.375, 0.625, 2.5)
+    for command in (deferred, legacy):
+        for attribute, value in zip(_HOLD_RECOVERY_ATTRIBUTES, before):
+            setattr(command, attribute, value)
+
+    rows = (
+        (0.99, torch.tensor([0.25, 1.0, 0.5, 0.125, 1.0])),
+        (0.875, torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0])),
+        (0.5, torch.tensor([0.75, 2.0, 1.25, 0.25, 2.0])),
+    )
+    for decay, row in rows:
+        deferred._stage_action_ball_full_mdp_hold_recovery_metric_row(
+            row.unbind(),
+            decay=decay,
+        )
+        for attribute in _HOLD_RECOVERY_ATTRIBUTES:
+            setattr(legacy, attribute, decay * getattr(legacy, attribute))
+        legacy._apply_hold_recovery_host_values(
+            tuple(float(value) for value in row)
+        )
+
+    deferred.materialize_action_ball_diagnostic_metrics_for_report()
+    legacy._refresh_action_ball_diagnostic_public_metrics()
+
+    assert tuple(
+        getattr(deferred, attribute)
+        for attribute in _HOLD_RECOVERY_ATTRIBUTES
+    ) == tuple(
+        getattr(legacy, attribute)
+        for attribute in _HOLD_RECOVERY_ATTRIBUTES
+    )
+    for name in (
+        "base_heading_abs_at_swing_start",
+        "base_heading_hold_expiry_count",
+        "heading_recovery_spawn_yaw",
+        "heading_recovery_expiry_yaw",
+        "heading_recovery_count",
+    ):
+        assert torch.equal(deferred.metrics[name], legacy.metrics[name]), name
+
+
+@pytest.mark.parametrize("row_count", (48, 49))
+def test_full_mdp_exact_and_hold_tapes_use_two_update_boundary_reads(
+    monkeypatch,
+    row_count: int,
+):
+    command = _deferred_hold_command()
+    calls = []
+    original = hope_commands_mod._batched_host_scalar_rows
+
+    def counted(rows):
+        rows = tuple(rows)
+        calls.append((len(rows), int(rows[0].numel())))
+        return original(rows)
+
+    monkeypatch.setattr(hope_commands_mod, "_batched_host_scalar_rows", counted)
+    for index in range(row_count):
+        exact = torch.arange(18, dtype=torch.float32) + float(index)
+        hold = torch.arange(5, dtype=torch.float32) + float(index)
+        command._stage_action_ball_full_mdp_exact_metric_row(
+            exact.unbind(), decay=0.99, bucket_order=(0,)
+        )
+        command._stage_action_ball_full_mdp_hold_recovery_metric_row(
+            hold.unbind(), decay=0.99
+        )
+
+    command.materialize_action_ball_diagnostic_metrics_for_report(
+        expected_full_mdp_exact_row_counts=(48, 49)
+    )
+    command.assert_action_ball_diagnostic_metrics_materialized_for_report()
+    command.materialize_action_ball_diagnostic_metrics_for_report()
+
+    assert calls == [(row_count, 18), (row_count, 5)]
+
+
+def test_full_mdp_hold_row_count_mismatch_fails_before_any_transfer(monkeypatch):
+    command = _deferred_hold_command()
+    calls = []
+    monkeypatch.setattr(
+        hope_commands_mod,
+        "_batched_host_scalar_rows",
+        lambda rows: calls.append(tuple(rows)),
+    )
+    for _ in range(48):
+        command._stage_action_ball_full_mdp_exact_metric_row(
+            torch.zeros(18).unbind(), decay=0.99, bucket_order=(0,)
+        )
+    for _ in range(47):
+        command._stage_action_ball_full_mdp_hold_recovery_metric_row(
+            torch.zeros(5).unbind(), decay=0.99
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="exact/hold metric rollout row counts differ",
+    ):
+        command.materialize_action_ball_diagnostic_metrics_for_report(
+            expected_full_mdp_exact_row_counts=(48,)
+        )
+
+    assert calls == []
+    assert len(command._action_ball_full_mdp_pending_exact_metric_rows) == 48
+    assert len(
+        command._action_ball_full_mdp_pending_hold_recovery_metric_rows
+    ) == 47
+
+
+def test_full_mdp_exact_and_hold_allowed_span_mismatch_fails_before_transfer(
+    monkeypatch,
+):
+    command = _deferred_hold_command()
+    calls = []
+    monkeypatch.setattr(
+        hope_commands_mod,
+        "_batched_host_scalar_rows",
+        lambda rows: calls.append(tuple(rows)),
+    )
+    for _ in range(48):
+        command._stage_action_ball_full_mdp_exact_metric_row(
+            torch.zeros(18).unbind(), decay=0.99, bucket_order=(0,)
+        )
+    for _ in range(49):
+        command._stage_action_ball_full_mdp_hold_recovery_metric_row(
+            torch.zeros(5).unbind(), decay=0.99
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="exact/hold metric rollout row counts differ",
+    ):
+        command.materialize_action_ball_diagnostic_metrics_for_report(
+            expected_full_mdp_exact_row_counts=(48, 49)
+        )
+
+    assert calls == []
+    assert len(command._action_ball_full_mdp_pending_exact_metric_rows) == 48
+    assert len(
+        command._action_ball_full_mdp_pending_hold_recovery_metric_rows
+    ) == 49
+
+
+def test_full_mdp_hold_pending_and_nonfinite_rows_fail_closed():
+    command = _deferred_hold_command()
+    row = torch.zeros(5)
+    row[2] = float("nan")
+    command._stage_action_ball_full_mdp_hold_recovery_metric_row(
+        row.unbind(), decay=0.99
+    )
+
+    with pytest.raises(RuntimeError, match="pending on device"):
+        command.assert_action_ball_diagnostic_metrics_materialized_for_report()
+    with pytest.raises(RuntimeError, match="non-finite scalar"):
+        command.materialize_action_ball_diagnostic_metrics_for_report()
+
+    assert len(
+        command._action_ball_full_mdp_pending_hold_recovery_metric_rows
+    ) == 1
+
+
+def test_full_mdp_second_tape_failure_cannot_partially_replay_exact_rows():
+    command = _deferred_hold_command()
+    command._exact_n_acc = 7.0
+    command._heading_expiry_sum_acc = 11.0
+    command._stage_action_ball_full_mdp_exact_metric_row(
+        torch.arange(1, 19, dtype=torch.float32).unbind(),
+        decay=0.75,
+        bucket_order=(0,),
+    )
+    hold = torch.zeros(5)
+    hold[2] = float("nan")
+    command._stage_action_ball_full_mdp_hold_recovery_metric_row(
+        hold.unbind(),
+        decay=0.75,
+    )
+
+    with pytest.raises(RuntimeError, match="non-finite scalar"):
+        command.materialize_action_ball_diagnostic_metrics_for_report(
+            expected_full_mdp_exact_row_counts=(1,)
+        )
+
+    assert command._exact_n_acc == 7.0
+    assert command._heading_expiry_sum_acc == 11.0
+    assert len(command._action_ball_full_mdp_pending_exact_metric_rows) == 1
+    assert len(
+        command._action_ball_full_mdp_pending_hold_recovery_metric_rows
+    ) == 1
+
+
+def test_full_mdp_exact_and_hold_decay_drift_fails_before_transfer(monkeypatch):
+    command = _deferred_hold_command()
+    calls = []
+    monkeypatch.setattr(
+        hope_commands_mod,
+        "_batched_host_scalar_rows",
+        lambda rows: calls.append(tuple(rows)),
+    )
+    command._stage_action_ball_full_mdp_exact_metric_row(
+        torch.zeros(18).unbind(), decay=0.99, bucket_order=(0,)
+    )
+    command._stage_action_ball_full_mdp_hold_recovery_metric_row(
+        torch.zeros(5).unbind(), decay=0.98
+    )
+
+    with pytest.raises(RuntimeError, match="decay chronology differs"):
+        command.materialize_action_ball_diagnostic_metrics_for_report(
+            expected_full_mdp_exact_row_counts=(1,)
+        )
+
+    assert calls == []
+
+
+def test_full_mdp_hold_update_stages_no_host_read_and_handles_missing_hold(
+    monkeypatch,
+):
+    command = _deferred_hold_command()
+    calls = []
+    original = hope_commands_mod._batched_host_scalar_rows
+
+    def counted(rows):
+        rows = tuple(rows)
+        calls.append((len(rows), int(rows[0].numel())))
+        return original(rows)
+
+    monkeypatch.setattr(hope_commands_mod, "_batched_host_scalar_rows", counted)
+    command._update_hold_recovery_metrics(
+        torch.tensor([True, True, True]),
+        decay=0.9,
+    )
+    command._update_hold_recovery_metrics(None, decay=0.8)
+
+    assert calls == []
+    assert len(
+        command._action_ball_full_mdp_pending_hold_recovery_metric_rows
+    ) == 2
+    command.materialize_action_ball_diagnostic_metrics_for_report()
+    assert calls == [(2, 5)]
+
+
+def test_full_mdp_hold_hotpath_skips_python_decay_and_threads_step_decay():
+    command_type = hope_commands_mod.RacketTargetCommand
+    decay_source = inspect.getsource(command_type._decay_swing_accounting)
+    update_source = inspect.getsource(command_type._update_metrics)
+    footwork_source = inspect.getsource(command_type._update_footwork_signals)
+
+    assert (
+        "if not self._action_ball_full_mdp_deferred_exact_metrics_enabled():"
+        in decay_source
+    )
+    assert "hold_recovery_decay=decay" in update_source
+    assert "decay=hold_recovery_decay" in footwork_source
