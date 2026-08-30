@@ -27,8 +27,8 @@ MuJoCo N=1 frozen-teacher replay增加一个显式枚举的
 [`direct_frame0_playback`](../../DEFINITIONS.md#mujoco-direct-frame0-teacher-replay)诊断候选。默认
 `split_ready_bridge`的生产训练、Observation、Reward、termination、plant和回放trace语义均不变。
 
-反事实模式只允许一次交接：accepted task仍处于`REVEAL_COMMITTED`、球仍是canonical
-park且未launch、Motion仍为frame0/prepare、离散pre-swing wait恰好归零时，原子写入
+反事实模式只允许一次交接：accepted task仍处于`REVEAL_COMMITTED`、未launch、
+Motion仍为frame0/prepare、离散pre-swing wait恰好归零时，原子写入
 teacher frame0 pelvis root与31关节，将root/joint velocity归零，只清robot DOF的
 `qacc_warmstart`及controller/qdes history后做`sim.forward()`。ball qpos/qvel/solver history、task bytes、
 lifecycle counters必须逐位不变；`sim.forward()`后、真实transition前只读记录
@@ -42,6 +42,16 @@ exact Pod clean checkout `dd62e8ca5e0ebae9e62017df6103762bdaab08ff`恢复受管A
 ignored mesh closure后，四个直接相关module union=`167 passed / 8 skipped / 0 failed`；第一轮还抓到
 非replay `main()`过早import helper会破坏EPA48 pre-import order，已在同一SHA的前驱修复。
 下一证据是自然空闲GPU上fresh N=1 CUDA replay；在那之前仍为`unverified`，Gate不升级。
+
+`5e7be7a6` 的首个真实CUDA replay在installer首个boundary gate自然RC1，未产生
+teacher transition、summary或NPZ。根因不是训练或浮点误差：production每个控制步先
+park waiting row，再经20×1 ms semi-implicit Euler积分；因此返回actor boundary必然是
+`ball_age=1`、`vz≈-0.1962 m/s`、`z drift≈-0.0020601 m`，而旧门错要求
+`age=0 + canonical qpos + qvel=0`。本修复不改production调用顺序：删除这两个不可能
+假设，改为精确核`age=1`与当前ball qpos/qvel finite、quaternion finite/nonzero，并继续
+对install前后ball qpos/qvel/warmstart、task、lifecycle作逐位不变证明。下一真实
+production prepare仍在physics前自然repark。失败信息升为typed v2 report，逐项列出
+predicate及position delta、linear/angular velocity、quaternion norm；新Pod CPU/CUDA证据待补。
 
 ## 2026-08-30 frozen-teacher targeted修复候选
 

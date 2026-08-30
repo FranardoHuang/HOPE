@@ -1,11 +1,22 @@
 # 简短进度记录
 
+## 2026-08-30 — direct-frame0 actor-boundary假设修正
+
+- `5e7be7a6` 真实CUDA在teacher step前因旧boundary gate自然RC1。production时序证明
+  waiting ball在每个transition开始park，随后20×1 ms物理推进，所以actor boundary必然是
+  `age=1`、`vz≈-0.1962 m/s`、`z drift≈-0.0020601 m`；旧`age=0/canonical/qvel=0`门为
+  impossible precondition。后继保留现有diagnostic-only actor-boundary原子安装，不侵入
+  production prepare/hot path；改核精确phase/task/frame/frozen/no-launch/no-physical/age1与当前
+  ball finite/nonzero quaternion，安装前后ball/task/lifecycle仍逐位不变。新typed report列出
+  每个predicate和ball delta/velocity/norm；已补真实age1/fallen-state与park-before-advance回归，
+  当前只有静态diff证据，Pod CPU/CUDA待验。
+
 ## 2026-08-30 — direct-frame0 frozen-teacher反事实候选
 
 - 在exact `3f0b80d3`上增加显式
   [`direct_frame0_playback`](DEFINITIONS.md#mujoco-direct-frame0-teacher-replay)枚举；默认
   `split_ready_bridge`及生产训练/Observation/Reward/termination不变。N=1 zero-PPO模式只在
-  accepted、未launch、canonical parked ball、wait=0的唯一边界安装Motion frame0
+  accepted、未launch、finite waiting-ball actor state、wait=0的唯一边界安装Motion frame0
   root/q和零速，清robot solver/controller/qdes history，刷新aligned teacher/Observation cache；
   安装后、真实transition前的table keepout与backend-resolved robot/table contact以只读边界证据记录，不写lifecycle latch；
   ball/task/lifecycle逐位不变、requested/executable q0、后继实际执行自然frame1和exactly-one

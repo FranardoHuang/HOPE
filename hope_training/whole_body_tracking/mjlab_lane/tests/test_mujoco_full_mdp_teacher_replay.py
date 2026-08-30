@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import inspect
+import json
 from pathlib import Path
 import sys
 import textwrap
@@ -105,8 +106,11 @@ def _direct_frame0_install_rig():
     qpos[:, 2] = 1.1
     qpos[:, 3] = 1.0
     qpos[:, 38:45] = torch.tensor(
-        [[4.0, 5.0, 6.0, 1.0, 0.0, 0.0, 0.0]]
+        [[4.0, 5.0, 5.9979399, 1.0, 0.0, 0.0, 0.0]]
     )
+    # This is the real returned actor boundary after a waiting row was parked
+    # and then advanced by 20 x 1 ms semi-implicit Euler gravity substeps.
+    qvel[:, 39] = -0.1962
     data = types.SimpleNamespace(
         qpos=qpos,
         qvel=qvel,
@@ -184,7 +188,7 @@ def _direct_frame0_install_rig():
     env._epoch_clock_ticks = torch.tensor([[48, 140, 130, 190, 198]])
     env.reset_generation = torch.tensor([3], dtype=torch.long)
     env.episode_length_buf = torch.tensor([93], dtype=torch.long)
-    env.ball_age_buf = torch.tensor([0], dtype=torch.long)
+    env.ball_age_buf = torch.tensor([1], dtype=torch.long)
     env._full_a_physical_present = torch.tensor([False])
     env._full_a_owner_valid_bits = torch.tensor([[1, 2, 3, 4]])
     env._full_a_owner_fault_bits = torch.tensor([[0, 0, 0, 0]])
@@ -246,6 +250,72 @@ def test_direct_frame0_install_is_atomic_one_shot_and_preserves_shot_state():
     )
     with pytest.raises(RuntimeError, match="boundary differs"):
         env.install_diagnostic_direct_frame0_playback(ids)
+
+
+def test_direct_frame0_actor_boundary_reports_real_park_drift_without_gating_it():
+    env, _joint_q0, _forward_calls = _direct_frame0_install_rig()
+    ids = torch.tensor([0], dtype=torch.long)
+    env.enable_diagnostic_direct_frame0_playback()
+
+    report = env._diagnostic_direct_frame0_boundary_report(ids)
+
+    assert all(report["checks"].values())
+    assert report["schema"] == "action_ball_direct_frame0_boundary_v2"
+    assert report["actual"]["ball_age"] == 1
+    assert report["actual"]["ball_position_max_abs_delta_from_park_m"] \
+        == pytest.approx(0.0020601, abs=2.0e-7)
+    assert report["actual"]["ball_linear_velocity_max_abs_mps"] \
+        == pytest.approx(0.1962, abs=2.0e-7)
+
+
+def test_direct_frame0_boundary_failure_names_predicate_and_measured_delta():
+    env, _joint_q0, forward_calls = _direct_frame0_install_rig()
+    ids = torch.tensor([0], dtype=torch.long)
+    env.sim.data.qpos[0, env.b_q + 3 : env.b_q + 7] = 0.0
+    env.enable_diagnostic_direct_frame0_playback()
+
+    with pytest.raises(RuntimeError) as error:
+        env.install_diagnostic_direct_frame0_playback(ids)
+
+    prefix = "direct frame-zero diagnostic boundary differs: "
+    assert str(error.value).startswith(prefix)
+    report = json.loads(str(error.value)[len(prefix):])
+    assert not report["checks"]["ball_quaternion_nonzero"]
+    assert report["checks"]["ball_position_finite"]
+    assert report["checks"]["ball_velocity_finite"]
+    assert report["actual"]["ball_quaternion_norm"] == 0.0
+    assert forward_calls == []
+
+    nonfinite, _joint_q0, nonfinite_calls = _direct_frame0_install_rig()
+    nonfinite.sim.data.qvel[0, nonfinite.b_v] = float("nan")
+    nonfinite.enable_diagnostic_direct_frame0_playback()
+    with pytest.raises(RuntimeError) as nonfinite_error:
+        nonfinite.install_diagnostic_direct_frame0_playback(ids)
+    nonfinite_report = json.loads(
+        str(nonfinite_error.value)[len(prefix):]
+    )
+    assert not nonfinite_report["checks"]["ball_velocity_finite"]
+    assert nonfinite_report["actual"][
+        "ball_linear_velocity_max_abs_mps"
+    ] is None
+    assert nonfinite_calls == []
+
+
+def test_direct_frame0_production_reparks_before_advancing_waiting_rows():
+    prepare = inspect.getsource(
+        wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step
+    )
+    step = inspect.getsource(wait_env.FullMdpInitialWaitVecEnv._step_full_a)
+    runner_source = inspect.getsource(runner.run_teacher_replay)
+
+    assert prepare.index("self._full_a_park_rows(") < prepare.index(
+        "return scheduled_due, launch, missed_launch"
+    )
+    assert step.index("self._full_a_prepare_step()") < step.index(
+        "self._advance_plant(actions)"
+    )
+    assert runner_source.index("install_diagnostic_direct_frame0_playback") \
+        < runner_source.index("env.step(action)")
 
 
 def test_direct_frame0_install_rejects_an_early_or_live_ball_boundary():

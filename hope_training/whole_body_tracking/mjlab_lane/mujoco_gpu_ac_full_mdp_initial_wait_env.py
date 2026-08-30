@@ -2090,6 +2090,118 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         ))
         return ball, task, lifecycle, int(self.common_step_counter)
 
+    def _diagnostic_direct_frame0_boundary_report(self, ids):
+        """Describe the exact actor boundary used by the frame-zero probe.
+
+        Waiting rows are parked at the *start* of every production transition.
+        The returned actor boundary is consequently one integrated policy step
+        later: the still-logical park row has ``ball_age == 1`` and gravity has
+        moved its free joint away from the canonical park bytes.  The probe may
+        inspect that finite state, but it must preserve the bytes exactly; the
+        next production ``_full_a_prepare_step`` will park it again.
+        """
+
+        torch = self._torch
+        data = self.sim.data
+
+        def host_bool(value):
+            return bool(value.detach().cpu().item())
+
+        def host_int(value):
+            return int(value.detach().cpu().item())
+
+        def host_float(value):
+            result = float(value.detach().cpu().item())
+            return result if math.isfinite(result) else None
+
+        expected_ball_position = (
+            self.env.scene.env_origins[ids] + self._full_a_park_position_scene
+        )
+        expected_ball_quaternion = self._full_a_park_quaternion.expand(
+            ids.numel(), 4
+        )
+        ball_position = data.qpos[ids, self.b_q : self.b_q + 3]
+        ball_quaternion = data.qpos[ids, self.b_q + 3 : self.b_q + 7]
+        ball_velocity = data.qvel[ids, self.b_v : self.b_v + 6]
+        quaternion_norm = torch.linalg.vector_norm(ball_quaternion, dim=1)
+        frozen_steps = teacher_replay.remaining_teacher_frozen_steps(
+            torch=torch,
+            common_step=int(self.common_step_counter),
+            reveal_tick=self._epoch_clock_ticks[ids, 0],
+            pre_swing_wait_s=self._full_a_pre_swing_wait_s[ids],
+            step_dt=float(self.step_dt),
+        )
+        checks = {
+            "consumed_clear": host_bool(
+                ~self._diagnostic_direct_frame0_consumed[ids].any()
+            ),
+            "task_valid": host_bool(self._epoch_task_valid[ids].all()),
+            "phase_reveal_committed": host_bool(
+                self._epoch_phase[ids]
+                .eq(FULL_A_PHASE_REVEAL_COMMITTED)
+                .all()
+            ),
+            "launch_not_succeeded": host_bool(
+                ~self._epoch_launch_succeeded[ids].any()
+            ),
+            "physical_not_present": host_bool(
+                ~self._full_a_physical_present[ids].any()
+            ),
+            "ball_age_one": host_bool(self.ball_age_buf[ids].eq(1).all()),
+            "ball_position_finite": host_bool(
+                torch.isfinite(ball_position).all()
+            ),
+            "ball_quaternion_finite": host_bool(
+                torch.isfinite(ball_quaternion).all()
+            ),
+            "ball_quaternion_nonzero": host_bool(
+                quaternion_norm.gt(0).all()
+            ),
+            "ball_velocity_finite": host_bool(
+                torch.isfinite(ball_velocity).all()
+            ),
+            "frozen_steps_zero": host_bool(frozen_steps.eq(0).all()),
+            "teacher_frame_zero": host_bool(
+                self._full_a_teacher_frame[ids].eq(0).all()
+            ),
+            "motion_phase_prepare": host_bool(
+                self._full_a_motion_phase_code[ids]
+                .eq(FULL_A_MOTION_PREPARE_PHASE_INDEX)
+                .all()
+            ),
+            "actuator_state_absent": int(self.mj_model.na) == 0,
+        }
+        return {
+            "schema": "action_ball_direct_frame0_boundary_v2",
+            "checks": checks,
+            "actual": {
+                "common_step": int(self.common_step_counter),
+                "phase": host_int(self._epoch_phase[ids][0]),
+                "motion_phase": host_int(
+                    self._full_a_motion_phase_code[ids][0]
+                ),
+                "teacher_frame": host_int(self._full_a_teacher_frame[ids][0]),
+                "ball_age": host_int(self.ball_age_buf[ids][0]),
+                "frozen_steps": host_int(frozen_steps[0]),
+                "mj_model_na": int(self.mj_model.na),
+                "ball_position_max_abs_delta_from_park_m": host_float(
+                    torch.max(torch.abs(ball_position - expected_ball_position))
+                ),
+                "ball_quaternion_max_abs_delta_from_park": host_float(
+                    torch.max(
+                        torch.abs(ball_quaternion - expected_ball_quaternion)
+                    )
+                ),
+                "ball_quaternion_norm": host_float(quaternion_norm[0]),
+                "ball_linear_velocity_max_abs_mps": host_float(
+                    torch.max(torch.abs(ball_velocity[:, :3]))
+                ),
+                "ball_angular_velocity_max_abs_radps": host_float(
+                    torch.max(torch.abs(ball_velocity[:, 3:6]))
+                ),
+            },
+        }
+
     def _diagnostic_direct_frame0_table_state(self):
         """Read table safety at the installed-frame-zero boundary.
 
@@ -2145,50 +2257,17 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             or int(ids[0].detach().cpu().item()) != 0
         ):
             raise RuntimeError("direct frame-zero diagnostic boundary differs")
-        expected_ball_position = (
-            self.env.scene.env_origins[ids] + self._full_a_park_position_scene
-        )
-        expected_ball_quaternion = self._full_a_park_quaternion.expand(
-            ids.numel(), 4
-        )
-        ball_is_canonical_park = (
-            data.qpos[ids, self.b_q : self.b_q + 3]
-            .eq(expected_ball_position)
-            .all(dim=1)
-            & data.qpos[ids, self.b_q + 3 : self.b_q + 7]
-            .eq(expected_ball_quaternion)
-            .all(dim=1)
-            & data.qvel[ids, self.b_v : self.b_v + 6].eq(0).all(dim=1)
-        )
-        frozen_steps = teacher_replay.remaining_teacher_frozen_steps(
-            torch=torch,
-            common_step=int(self.common_step_counter),
-            reveal_tick=self._epoch_clock_ticks[ids, 0],
-            pre_swing_wait_s=self._full_a_pre_swing_wait_s[ids],
-            step_dt=float(self.step_dt),
-        )
-        if (
-            bool(consumed[ids].any())
-            or not bool(self._epoch_task_valid[ids].all())
-            or not bool(
-                self._epoch_phase[ids]
-                .eq(FULL_A_PHASE_REVEAL_COMMITTED)
-                .all()
+        boundary_report = self._diagnostic_direct_frame0_boundary_report(ids)
+        if not all(boundary_report["checks"].values()):
+            raise RuntimeError(
+                "direct frame-zero diagnostic boundary differs: "
+                + json.dumps(
+                    boundary_report,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
             )
-            or bool(self._epoch_launch_succeeded[ids].any())
-            or bool(self._full_a_physical_present[ids].any())
-            or not bool(self.ball_age_buf[ids].eq(0).all())
-            or not bool(ball_is_canonical_park.all())
-            or not bool(frozen_steps.eq(0).all())
-            or not bool(self._full_a_teacher_frame[ids].eq(0).all())
-            or not bool(
-                self._full_a_motion_phase_code[ids]
-                .eq(FULL_A_MOTION_PREPARE_PHASE_INDEX)
-                .all()
-            )
-            or int(self.mj_model.na) != 0
-        ):
-            raise RuntimeError("direct frame-zero diagnostic boundary differs")
 
         before_ball, before_task, before_lifecycle, before_step = (
             self._diagnostic_direct_frame0_preserved_state(ids)

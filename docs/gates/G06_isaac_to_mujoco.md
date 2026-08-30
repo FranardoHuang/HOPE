@@ -6,8 +6,9 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 
 N=1 zero-PPO teacher replay增加显式
 [`direct_frame0_playback`](../DEFINITIONS.md#mujoco-direct-frame0-teacher-replay)候选，只用来隔离
-split-ready bridge与teacher轨迹自身的因果。它只在合法题已接受、球仍是canonical park且
-未launch、pre-swing wait恰好归零的唯一边界安装frame0 root/q和零速；只清robot
+split-ready bridge与teacher轨迹自身的因果。它只在合法题已接受、球未launch、
+pre-swing wait恰好归零且actor boundary仍是有限waiting-ball state的唯一边界安装
+frame0 root/q和零速；只清robot
 solver/controller/qdes history，ball/task/lifecycle逐位不变。当步q0、后继自然frame1、exactly-one
 intervention和typed `diagnostic_unauthorized / zero PPO`都fail closed；安装后、真实
 transition前的keepout与backend-resolved robot/table contact单独只读取证，不写lifecycle latch。默认
@@ -18,6 +19,16 @@ transition前的keepout与backend-resolved robot/table contact单独只读取证
 teacher replay / initial WAIT env / WAIT transition / RSL3四module union=`167 passed / 8 skipped / 0 failed`。
 首轮targeted抓到并修复了非replay `main()`过早import helper对EPA48 pre-import order的真回归。
 fresh GPU CUDA replay仍`unverified`，因此还不是physical-birth、physics parity、训练或部署证据，G06不升级。
+
+`5e7be7a6` 的首个真实CUDA replay在任何teacher step/summary前因boundary gate自然
+RC1。读取production时序后确认旧门把两个不可能的precondition写进了actor
+boundary：`_full_a_prepare_step()`在transition开始park，20个1 ms Euler substep随后必然
+把等待球推进到`ball_age=1`、`vz≈-0.1962 m/s`、`z drift≈-0.0020601 m`。
+后继不把dignostic arm塞进production hot path，也不放宽数值容差：仍在现有actor
+boundary安装，只要求phase/task/frame0/frozen/no-launch/no-physical与`ball_age=1`精确，
+当前ball qpos/qvel有限且quaternion非零；安装前后ball qpos/qvel/warmstart、task与
+lifecycle仍逐位相等。下一production prepare自然repark。任何失败现输出具名predicate
+和park delta/velocity/quaternion norm；修复后Pod CPU与CUDA replay待复验，G06仍`Partial`。
 
 ## 2026-08-30 frozen-teacher targeted修复候选（仍`Partial`）
 
