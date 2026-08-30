@@ -340,6 +340,7 @@ def _keepout_witness(*, component_id="torso_box"):
     return {
         "schema": "action_ball_keepout_first_witness_v1",
         "selection": "first_production_order_overlap",
+        "reason": "sat_overlap",
         "component_index": 7,
         "component_id": component_id,
         "component_kind": "body_proxy",
@@ -359,6 +360,8 @@ def _keepout_witness(*, component_id="torso_box"):
             "verification_receipt_sha256": "d" * 64,
             "owner_local_frame_sha256": "e" * 64,
         },
+        "collision_artifact_sha256": "f" * 64,
+        "collision_content_sha256": "0" * 64,
     }
 
 

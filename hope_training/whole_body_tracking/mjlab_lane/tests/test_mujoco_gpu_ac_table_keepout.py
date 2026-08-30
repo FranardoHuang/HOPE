@@ -156,11 +156,14 @@ def test_construction_exposes_only_path_free_plant_receipt(monkeypatch):
         },
         body_ids=immutable(np.arange(32, dtype=np.int64)),
         components=SimpleNamespace(
+            component_ids=("component_00",),
             owner_indices=immutable(np.zeros(1, dtype=np.int64)),
             local_centers_m=immutable(np.zeros((1, 3), dtype=np.float64)),
             local_half_axes_m=immutable(
                 np.zeros((1, 3, 3), dtype=np.float64)
             ),
+            artifact_sha256="f" * 64,
+            content_sha256="0" * 64,
         ),
         aabb_lo=immutable(np.zeros((1, 3), dtype=np.float64)),
         aabb_hi=immutable(np.ones((1, 3), dtype=np.float64)),
@@ -193,6 +196,7 @@ def test_construction_exposes_only_path_free_plant_receipt(monkeypatch):
             device=torch.device("cpu"),
         )
     assert dict(bound.plant_identity_receipt) == digests
+    assert bound._component_ids == ("component_00",)
     assert all("path" not in key for key in bound.plant_identity_receipt)
     registered = captured["registered_plant"]
     assert registered["root_mjcf_sha256"] == (
@@ -201,6 +205,23 @@ def test_construction_exposes_only_path_free_plant_receipt(monkeypatch):
     assert registered["identity_manifest_path"].name == (
         "a3p_p1_0807_mujoco_identity_v1_20260828.json"
     )
+
+
+@pytest.mark.parametrize(
+    ("reason_code", "owner_index", "message"),
+    (
+        (1, -1, "invalid_origin"),
+        (2, 17, "invalid_body_pose at local body 17"),
+        (3, 8, "zero_quaternion at local body 8"),
+        (0, -1, "unknown"),
+    ),
+)
+def test_keepout_witness_invalid_precheck_reasons_fail_closed(
+    reason_code, owner_index, message
+):
+    with pytest.raises(RuntimeError, match=message):
+        keepout._diagnostic_witness_reason(reason_code, owner_index)
+    assert keepout._diagnostic_witness_reason(4, 0) == "sat_overlap"
 
 
 def _empty_corner_discriminator(device: str, dtype):

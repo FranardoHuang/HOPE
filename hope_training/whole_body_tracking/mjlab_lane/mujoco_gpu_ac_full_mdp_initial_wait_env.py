@@ -662,6 +662,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 not in ("top", "keepout", "net", "post_left", "post_right")
                 or keepout_witness.get("component_kind")
                 not in ("body_proxy", "blade")
+                or keepout_witness.get("reason") != "sat_overlap"
                 or type(keepout_witness.get("component_index")) is not int
                 or not 0 <= keepout_witness["component_index"] < 63
                 or type(keepout_witness.get("owner_body_name")) is not str
@@ -695,6 +696,18 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                     or len(value) != 64
                     or any(char not in "0123456789abcdef" for char in value)
                     for value in identity.values()
+                )
+                or any(
+                    type(keepout_witness.get(key)) is not str
+                    or len(keepout_witness[key]) != 64
+                    or any(
+                        char not in "0123456789abcdef"
+                        for char in keepout_witness[key]
+                    )
+                    for key in (
+                        "collision_artifact_sha256",
+                        "collision_content_sha256",
+                    )
                 )
             ):
                 raise RuntimeError("positive keepout witness is unknown")

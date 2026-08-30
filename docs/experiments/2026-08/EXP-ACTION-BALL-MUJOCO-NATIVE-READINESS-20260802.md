@@ -12197,3 +12197,8 @@ host测试预先裁决。
 不是production runtime。独立review同时指出初版在replay enable二次读collision artifact，存在geometry已绑定、
 label却来自替换文件的TOCTOU。后继把component IDs加入authority同一次strict+SHA解析的frozen对象，witness只
 持有该tuple；补artifact replacement、invalid pose及真实fixture反例。修复后Pod复测仍待完成，GPU禁止先跑。
+
+第二轮review发现另一条必须同构的生产语义：keepout kernel在任何SAT循环前先检查origin和全部32个body
+pose/quaternion，非有限或zero quaternion也会把terminal置true。witness现使用相同顺序和typed reason；
+`invalid_origin/invalid_body_pose/zero_quaternion`具名失败且不继续SAT，只有`sat_overlap`能产出component/table
+几何结论。witness同时记录collision artifact SHA与content SHA，避免标签证据脱离已验source。

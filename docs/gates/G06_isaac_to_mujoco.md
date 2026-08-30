@@ -2703,3 +2703,5 @@ root/owner pose；unknown或nonfinite具名失败。默认训练终止、Reward�
 fresh CUDA尚未验收，故尚不能裁决轨迹需swept-safe重定时/站位平移，或2 cm guard本身过保守。
 component label现与几何共同来自production authority首轮strict+SHA解析出的immutable对象；replay enable不再
 二次读取artifact，避免文件替换造成TOCTOU错标签。该修复的Pod CPU复测仍未完成，Gate状态不变。
+此外witness已镜像production在SAT前的origin/32-body pose/zero-quaternion检查；非几何阳性不得被误标成
+较早的SAT overlap。只有typed `sat_overlap`进入component/table归因，其余reason具名fail-closed。

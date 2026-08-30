@@ -5407,6 +5407,9 @@
 - Pod首轮发现test rig遗漏witness依赖，并由review发现二次读取artifact会造成label/geometry TOCTOU；后继已把
   component IDs纳入生产authority同一次strict+SHA解析的immutable `CollisionComponents`，witness不再打开文件。
   修复后的Pod CPU仍待复测，禁止在此之前消费GPU。
+- 后续review补出production keepout会先对origin与全部32 body pose/quaternion fail-closed，而初版witness未镜像。
+  候选现同序输出`invalid_origin/invalid_body_pose/zero_quaternion/sat_overlap`；只有`sat_overlap`可形成几何
+  attribution，其余具名fail-closed，并把collision artifact/content SHA一并写入witness。
 
 ## HISTORICAL / SUPERSEDED — 2026-08-25 V6候选冻结、尚未Pod重验
 

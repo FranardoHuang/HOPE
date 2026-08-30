@@ -491,6 +491,22 @@ if _wp is not None:
         winner_i64[0] = -1
         winner_i64[1] = -1
         winner_i64[2] = -1
+        winner_i64[3] = 0
+        if not _wp.isfinite(origin):
+            winner_i64[3] = 1
+            return
+        for local_body in range(32):
+            body = int(body_ids[local_body])
+            body_pos = body_pos_w[env, body]
+            body_quat = body_quat_w[env, body]
+            if (not _wp.isfinite(body_pos)) or (not _wp.isfinite(body_quat)):
+                winner_i64[2] = local_body
+                winner_i64[3] = 2
+                return
+            if _wp.dot(body_quat, body_quat) <= 0.0:
+                winner_i64[2] = local_body
+                winner_i64[3] = 3
+                return
         for obb in range(63):
             local_body = racket_body_index
             local_center = blade_center_offset[0]
@@ -529,6 +545,7 @@ if _wp is not None:
                     winner_i64[0] = obb
                     winner_i64[1] = table
                     winner_i64[2] = local_body
+                    winner_i64[3] = 4
                     witness_f32[0] = _warp_sat_signed_margin_f32(
                         center, half_axes, lo, hi
                     )
@@ -781,6 +798,21 @@ def _host_test_first_overlap_index(exact: torch.Tensor) -> tuple[int, int]:
     return flat // 5, flat % 5
 
 
+def _diagnostic_witness_reason(reason_code: int, owner_index: int) -> str:
+    reason = {
+        1: "invalid_origin",
+        2: "invalid_body_pose",
+        3: "zero_quaternion",
+        4: "sat_overlap",
+    }.get(reason_code)
+    if reason != "sat_overlap":
+        detail = "" if owner_index < 0 else f" at local body {owner_index}"
+        raise RuntimeError(
+            f"positive keepout witness reason {reason or 'unknown'}{detail}"
+        )
+    return reason
+
+
 class DeviceExactTableKeepout:
     """Construction-bound constants plus one tensor-only live sampler."""
 
@@ -837,11 +869,8 @@ class DeviceExactTableKeepout:
             authority.components.owner_indices, torch.long
         )
         self._component_ids = authority.components.component_ids
-        if (
-            len(self._component_ids) != 62
-            or tuple(sorted(self._component_ids)) != self._component_ids
-        ):
-            raise RuntimeError("MuJoCo table keepout component identities differ")
+        self._component_artifact_sha256 = authority.components.artifact_sha256
+        self._component_content_sha256 = authority.components.content_sha256
         self.component_local_centers = tensor(authority.components.local_centers_m)
         self.component_local_half_axes = tensor(
             authority.components.local_half_axes_m
@@ -940,7 +969,7 @@ class DeviceExactTableKeepout:
         if self._diagnostic_winner_i64 is not None:
             raise RuntimeError("keepout witness is already enabled")
         self._diagnostic_winner_i64 = torch.full(
-            (3,), -1, dtype=torch.int64, device=self._cuda_live_device
+            (4,), -1, dtype=torch.int64, device=self._cuda_live_device
         )
         self._diagnostic_witness_f32 = torch.full(
             (15,), float("nan"), dtype=torch.float32, device=self._cuda_live_device
@@ -983,7 +1012,10 @@ class DeviceExactTableKeepout:
         )
         winner = self._diagnostic_winner_i64.detach().cpu().tolist()
         values = self._diagnostic_witness_f32.detach().cpu()
-        component_index, table_index, owner_index = (int(value) for value in winner)
+        component_index, table_index, owner_index, reason_code = (
+            int(value) for value in winner
+        )
+        reason = _diagnostic_witness_reason(reason_code, owner_index)
         if (
             not 0 <= component_index < 63
             or not 0 <= table_index < len(_authority.TABLE_ASSEMBLY_ROLES)
@@ -1000,6 +1032,7 @@ class DeviceExactTableKeepout:
         return {
             "schema": "action_ball_keepout_first_witness_v1",
             "selection": "first_production_order_overlap",
+            "reason": reason,
             "component_index": component_index,
             "component_id": component_id,
             "component_kind": "blade" if is_blade else "body_proxy",
@@ -1013,6 +1046,8 @@ class DeviceExactTableKeepout:
             "owner_position_env_m": [float(value) for value in values[8:11].tolist()],
             "owner_quaternion_wxyz": [float(value) for value in values[11:15].tolist()],
             "plant_identity": dict(self.plant_identity_receipt),
+            "collision_artifact_sha256": self._component_artifact_sha256,
+            "collision_content_sha256": self._component_content_sha256,
         }
 
     def sample(self, data) -> torch.Tensor:
