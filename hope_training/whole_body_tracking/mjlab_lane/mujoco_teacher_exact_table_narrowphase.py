@@ -27,17 +27,28 @@ import numpy as np
 
 SCHEMA = "action_ball_teacher_exact_table_narrowphase_v1"
 ALGORITHM = (
-    "broad_positive_component_table_pair__tracked_source_stl_triangle_vs_"
-    "convex_hull_vs_20mm_expanded_axis_aligned_table_primitive_sat_v1"
+    "broad_positive_component_table_pair__tracked_source_stl_vertex_convex_"
+    "hull_vs_20mm_expanded_axis_aligned_table_primitive_sat_v1"
 )
 AUTHORITY_KIND = (
-    "tracked_source_urdf_collision_mesh_vertex_convex_hulls_in_compiled_"
-    "owner_body_frames__"
+    "tracked_source_urdf_collision_mesh_vertex_convex_hulls_transformed_"
+    "through_verified_live_owner_body_frames__"
     "not_backend_contact_and_not_compiled_actual_geom_distance"
 )
 TABLE_ROLES = ("top", "keepout", "net", "post_left", "post_right")
 RACKET_BLADE_COMPONENT_INDEX = 62
 RACKET_BLADE_COMPONENT_ID = "racket_blade"
+SOURCE_TO_LIVE_OBB_NUMERICAL_GUARD_M = 2.0e-8
+EXACT_SEPARATION_NUMERICAL_GUARD_M = 2.0e-8
+PLANT_IDENTITY_KEYS = frozenset(
+    (
+        "root_mjcf_sha256",
+        "identity_manifest_sha256",
+        "portable_identity_sha256",
+        "verification_receipt_sha256",
+        "owner_local_frame_sha256",
+    )
+)
 _HEX = frozenset("0123456789abcdef")
 
 
@@ -54,6 +65,14 @@ def _canonical_sha(value: object) -> str:
         value, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("ascii")
     return _sha256(payload)
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(char in _HEX for char in value)
+    )
 
 
 def _finite_array(value, shape, *, label: str) -> np.ndarray:
@@ -255,7 +274,14 @@ def triangles_aabb_overlap(triangles, lo, hi) -> tuple[bool, int | None]:
     return False, None
 
 
-def convex_hull_aabb_overlap(hull_vertices, hull_triangles, lo, hi) -> bool:
+def convex_hull_aabb_overlap(
+    hull_vertices,
+    hull_triangles,
+    lo,
+    hi,
+    *,
+    numerical_guard_m: float = EXACT_SEPARATION_NUMERICAL_GUARD_M,
+) -> bool:
     """Complete closed-set SAT for one convex source hull and one AABB."""
 
     vertices = np.asarray(hull_vertices, dtype=np.float64)
@@ -272,6 +298,9 @@ def convex_hull_aabb_overlap(hull_vertices, hull_triangles, lo, hi) -> bool:
         or not np.isfinite(vertices).all()
         or not np.isfinite(triangles).all()
         or not np.all(upper > lower)
+        or not isinstance(numerical_guard_m, (int, float))
+        or not math.isfinite(float(numerical_guard_m))
+        or float(numerical_guard_m) < 0.0
     ):
         raise ExactTableNarrowphaseError("source convex hull/AABB is malformed")
     center = 0.5 * (lower + upper)
@@ -294,9 +323,10 @@ def convex_hull_aabb_overlap(hull_vertices, hull_triangles, lo, hi) -> bool:
         projection = vertices @ unit
         box_center = float(np.dot(center, unit))
         box_radius = float(np.dot(half, np.abs(unit)))
+        guard = float(numerical_guard_m)
         if (
-            float(np.min(projection)) > box_center + box_radius
-            or float(np.max(projection)) < box_center - box_radius
+            float(np.min(projection)) > box_center + box_radius + guard
+            or float(np.max(projection)) < box_center - box_radius - guard
         ):
             return False
     return True
@@ -343,7 +373,7 @@ class _SourceComponent:
 
 
 class SourceTriangleCatalog:
-    """Lazy, identity-bound reconstruction of tracked URDF collision meshes."""
+    """Identity-bound reconstruction of tracked URDF collision meshes."""
 
     def __init__(self, *, repo_root: Path, artifact_path: Path, source_urdf: Path):
         try:
@@ -464,18 +494,6 @@ class SourceTriangleCatalog:
             ) from exc
         owner_vertices = source_vertices[hull.vertices]
         owner_hull_triangles = source_vertices[hull.simplices]
-        # Bind the reconstructed source soup back to the OBB artifact it refines.
-        center = _finite_array(row.get("local_center_owner_m"), (3,), label="artifact OBB center")
-        half_axes = _finite_array(
-            row.get("local_half_axes_owner_m"),
-            (3, 3),
-            label="artifact OBB axes",
-        )
-        directions = half_axes / np.linalg.norm(half_axes, axis=1)[:, None]
-        extents = np.linalg.norm(half_axes, axis=1)
-        projection = (owner_vertices - center) @ directions.T
-        if np.any(np.abs(projection) > extents[None] + 2.0e-6):
-            raise ExactTableNarrowphaseError("source triangles escape their broad OBB")
         owner_vertices.setflags(write=False)
         owner_hull_triangles.setflags(write=False)
         result = _SourceComponent(
@@ -515,13 +533,33 @@ class TeacherExactTableNarrowphase:
         blade_local_half_axes,
         plant_identity: dict,
         table_geometry_sha256: str,
+        table_roles,
+        table_expansion_m: float,
     ) -> None:
-        if (
-            type(runtime_mjb_sha256) is not str
-            or len(runtime_mjb_sha256) != 64
-            or any(char not in _HEX for char in runtime_mjb_sha256)
-        ):
+        if not _is_sha256(runtime_mjb_sha256):
             raise ExactTableNarrowphaseError("runtime MJB SHA-256 is malformed")
+        if type(mujoco_version) is not str or not mujoco_version:
+            raise ExactTableNarrowphaseError("MuJoCo version is absent")
+        if type(nativeccd_enabled) is not bool:
+            raise ExactTableNarrowphaseError("native CCD identity is malformed")
+        if type(disableflags) is not int or disableflags < 0:
+            raise ExactTableNarrowphaseError("MuJoCo disable flags are malformed")
+        if not _is_sha256(table_geometry_sha256):
+            raise ExactTableNarrowphaseError("table geometry SHA-256 is malformed")
+        if tuple(str(value) for value in table_roles) != TABLE_ROLES:
+            raise ExactTableNarrowphaseError("table role order differs")
+        if (
+            not isinstance(table_expansion_m, (int, float))
+            or not math.isfinite(float(table_expansion_m))
+            or float(table_expansion_m) != 0.02
+        ):
+            raise ExactTableNarrowphaseError("table expansion is not exact 20 mm")
+        if (
+            not isinstance(plant_identity, dict)
+            or set(plant_identity) != PLANT_IDENTITY_KEYS
+            or any(not _is_sha256(value) for value in plant_identity.values())
+        ):
+            raise ExactTableNarrowphaseError("plant identity is incomplete")
         self.catalog = SourceTriangleCatalog(
             repo_root=repo_root,
             artifact_path=artifact_path,
@@ -540,7 +578,12 @@ class TeacherExactTableNarrowphase:
         self.axes = _finite_array(component_local_half_axes, (62, 3, 3), label="component axes")
         self.table_lo = _finite_array(table_lo, (5, 3), label="table lower bounds")
         self.table_hi = _finite_array(table_hi, (5, 3), label="table upper bounds")
-        if self.owner.shape != (62,) or np.any(self.owner < 0) or np.any(self.owner >= 32):
+        if (
+            self.owner.shape != (62,)
+            or np.any(self.owner < 0)
+            or np.any(self.owner >= 32)
+            or not np.all(self.table_hi > self.table_lo)
+        ):
             raise ExactTableNarrowphaseError("component owner map differs")
         artifact_centers = np.asarray(
             [row["local_center_owner_m"] for row in self.catalog.rows],
@@ -550,16 +593,36 @@ class TeacherExactTableNarrowphase:
             [row["local_half_axes_owner_m"] for row in self.catalog.rows],
             dtype=np.float64,
         )
-        if not np.array_equal(self.centers, artifact_centers) or not np.array_equal(
-            self.axes, artifact_axes
-        ):
+        live_artifact_delta = max(
+            float(np.max(np.abs(self.centers - artifact_centers))),
+            float(np.max(np.abs(self.axes - artifact_axes))),
+        )
+        if live_artifact_delta > SOURCE_TO_LIVE_OBB_NUMERICAL_GUARD_M:
             raise ExactTableNarrowphaseError("live/source broad geometry differs")
+        max_source_escape = 0.0
         for component, row in enumerate(self.catalog.rows):
             if self.owner_body_names[int(self.owner[component])] != str(
                 row["owner_body_name"]
             ):
                 raise ExactTableNarrowphaseError(
                     "source component does not close to its compiled owner body"
+                )
+            source = self.catalog.load(component)
+            center = self.centers[component]
+            half_axes = self.axes[component]
+            extents = np.linalg.norm(half_axes, axis=1)
+            if np.any(extents <= 0.0):
+                raise ExactTableNarrowphaseError("live broad OBB is degenerate")
+            directions = half_axes / extents[:, None]
+            projection = (source.owner_vertices_m - center) @ directions.T
+            escape = max(
+                0.0,
+                float(np.max(np.abs(projection) - extents[None, :])),
+            )
+            max_source_escape = max(max_source_escape, escape)
+            if escape > SOURCE_TO_LIVE_OBB_NUMERICAL_GUARD_M:
+                raise ExactTableNarrowphaseError(
+                    "source hull escapes the live no-false-negative broad OBB"
                 )
         self.blade_owner_index = int(blade_owner_index)
         if not 0 <= self.blade_owner_index < 32:
@@ -568,14 +631,18 @@ class TeacherExactTableNarrowphase:
             raise ExactTableNarrowphaseError("blade compiled owner body differs")
         self.blade_center = _finite_array(blade_center_offset, (3,), label="blade center")
         self.blade_axes = _finite_array(blade_local_half_axes, (3, 3), label="blade axes")
-        if not isinstance(plant_identity, dict) or not plant_identity:
-            raise ExactTableNarrowphaseError("plant identity is absent")
         self.identity = {
             "schema": SCHEMA,
             "algorithm": ALGORITHM,
             "authority_kind": AUTHORITY_KIND,
             "backend_contact_used_as_clearance_truth": False,
             "compiled_actual_geom_distance_used": False,
+            "compiled_actual_geom_equivalence_claimed": False,
+            "mj_geom_distance_not_selected_reason": (
+                "source_component_to_every_compiled_actual_geom_closure_is_not_"
+                "available__source_urdf_collision_to_verified_owner_transform_"
+                "closure_is_complete"
+            ),
             "runtime_mjb_sha256": runtime_mjb_sha256,
             "mujoco_version": str(mujoco_version),
             "scipy_version": self.catalog.scipy_version,
@@ -586,6 +653,15 @@ class TeacherExactTableNarrowphase:
             "source_urdf_sha256": _sha256(self.catalog.source_urdf.read_bytes()),
             "plant_identity": dict(plant_identity),
             "table_geometry_sha256": str(table_geometry_sha256),
+            "source_component_count_eagerly_closed": len(self.catalog._cache),
+            "source_to_live_obb_max_escape_m": max_source_escape,
+            "source_to_live_obb_numerical_guard_m": (
+                SOURCE_TO_LIVE_OBB_NUMERICAL_GUARD_M
+            ),
+            "live_artifact_max_abs_delta_m": live_artifact_delta,
+            "exact_separation_numerical_guard_m": (
+                EXACT_SEPARATION_NUMERICAL_GUARD_M
+            ),
             "expanded_table_aabbs_sha256": _canonical_sha(
                 {
                     "lo": self.table_lo.tolist(),
@@ -594,9 +670,15 @@ class TeacherExactTableNarrowphase:
                 }
             ),
             "table_roles": list(TABLE_ROLES),
-            "table_expansion_m": 0.02,
-            "intersection_semantics": "inclusive_closed_set_no_extra_tolerance",
+            "table_expansion_m": float(table_expansion_m),
+            "intersection_semantics": (
+                "inclusive_closed_set_plus_20nm_roundoff_guard"
+            ),
             "owner_body_names": list(self.owner_body_names),
+            "source_to_compiled_owner_transform_closure": (
+                "urdf_collision_to_fixed_joint_owner__owner_name_to_live_32_body_"
+                "authority__owner_local_frame_sha256__source_hull_inside_live_obb"
+            ),
         }
         self.identity["identity_sha256"] = _canonical_sha(self.identity)
         self.evaluation_count = 0
@@ -605,7 +687,28 @@ class TeacherExactTableNarrowphase:
         self.false_positive_pair_count = 0
         self.first_false_positive = None
         self.first_exact_positive = None
-        self.current_exact_witness = None
+        self.current_exact_evidence = None
+        self.failure_count = 0
+        self.first_failure = None
+
+    def clear_current_exact_evidence(self) -> None:
+        self.current_exact_evidence = None
+
+    def record_failure(
+        self,
+        exc: Exception,
+        *,
+        capture_boundary: str,
+        physics_substep_index: int | None,
+    ) -> None:
+        self.failure_count += 1
+        if self.first_failure is None:
+            self.first_failure = {
+                "failure_type": type(exc).__name__,
+                "failure_message": str(exc),
+                "capture_boundary": str(capture_boundary),
+                "physics_substep_index": physics_substep_index,
+            }
 
     def evaluate(
         self,
@@ -616,7 +719,7 @@ class TeacherExactTableNarrowphase:
         physics_substep_index: int | None,
     ) -> dict:
         self.evaluation_count += 1
-        self.current_exact_witness = None
+        self.clear_current_exact_evidence()
         try:
             positions = _finite_array(body_position_env_m, (32, 3), label="body positions")
             quaternions = _finite_array(body_quaternion_wxyz, (32, 4), label="body quaternions")
@@ -672,7 +775,11 @@ class TeacherExactTableNarrowphase:
                             + positions[owner]
                         )
                         hit = convex_hull_aabb_overlap(
-                            vertices, hull_triangles, lo, hi
+                            vertices,
+                            hull_triangles,
+                            lo,
+                            hi,
+                            numerical_guard_m=EXACT_SEPARATION_NUMERICAL_GUARD_M,
                         )
                         triangle_index = None
                         source = {
@@ -703,27 +810,10 @@ class TeacherExactTableNarrowphase:
             exact_hit = bool(exact_pairs)
             if exact_hit:
                 chosen = dict(exact_pairs[0])
-                owner = int(chosen["owner_body_index"])
-                self.current_exact_witness = {
-                    "schema": "action_ball_keepout_first_witness_v1",
+                self.current_exact_evidence = {
+                    "schema": "action_ball_teacher_exact_overlap_evidence_v1",
                     "selection": "first_exact_source_overlap_in_production_order",
-                    "reason": "sat_overlap",
-                    **{key: chosen[key] for key in (
-                        "component_index", "component_id", "owner_body_index",
-                        "owner_body_name", "table_index", "table_role",
-                    )},
-                    "component_kind": (
-                        "blade" if chosen["component_index"] == 62 else "body_proxy"
-                    ),
-                    "sat_signed_margin_m": 0.0,
-                    "root_position_env_m": positions[0].tolist(),
-                    "root_quaternion_wxyz": quaternions[0].tolist(),
-                    "owner_position_env_m": positions[owner].tolist(),
-                    "owner_quaternion_wxyz": quaternions[owner].tolist(),
-                    "plant_identity": dict(self.identity["plant_identity"]),
-                    "collision_artifact_sha256": self.catalog.artifact_sha256,
-                    "collision_content_sha256": self.catalog.content_sha256,
-                    "exact_narrowphase": chosen,
+                    "pair": chosen,
                     "narrowphase_identity_sha256": self.identity["identity_sha256"],
                 }
             return {
@@ -734,6 +824,11 @@ class TeacherExactTableNarrowphase:
                 "false_positive_pairs": false_pairs,
             }
         except Exception as exc:
+            self.record_failure(
+                exc,
+                capture_boundary=capture_boundary,
+                physics_substep_index=physics_substep_index,
+            )
             # The broad verdict is retained on every unknown input or identity.
             return {
                 "exact_hit": True,
@@ -755,6 +850,8 @@ class TeacherExactTableNarrowphase:
             "broad_positive_pair_count": self.broad_positive_pair_count,
             "exact_positive_pair_count": self.exact_positive_pair_count,
             "false_positive_pair_count": self.false_positive_pair_count,
+            "failure_count": self.failure_count,
+            "first_failure": self.first_failure,
             "first_false_positive": self.first_false_positive,
             "first_exact_positive": self.first_exact_positive,
         }
