@@ -1346,10 +1346,13 @@ def test_full_a_builder_failure_is_bitwise_zero_write():
     before = {name: getattr(env, name).clone() for name in fields}
     scheduled_due, _launch, _missed = env._full_a_prepare_step()
     env.common_step_counter += 1
-    def fail(**_kwargs):
-        raise RuntimeError("injected builder failure")
+    original = env._full_a_question_builder
+    def fail(**kwargs):
+        question = original(**kwargs)
+        del question["launch_state_f32"]
+        return question
     env._full_a_question_builder = fail
-    with pytest.raises(RuntimeError, match="injected builder failure"):
+    with pytest.raises(RuntimeError, match="staged fields differ"):
         env._full_a_settle_reveal(scheduled_due, torch.zeros(env.num_envs, dtype=torch.bool))
     for name in fields:
         assert torch.equal(getattr(env, name), before[name]), name
