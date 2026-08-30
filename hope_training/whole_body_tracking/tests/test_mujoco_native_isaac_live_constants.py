@@ -74,6 +74,31 @@ def _mutated(tmp_path: Path, source: Path, old: str, new: str, name: str) -> Pat
     return target
 
 
+def _mutated_in_class(
+    tmp_path: Path,
+    source: Path,
+    class_name: str,
+    old: str,
+    new: str,
+    name: str,
+) -> Path:
+    """Mutate one unique anchor within one named config class only."""
+
+    text = source.read_text(encoding="utf-8")
+    start = text.index(f"class {class_name}")
+    end = text.find("\n@configclass\nclass ", start + 1)
+    if end < 0:
+        end = len(text)
+    class_text = text[start:end]
+    assert class_text.count(old) == 1, (
+        f"mutation anchor is not unique in {class_name}: {old!r}"
+    )
+    mutated = text[:start] + class_text.replace(old, new) + text[end:]
+    target = tmp_path / name
+    target.write_text(mutated, encoding="utf-8")
+    return target
+
+
 def _repin_table_config(monkeypatch, path: Path) -> None:
     """Do the careless author's re-pin for them: the SHA gate now passes."""
 
@@ -325,9 +350,10 @@ def test_a_body_order_swap_is_refused_even_though_the_set_is_identical(tmp_path)
 def test_a_threshold_change_is_refused_even_though_the_number_recurs(tmp_path):
     """``0.02`` still occurs elsewhere in the file, so "the number exists" passes."""
 
-    mutated = _mutated(
+    mutated = _mutated_in_class(
         tmp_path,
         ISAAC_CONFIG,
+        ACTION_BALL_CFG,
         '            "action_name": "joint_pos",\n'
         '            "limit_source": "joint_pos_limits",\n'
         '            "margin_rad": 0.0,\n            "margin_fraction": 0.02,\n',
