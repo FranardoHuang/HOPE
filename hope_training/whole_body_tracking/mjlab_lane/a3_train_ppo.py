@@ -1974,6 +1974,12 @@ class A3ReadyBallVecEnv:
         "q_before": q_before,
         "dq_before": dq_before,
         "pre_clamp_qdes": pre_clamp_qdes.clone(),
+        # This is the production guard's expected executable when the guard
+        # reports no intervention.  Teacher replay validates against these
+        # exact bytes rather than pretending affine float32 round-trips are
+        # bitwise-identical to the teacher target.
+        "nominal_projected_qdes": (
+          self._qdes_reward_nominal_projected.clone()),
         "executable_qdes": q_des.clone(),
         "q_min": q_before.clone(),
         "q_max": q_before.clone(),

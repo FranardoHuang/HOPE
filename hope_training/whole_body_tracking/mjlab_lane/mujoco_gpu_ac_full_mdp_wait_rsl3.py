@@ -953,6 +953,7 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
 
     import numpy as np
 
+    decoder_abi_atol_rad = 2.0e-7
     required_bits = (
         "direct_frame0_ball_unchanged",
         "direct_frame0_task_unchanged",
@@ -980,6 +981,7 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
             "evaluated": True,
             "actual": actual_value,
             "expected": expected_value,
+            "comparison": "equal",
             "delta": delta,
             "passed": actual_value == expected_value,
         }
@@ -992,8 +994,22 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
             "evaluated": True,
             "actual": value if finite else None,
             "expected": expected_value,
+            "comparison": "equal",
             "delta": value - expected_value if finite else None,
             "passed": finite and value == expected_value,
+        }
+
+    def add_float_at_most(name, actual, maximum) -> None:
+        value = float(actual)
+        finite = bool(np.isfinite(value))
+        maximum_value = float(maximum)
+        predicates[name] = {
+            "evaluated": True,
+            "actual": value if finite else None,
+            "expected": maximum_value,
+            "comparison": "less_than_or_equal",
+            "delta": value - maximum_value if finite else None,
+            "passed": finite and value <= maximum_value,
         }
 
     def fingerprint(value) -> dict[str, object]:
@@ -1027,6 +1043,7 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
             "evaluated": True,
             "actual": fingerprint(left),
             "expected": fingerprint(right),
+            "comparison": "array_equal",
             "delta": {
                 "mismatch_count": mismatch_count,
                 "max_abs": max_abs if max_abs is None or np.isfinite(max_abs)
@@ -1035,13 +1052,27 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
             "passed": same_shape and bool(np.array_equal(left, right)),
         }
 
-    def add_not_evaluated(name, expected) -> None:
+    def max_abs_delta(actual, expected) -> float:
+        left = np.asarray(actual)
+        right = np.asarray(expected)
+        if (
+            left.shape != right.shape
+            or left.size == 0
+            or not np.issubdtype(left.dtype, np.number)
+            or not np.issubdtype(right.dtype, np.number)
+        ):
+            return float("nan")
+        return float(np.max(np.abs(left - right)))
+
+    def add_not_evaluated(name, expected, reason) -> None:
         predicates[name] = {
             "evaluated": False,
             "actual": None,
             "expected": expected,
+            "comparison": "not_evaluated",
             "delta": None,
             "passed": None,
+            "reason_not_evaluated": reason,
         }
 
     intervention_rows = np.flatnonzero(
@@ -1053,25 +1084,51 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
     index = int(intervention_rows[0]) if intervention_rows.size > 0 else None
     if index is None:
         for name in required_bits:
-            add_not_evaluated(name, True)
-        for name in (
-            "same_step_requested_q0_error_zero",
-            "same_step_executable_q0_error_zero",
-            "same_step_qdes_guard_clear",
-            "installed_frame0_table_keepout_clear",
-            "installed_frame0_resolved_table_contact_clear",
-            "joint_q0_error_after_zero",
-            "root_position_q0_error_after_zero",
-            "root_quaternion_q0_error_after_zero",
-            "post_transition_teacher_frame_one",
-            "next_trace_row_exists",
-            "next_pre_teacher_frame_one",
-            "next_intervention_clear",
-            "next_requested_natural_teacher_exact",
-            "next_executable_natural_teacher_exact",
-            "next_qdes_guard_clear",
+            add_not_evaluated(name, True, "no intervention row")
+        for name, expected in (
+            ("same_step_requested_q0_error_zero", 0.0),
+            (
+                "same_step_executable_guard_expected_exact",
+                {
+                    "relation": "array_equal",
+                    "rhs": "guard_expected_executable_qdes[same_row]",
+                },
+            ),
+            (
+                "same_step_executable_teacher_error_within_decoder_abi",
+                decoder_abi_atol_rad,
+            ),
+            ("same_step_qdes_guard_clear", False),
+            ("installed_frame0_table_keepout_clear", False),
+            ("installed_frame0_resolved_table_contact_clear", False),
+            ("joint_q0_error_after_zero", 0.0),
+            ("root_position_q0_error_after_zero", 0.0),
+            ("root_quaternion_q0_error_after_zero", 0.0),
+            ("post_transition_teacher_frame_one", 1),
+            ("next_trace_row_exists", True),
+            ("next_pre_teacher_frame_one", 1),
+            ("next_intervention_clear", False),
+            (
+                "next_requested_natural_teacher_exact",
+                {
+                    "relation": "array_equal",
+                    "rhs": "pre_teacher_qdes[next_row]",
+                },
+            ),
+            (
+                "next_executable_guard_expected_exact",
+                {
+                    "relation": "array_equal",
+                    "rhs": "guard_expected_executable_qdes[next_row]",
+                },
+            ),
+            (
+                "next_executable_teacher_error_within_decoder_abi",
+                decoder_abi_atol_rad,
+            ),
+            ("next_qdes_guard_clear", False),
         ):
-            add_not_evaluated(name, "requires an intervention row")
+            add_not_evaluated(name, expected, "no intervention row")
         next_index = None
     else:
         for name in required_bits:
@@ -1080,9 +1137,18 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
             "same_step_requested_q0_error_zero",
             arrays["direct_frame0_requested_q0_error_max_rad"][index, 0],
         )
-        add_float(
-            "same_step_executable_q0_error_zero",
-            arrays["direct_frame0_executable_q0_error_max_rad"][index, 0],
+        add_array(
+            "same_step_executable_guard_expected_exact",
+            arrays["executable_qdes"][index],
+            arrays["guard_expected_executable_qdes"][index],
+        )
+        add_float_at_most(
+            "same_step_executable_teacher_error_within_decoder_abi",
+            max_abs_delta(
+                arrays["executable_qdes"][index],
+                arrays["requested_qdes"][index],
+            ),
+            decoder_abi_atol_rad,
         )
         add_exact(
             "same_step_qdes_guard_clear",
@@ -1138,9 +1204,17 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
                 arrays["pre_teacher_qdes"][next_index],
             )
             add_array(
-                "next_executable_natural_teacher_exact",
+                "next_executable_guard_expected_exact",
                 arrays["executable_qdes"][next_index],
-                arrays["pre_teacher_qdes"][next_index],
+                arrays["guard_expected_executable_qdes"][next_index],
+            )
+            add_float_at_most(
+                "next_executable_teacher_error_within_decoder_abi",
+                max_abs_delta(
+                    arrays["executable_qdes"][next_index],
+                    arrays["pre_teacher_qdes"][next_index],
+                ),
+                decoder_abi_atol_rad,
             )
             add_exact(
                 "next_qdes_guard_clear",
@@ -1151,11 +1225,27 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
             for name, expected in (
                 ("next_pre_teacher_frame_one", 1),
                 ("next_intervention_clear", False),
-                ("next_requested_natural_teacher_exact", "teacher qdes bytes"),
-                ("next_executable_natural_teacher_exact", "teacher qdes bytes"),
+                (
+                    "next_requested_natural_teacher_exact",
+                    {
+                        "relation": "array_equal",
+                        "rhs": "pre_teacher_qdes[next_row]",
+                    },
+                ),
+                (
+                    "next_executable_guard_expected_exact",
+                    {
+                        "relation": "array_equal",
+                        "rhs": "guard_expected_executable_qdes[next_row]",
+                    },
+                ),
+                (
+                    "next_executable_teacher_error_within_decoder_abi",
+                    decoder_abi_atol_rad,
+                ),
                 ("next_qdes_guard_clear", False),
             ):
-                add_not_evaluated(name, expected)
+                add_not_evaluated(name, expected, "next trace row absent")
 
     failed = [
         name for name, row in predicates.items() if row["passed"] is False
@@ -1164,11 +1254,12 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
         name for name, row in predicates.items() if not row["evaluated"]
     ]
     return {
-        "schema_version": 1,
-        "kind": "action_ball_mujoco_direct_frame0_validation_v1",
+        "schema_version": 2,
+        "kind": "action_ball_mujoco_direct_frame0_validation_v2",
         "diagnostic_unauthorized": True,
         "training_authorized": False,
         "ppo_update_calls": 0,
+        "decoder_abi_atol_rad": decoder_abi_atol_rad,
         "trace_rows": int(arrays["common_step"].shape[0]),
         "intervention_rows": [int(value) for value in intervention_rows],
         "trace_row": index,
@@ -1180,20 +1271,58 @@ def _direct_frame0_validation_report(arrays: dict) -> dict:
     }
 
 
-def _write_direct_frame0_validation_failure(root: Path, report: dict) -> Path:
-    """Persist one no-clobber failure report before raising the GPU result."""
+def _write_direct_frame0_validation_failure(
+    root: Path, report: dict, *, identity_context: dict
+) -> tuple[Path, str]:
+    """Persist one independently identifiable failure before raising."""
 
     if report.get("all_passed") is not False:
         raise ValueError("direct frame-zero validation failure report differs")
+    identity_keys = {
+        "run", "source", "runtime", "motion", "ready", "task", "plant",
+    }
+    if (
+        type(identity_context) is not dict
+        or set(identity_context) != identity_keys
+        or any(type(identity_context[name]) is not dict for name in identity_keys)
+    ):
+        raise ValueError("direct frame-zero failure identity differs")
+    document = {
+        "schema_version": 1,
+        "kind": "action_ball_mujoco_direct_frame0_validation_failure_v1",
+        "diagnostic_unauthorized": True,
+        "training_authorized": False,
+        "ppo_update_calls": 0,
+        "payload_sha256_scope": (
+            "canonical_json_of_this_document_without_payload_sha256"
+        ),
+        "identity": identity_context,
+        "validation": report,
+    }
+    unsigned_payload = json.dumps(
+        document,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    payload_sha256 = hashlib.sha256(unsigned_payload).hexdigest()
+    document["payload_sha256"] = payload_sha256
     payload = json.dumps(
-        report,
+        document,
         allow_nan=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8") + b"\n"
     path = root / "direct_frame0_validation_failure.json"
     _write_fresh_bytes(path, payload)
-    return path
+    directory_fd = os.open(
+        root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    )
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+    return path, payload_sha256
 
 
 def _run_teacher_replay(
@@ -1227,7 +1356,8 @@ def _run_teacher_replay(
         "pre_motion_phase", "pre_teacher_qdes", "pre_reveal_tick",
         "pre_swing_wait_s", "post_task_valid", "post_teacher_frame",
         "post_motion_phase", "frozen_steps", "requested_qdes", "raw_action",
-        "executable_qdes", "actual_joint_pos", "actual_joint_vel",
+        "executable_qdes", "guard_expected_executable_qdes",
+        "actual_joint_pos", "actual_joint_vel",
         "ball_center_w", "ball_lin_vel_w", "racket_site_w",
         "racket_velocity_w", "racket_normal_w", "scheduled_due", "reveal",
         "launch", "r03", "generic_contact", "selected_contact",
@@ -1367,6 +1497,9 @@ def _run_teacher_replay(
             rows["requested_qdes"].append(host(requested))
             rows["raw_action"].append(host(action))
             rows["executable_qdes"].append(host(trace["executable_qdes"]))
+            rows["guard_expected_executable_qdes"].append(host(
+                trace["nominal_projected_qdes"]
+            ))
             rows["actual_joint_pos"].append(host(env._qpos_act()))
             rows["actual_joint_vel"].append(host(env._qvel_act()))
             rows["ball_center_w"].append(host(env.sim.data.qpos[:, env.b_q:env.b_q + 3]))
@@ -1565,16 +1698,77 @@ def _run_teacher_replay(
     if direct_frame0:
         validation = _direct_frame0_validation_report(arrays)
         if not validation["all_passed"]:
-            failure_path = _write_direct_frame0_validation_failure(
-                root, validation
+            catalog = env._full_a_catalog
+            plant = identity["plant_model"]
+            failure_identity = {
+                "run": {
+                    "run_namespace": identity["run_namespace"],
+                    "artifact_root": str(root),
+                    "teacher_handoff_mode": handoff_mode,
+                },
+                "source": {"commit": identity["source_commit"]},
+                "runtime": {
+                    "identity": identity["runtime_stack"],
+                    "canonical_sha256": _canonical_payload_sha256(
+                        identity["runtime_stack"]
+                    ),
+                },
+                "motion": {
+                    "action_id": catalog.fresh_action.action_id,
+                    "action_uid": int(catalog.fresh_action.action_uid),
+                    "motion_sha256": catalog.fresh_action.motion_sha256,
+                    "manifest_file_sha256": catalog.manifest_file_sha256,
+                    "manifest_canonical_sha256": (
+                        catalog.manifest_canonical_sha256
+                    ),
+                },
+                "ready": {
+                    "payload_sha256": hashlib.sha256(
+                        ready_pose_payload
+                    ).hexdigest(),
+                },
+                "task": {
+                    "accepted_question_present": not no_question,
+                    "question_f32_sha256": (
+                        None if no_question
+                        else helper.tensor_f32_sha256(question)
+                    ),
+                    "launch_f32_sha256": (
+                        None if no_question
+                        else helper.tensor_f32_sha256(launch)
+                    ),
+                    "question_reset_generation": question_reset_generation,
+                },
+                "plant": {
+                    "identity": plant,
+                    "canonical_sha256": _canonical_payload_sha256(plant),
+                },
+            }
+            failure_path, failure_sha256 = (
+                _write_direct_frame0_validation_failure(
+                    root,
+                    validation,
+                    identity_context=failure_identity,
+                )
             )
             failed = ",".join(validation["failed_predicates"]) or "none"
             not_evaluated = (
                 ",".join(validation["not_evaluated_predicates"]) or "none"
             )
+            failure_marker = {
+                "artifact": str(failure_path),
+                "payload_sha256": failure_sha256,
+            }
+            _best_effort_stdout_marker(
+                "ACTION_BALL_MUJOCO_DIRECT_FRAME0_FAILURE_JSON="
+                + json.dumps(
+                    failure_marker, sort_keys=True, separators=(",", ":")
+                )
+            )
             raise RuntimeError(
                 "direct frame-zero validation differs: "
-                f"artifact={failure_path.name} failed={failed} "
+                f"artifact={failure_path} payload_sha256={failure_sha256} "
+                f"failed={failed} "
                 f"not_evaluated={not_evaluated}"
             )
         index = int(validation["trace_row"])
@@ -1595,11 +1789,18 @@ def _run_teacher_replay(
                 ][index, 0]
                 == 0.0
             ),
-            "executable_frame0_same_step": bool(
-                arrays[
-                    "direct_frame0_executable_q0_error_max_rad"
-                ][index, 0]
-                == 0.0
+            "executable_frame0_matches_guard_expected": bool(
+                validation["predicates"][
+                    "same_step_executable_guard_expected_exact"
+                ]["passed"]
+            ),
+            "executable_frame0_teacher_error_max_rad": float(
+                validation["predicates"][
+                    "same_step_executable_teacher_error_within_decoder_abi"
+                ]["actual"]
+            ),
+            "decoder_abi_atol_rad": float(
+                validation["decoder_abi_atol_rad"]
             ),
             "post_transition_teacher_frame": int(
                 arrays["post_teacher_frame"][index, 0]
@@ -1609,7 +1810,13 @@ def _run_teacher_replay(
                 arrays["pre_teacher_frame"][next_index, 0]
             ),
             "next_action_uses_natural_teacher_qdes": True,
-            "next_action_executable_teacher_qdes_exact": True,
+            "next_action_executable_matches_guard_expected": True,
+            "next_action_executable_teacher_error_max_rad": float(
+                validation["predicates"][
+                    "next_executable_teacher_error_within_decoder_abi"
+                ]["actual"]
+            ),
+            "next_action_executable_within_decoder_abi": True,
             "next_action_qdes_guard_intervention": False,
             "joint_q0_error_max_before_rad": float(
                     arrays[

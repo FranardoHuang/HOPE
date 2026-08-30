@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 from pathlib import Path
+import stat
 import sys
 import textwrap
 import types
@@ -355,11 +356,33 @@ def _valid_direct_frame0_validation_arrays():
         "direct_frame0_root_quaternion_q0_error_after",
     ):
         arrays[name] = np.zeros((2, 1), dtype=np.float32)
-    teacher = np.arange(62, dtype=np.float32).reshape(2, 31)
+    # Real 4c evidence: float32 affine inverse+decode moved the runtime-order
+    # right_shoulder_roll (index 11) by one ULP.  The production guard expected
+    # and executable bytes agree, and the teacher delta remains inside the
+    # already-bound 2e-7-rad decoder ABI.
+    teacher = np.zeros((2, 31), dtype=np.float32)
+    teacher[:, 11] = np.float32(0.5)
+    guard_expected = teacher.copy()
+    guard_expected[:, 11] = np.nextafter(
+        np.float32(0.5), np.float32(np.inf)
+    )
     arrays["pre_teacher_qdes"] = teacher.copy()
     arrays["requested_qdes"] = teacher.copy()
-    arrays["executable_qdes"] = teacher.copy()
+    arrays["guard_expected_executable_qdes"] = guard_expected.copy()
+    arrays["executable_qdes"] = guard_expected.copy()
     return arrays
+
+
+def _direct_frame0_failure_identity():
+    return {
+        "run": {"run_namespace": "probe-r1", "artifact_root": "/probe"},
+        "source": {"commit": "a" * 40},
+        "runtime": {"canonical_sha256": "b" * 64},
+        "motion": {"motion_sha256": "c" * 64},
+        "ready": {"payload_sha256": "d" * 64},
+        "task": {"question_f32_sha256": "e" * 64},
+        "plant": {"canonical_sha256": "f" * 64},
+    }
 
 
 def test_direct_frame0_validation_names_and_isolates_every_predicate():
@@ -367,9 +390,12 @@ def test_direct_frame0_validation_names_and_isolates_every_predicate():
         _valid_direct_frame0_validation_arrays()
     )
     assert valid["all_passed"]
-    assert len(valid["predicates"]) == 26
+    assert len(valid["predicates"]) == 28
     assert valid["failed_predicates"] == []
     assert valid["not_evaluated_predicates"] == []
+    assert valid["predicates"][
+        "same_step_executable_teacher_error_within_decoder_abi"
+    ]["actual"] == pytest.approx(5.960464477539063e-8, rel=0.0, abs=0.0)
 
     def set_value(field, row, value):
         return lambda arrays: arrays[field].__setitem__((row, 0), value)
@@ -411,8 +437,22 @@ def test_direct_frame0_validation_names_and_isolates_every_predicate():
         "same_step_requested_q0_error_zero": set_value(
             "direct_frame0_requested_q0_error_max_rad", 0, 0.125
         ),
-        "same_step_executable_q0_error_zero": set_value(
-            "direct_frame0_executable_q0_error_max_rad", 0, 0.125
+        "same_step_executable_guard_expected_exact": lambda arrays: arrays[
+            "executable_qdes"
+        ].__setitem__(
+            (0, 11),
+            np.nextafter(
+                arrays["guard_expected_executable_qdes"][0, 11],
+                np.float32(np.inf),
+            ),
+        ),
+        "same_step_executable_teacher_error_within_decoder_abi": (
+            lambda arrays: (
+                arrays["executable_qdes"].__setitem__((0, 11), 0.501),
+                arrays["guard_expected_executable_qdes"].__setitem__(
+                    (0, 11), 0.501
+                ),
+            )
         ),
         "same_step_qdes_guard_clear": set_value(
             "qdes_guard_intervention", 0, True
@@ -447,9 +487,23 @@ def test_direct_frame0_validation_names_and_isolates_every_predicate():
         "next_requested_natural_teacher_exact": lambda arrays: arrays[
             "requested_qdes"
         ].__setitem__((1, 0), 0.125),
-        "next_executable_natural_teacher_exact": lambda arrays: arrays[
+        "next_executable_guard_expected_exact": lambda arrays: arrays[
             "executable_qdes"
-        ].__setitem__((1, 0), 0.125),
+        ].__setitem__(
+            (1, 11),
+            np.nextafter(
+                arrays["guard_expected_executable_qdes"][1, 11],
+                np.float32(np.inf),
+            ),
+        ),
+        "next_executable_teacher_error_within_decoder_abi": (
+            lambda arrays: (
+                arrays["executable_qdes"].__setitem__((1, 11), 0.501),
+                arrays["guard_expected_executable_qdes"].__setitem__(
+                    (1, 11), 0.501
+                ),
+            )
+        ),
         "next_qdes_guard_clear": set_value(
             "qdes_guard_intervention", 1, True
         ),
@@ -462,9 +516,29 @@ def test_direct_frame0_validation_names_and_isolates_every_predicate():
         assert target in report["failed_predicates"], target
         assert report["predicates"][target]["passed"] is False
 
+    missing = _valid_direct_frame0_validation_arrays()
+    missing["direct_frame0_intervention"][0, 0] = False
+    report = runner._direct_frame0_validation_report(missing)
+    for name in report["not_evaluated_predicates"]:
+        predicate = report["predicates"][name]
+        assert predicate["expected"] != "requires an intervention row"
+        assert predicate["reason_not_evaluated"] == "no intervention row"
+    assert report["predicates"][
+        "same_step_requested_q0_error_zero"
+    ]["expected"] == 0.0
+    assert report["predicates"][
+        "same_step_qdes_guard_clear"
+    ]["expected"] is False
+    assert report["predicates"][
+        "post_transition_teacher_frame_one"
+    ]["expected"] == 1
+    assert report["predicates"][
+        "same_step_executable_guard_expected_exact"
+    ]["expected"]["relation"] == "array_equal"
+
 
 def test_direct_frame0_validation_failure_artifact_is_json_safe_and_no_clobber(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     arrays = _valid_direct_frame0_validation_arrays()
     arrays["direct_frame0_requested_q0_error_max_rad"][0, 0] = np.nan
@@ -474,15 +548,45 @@ def test_direct_frame0_validation_failure_artifact_is_json_safe_and_no_clobber(
     ]
     assert predicate["actual"] is None
     assert predicate["delta"] is None
-    path = runner._write_direct_frame0_validation_failure(tmp_path, report)
+    sync_modes = []
+    real_fsync = runner.os.fsync
+
+    def traced_fsync(fd):
+        sync_modes.append(runner.os.fstat(fd).st_mode)
+        real_fsync(fd)
+
+    monkeypatch.setattr(runner.os, "fsync", traced_fsync)
+    identity = _direct_frame0_failure_identity()
+    incomplete_identity = dict(identity)
+    incomplete_identity.pop("plant")
+    with pytest.raises(ValueError, match="failure identity differs"):
+        runner._write_direct_frame0_validation_failure(
+            tmp_path, report, identity_context=incomplete_identity
+        )
+    path, payload_sha256 = runner._write_direct_frame0_validation_failure(
+        tmp_path, report, identity_context=identity
+    )
     payload = path.read_bytes()
     assert b"NaN" not in payload
     restored = json.loads(payload)
-    assert restored["failed_predicates"] == [
+    assert restored["identity"] == identity
+    assert restored["validation"]["failed_predicates"] == [
         "same_step_requested_q0_error_zero"
     ]
+    observed_sha256 = restored.pop("payload_sha256")
+    unsigned = json.dumps(
+        restored, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    assert observed_sha256 == payload_sha256
+    assert hashlib.sha256(unsigned).hexdigest() == payload_sha256
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert len(sync_modes) == 2
+    assert stat.S_ISREG(sync_modes[0])
+    assert stat.S_ISDIR(sync_modes[1])
     with pytest.raises(FileExistsError):
-        runner._write_direct_frame0_validation_failure(tmp_path, report)
+        runner._write_direct_frame0_validation_failure(
+            tmp_path, report, identity_context=identity
+        )
 
 
 def test_direct_frame0_failure_artifact_precedes_trace_and_summary_writes():
@@ -491,9 +595,26 @@ def test_direct_frame0_failure_artifact_precedes_trace_and_summary_writes():
     failure_write = source.index(
         "_write_direct_frame0_validation_failure", validation
     )
+    marker = source.index(
+        "ACTION_BALL_MUJOCO_DIRECT_FRAME0_FAILURE_JSON", failure_write
+    )
+    failure_raise = source.index("raise RuntimeError(", marker)
     trace_write = source.index('root / "teacher_replay.npz"')
     summary_write = source.index('root / "summary.json"')
-    assert validation < failure_write < trace_write < summary_write
+    assert validation < failure_write < marker < failure_raise
+    assert failure_raise < trace_write < summary_write
+    assert "payload_sha256={failure_sha256}" in source
+
+
+def test_direct_frame0_expected_executable_comes_from_production_guard_trace():
+    advance = inspect.getsource(
+        wait_env.FullMdpInitialWaitVecEnv._advance_plant
+    )
+    replay_source = inspect.getsource(runner._run_teacher_replay)
+    assert '"nominal_projected_qdes": (' in advance
+    assert "self._qdes_reward_nominal_projected.clone()" in advance
+    assert 'trace["nominal_projected_qdes"]' in replay_source
+    assert 'rows["guard_expected_executable_qdes"]' in replay_source
 
 
 def test_direct_frame0_install_rejects_an_early_or_live_ball_boundary():
