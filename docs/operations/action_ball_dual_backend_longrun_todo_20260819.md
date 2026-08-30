@@ -33,16 +33,19 @@ exact source和证据root继续只读，不hot-patch、不resume、不复用。R
   `+13.522844/+13.361006 mm`净空，故这不是实际碰桌。Isaac live collider因缺对应ignored USD字节明确
   `未测`，不得由Mu结果代签。
 - 不再按文件名逐个加特例。下一guard候选必须是离线、确定性的通用adaptive multi-OBB：保留20 mm安全
-  余量、完整actual/source solid coverage、component级ledger与双端同artifact；按最终float32几何选择满足
-  可证明empty-space excess不高于5 mm的最小leaf数，`k<=8`仍不满足则fail closed。已知replay只作
-  heldout反例，不参与挑leaf数。
-- direct-frame0诊断分支的CPU闭合为`174 passed,8 skipped`；它只在diagnostic actor boundary请求exact
-  teacher frame0，executed qdes按生产affine decode+guard真值验证，并允许生产ABI内`2e-7 rad`的decode
-  舍入。此前GPU失败已定位为`right_shoulder_roll`仅`1 ULP=5.96e-8 rad`却被错误要求与teacher逐位相等；
-  新实现同时钉requested exact、executed production-expected、guard零介入及O_EXCL+file/dir fsync失败收据。
-  独立复审仍找到一项P1：atomic install八项聚合与runner的same-step done/frame检查会在统一writer前early
-  raise，故尚不能声称28个谓词任一失败都有typed durable artifact；现有mutation只测了人造arrays。该旁路与
-  teacher-delta字段已进入修复，fresh GPU replay须等复验后再发；动态teacher是否可追踪仍为`未测`。
+  余量、完整actual/source solid coverage、component级ledger与双端同artifact；先对全部62个source component
+  做身份盲、最终owner-frame float32的`k=1..8` census，再决定multi-OBB还是broad-phase后接exact convex
+  narrow-phase。已知component51/55/57只作heldout反例，不参与挑leaf数或5 mm暂定阈值。
+- direct-frame0最终代码为`643f03b5`，Pod三模块CPU=`103 passed,2 skipped`，独立终审为`P0=0/P1=0`。
+  fresh GPU1 zero-PPO root
+  `/workspace/franco/runs/fullmdp-direct-frame0-643f03b5-gpu1-20260830T060903Z-r4`完成：29个typed谓词全部
+  通过，唯一介入行92的requested teacher frame0误差为0，production executable只差
+  `5.960464e-8 rad <= 2e-7 rad`，qdes guard零介入，下一行自然请求teacher frame1；球、task、lifecycle、
+  controller history均保持，`ppo_update_calls=0`。这闭合了frame0 handoff量具，不等于整段动态老师可行。
+  回放在进入frame1后的第18个physics substep被旧single-OBB keepout终止：component51
+  `right_wrist_roll_link.stl`给出`-1.236878 mm`，而backend resolved contact仍为false。它是第三个需要由
+  全局census复核的proxy假阳性候选；multi-OBB/exact narrow-phase闭合前，frame1之后的动态可追踪性仍为
+  `未测`。
 
 ### 已证根因，不再归为“Pod整体装坏”
 

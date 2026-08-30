@@ -11,6 +11,12 @@ proxy把空角填实。Isaac实际collider union因对应ignored USD未在该诊
 不能把Mu净空外推成Isaac parity。下一候选保留20 mm余量并要求双端消费同一通用adaptive multi-OBB artifact、
 完整solid coverage与float32 outward证书；在Isaac live collider与fresh replay闭合前，G06不晋级。
 
+`643f03b5`的fresh GPU1 direct-frame0 zero-PPO replay又提供了独立边界证据：29/29 handoff谓词通过并
+自然从teacher frame0进入frame1，但第18个physics substep由component51 `right_wrist_roll_link.stl`的
+single OBB给出`-1.236878 mm`，同时Mu backend resolved contact=false。该结果不能代签Isaac，也不能把
+teacher动态判负；它把component51加入只读heldout，并进一步要求全部62个component的身份盲几何census，
+而不是继续逐winner加特例。
+
 ## 2026-08-29 当前双端阶段与环境裁决（仍`Partial`）
 
 新机可复现边界现已具体化：Mu的Python3.12.3基础venv有133项tracked lock，Pod fresh resolver精确闭合；

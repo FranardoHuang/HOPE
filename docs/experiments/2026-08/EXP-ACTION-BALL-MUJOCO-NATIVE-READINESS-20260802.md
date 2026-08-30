@@ -37,15 +37,23 @@ Isaac actual collider因缺ignored USD字节保持`未测`。采用方向是通�
 按完整actual/source solid coverage与最终owner-frame float32证书选择满足empty-space excess `<=5 mm`的
 最小`k<=8`；当前帧只作heldout回归，不驱动leaf数量。
 
-direct-frame0诊断另将上一GPU失败定位为validator口径，而非plant：production affine decode使
-`right_shoulder_roll`相对teacher变化`1 ULP=5.96e-8 rad`，旧门却要求bitwise teacher。新候选保持
-requested qdes exact teacher，同时要求executed qdes逐位等于production decode+guard expected、相对teacher
-不超过既有`2e-7 rad` ABI且guard零介入；失败收据用O_EXCL、0600、file/parent-dir fsync并绑定完整identity和
-payload SHA。Pod CPU union=`174 passed,8 skipped`；独立复审与fresh GPU尚未完成，因此它不证明dynamic
-teacher可行、也不授权改训练。随后只读终审给出`P0=0/P1=1`：atomic install八项聚合以及runner的
-same-step done/frame检查会在统一writer前直接raise，现有mutation又只覆盖人造arrays；因此“28个谓词任一
-失败都产生typed durable artifact”尚不成立。same-step teacher delta还应直接消费已有executable-q0 scalar，
-并把`2e-7`与生产ready ABI钉成同一常量。上述窄修、真实failure-path mutation与Pod复验完成前不发GPU。
+direct-frame0诊断将上一GPU失败定位为validator口径，而非plant：production affine decode使
+`right_shoulder_roll`相对teacher变化`1 ULP=5.96e-8 rad`，旧门却要求bitwise teacher。最终`643f03b5`
+保持requested qdes exact teacher，同时要求executed qdes逐位等于production decode+guard expected、相对
+teacher不超过共享`2e-7 rad` ABI且guard零介入；atomic-install与same-step done/frame也统一进入O_EXCL、
+0600、file/parent-dir fsync的typed failure writer。Pod三模块CPU=`103 passed,2 skipped`，独立终审
+`P0=0/P1=0`。
+
+fresh GPU1 root
+`/workspace/franco/runs/fullmdp-direct-frame0-643f03b5-gpu1-20260830T060903Z-r4`为zero-PPO、N=1、
+180-step预算；实际在first done时保存101行。29/29谓词通过：介入仅行92，requested frame0误差0，executed
+teacher误差`5.960464e-8 rad`且等于production expected，qdes guard false；行93自然请求teacher frame1，
+球/task/lifecycle/controller state均未偷改，`ppo_update_calls=0`。因此frame0 handoff合同已实证闭合。
+
+该结果仍不证明整段dynamic teacher：frame1开始后的physics substep18，旧single-OBB guard以component51
+`right_wrist_roll_link.stl`、SAT margin `-1.236878 mm`触发first done，但Mu backend resolved contact=false。
+component51与既有55/57一样只作为heldout反例；全62 component身份盲`k=1..8` census完成前，不据此改teacher、
+Reward、20 mm余量或训练Stage，也不宣称Isaac collider parity。
 
 ## 2026-08-29 current correction
 

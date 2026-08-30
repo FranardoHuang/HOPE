@@ -12,10 +12,12 @@ mimic→hit未打开，不能由模型文件、episode length或total return晋�
 [OBB](../DEFINITIONS.md#obb)在20 mm扩张桌面上给出
 约`-1.235 mm`交叠，但原始STL与Mu实际collider union仍有`+13.52/+13.36 mm`净空。这是保守proxy的
 empty-corner假阳性，不是老师实际撞桌。20 mm安全余量不降低；下一候选必须用通用、确定性、多叶覆盖证书
-修正量具，不能为当前帧加文件名特例。direct-frame0 probe的生产decode语义与durable失败收据已完成Pod CPU
-`174 passed,8 skipped`；独立复审无P0，但发现atomic install八项与same-step done/frame early raise仍会绕过
-统一失败writer，故28谓词durable coverage尚未闭合。该P1修完并复验前不发fresh GPU，所以teacher动态
-可行性仍为`未测`，G05保持`Partial / diagnostic_unauthorized=true`。
+修正量具，不能为当前帧加文件名特例。direct-frame0最终`643f03b5`已完成Pod CPU
+`103 passed,2 skipped`、独立复审`P0/P1=0`及fresh GPU1 zero-PPO：29/29谓词通过，frame0 requested exact、
+production executable仅有`5.96e-8 rad`舍入且guard清零，下一行自然进入teacher frame1。该probe随后在
+frame1后的physics substep18被component51 single OBB以`-1.236878 mm`终止，而resolved contact=false；
+所以它闭合handoff量具但仍未测完整动态teacher。component51/55/57只作heldout，全62身份盲census未完成，
+G05保持`Partial / diagnostic_unauthorized=true`。
 
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
