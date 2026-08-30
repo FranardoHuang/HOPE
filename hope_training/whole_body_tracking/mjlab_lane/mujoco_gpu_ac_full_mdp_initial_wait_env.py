@@ -829,18 +829,15 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_owner_source_step[:, 3:] = -1
         self._full_a_owner_fact_f32[:, 3:] = 0.0
 
-    def _full_a_reveal_rows(self, ids) -> None:
-        """Publish the slot-zero centre question from the live base frame."""
-
+    def _full_a_stage_reveal_rows(self, ids):
+        """Build and validate ACCEPT payloads without mutating lifecycle."""
         torch = self._torch
         n = int(ids.numel())
         if n == 0:
-            return
+            return None
         builder = getattr(
             self, "_full_a_question_builder", portable_question.build_center_question
         )
-        if not bool(self._full_a_frozen_root_valid[ids].all()):
-            raise RuntimeError("Full-A reveal has no installed physical spawn")
         base_position = self._full_a_frozen_root_position_scene[ids]
         base_quat = self._full_a_frozen_root_quat_wxyz[ids]
         question = builder(
@@ -861,21 +858,37 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         task_translation = question[
             "teacher_source_to_task_translation_scene"
         ]
-        if (
-            tuple(task_yaw.shape) != (n, 4)
-            or tuple(task_translation.shape) != (n, 3)
-            or not bool(torch.isfinite(task_yaw).all())
-            or not bool(torch.isfinite(task_translation).all())
-            or not bool(
-                torch.isclose(
-                    torch.linalg.vector_norm(task_yaw, dim=1),
-                    torch.ones(n, dtype=task.dtype, device=task.device),
-                    rtol=0.0,
-                    atol=1.0e-5,
-                ).all()
-            )
-        ):
+        if tuple(task_yaw.shape) != (n, 4) or tuple(task_translation.shape) != (n, 3):
             raise RuntimeError("portable centre teacher task frame differs")
+        # Device assertions preserve fail-closed construction semantics without
+        # forcing a CUDA stream synchronization on every reveal.
+        torch._assert_async(self._full_a_frozen_root_valid[ids].all())
+        torch._assert_async(torch.isfinite(task_yaw).all())
+        torch._assert_async(torch.isfinite(task_translation).all())
+        torch._assert_async(
+            torch.isclose(
+                torch.linalg.vector_norm(task_yaw, dim=1),
+                torch.ones(n, dtype=task.dtype, device=task.device),
+                rtol=0.0,
+                atol=1.0e-5,
+            ).all()
+        )
+        torch._assert_async(task_yaw[:, 1:3].abs().le(1.0e-6).all())
+        torch._assert_async(task_translation[:, 2].abs().le(1.0e-6).all())
+        return question
+
+    def _full_a_commit_reveal_rows(self, ids, question) -> None:
+        """Commit one fully staged slot-zero centre question."""
+
+        torch = self._torch
+        n = int(ids.numel())
+        if n == 0:
+            return
+        task = question["task_f32"]
+        task_yaw = question["teacher_source_to_task_yaw_wxyz"]
+        task_translation = question[
+            "teacher_source_to_task_translation_scene"
+        ]
         self._full_a_teacher_source_to_task_yaw_wxyz[ids] = task_yaw
         self._full_a_teacher_source_to_task_translation_scene[ids] = (
             task_translation
@@ -938,6 +951,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._epoch_task_valid[ids] = True
         self._epoch_selected[ids] = True
         self._full_a_cadence_ready_streak[ids] = 0
+
+    def _full_a_reveal_rows(self, ids) -> None:
+        """Compatibility entry point: stage first, then commit."""
+
+        staged = self._full_a_stage_reveal_rows(ids)
+        if staged is not None:
+            self._full_a_commit_reveal_rows(ids, staged)
 
     def _full_a_launch_rows(self, ids) -> None:
         state = self._full_a_launch_state_f32[ids]
@@ -1045,8 +1065,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         if reveal_ids.numel() > 0:
             # ACCEPT atomically replaces an IDLE/RETIRED row.  DEFER and a
             # terminal overlap are zero-write with respect to task/lifecycle.
+            staged = self._full_a_stage_reveal_rows(reveal_ids)
             self._clear_lifecycle(reveal_ids)
-            self._full_a_reveal_rows(reveal_ids)
+            self._full_a_commit_reveal_rows(reveal_ids, staged)
         return reveal, due, deferred, due_terminal_overlap
 
     def _full_a_latch_ball_contacts(self, contact_census=None) -> None:
