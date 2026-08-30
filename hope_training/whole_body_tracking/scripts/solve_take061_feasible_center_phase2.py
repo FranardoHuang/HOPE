@@ -60,7 +60,7 @@ def solve(args):
     import mujoco
     from scipy.signal import savgol_filter
 
-    ready = P1._load_ready(args.dynamic_ready)
+    ready = P1._HIT._load_ready(args.dynamic_ready)
     document = ready["document"]["runtime_plant"]
     model = P1._load_model(mujoco, args.model)
     _jids, qadr, dadr, root_qadr, root_dadr = P1._runtime_mapping(
