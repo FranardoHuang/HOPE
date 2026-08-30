@@ -16540,6 +16540,15 @@ def _run_action_ball_full_mdp_isaac_contact_tick_trace(
             return value.cpu().tolist()
         return value
 
+    def vector(value):
+        """Serialize one already-selected device vector without re-indexing it."""
+
+        if value is None:
+            return None
+        if not torch.is_tensor(value) or value.ndim != 1:
+            raise RuntimeError("Isaac contact-tick trace vector ABI differs")
+        return value.detach().cpu().tolist()
+
     def current_slot(record):
         slot = int(record.current_task_slot[0].item())
         return slot if 0 <= slot < record.phase.shape[1] else None
@@ -16581,7 +16590,17 @@ def _run_action_ball_full_mdp_isaac_contact_tick_trace(
             "boundary": boundary,
             "transition": transition,
             "common_step_counter": int(runtime_env.common_step_counter),
-            "task_public_valid": one(motion._action_ball_public_task_valid),
+            "task_public_valid": one(racket._action_ball_task_valid),
+            "motion_public_task_valid": one(
+                motion._action_ball_public_task_valid
+            ),
+            "motion_task_timing_active": one(
+                motion.action_ball_task_timing_active
+            ),
+            "motion_event_exact_strike_allowed": one(
+                motion.event_exact_strike_allowed
+            ),
+            "motion_event_installed": one(motion.event_installed),
             "task_age_s": one(motion._action_ball_task_age_s),
             "time_to_contact_s": one(
                 motion.action_ball_time_to_contact_remaining_s
@@ -16591,6 +16610,8 @@ def _run_action_ball_full_mdp_isaac_contact_tick_trace(
             ),
             "teacher_frame_f": one(motion.time_steps_f),
             "teacher_frame_i": one(motion.time_steps),
+            "racket_time_to_strike_s": one(racket.time_to_strike),
+            "racket_exact_fired": one(racket._exact_fired),
             "epoch_phase": None if slot is None else one(record.phase[0, slot]),
             "epoch_reveal_tick": slot_value(record, record.clocks.reveal_tick),
             "epoch_launch_tick": slot_value(record, record.clocks.launch_tick),
@@ -16605,7 +16626,7 @@ def _run_action_ball_full_mdp_isaac_contact_tick_trace(
                 else one(pending.contact_deadline_motion_tick)
             ),
             "active_flight_slot": active_slot,
-            "ball_position_env_m": one(ball_pos),
+            "ball_position_env_m": vector(ball_pos),
             "ball_racket_center_distance_m": float(min_distance.item()),
             "racket_exact_eligibility": one(
                 racket._action_ball_strike_fact_exact_eligibility
@@ -16642,8 +16663,8 @@ def _run_action_ball_full_mdp_isaac_contact_tick_trace(
         }
         if slot is not None:
             facts = record.fact_f32[0, slot, r03_slot]
-            row["r03_target_position_w_m"] = one(facts[0:3])
-            row["r03_achieved_position_w_m"] = one(facts[15:18])
+            row["r03_target_position_w_m"] = vector(facts[0:3])
+            row["r03_achieved_position_w_m"] = vector(facts[15:18])
         return row
 
     def force_teacher_state():
