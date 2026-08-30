@@ -86,6 +86,14 @@ def _r03_identity(epoch):
     )
 
 
+def _r03_contact_step(epoch):
+    """Return D05's absolute contact tick for each current epoch row."""
+
+    current = epoch.current()
+    slot = current.current_task_slot[:, None]
+    return current.clocks.contact_tick.gather(1, slot).squeeze(1)
+
+
 def _real_settled_r03():
     (
         _motion,
@@ -201,7 +209,7 @@ def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
         assert epoch.commit_head == before_head
         assert _raw_bytes(epoch.current()) == before
 
-    step = torch.full((2,), 7, dtype=torch.int64)
+    step = _r03_contact_step(epoch)
     vectors = {
         name: torch.arange(offset, offset + 6, dtype=torch.float32).reshape(2, 3)
         for offset, name in enumerate(
@@ -258,7 +266,10 @@ def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
         R03.R03_EPOCH_FACT_PRESENT | R03.R03_EPOCH_FACT_PHYSICALLY_VALID,
         0,
     ]
-    assert record.fact_source_step[row, slot, owner_slot].tolist() == [7, -1]
+    assert record.fact_source_step[row, slot, owner_slot].tolist() == [
+        int(step[0]),
+        -1,
+    ]
     assert record.owner_fault_bits[row, slot, owner_slot].tolist() == [0, 0]
     assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
 
@@ -291,7 +302,7 @@ def test_r03_publish_faults_freeze_bad_row_preserve_peer_and_enter_named_drain(
     fault_kind, expected_fault, expected_row_fault
 ):
     owner, epoch, racket, identity = _real_settled_r03()
-    step = torch.ones(2, dtype=torch.int64)
+    step = _r03_contact_step(epoch)
     zero = torch.zeros((2, 3), dtype=torch.float32)
     with _active(racket):
         owner.arm_action_epoch_strike_fact_v1(
@@ -396,7 +407,7 @@ def test_r03_real_arm_types_each_fault_without_touching_peer(
     fault_kind, expected_fault, expected_row_fault
 ):
     owner, epoch, racket, identity = _real_settled_r03()
-    step = torch.ones(2, dtype=torch.int64)
+    step = _r03_contact_step(epoch)
     target_position = torch.zeros((2, 3), dtype=torch.float32)
     if fault_kind == "epoch_identity":
         identity = replace(
@@ -452,7 +463,7 @@ def test_r03_real_arm_types_each_fault_without_touching_peer(
 
 def test_r03_producer_fault_stops_preoptimizer_with_exact_named_cause():
     owner, epoch, racket, identity = _real_settled_r03()
-    step = torch.ones(2, dtype=torch.int64)
+    step = _r03_contact_step(epoch)
     zero = torch.zeros((2, 3), dtype=torch.float32)
     with _active(racket):
         owner.arm_action_epoch_strike_fact_v1(
