@@ -5437,3 +5437,9 @@
   final source、rate与fresh仍待验。它已由本页顶部同日“exact rate闭合并双fresh替换”条目取代；当前数字与
   authority只认[课程实验§10](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)和
   [热路实验§16](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)。
+## 2026-08-30 — multi-OBB teacher-replay consumer 收口
+
+- 收口 multi-OBB teacher-replay consumer：witness schema v2 支持 `63` blade、
+  leaf/source 双层 ID，双 loader 拒绝 split index/count 有洞；合同收窄为
+  component55 actual-collider union refinement。Pod exact `213c8622` 物化检查通过，
+  含 teacher replay 的 CPU union `200 passed, 2 skipped`；未触碰 active runs。

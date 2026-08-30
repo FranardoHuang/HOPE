@@ -7042,3 +7042,8 @@ loader 只读物化字节。Pod exact `44011beb` 的 materializer/check 已逐�
 入测。它仍是 branch candidate，不改 active run；合入后同带 replay 前，不能将这一几何修复写成
 teacher/Reward/训练通过。详见
 [collision proxy 实验 §9](../experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#9-2026-08-30-v2从-single-obb-空角改为双端-actual-collider-union)。
+
+2026-08-30 后续 P1 收口：teacher-replay witness 已识别 `63` 为 blade，
+proxy leaf 另带 parent source ID；双 loader 已校验 split index/count 无洞。
+Pod exact `213c8622` 扩展 CPU union 为 `200 passed, 2 skipped`。本轮合同
+仅声称 component55 actual-union refinement，不声称全机器人 actual collider 已证明。

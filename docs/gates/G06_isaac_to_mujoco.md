@@ -2728,3 +2728,8 @@ SHA；双 loader 都拒绝 schema/plant/MJCF/inventory 漂移。冻结 witness �
 NUMA，本轮没有污染现役窗口。合入后同带 replay 仍需分别给出。G06 不晋级，不授权 resume/export/
 deployment。细节见
 [collision proxy 实验 §9](../experiments/2026-08/EXP-A3P-P1-0807-COLLISION-PROXY-20260808.md#9-2026-08-30-v2从-single-obb-空角改为双端-actual-collider-union)。
+
+2026-08-30 consumer 补洞后，Mu teacher replay 不再把 runtime blade index `63`
+当成 unknown，并保留 split OBB leaf 到 source component 的 parent mapping。Pod exact
+`213c8622` 的扩展 CPU union（含 teacher replay）为 `200 passed, 2 skipped`；
+CUDA 因 GPU1 owner locks 及现役 GPU2 共享 NUMA 未越权运行，Gate 仍 `Partial`。

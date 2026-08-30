@@ -432,6 +432,18 @@ loader 只消费已物化字节，不在训练热路重算 hull/PCA。Isaac 与 
 都校验 v2 schema、file/content SHA、plant identity、source/proxy count，并校验
 exact MuJoCo MJCF / collider inventory / binding SHA。任一漂移都 fail closed。
 
+2026-08-30 的 consumer 补洞将 diagnostic witness 升为 v2：`0..62` 是
+proxy row，`63` 是 runtime racket blade，同时携带 leaf-specific
+`component_id` 和 parent `source_component_id`。双 loader 额外拒绝 source ID
+数量漂移、`proxy_box_index/count` 不连续或有洞的 split mapping。Isaac
+attribution 二次读取也重验 exact file SHA，不再可用替换工件制造
+geometry/label TOCTOU。
+
+Pod exact `213c8622` 上的 materializer `--check` 通过，扩展 CPU union
+包含 teacher replay / initial-wait / MJLab keepout，结果 `200 passed, 2 skipped`
+(`20.93 s`)。两个 skip 均是显式 CUDA opt-in；GPU1 虽无显存进程，但仍有
+Isaac/MuJoCo owner lock 且与现役 GPU2 共享 NUMA，本轮没有越权运行 CUDA。
+
 ### 9.4 证据边界
 
 此 v2 只修 shared geometric table guard 的 conservative cover，不改 Reward、teacher、
