@@ -37,6 +37,7 @@ def solve(args):
     from scipy.spatial.transform import Rotation
 
     source = json.loads(args.phase3_report.read_text())
+    P3._require_seed_valid("phase3", source)
     P3._require_ball_physics_lineage(
         "phase3", source.get("selected", {}).get("solver"), args.ball_physics
     )
@@ -180,6 +181,9 @@ def solve(args):
     report = {
         "schema_version": 1, "kind": KIND, "diagnostic_unauthorized": True,
         "new_action_identity_sha256": identity,
+        "seed_valid": True,
+        "matched": bool(replay.get("matched", False)),
+        "admitted": robust,
         "exact_face_admitted": True, "robust_curriculum_center": robust,
         "typed_reject_reasons": [] if robust else ["ROBUST_MARGIN_TARGETS_NOT_MET"],
         "continuous_solver": replay,
@@ -262,7 +266,7 @@ def parser():
 
 def main():
     report = solve(parser().parse_args()); print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-    return 0 if report["exact_face_admitted"] else 2
+    return 0 if report["robust_curriculum_center"] else 2
 
 
 if __name__ == "__main__":

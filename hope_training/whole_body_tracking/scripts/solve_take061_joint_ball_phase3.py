@@ -29,6 +29,14 @@ P2 = _module("_take061_phase2", "solve_take061_feasible_center_phase2.py")
 KIND = "take061_joint_ball_feasible_center_phase3_v1"
 
 
+def _require_seed_valid(label, report):
+    """Require an explicitly validated upstream retarget seed."""
+    if not isinstance(report, dict) or report.get("seed_valid") is not True:
+        raise P1.ProducerError(
+            f"{label} does not declare seed_valid=true; refusing downstream retarget"
+        )
+
+
 def _require_ball_physics_lineage(label, solver_report, ball_physics):
     """Reject a phase chain that silently changes its fitted ball model."""
     try:
@@ -119,11 +127,12 @@ def solve(args):
     qbase[root_qadr : root_qadr + 3] = ready["root_pos"]
     qbase[root_qadr + 3 : root_qadr + 7] = ready["root_wxyz"]
     qbase[qadr] = ready["ready"]
+    phase2 = json.loads(args.phase2_report.read_text())
+    _require_seed_valid("phase2", phase2)
     with np.load(args.phase2_npz, allow_pickle=False) as artifact:
         q_seed = np.asarray(artifact["q_ref"], np.float64)
         sites = np.asarray(artifact["racket_site"], np.float64)
         faces = np.asarray(artifact["racket_face"], np.float64)
-    phase2 = json.loads(args.phase2_report.read_text())
     inverse = phase2["fixed_action_solver_inverse"]
     _require_ball_physics_lineage("phase2", inverse, args.ball_physics)
     desired_velocity = np.asarray(inverse["solver_racket_velocity_w_mps"], np.float64)
@@ -213,16 +222,21 @@ def solve(args):
                     and plant["bilateral_support_frame_fraction"] >= 1.0
                     and plant["table_distance_min_m"] >= P1.TABLE_CLEARANCE_M - P1.NUMERIC_TOL_M
                 )
+                seed_valid = bool(mechanical and replay.get("solver_admitted", False))
                 candidates.append({
                     "alpha": float(alpha), "timewarp": float(timewarp),
                     "wrist_inward_bias_rad": float(wrist_bias),
                     "q_ref": q, "site": path_site, "face": path_face,
                     "velocity": velocity, "long": path_long, "plant": plant,
                     "center": center, "solver": replay,
+                    "mechanically_admitted": mechanical,
+                    "seed_valid": seed_valid,
+                    "matched": bool(replay.get("matched", False)),
                     "admitted": bool(mechanical and replay.get("matched", False)),
                 })
     chosen = min(candidates, key=lambda row: (
         not row["admitted"],
+        not row["seed_valid"],
         max(0.0, -row["plant"]["qdes_margin_min"]),
         max(0.0, -row["plant"]["torque_margin_min"]),
         row["solver"].get("face_error_deg", 999.0),
@@ -235,6 +249,11 @@ def solve(args):
     report = {
         "schema_version": 1, "kind": KIND,
         "diagnostic_unauthorized": True,
+        "seed_valid": chosen["seed_valid"],
+        "seed_typed_reject_reasons": [] if chosen["seed_valid"] else [
+            "NO_JOINT_MECHANICAL_AND_SOLVER_ADMITTED_RETARGET_SEED"
+        ],
+        "matched": chosen["matched"],
         "admitted": chosen["admitted"],
         "typed_reject_reasons": [] if chosen["admitted"] else [
             "NO_JOINT_MECHANICAL_AND_FIXED_SOLVER_MATCH_IN_REGISTERED_SEARCH"
@@ -276,10 +295,14 @@ def solve(args):
                 "table_distance_min_m": row["plant"]["table_distance_min_m"],
                 "velocity_error_mps": row["solver"].get("velocity_error_mps"),
                 "face_error_deg": row["solver"].get("face_error_deg"),
+                "mechanically_admitted": row["mechanically_admitted"],
+                "seed_valid": row["seed_valid"],
+                "matched": row["matched"],
                 "admitted": row["admitted"],
             }
             for row in sorted(candidates, key=lambda row: (
                 not row["admitted"],
+                not row["seed_valid"],
                 max(0.0, -row["plant"]["qdes_margin_min"]),
                 max(0.0, -row["plant"]["torque_margin_min"]),
                 row["solver"].get("face_error_deg", 999.0),
