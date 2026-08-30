@@ -2,6 +2,22 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-30 current graph 死门减法（仍`Partial`）
+
+`90f86cc8`只缩小当前 FullMDP 的构造/API 面，不改变学习语义：current `mdp` wildcard 不再导出两个
+predecessor Reward/termination 模块；当前 termination source 与 materializer 直接且精确地只保留
+`time_out / base_fell_tilt / base_too_low / joint_qdes_forbidden / robot_hit_table`五个真实消费者，不再先构造
+再删除无终止效果的`fresh_pre_reward_publish`同写者桥。legacy 模块仍可显式导入，供历史测试和旧调用者使用。
+reveal/observation owner 中两个没有读取者的纯计数
+`minted_receipt_count / semantic_publication_count`同时删除；durable receipt、Reward28、five-term Done、
+physical fact、fault/counter/safety与checkpoint边界均未删除。
+
+Pod1 CPU exact checkout已分进程通过current-graph AST/legacy import=`4 passed`、cfg/materializer=
+`13 passed,25 skipped`（skip为CPU lane无Isaac/Kit）、lean observation=`15 passed`、Reward28与actual-close=
+`52 passed`、lean install=`21 passed`、runtime factory=`58 passed,10 skipped`、portable flight contract=
+`25 passed`。这项减法的收益是减少当前名字空间、构造分支和审计面；它不在已证热墙上，因此没有墙钟收益
+声明，也不改变学习、promotion、physics或部署状态。本Gate继续`Partial`。
+
 ## 2026-08-29 当前学习与iteration复核（仍`Partial`）
 
 validated code source=`b0d7d562`保留`255df4a1`的每control一次R06 finalize与每substep Scene capture、terminal

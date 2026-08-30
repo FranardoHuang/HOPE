@@ -3,7 +3,7 @@
 > 状态：`corrected-dual-fresh-running / active-flight-profile-complete / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-29
+> 更新：2026-08-30
 >
 > `origin/main:docs/NOW.md` 是全项目唯一优先级权威。本页只维护
 > [FullMDP](../DEFINITIONS.md)（完整球路、击球、落点与恢复状态机）单动作双后端
@@ -213,6 +213,12 @@ procedural blockers；plant/file identity、fresh live recompute、真实write�
    第二刀按全仓AST/callsite审计删除三个无生产consumer的兼容decoder/view及两个只为它们存在的facts类型：
    Physical/R06不再各自重读并clone完整Epoch slice，Epoch也不再暴露未消费的active D05 rows；源码净减约
    214行。该刀不在active调用图上，预期不改变墙钟；其价值是缩小owner/API面，仍须Pod exact相关套件确认。
+   第三刀只清除已由AST/callsite证明不在current graph的表面：current wildcard退出旧FullMDP Reward/Done
+   模块，termination source/materializer直接收为五个live term，不再保留`fresh_pre_reward_publish`的
+   validate-then-drop桥；两个无consumer的receipt/publication计数也删除。legacy模块仍可显式导入。
+   Pod1 CPU exact已分别通过current graph、cfg/materializer、Reward28 actual-close、lean install、runtime
+   factory与portable-flight套件；缺Isaac/Kit的构造格诚实skip。该刀不在热路，故只关闭一段current API/
+   审计债，不声明iteration墙钟改善，item 9仍为open，下一结构工作仍须针对typed owner边界且逐刀验真。
 10. [x] 已在GPU1隔离、严格加载Mu `model_2000.pt`做`512×240`随机policy轨迹诊断；optimizer未加载，当前
     GPU0/2长期run未改。`8,081/122,880=6.58%` policy rows有actual hard edge，`8,373/122,880=6.81%`
     有qdes guard，非零hard joint只有`waist_pitch/waist_roll/left_ankle_roll`三项；其中`77.47%` hard rows在

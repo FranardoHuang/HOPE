@@ -1,5 +1,17 @@
 # 简短进度记录
 
+## 2026-08-30 — FullMDP current graph 死门减法
+
+- current `mdp` wildcard退出旧FullMDP Reward/termination模块；当前termination source/materializer不再
+  构造后删除`fresh_pre_reward_publish`，而是直接精确保留五个live term。legacy模块仍可显式导入，
+  历史调用面没有被伪装成current runtime。
+- 删除reveal/observation owner中没有读取者的`minted_receipt_count`和
+  `semantic_publication_count`。该刀不碰Reward28、five-term Done、durable receipt、physical truth、
+  fault/counter/safety或checkpoint，因此只声明API/审计面减小，不冒充iteration加速或学习证据。
+- Pod1 CPU exact分进程回归为`4 / 13(+25 skipped) / 15 / 52 / 21 / 58(+10 skipped) / 25 passed`，
+  分别覆盖current-graph AST与legacy显式导入、cfg/materializer、observation、Reward28 actual-close、
+  lean install、runtime factory和portable flight contract。CPU lane缺Isaac/Kit项诚实标为skip；G05仍`Partial`。
+
 ## 2026-08-29 — 四倍paddle判负、回放期增强后继与环境文档闭环
 
 - fresh 4× Mu到ACK623后，matched旧Mu的raw/selected/crossing=`56/5/2` vs `1,665/334/281`，最近10轮
