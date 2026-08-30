@@ -781,6 +781,24 @@ def test_portable_and_legacy_paths_cannot_publish_canonical_observation() -> Non
 def test_active_midtask_checkpoint_payload_keeps_complete_identity_and_timing() -> None:
     command, _receipts = _motion()
     _seed_complete_canonical_prepare(command)
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    n = command.num_envs
+    origins = torch.zeros((n, 3), device=device)
+    origins[:, 0] = torch.arange(n, device=device) + 10.0
+    origins[:, 1] = -7.0
+    command._env.scene.env_origins = origins
+    command._action_ball_full_mdp_source_strike_root_xy = torch.zeros((1, 2), device=device)
+    command._action_ball_full_mdp_source_strike_yaw_wxyz = torch.tensor(
+        [[1.0, 0.0, 0.0, 0.0]], device=device
+    )
+    command._action_ball_full_mdp_frozen_root_pos_w = origins.clone()
+    command._action_ball_full_mdp_frozen_root_pos_w[:, :2] += torch.tensor([0.4, -0.3], device=device)
+    command._action_ball_full_mdp_frozen_root_quat_wxyz = torch.zeros((n, 4), device=device)
+    command._action_ball_full_mdp_frozen_root_quat_wxyz[:, 0] = 1.0
+    command._action_ball_full_mdp_frozen_root_valid = torch.ones(n, dtype=torch.bool, device=device)
+    command._action_ball_full_mdp_task_yaw_wxyz = command._action_ball_full_mdp_frozen_root_quat_wxyz.clone()
+    command._action_ball_full_mdp_task_translation_w = torch.zeros((n, 3), device=device)
+    command._action_ball_full_mdp_task_translation_w[:, :2] = torch.tensor([0.4, -0.3], device=device)
     command._action_ball_continuous_motion_device_mutation_version = torch.zeros(
         1, dtype=torch.int64
     )
