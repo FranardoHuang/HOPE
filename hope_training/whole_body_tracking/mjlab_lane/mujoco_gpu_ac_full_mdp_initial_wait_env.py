@@ -2177,7 +2177,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         elapsed = self._torch.clamp(
             (
                 int(self.common_step_counter) - self._epoch_clock_ticks[:, 0]
-            ).to(dtype=self.qpos_init.dtype)
+            ).to(dtype=self._full_a_pre_swing_wait_s.dtype)
             * self.step_dt,
             min=0.0,
         )

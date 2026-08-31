@@ -48,6 +48,9 @@ def _paddle_telemetry_kwargs(ordinal, value):
             dtype=value.dtype,
             device=value.device,
         ),
+        "paddle_contact_scale": torch.ones(
+            value.shape, dtype=value.dtype, device=value.device
+        ),
     }
 
 
