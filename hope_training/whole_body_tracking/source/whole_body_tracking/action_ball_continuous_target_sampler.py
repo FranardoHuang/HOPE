@@ -210,7 +210,6 @@ class ContinuousTargetProfile:
         object.__setattr__(self, "cells", clean_cells)
 
         cell_ids: set[str] = set()
-        semantic_hashes: dict[str, str] = {}
         for index, cell in enumerate(clean_cells):
             if cell.cell_id in cell_ids:
                 raise ContinuousTargetSamplerError(
@@ -221,14 +220,9 @@ class ContinuousTargetProfile:
                 raise ContinuousTargetSamplerError(
                     "cells[%d].target width differs from components" % index
                 )
-            semantic_sha = self.semantic_sha256(cell)
-            previous_id = semantic_hashes.get(semantic_sha)
-            if previous_id is not None:
-                raise ContinuousTargetSamplerError(
-                    "different cell IDs cannot name the same numerical target: "
-                    "%s and %s" % (previous_id, cell.cell_id)
-                )
-            semantic_hashes[semantic_sha] = cell.cell_id
+            # Cell IDs describe fixed-width draw slots, not distinct physical
+            # coordinates.  A zero-width action domain legitimately repeats
+            # one target while retaining deterministic slot identity.
 
     def semantic_sha256(self, cell: TargetCell) -> str:
         if not isinstance(cell, TargetCell):
