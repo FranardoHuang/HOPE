@@ -862,7 +862,7 @@ def test_full_mdp_typed_ppo_v6_replaces_only_the_fresh_algo_mapping():
     assert legacy["runner"] == {
         "num_steps_per_env": 48,
         "max_iterations": 100_000,
-        "save_interval": 2_000,
+        "save_interval": 300,
         "empirical_normalization": False,
     }
     assert legacy["policy"] == recipe.policy()

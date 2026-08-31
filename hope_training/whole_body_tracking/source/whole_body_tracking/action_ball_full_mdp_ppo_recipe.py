@@ -27,7 +27,13 @@ class ActionBallFullMdpPpoRecipe:
     num_envs: int = 512
     num_steps_per_env: int = 48
     max_iterations: int = 100_000
-    save_interval: int = 2_000
+    # A learned-policy visual review is part of the development loop, not a
+    # promotion Gate.  Saving only every 2,000 updates left reset/reference/
+    # contact mistakes invisible for hours even though a 300-update snapshot
+    # is already useful for fixed-camera diagnosis.  Both backends consume
+    # this same operational cadence; PPO math and the learning recipe hash do
+    # not change.
+    save_interval: int = 300
     empirical_normalization: bool = False
 
     policy_class_name: str = "ActorCritic"

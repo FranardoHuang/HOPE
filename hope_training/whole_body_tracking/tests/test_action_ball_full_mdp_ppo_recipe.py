@@ -93,7 +93,7 @@ def test_learning_identity_matches_existing_training_contract_serializer_shape()
             "num_envs": 512,
             "num_steps_per_env": 48,
             "max_iterations": 100_000,
-            "save_interval": 2_000,
+            "save_interval": 300,
         },
         "learning_recipe": scientific,
     }
@@ -114,7 +114,7 @@ def test_isaac_and_mujoco_views_share_scientific_values_without_aliasing():
     assert isaac["runner"] == {
         "num_steps_per_env": 48,
         "max_iterations": 100_000,
-        "save_interval": 2_000,
+        "save_interval": 300,
         "empirical_normalization": False,
     }
     assert mujoco["num_steps_per_env"] == isaac["runner"]["num_steps_per_env"]

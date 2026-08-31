@@ -231,7 +231,7 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     module = _load()
     cfg = module.build_train_cfg()
     assert cfg["num_steps_per_env"] == 48
-    assert cfg["save_interval"] == 2_000
+    assert cfg["save_interval"] == 300
     assert cfg["obs_groups"] == {"policy": ["policy"], "critic": ["critic"]}
     assert cfg["policy"]["init_noise_std"] == (
         module.FULL_MDP_PPO_RECIPE.init_noise_std
@@ -1295,7 +1295,7 @@ def test_rate_probe_keeps_production_shape_and_rejects_artifact_authority(
         "num_envs": 512,
         "num_steps_per_env": 48,
         "max_iterations": 61,
-        "save_interval": 2_000,
+        "save_interval": 300,
     }
     assert production_rate_recipe["runner_overrides"] == {
         "max_iterations": {
