@@ -212,3 +212,18 @@ def test_fullmdp_policy_visual_preserves_code_owned_motion_tuple():
             ["/other/take061.npz"],
             full_mdp_runtime=True,
         )
+
+
+def test_video_and_capture_are_inference_only_not_onnx_export():
+    assert play_mod._playback_exports_onnx(
+        capture_requested=False,
+        video_requested=False,
+    )
+    assert not play_mod._playback_exports_onnx(
+        capture_requested=False,
+        video_requested=True,
+    )
+    assert not play_mod._playback_exports_onnx(
+        capture_requested=True,
+        video_requested=False,
+    )

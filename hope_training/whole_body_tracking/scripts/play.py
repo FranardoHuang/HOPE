@@ -197,6 +197,14 @@ def _prepare_video_output_directory(configured, fallback):
     return output
 
 
+def _playback_exports_onnx(*, capture_requested, video_requested):
+    """Keep visual inference separate from deployment export."""
+
+    if type(capture_requested) is not bool or type(video_requested) is not bool:
+        raise TypeError("playback mode flags must be exact booleans")
+    return not capture_requested and not video_requested
+
+
 def _run_with_owned_play_environment(env, body):
     """Run ``body`` and close the final environment wrapper exactly once.
 
@@ -314,7 +322,10 @@ def _run_created_environment(
 
     # Capture mode is inference-only and writes only its dedicated no-clobber callback directory;
     # do not mutate the checkpoint run by exporting an unrelated ONNX side artifact.
-    if not capture_requested:
+    if _playback_exports_onnx(
+        capture_requested=capture_requested,
+        video_requested=bool(cfg.video),
+    ):
         export_model_dir = (
             os.path.abspath(str(cfg.export_dir))
             if cfg.get("export_dir", None)
@@ -333,7 +344,8 @@ def _run_created_environment(
         )
         print(f"[INFO] Exported ONNX policy to: {export_model_dir}")
     else:
-        print("[play.py] capture mode: ONNX export skipped", flush=True)
+        mode = "capture" if capture_requested else "video"
+        print(f"[play.py] {mode} mode: ONNX export skipped", flush=True)
 
     if bool(cfg.get("export_only", False)):
         return
