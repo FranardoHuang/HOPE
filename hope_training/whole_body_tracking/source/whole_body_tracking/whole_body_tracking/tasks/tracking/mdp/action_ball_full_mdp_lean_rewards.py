@@ -96,12 +96,12 @@ if (
     )
     or len({spec.command_name for spec in PADDLE_MOTION_PRIOR_SPECS}) != 1
     or any(
-        float(spec.scale_during_playback)
-        != reward_contract.PADDLE_MOTION_PRIOR_PLAYBACK_SCALE
+        float(spec.contact_peak_scale)
+        != reward_contract.PADDLE_MOTION_PRIOR_CONTACT_PEAK_SCALE
         for spec in PADDLE_MOTION_PRIOR_SPECS
     )
 ):
-    raise RuntimeError("paddle pack requires the ordered playback-scaled contract")
+    raise RuntimeError("paddle pack requires the ordered contact-shaped contract")
 
 R03_PRESENT = 1 << 0
 R03_PHYSICALLY_VALID = 1 << 1
@@ -297,6 +297,7 @@ class LeanActionEpochRewardGraph:
         self._paddle_reward_cycle_cache: tuple[torch.Tensor, ...] | None = None
         self._paddle_playback_cycle_mask: torch.Tensor | None = None
         self._paddle_error_cycle_matrix: torch.Tensor | None = None
+        self._paddle_contact_scale_cycle: torch.Tensor | None = None
         self._next_ordinal = 0
         self._next_dense_ordinal = LIFECYCLE_PAYMENT_COUNT
         self._dense_cycle_open = False
@@ -369,6 +370,7 @@ class LeanActionEpochRewardGraph:
         self._paddle_reward_cycle_cache = None
         self._paddle_playback_cycle_mask = None
         self._paddle_error_cycle_matrix = None
+        self._paddle_contact_scale_cycle = None
 
     def _snapshot(self) -> epoch_v1._LeanRewardCycleSnapshot:
         if self._cycle_snapshot is None:
@@ -565,7 +567,12 @@ class LeanActionEpochRewardGraph:
         ordinal: int,
         command_lookup: object,
         tracking_errors: object,
-    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
+    ]:
         """Return one column from the same-cycle four-channel paddle pack."""
 
         carry_txn._require_leaf_mutable(self)
@@ -580,6 +587,7 @@ class LeanActionEpochRewardGraph:
         cached = self._paddle_reward_cycle_cache
         playback_active = None
         telemetry_errors = None
+        contact_scale = None
         if cached is None:
             if ordinal != first:
                 raise LeanRewardCycleError("paddle pack first row was skipped")
@@ -607,6 +615,15 @@ class LeanActionEpochRewardGraph:
                 or not playback_active.is_contiguous()
             ):
                 raise RuntimeError("Motion playback Reward ABI differs")
+            time_to_contact_s = getattr(cmd, "time_to_strike", None)
+            if (
+                type(time_to_contact_s) is not torch.Tensor
+                or tuple(time_to_contact_s.shape) != (self.num_envs,)
+                or time_to_contact_s.device != self.device
+                or time_to_contact_s.dtype is not torch.float32
+                or not time_to_contact_s.is_contiguous()
+            ):
+                raise RuntimeError("Racket contact clock Reward ABI differs")
             if (
                 type(errors) is not torch.Tensor
                 or tuple(errors.shape)
@@ -627,13 +644,18 @@ class LeanActionEpochRewardGraph:
                 )
                 for column, spec in enumerate(PADDLE_MOTION_PRIOR_SPECS)
             )
+            contact_scale = paddle_prior.contact_phase_scale(
+                time_to_contact_s,
+                playback_active,
+                half_window_s=(
+                    reward_contract.PADDLE_MOTION_PRIOR_CONTACT_HALF_WINDOW_S
+                ),
+                peak_scale=(
+                    reward_contract.PADDLE_MOTION_PRIOR_CONTACT_PEAK_SCALE
+                ),
+            )
             cached = tuple(
-                torch.where(
-                    playback_active,
-                    value * float(spec.scale_during_playback),
-                    value,
-                )
-                for value, spec in zip(base_value, PADDLE_MOTION_PRIOR_SPECS)
+                value * contact_scale for value in base_value
             )
             telemetry_errors = errors
             self._paddle_reward_cycle_cache = cached
@@ -642,6 +664,7 @@ class LeanActionEpochRewardGraph:
             cached[column],
             playback_active,
             telemetry_errors,
+            contact_scale,
         )
 
     def pay(self, ordinal: int, *, scale: float | None = None) -> torch.Tensor:
@@ -724,6 +747,7 @@ class LeanActionEpochRewardGraph:
         *,
         paddle_playback_active: torch.Tensor | None = None,
         paddle_error_components: torch.Tensor | None = None,
+        paddle_contact_scale: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Record one existing Motion reward without extending lifecycle payment bits."""
 
@@ -782,17 +806,33 @@ class LeanActionEpochRewardGraph:
                         raise LeanRewardCycleError(
                             "paddle motion-prior error telemetry ABI differs"
                         )
-                    if (paddle_playback_active is None) != (
-                        paddle_error_components is None
+                    if paddle_contact_scale is not None and (
+                        type(paddle_contact_scale) is not torch.Tensor
+                        or tuple(paddle_contact_scale.shape) != (self.num_envs,)
+                        or paddle_contact_scale.device != self.device
+                        or paddle_contact_scale.dtype is not torch.float32
+                        or not paddle_contact_scale.is_contiguous()
                     ):
+                        raise LeanRewardCycleError(
+                            "paddle contact-scale telemetry ABI differs"
+                        )
+                    if len(
+                        {
+                            paddle_playback_active is None,
+                            paddle_error_components is None,
+                            paddle_contact_scale is None,
+                        }
+                    ) != 1:
                         raise LeanRewardCycleError(
                             "paddle motion-prior telemetry resolved partially"
                         )
                     self._paddle_playback_cycle_mask = paddle_playback_active
                     self._paddle_error_cycle_matrix = paddle_error_components
+                    self._paddle_contact_scale_cycle = paddle_contact_scale
                 elif (
                     paddle_playback_active is not None
                     or paddle_error_components is not None
+                    or paddle_contact_scale is not None
                 ):
                     raise LeanRewardCycleError(
                         "paddle telemetry must be resolved once"
@@ -800,6 +840,7 @@ class LeanActionEpochRewardGraph:
             elif (
                 paddle_playback_active is not None
                 or paddle_error_components is not None
+                or paddle_contact_scale is not None
             ):
                 raise LeanRewardCycleError(
                     "non-paddle dense row received paddle telemetry"
@@ -822,22 +863,15 @@ class LeanActionEpochRewardGraph:
                 if (
                     self._paddle_playback_cycle_mask is None
                     or self._paddle_error_cycle_matrix is None
+                    or self._paddle_contact_scale_cycle is None
                 ):
                     self._milestone.add_paddle_motion_prior_unavailable(ordinal)
                 else:
-                    # Milestone telemetry measures the normalized analytic
-                    # fidelity kernel in [0, 1], while configured/actual
-                    # income above records the value really paid.  Undo only
-                    # the contract's playback multiplier here so these two
-                    # auditable quantities do not silently change meaning.
-                    spec = PADDLE_MOTION_PRIOR_SPECS[
-                        ordinal - PADDLE_MOTION_PRIOR_FIRST_ORDINAL
-                    ]
-                    telemetry_kernel = torch.where(
-                        self._paddle_playback_cycle_mask,
-                        value / float(spec.scale_during_playback),
-                        value,
-                    )
+                    # Configured/actual income records the contact-shaped
+                    # payment.  Milestone telemetry keeps the underlying
+                    # analytic fidelity kernel in [0, 1] by undoing the exact
+                    # per-row phase multiplier, not a misleading constant.
+                    telemetry_kernel = value / self._paddle_contact_scale_cycle
                     self._milestone.add_paddle_motion_prior_playback(
                         ordinal,
                         telemetry_kernel,
@@ -910,6 +944,7 @@ class LeanActionEpochRewardGraph:
             or self._paddle_reward_cycle_cache is not None
             or self._paddle_playback_cycle_mask is not None
             or self._paddle_error_cycle_matrix is not None
+            or self._paddle_contact_scale_cycle is not None
         ):
             self._invalidate_r03_cycle_cache()
             self._invalidate_r06_cycle_cache()
@@ -1108,9 +1143,10 @@ def paddle_motion_prior_reward(
     command_name: str,
     std: float,
     coarse_std: float,
-    scale_during_playback: float,
+    contact_peak_scale: float,
+    contact_half_window_s: float,
 ) -> torch.Tensor:
-    """Pay the baseline prior everywhere and its stronger value during playback."""
+    """Pay the baseline prior plus smooth contact-centred playback emphasis."""
 
     first = PADDLE_MOTION_PRIOR_FIRST_ORDINAL
     if type(ordinal) is not int or not first <= ordinal < REGULARIZATION_FIRST_ORDINAL:
@@ -1128,17 +1164,29 @@ def paddle_motion_prior_reward(
         ).hex()
         != spec.coarse_std.hex()
         or _positive_host_number(
-            scale_during_playback,
-            label=spec.manager_name + " playback scale",
+            contact_peak_scale,
+            label=spec.manager_name + " contact peak scale",
         ).hex()
-        != float(spec.scale_during_playback).hex()
+        != float(spec.contact_peak_scale).hex()
+        or _positive_host_number(
+            contact_half_window_s,
+            label=spec.manager_name + " contact half window",
+        ).hex()
+        != float(
+            reward_contract.PADDLE_MOTION_PRIOR_CONTACT_HALF_WINDOW_S
+        ).hex()
     ):
         raise LeanRewardConstructionHold(
             "paddle motion-prior term parameters differ"
         )
     binding = _env_reward_hot_path(env)
     try:
-        value, playback_active, paddle_error_components = (
+        (
+            value,
+            playback_active,
+            paddle_error_components,
+            paddle_contact_scale,
+        ) = (
             binding.graph.paddle_motion_prior_cycle_value(
                 env,
                 ordinal=ordinal,
@@ -1148,7 +1196,7 @@ def paddle_motion_prior_reward(
         )
     except BaseException as exc:
         binding.graph._poison(
-            "paddle playback-scaled reward failed: " + type(exc).__name__
+            "paddle contact-shaped reward failed: " + type(exc).__name__
         )
         raise
     return binding.dispatcher(
@@ -1157,6 +1205,7 @@ def paddle_motion_prior_reward(
         value=value,
         paddle_playback_active=playback_active,
         paddle_error_components=paddle_error_components,
+        paddle_contact_scale=paddle_contact_scale,
     )
 
 
@@ -1453,8 +1502,11 @@ def materialize_reward_manager_cfg(
                 raise LeanRewardConstructionHold(
                     name + " dense body scope is unknown"
                 )
-            if spec.scale_during_playback is not None:
-                params["scale_during_playback"] = spec.scale_during_playback
+            if spec.contact_peak_scale is not None:
+                params["contact_peak_scale"] = spec.contact_peak_scale
+                params["contact_half_window_s"] = (
+                    reward_contract.PADDLE_MOTION_PRIOR_CONTACT_HALF_WINDOW_S
+                )
         result[name] = reward_term_type(
             func=REWARD_TERM_CALLABLES[ordinal], weight=weight, params=params
         )

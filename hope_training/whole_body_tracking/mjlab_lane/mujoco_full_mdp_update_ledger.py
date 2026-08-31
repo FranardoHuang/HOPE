@@ -208,11 +208,13 @@ def _exact_paddle_prior_contract():
         raise RuntimeError("FullMDP paddle prior contract differs")
     names = tuple(spec.manager_name for spec in specs)
     weights = tuple(float(spec.manager_weight) for spec in specs)
-    if any(spec.scale_during_playback is None for spec in specs):
+    if any(spec.contact_peak_scale is None for spec in specs):
         raise RuntimeError("FullMDP paddle prior contract differs")
-    playback_scales = tuple(
-        float(spec.scale_during_playback) for spec in specs
+    contact_peak_scales = tuple(
+        float(spec.contact_peak_scale) for spec in specs
     )
+    precision_stds = tuple(float(spec.std) for spec in specs)
+    coarse_stds = tuple(float(spec.coarse_std) for spec in specs)
     try:
         start = REWARD_TERM_NAMES.index(names[0])
     except ValueError as exc:
@@ -221,17 +223,23 @@ def _exact_paddle_prior_contract():
         REWARD_TERM_NAMES[start : start + len(names)] != names
         or any(
             not math.isfinite(value) or value <= 0.0
-            for value in weights + playback_scales
+            for value in weights + contact_peak_scales + precision_stds + coarse_stds
         )
     ):
         raise RuntimeError("FullMDP paddle prior contract differs")
-    return names, weights, playback_scales, start
+    if any(
+        value != contract.PADDLE_MOTION_PRIOR_CONTACT_PEAK_SCALE
+        for value in contact_peak_scales
+    ):
+        raise RuntimeError("FullMDP paddle contact peak differs")
+    return names, weights, precision_stds, coarse_stds, start
 
 
 (
     PADDLE_PRIOR_TERM_NAMES,
     PADDLE_PRIOR_WEIGHTS,
-    PADDLE_PRIOR_PLAYBACK_SCALES,
+    PADDLE_PRIOR_PRECISION_STDS,
+    PADDLE_PRIOR_COARSE_STDS,
     PADDLE_PRIOR_TERM_START,
 ) = _exact_paddle_prior_contract()
 PADDLE_PRIOR_TERM_COUNT = len(PADDLE_PRIOR_TERM_NAMES)
@@ -443,14 +451,14 @@ class FullMdpUpdateLedger:
         self._paddle_playback_stats = torch.zeros(
             (7, PADDLE_PRIOR_TERM_COUNT), dtype=torch.float64, device=device
         )
-        self._paddle_max_payment = torch.tensor(
-            [
-                weight * playback_scale * FULLMDP_POLICY_STEP_S
-                for weight, playback_scale in zip(
-                    PADDLE_PRIOR_WEIGHTS, PADDLE_PRIOR_PLAYBACK_SCALES
-                )
-            ],
-            dtype=torch.float64,
+        self._paddle_precision_stds = torch.tensor(
+            PADDLE_PRIOR_PRECISION_STDS,
+            dtype=torch.float32,
+            device=device,
+        )
+        self._paddle_coarse_stds = torch.tensor(
+            PADDLE_PRIOR_COARSE_STDS,
+            dtype=torch.float32,
             device=device,
         )
         self._steps, self._faults, self._next, self._token = 0, set(), 0, 0
@@ -621,13 +629,15 @@ class FullMdpUpdateLedger:
         ).sum(1, dtype=torch.float64)
         self._reward += torch.where(torch.isfinite(terms), terms,
                                     torch.zeros_like(terms)).sum(0, dtype=torch.float64)
-        paddle_terms = terms[
-            :,
-            PADDLE_PRIOR_TERM_START : (
-                PADDLE_PRIOR_TERM_START + PADDLE_PRIOR_TERM_COUNT
-            ),
-        ].to(dtype=torch.float64)
-        paddle_kernel = paddle_terms / self._paddle_max_payment
+        # Reward terms are contact-phase weighted.  Telemetry remains the
+        # underlying analytic fidelity kernel by rebuilding it from the exact
+        # physical errors already on device; dividing by a constant peak would
+        # make all off-contact perfect rows falsely read as 0.25.
+        paddle_kernel = _paddle_prior_module().kernels(
+            paddle_error,
+            precision_stds=self._paddle_precision_stds,
+            coarse_stds=self._paddle_coarse_stds,
+        ).to(dtype=torch.float64)
         paddle_finite = (
             paddle_playback[:, None]
             & torch.isfinite(paddle_kernel)

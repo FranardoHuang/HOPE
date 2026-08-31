@@ -1786,6 +1786,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
         value: torch.Tensor | None = None,
         paddle_playback_active: torch.Tensor | None = None,
         paddle_error_components: torch.Tensor | None = None,
+        paddle_contact_scale: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Pay one manager ordinal through the atomically installed graph.
 
@@ -1817,6 +1818,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 value is not None
                 or paddle_playback_active is not None
                 or paddle_error_components is not None
+                or paddle_contact_scale is not None
             ):
                 raise FullMdpPostPhysicsProtocolError(
                     "lifecycle Reward term cannot inject a dense value"
@@ -1838,10 +1840,14 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             paddle_error_components is not None
             and type(paddle_error_components) is not torch.Tensor
         ) or (
+            paddle_contact_scale is not None
+            and type(paddle_contact_scale) is not torch.Tensor
+        ) or (
             not paddle_row
             and (
                 paddle_playback_active is not None
                 or paddle_error_components is not None
+                or paddle_contact_scale is not None
             )
         ):
             raise FullMdpPostPhysicsProtocolError(
@@ -1853,6 +1859,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             value,
             paddle_playback_active=paddle_playback_active,
             paddle_error_components=paddle_error_components,
+            paddle_contact_scale=paddle_contact_scale,
         )
 
     def _require_action_ball_full_mdp_lease(self, lease: object) -> None:

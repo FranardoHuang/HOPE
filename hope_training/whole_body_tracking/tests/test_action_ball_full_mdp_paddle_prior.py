@@ -23,7 +23,8 @@ import action_ball_full_mdp_reward_contract as C  # noqa: E402
 
 
 def test_direct_paddle_successor_strengthens_only_dynamic_playback_rows():
-    assert C.PADDLE_MOTION_PRIOR_PLAYBACK_SCALE == 4.0
+    assert C.PADDLE_MOTION_PRIOR_CONTACT_PEAK_SCALE == 4.0
+    assert C.PADDLE_MOTION_PRIOR_CONTACT_HALF_WINDOW_S == 0.12
     assert tuple(
         spec.manager_weight for spec in C.PADDLE_MOTION_PRIOR_SPECS
     ) == (1.0, 1.0, 1.0, 0.5)
@@ -41,8 +42,25 @@ def test_direct_paddle_successor_strengthens_only_dynamic_playback_rows():
     )
     assert all(
         spec.command_name == "racket_target"
-        and spec.scale_during_playback == 4.0
+        and spec.contact_peak_scale == 4.0
         for spec in C.PADDLE_MOTION_PRIOR_SPECS
+    )
+
+
+def test_contact_phase_scale_is_smooth_bounded_and_inactive_rows_stay_one():
+    ttc = torch.tensor([-0.24, -0.12, -0.06, 0.0, 0.06, 0.12, 0.24])
+    active = torch.tensor([True, True, True, True, True, True, False])
+    actual = P.contact_phase_scale(
+        ttc,
+        active,
+        half_window_s=C.PADDLE_MOTION_PRIOR_CONTACT_HALF_WINDOW_S,
+        peak_scale=C.PADDLE_MOTION_PRIOR_CONTACT_PEAK_SCALE,
+    )
+    torch.testing.assert_close(
+        actual,
+        torch.tensor([1.0, 1.0, 2.5, 4.0, 2.5, 1.0, 1.0]),
+        rtol=0.0,
+        atol=2.0e-6,
     )
 
 

@@ -2659,8 +2659,16 @@ def _action_ball_full_mdp_dense_fixed_func_params(
         )
     elif spec.body_scope is not None:
         raise RuntimeError("fresh full-MDP dense body scope differs")
-    if spec.scale_during_playback is not None:
-        params.append(("scale_during_playback", spec.scale_during_playback))
+    if spec.contact_peak_scale is not None:
+        params.extend(
+            (
+                ("contact_peak_scale", spec.contact_peak_scale),
+                (
+                    "contact_half_window_s",
+                    _full_mdp_reward_contract.PADDLE_MOTION_PRIOR_CONTACT_HALF_WINDOW_S,
+                ),
+            )
+        )
     return tuple(params)
 
 

@@ -1158,7 +1158,8 @@ def test_materializer_builds_exact_order_with_real_type_surface(monkeypatch):
         0.5,
     )
     assert all(
-        cfg[name].params["scale_during_playback"] == 4.0
+        cfg[name].params["contact_peak_scale"] == 4.0
+        and cfg[name].params["contact_half_window_s"] == 0.12
         for name in R.PADDLE_MOTION_PRIOR_NAMES
     )
     assert tuple(cfg[name].weight for name in R.REGULARIZATION_NAMES) == (
@@ -1329,7 +1330,12 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
             )
 
     motion = Motion()
-    command = types.SimpleNamespace(_motion=lambda: motion)
+    command = types.SimpleNamespace(
+        _motion=lambda: motion,
+        time_to_strike=torch.tensor(
+            [0.0, 0.0], dtype=torch.float32, device=TEST_DEVICE
+        ),
+    )
     exact_errors = torch.tensor(
         [[0.017, 0.731, 0.123, 0.456], [0.31, 2.7, 0.41, 0.93]],
         dtype=torch.float32,
@@ -1378,7 +1384,10 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
                 command_name=spec.command_name,
                 std=spec.std,
                 coarse_std=spec.coarse_std,
-                scale_during_playback=spec.scale_during_playback,
+                contact_peak_scale=spec.contact_peak_scale,
+                contact_half_window_s=(
+                    R.reward_contract.PADDLE_MOTION_PRIOR_CONTACT_HALF_WINDOW_S
+                ),
             )
         if reward_abi_mode != "valid":
             with pytest.raises(
@@ -1410,7 +1419,9 @@ def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
         dim=1,
     )
     expected_values = expected_kernels.clone()
-    expected_values[0].mul_(R.reward_contract.PADDLE_MOTION_PRIOR_PLAYBACK_SCALE)
+    expected_values[0].mul_(
+        R.reward_contract.PADDLE_MOTION_PRIOR_CONTACT_PEAK_SCALE
+    )
     assert torch.equal(
         torch.stack(values, dim=1).view(torch.int32),
         expected_values.view(torch.int32),

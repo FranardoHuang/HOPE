@@ -241,20 +241,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             device=self.device,
         )
         if any(
-            spec.scale_during_playback is None
-            or not math.isfinite(float(spec.scale_during_playback))
-            or float(spec.scale_during_playback) <= 0.0
+            spec.contact_peak_scale is None
+            or not math.isfinite(float(spec.contact_peak_scale))
+            or float(spec.contact_peak_scale)
+            != reward_contract.PADDLE_MOTION_PRIOR_CONTACT_PEAK_SCALE
             for spec in FULLMDP_PADDLE_REWARD_SPECS
         ):
-            raise RuntimeError("FullMDP paddle playback scales are unavailable")
-        self._fullmdp_paddle_playback_scales = self._torch.tensor(
-            [
-                spec.scale_during_playback
-                for spec in FULLMDP_PADDLE_REWARD_SPECS
-            ],
-            dtype=self.qpos_init.dtype,
-            device=self.device,
-        )
+            raise RuntimeError("FullMDP paddle contact scales are unavailable")
         self._fullmdp_paddle_precision_stds = self._torch.tensor(
             [spec.std for spec in FULLMDP_PADDLE_REWARD_SPECS],
             dtype=self.qpos_init.dtype,
@@ -2178,6 +2171,32 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             FULL_A_MOTION_FOLLOW_PHASE_INDEX
         )
 
+    def _full_a_paddle_prior_contact_scale(self):
+        """Return the shared smooth contact-centred paddle multiplier."""
+
+        elapsed = self._torch.clamp(
+            (
+                int(self.common_step_counter) - self._epoch_clock_ticks[:, 0]
+            ).to(dtype=self.qpos_init.dtype)
+            * self.step_dt,
+            min=0.0,
+        )
+        time_to_contact_s = (
+            self._full_a_pre_swing_wait_s
+            + self._full_a_scaled_t_hit_s
+            - elapsed
+        )
+        return paddle_prior.contact_phase_scale(
+            time_to_contact_s,
+            FullMdpInitialWaitVecEnv._full_a_paddle_prior_playback_mask(self),
+            half_window_s=(
+                reward_contract.PADDLE_MOTION_PRIOR_CONTACT_HALF_WINDOW_S
+            ),
+            peak_scale=(
+                reward_contract.PADDLE_MOTION_PRIOR_CONTACT_PEAK_SCALE
+            ),
+        )
+
     def _refresh_aligned_teacher_body_pose(self) -> None:
         """Publish body and measured-paddle caches under one alignment rule."""
 
@@ -3031,11 +3050,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 or not paddle_playback_mask.is_contiguous()
             ):
                 raise RuntimeError("FullMDP paddle playback Reward ABI differs")
-            paddle_raw = torch.where(
-                paddle_playback_mask[:, None],
-                paddle_raw * self._fullmdp_paddle_playback_scales[None, :],
-                paddle_raw,
+            paddle_contact_scale = (
+                FullMdpInitialWaitVecEnv
+                ._full_a_paddle_prior_contact_scale(self)
             )
+            paddle_raw = paddle_raw * paddle_contact_scale[:, None]
         paddle_configured = (
             paddle_raw
             * self._fullmdp_paddle_weights

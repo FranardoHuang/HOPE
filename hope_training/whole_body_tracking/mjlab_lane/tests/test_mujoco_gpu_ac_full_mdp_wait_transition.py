@@ -309,13 +309,6 @@ def _fixed_reward_env():
             ],
             dtype=dtype,
         ),
-        _fullmdp_paddle_playback_scales=torch.tensor(
-            [
-                spec.scale_during_playback
-                for spec in wait_env.FULLMDP_PADDLE_REWARD_SPECS
-            ],
-            dtype=dtype,
-        ),
         _fullmdp_paddle_precision_stds=torch.tensor(
             [spec.std for spec in wait_env.FULLMDP_PADDLE_REWARD_SPECS],
             dtype=dtype,
@@ -330,6 +323,9 @@ def _fixed_reward_env():
             dtype=dtype,
         ),
         _epoch_task_valid=torch.zeros(num_envs, dtype=torch.bool),
+        _epoch_clock_ticks=torch.zeros((num_envs, 4), dtype=torch.long),
+        _full_a_pre_swing_wait_s=torch.zeros(num_envs, dtype=dtype),
+        _full_a_scaled_t_hit_s=torch.zeros(num_envs, dtype=dtype),
         _epoch_phase=torch.zeros(num_envs, dtype=torch.long),
         _full_a_motion_phase_code=torch.full(
             (num_envs,),
@@ -374,6 +370,7 @@ def _fixed_reward_env():
         num_envs=num_envs,
         device=torch.device("cpu"),
         step_dt=0.02,
+        common_step_counter=0,
     )
     env._body_com_velocities_w = MethodType(
         wait_env.FullMdpInitialWaitVecEnv._body_com_velocities_w, env
@@ -442,7 +439,10 @@ def test_host_reward28_matches_common_and_measured_paddle_formulas():
     env = _fixed_reward_env()
     env._fullmdp_regularization_reward_terms = lambda: torch.zeros((2, 4))
     assert env._fullmdp_paddle_weights.tolist() == [1.0, 1.0, 1.0, 0.5]
-    assert env._fullmdp_paddle_playback_scales.tolist() == [4.0] * 4
+    assert all(
+        spec.contact_peak_scale == 4.0
+        for spec in wait_env.FULLMDP_PADDLE_REWARD_SPECS
+    )
     reward, terms = wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward(env)
 
     data = env.sim.data

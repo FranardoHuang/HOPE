@@ -670,49 +670,26 @@ def test_playback_paddle_prior_reuses_reward_terms_for_non_gating_moments():
             [0.90, 1.00, 1.10, 1.20],
         ],
     )
-    kernels = torch.tensor(
-        [
-            [1.0, 0.50, 0.25, 0.20],
-            [0.50, 0.25, 0.20, 0.10],
-            [0.75, 0.75, 0.75, 0.75],
-            [0.00, 0.20, 0.10, 0.05],
-        ],
-        dtype=torch.float32,
-    )
-    max_payment = torch.tensor(
-        module.PADDLE_PRIOR_WEIGHTS, dtype=torch.float32
-    ) * torch.tensor(
-        module.PADDLE_PRIOR_PLAYBACK_SCALES, dtype=torch.float32
-    ) * module.FULLMDP_POLICY_STEP_S
-    terms = result[3]["reward_terms"]
-    terms[
-        :,
-        module.PADDLE_PRIOR_TERM_START : (
-            module.PADDLE_PRIOR_TERM_START
-            + module.PADDLE_PRIOR_TERM_COUNT
-        ),
-    ] = kernels * max_payment
-    result = (result[0], terms.sum(1), result[2], result[3])
-
     ledger.ingest(result)
     record = _decode(_prepare(ledger, 0, environment_steps=1))
     measured = record["reward_graph"]["playback_paddle_prior"]
-    playback = terms[
-        [0, 1, 3],
-        module.PADDLE_PRIOR_TERM_START : (
-            module.PADDLE_PRIOR_TERM_START
-            + module.PADDLE_PRIOR_TERM_COUNT
-        ),
-    ].to(torch.float64) / torch.tensor(
+    playback_errors = torch.tensor(
         [
-            weight * playback_scale * module.FULLMDP_POLICY_STEP_S
-            for weight, playback_scale in zip(
-                module.PADDLE_PRIOR_WEIGHTS,
-                module.PADDLE_PRIOR_PLAYBACK_SCALES,
-            )
+            [0.10, 0.20, 0.30, 0.40],
+            [0.50, 0.60, 0.70, 0.80],
+            [0.90, 1.00, 1.10, 1.20],
         ],
-        dtype=torch.float64,
+        dtype=torch.float32,
     )
+    playback = module._paddle_prior_module().kernels(
+        playback_errors,
+        precision_stds=torch.tensor(
+            module.PADDLE_PRIOR_PRECISION_STDS, dtype=torch.float32
+        ),
+        coarse_stds=torch.tensor(
+            module.PADDLE_PRIOR_COARSE_STDS, dtype=torch.float32
+        ),
+    ).to(torch.float64)
     assert measured["term_names"] == list(module.PADDLE_PRIOR_TERM_NAMES)
     assert measured["row_count"] == 3
     assert measured["finite_rows"] == [3, 3, 3, 3]
@@ -723,12 +700,7 @@ def test_playback_paddle_prior_reuses_reward_terms_for_non_gating_moments():
         playback.square().sum(0).tolist()
     )
     assert measured["domain_violation_rows"] == [0, 0, 0, 0]
-    expected_error = torch.tensor(
-        [[0.10, 0.20, 0.30, 0.40],
-         [0.50, 0.60, 0.70, 0.80],
-         [0.90, 1.00, 1.10, 1.20]],
-        dtype=torch.float64,
-    )
+    expected_error = playback_errors.to(torch.float64)
     assert measured["error_names"] == list(module.PADDLE_ERROR_NAMES)
     assert measured["error_units"] == list(module.PADDLE_ERROR_UNITS)
     assert measured["error_finite_rows"] == [3, 3, 3, 3]
@@ -738,7 +710,7 @@ def test_playback_paddle_prior_reuses_reward_terms_for_non_gating_moments():
     )
 
 
-def test_playback_paddle_prior_domain_violations_are_visible_but_non_gating():
+def test_playback_paddle_prior_nonfinite_errors_are_visible_but_non_gating():
     module = _load()
     ledger = _ledger(module, steps=1, num_envs=2)
     result = _result(
@@ -747,30 +719,11 @@ def test_playback_paddle_prior_domain_violations_are_visible_but_non_gating():
         paddle_playback=[True, True],
         paddle_error=[[float("nan"), 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]],
     )
-    kernels = torch.tensor(
-        [[-0.25, 1.25, 0.0, 1.0], [0.5, 0.5, 0.5, 0.5]],
-        dtype=torch.float32,
-    )
-    max_payment = torch.tensor(
-        module.PADDLE_PRIOR_WEIGHTS, dtype=torch.float32
-    ) * torch.tensor(
-        module.PADDLE_PRIOR_PLAYBACK_SCALES, dtype=torch.float32
-    ) * module.FULLMDP_POLICY_STEP_S
-    terms = result[3]["reward_terms"]
-    terms[
-        :,
-        module.PADDLE_PRIOR_TERM_START : (
-            module.PADDLE_PRIOR_TERM_START
-            + module.PADDLE_PRIOR_TERM_COUNT
-        ),
-    ] = kernels * max_payment
-    result = (result[0], terms.sum(1), result[2], result[3])
-
     ledger.ingest(result)
     record = _decode(_prepare(ledger, 0, environment_steps=1))
     measured = record["reward_graph"]["playback_paddle_prior"]
-    assert measured["finite_rows"] == [2, 2, 2, 2]
-    assert measured["domain_violation_rows"] == [1, 1, 0, 0]
+    assert measured["finite_rows"] == [1, 2, 2, 2]
+    assert measured["domain_violation_rows"] == [0, 0, 0, 0]
     assert measured["error_finite_rows"] == [1, 2, 2, 2]
     assert measured["error_sum"] == pytest.approx([0.5, 0.8, 1.0, 1.2])
 

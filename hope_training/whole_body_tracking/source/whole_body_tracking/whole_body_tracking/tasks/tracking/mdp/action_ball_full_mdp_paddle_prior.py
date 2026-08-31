@@ -130,10 +130,57 @@ def kernels(
     )
 
 
+def contact_phase_scale(
+    time_to_contact_s: torch.Tensor,
+    playback_active: torch.Tensor,
+    *,
+    half_window_s: float,
+    peak_scale: float,
+) -> torch.Tensor:
+    """Return a smooth contact-centred multiplier without adding a Stage.
+
+    Ready, preparation, recovery, and playback rows outside the contact
+    neighbourhood keep multiplier one.  Active playback rows follow a raised
+    cosine from one at ``+/- half_window_s`` to ``peak_scale`` at contact.
+    The clock is exogenous, so this only redistributes an existing reward over
+    time; it does not gate task publication, contact truth, or policy actions.
+    """
+
+    half_window = float(half_window_s)
+    peak = float(peak_scale)
+    if (
+        type(time_to_contact_s) is not torch.Tensor
+        or type(playback_active) is not torch.Tensor
+        or time_to_contact_s.ndim != 1
+        or tuple(playback_active.shape) != tuple(time_to_contact_s.shape)
+        or playback_active.device != time_to_contact_s.device
+        or playback_active.dtype is not torch.bool
+        or time_to_contact_s.dtype not in (torch.float32, torch.float64)
+        or not math.isfinite(half_window)
+        or half_window <= 0.0
+        or not math.isfinite(peak)
+        or peak < 1.0
+    ):
+        raise ValueError("paddle contact-phase scale arguments differ")
+    normalized = torch.clamp(
+        torch.abs(time_to_contact_s) / half_window,
+        min=0.0,
+        max=1.0,
+    )
+    closeness = 0.5 * (1.0 + torch.cos(math.pi * normalized))
+    active_scale = 1.0 + (peak - 1.0) * closeness
+    return torch.where(
+        playback_active,
+        active_scale,
+        torch.ones_like(active_scale),
+    )
+
+
 __all__ = [
     "PADDLE_ERROR_NAMES",
     "PADDLE_ERROR_UNITS",
     "tracking_errors",
     "coarse_precision_kernel",
     "kernels",
+    "contact_phase_scale",
 ]
