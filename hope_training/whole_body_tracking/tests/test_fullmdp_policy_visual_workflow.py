@@ -133,10 +133,10 @@ def test_fullmdp_policy_visual_reuses_training_owner_and_typed_ppo(monkeypatch):
     owner_factory = object()
     binding = SimpleNamespace(owner_factory=owner_factory)
     cfg = _cfg(
-        task={
-            "action_ball_full_mdp_runtime": True,
-            "gym_task": "HOPE-PingPong-ActionBall-FullMdpA-AgibotA3-v0",
-        }
+        task=SimpleNamespace(
+            action_ball_full_mdp_runtime=True,
+            gym_task="HOPE-PingPong-ActionBall-FullMdpA-AgibotA3-v0",
+        )
     )
     env_cfg = SimpleNamespace()
     algo = {"runner": {}, "policy": {}, "algorithm": {}}
