@@ -324,6 +324,52 @@ def _render(renderer, data, camera, label: str, frame: int | None):
     return image
 
 
+def _write_video_ffmpeg(path: Path, images, *, fps: int, width: int, height: int) -> int:
+    """Stream RGB frames to the system ffmpeg without a Python video package."""
+
+    process = subprocess.Popen(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgb24",
+            "-video_size",
+            f"{width}x{height}",
+            "-framerate",
+            str(fps),
+            "-i",
+            "pipe:0",
+            "-an",
+            "-vcodec",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(path),
+        ],
+        stdin=subprocess.PIPE,
+    )
+    count = 0
+    assert process.stdin is not None
+    try:
+        for image in images:
+            array = np.asarray(image, dtype=np.uint8)
+            if array.shape != (height, width, 3):
+                raise RuntimeError(f"rendered frame shape changed: {array.shape}")
+            process.stdin.write(array.tobytes())
+            count += 1
+    finally:
+        process.stdin.close()
+    return_code = process.wait()
+    if return_code != 0:
+        raise RuntimeError(f"ffmpeg failed with exit code {return_code}")
+    return count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mjb", type=Path, required=True)
@@ -346,9 +392,9 @@ def main() -> int:
     if _sha256(motion_path) != binding_json["outputs"]["motion"]["sha256"]:
         raise RuntimeError("motion bytes differ")
 
-    import imageio.v2 as imageio
     import mujoco
     import torch
+    from PIL import Image
 
     table = portable_catalog.load_portable_action_center_table()
     row = table.fresh_action
@@ -408,22 +454,33 @@ def main() -> int:
     for label, (state, frame) in keyframes.items():
         image, receipt = stage(state, label, frame)
         path = args.out / f"{label}.png"
-        imageio.imwrite(path, image)
+        Image.fromarray(image).save(path)
         receipt["path"] = path.name
         receipt["sha256"] = _sha256(path)
         frame_receipts[label] = receipt
 
-    frames = []
-    reset_image, _ = stage(base, "reset_physical_ready", None)
-    frames.extend([reset_image] * max(1, args.video_fps // 2))
     stride = max(1, int(round(float(clip.fps) / args.video_fps)))
-    for frame in range(0, clip.n_frames, stride):
-        image, _ = stage(
-            _teacher_state(clip, frame, yaw, translation), "teacher_playback", frame
-        )
-        frames.append(image)
+
+    def video_images():
+        reset_image, _ = stage(base, "reset_physical_ready", None)
+        for _ in range(max(1, args.video_fps // 2)):
+            yield reset_image
+        for frame in range(0, clip.n_frames, stride):
+            image, _ = stage(
+                _teacher_state(clip, frame, yaw, translation),
+                "teacher_playback",
+                frame,
+            )
+            yield image
+
     video_path = args.out / "phase4_teacher_task_fixed_camera.mp4"
-    imageio.mimsave(video_path, frames, fps=args.video_fps, macro_block_size=8)
+    video_frames = _write_video_ffmpeg(
+        video_path,
+        video_images(),
+        fps=args.video_fps,
+        width=960,
+        height=720,
+    )
     renderer.close()
 
     source_commit = subprocess.check_output(
@@ -457,7 +514,7 @@ def main() -> int:
         "video": {
             "path": video_path.name,
             "fps": args.video_fps,
-            "frames": len(frames),
+            "frames": video_frames,
             "sha256": _sha256(video_path),
         },
         "non_claims": [
