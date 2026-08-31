@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`r36-v5-dual-run / isaac-learning-live / mujoco-catalog-identity-repair / diagnostic_unauthorized`
+> 状态：`r36-v5-dual-learning-live / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-31
@@ -16,8 +16,8 @@
 ## 0.7 2026-08-31 current：R36 v5 直接修根因与双端学习闭环
 
 本节是唯一现役局部执行合同。当前 Isaac 训练源为 `5dd39786`；Mu 身份真源修复为
-`e5c02ea6`。正在训练的 Isaac root 继续严格绑定 `5dd39786`，不热补；Mu 修复只从 fresh exact
-checkout/root 启动。所有结论限定为 `diagnostic_unauthorized`。
+`e5c02ea6`。正在训练的 Isaac root 继续严格绑定 `5dd39786`，不热补；Mu 从 fresh exact
+`e5c02ea6` 启动。所有结论限定为 `diagnostic_unauthorized`。
 
 ### 已采用合同
 
@@ -42,6 +42,9 @@ checkout/root 启动。所有结论限定为 `diagnostic_unauthorized`。
 - `5dd39786` 的 Isaac/Mu 真 CUDA fixed-action 都完成 `512×48×31`，done/timeout=0，同一
   action tape。Isaac update 149 前的 recent-30 p50/p90 约 `10.74/10.96 s`，不再把启动期的
   `~7 s` 写成稳态。
+- `e5c02ea6` fresh Mu 61-update diagnostic 自然完成，RC=0；每轮 `24,576/24,576`
+  UID/identity rows 正确，storage finite、reward conservation/fact-integrity 无故障，p50/p90=
+  `6.667/7.153 s`。同 source 已从 fresh root 进入 100,000-update Mu long。
 - Isaac update 149 的 D05 due/accepted=`174/174`、playback-started=`179`，但 physical-launch/R03/contact
   仍为 `0/0/0`。当轮 `200` 个完成 episode 平均 `132.48 tick`，而首次 ball launch/contact 时钟约在
   reveal 后 `252/265 tick`；因此当前首先是 balance/survival 的接触前样本饥饿，不能据此判 target 错，
@@ -67,8 +70,10 @@ checkout/root 启动。所有结论限定为 `diagnostic_unauthorized`。
   `/workspace/franco/runs/fullmdp-r36-v5-5dd39786-isaac-h48-20260831T0939Z`。
 - [x] Mu 精确诊断为 `uid_rows=0/24576, identity_rows=0/24576`；根因是 runner/consumer 还手抄
   0807 旧 UID，不是 reset row 破坏 identity。`e5c02ea6` 已改从 portable catalog 取唯一真源。
-- [ ] `e5c02ea6` fresh Mu diagnostic 首 ACK 与 61-update rate window；通过后直接 fresh long。
-- [ ] Mu 修复后用 fresh exact/root 发 long；然后双端按 update 100/300/1000 读同一自然链。
+- [x] `e5c02ea6` fresh Mu diagnostic 61-update rate window：RC=0，p50/p90=`6.667/7.153 s`。
+- [x] Mu fresh long：
+  `/workspace/franco/runs/fullmdp-r36-v5-e5c02ea6-mujoco-h48-20260831T1034Z`。
+- [ ] 双端按 update 100/300/1000 读同一自然链。
 - [ ] Isaac update 300/1000 导出当前 policy 的固定视角 reset/pre-teacher/contact-window/recovery 视频。
   尚无 contact 时仍导出 contact-window 球/拍/教师相对位置，不让日志平均值替代看图。
 

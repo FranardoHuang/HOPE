@@ -1,14 +1,14 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`r36-v5-isaac-learning-live / mujoco-catalog-identity-repair / diagnostic_unauthorized`
+- 状态：`r36-v5-dual-learning-live / diagnostic_unauthorized`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
 - 本 successor 当前最高证据等级：v5 bundle、Isaac nominal hold、固定视角、双端 CUDA
-  fixed-action和Isaac fresh ACK已有真 Pod 证据；学习仍处 balance/mimic 早窗，Mu long 因 ledger
-  计数口径失配尚未起跑
+  fixed-action、Isaac fresh ACK与 Mu 61-update 身份修复诊断已有真 Pod 证据；双端学习仍处
+  balance/mimic 早窗
 - 创建日期/最后复核日期：2026-08-02 / 2026-08-31
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
@@ -45,8 +45,10 @@ balance/survival 的接触前样本饥饿；这不是 target 错的证据，也�
 Mu 精确诊断已给出 `uid_rows=0/24576, identity_rows=0/24576`。根因是 runner 和离线 consumer
 仍各自手抄 0807 旧 UID `2552478955674699`，而v5 portable catalog 真源为 `4098890508575574`。
 `e5c02ea6` 删掉这两个生产常量，统一从 exact portable catalog 取身份，但保留 ledger 对每行真漂移的
-检测；Pod runner/ledger/consumer focused=`275 passed, 1 skipped`。fresh Mu diagnostic 已以新 root 起动，
-首 ACK/rate window 尚未签字。
+检测；Pod runner/ledger/consumer focused=`275 passed, 1 skipped`。fresh Mu diagnostic 自然完成
+61 update，RC=0，p50/p90=`6.667/7.153 s`，每轮 UID/identity=`24,576/24,576`，storage finite且
+reward conservation/fact-integrity 无故障。同 source 已发 fresh long：
+`/workspace/franco/runs/fullmdp-r36-v5-e5c02ea6-mujoco-h48-20260831T1034Z`。
 
 ### 结构裁决
 

@@ -744,6 +744,21 @@ def _historical_reader(revision):
 #: here: this batch only added it to the coverage list, the constant itself has
 #: existed all along, so it can and should still be compared across revisions.
 COVERED_SYMBOLS_ADDED_AFTER_HISTORICAL_REVISIONS = {
+    "stroke_adapt_torch.py": (
+        "_FIXED_TRY_DEVICE_CONSTANTS",
+        "_FIXED_TRY_GRAPH_CACHE",
+        "_FIXED_TRY_GRAPH_ENV",
+        "_FIXED_TRY_GRAPH_MAX_GROUPS",
+        "_FIXED_TRY_GRAPH_ROWS_PER_GROUP",
+        "_fixed_try_device_constants",
+        "_fixed_try_graph_bucket_rows",
+        "_fixed_try_graph_clone_prefix",
+        "_fixed_try_graph_copy_rows",
+        "_fixed_try_graph_enabled",
+        "_fixed_try_graph_signature",
+        "_new_fixed_try_graph_entry",
+        "run_fixed_try_lm_cuda_graph",
+    ),
     "continuous_questions.py": (
         "_R_LM_SOLVE_INFO",
         "_R_LM_SOLVE_NONFINITE",

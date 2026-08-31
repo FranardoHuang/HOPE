@@ -11,8 +11,10 @@ v5 bundle 已绑定 teacher、physical-ready、nominal-hold、OptiTrack physics 
 Isaac fresh long 已起跑；Mu fresh long 在首 PPO update 前因 ledger 拒绝。精确重放为
 `uid_rows=0/24576, identity_rows=0/24576`，证明不是 reset row，而是 runner/consumer 手抄了旧 UID。
 `e5c02ea6` 已让两者直接从 exact portable catalog 取唯一 action identity，并保留 row-wise drift 检测；
-Pod focused=`275 passed, 1 skipped`，fresh Mu diagnostic 正在新 root 运行。在 Mu durable ACK、
-双端 contact/outcome 分母和 first-divergence 都出现前，G06 保持 `Partial / diagnostic_unauthorized`。
+Pod focused=`275 passed, 1 skipped`。fresh Mu diagnostic 已自然完成 61 update，RC=0，
+p50/p90=`6.667/7.153 s`，每轮 UID/identity=`24,576/24,576`且 storage finite；同 source fresh
+long 已起跑。在双端 contact/outcome 分母和 first-divergence 都出现前，G06 保持
+`Partial / diagnostic_unauthorized`。
 
 ## 2026-08-30 R36 当前双端边界（仍 `Partial`）
 

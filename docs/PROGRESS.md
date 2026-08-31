@@ -15,6 +15,10 @@
   结构减法；不以更多安全 Gate 补偿臃肿结构。G05/G06 仍为 `Partial / diagnostic_unauthorized`。
 - 已删除从未进入 runtime graph 的 Racket observation token/registry 及其 focused-test/semantic glue；
   保留 ActionEpoch selected-rubber、cold table 和 D05/R05/generation 真正跨 owner 链。
+- Pod 对照确认 semantic-surface 唯一失败在父提交同样存在：历史回放 fixture 未排除
+  后来新增的 13 个 CUDA-graph symbol。仅更新该显式历史-source map，不改 production 覆盖或 digest。
+- `e5c02ea6` Mu 身份修复诊断自然完成 61 update，RC=0，p50/p90=`6.667/7.153 s`，
+  每轮 UID/identity=`24,576/24,576`且 storage finite；同 source fresh 100,000-update long 已起跑。
 
 ## 2026-08-30 — 双后端 TODO 收为唯一当前清单
 
