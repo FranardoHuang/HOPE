@@ -457,7 +457,6 @@ def _compose_recurring_question_projection(
         # Phase4 lane has zero curriculum width.  Its physical question is the
         # action-owned incoming centre expressed in the frozen episode heading,
         # not the unrelated legacy ContinuousQuestionCfg box.
-        del active_draw_u01
         active_velocity_center = compact(incoming_velocity_center_b_yaw)
         active_spin_center = compact(incoming_spin_center_b_yaw)
         velocity = _quat_rotate_wxyz(
