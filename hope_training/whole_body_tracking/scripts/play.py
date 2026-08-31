@@ -11,7 +11,6 @@ task-YAML override mapping from scripts/train.py.
 import json
 import os
 import sys
-from collections.abc import Mapping
 
 # allow `from train import _apply_task_overrides` (sibling script; no isaaclab imported at its top)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -19,7 +18,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydra
 from omegaconf import OmegaConf
 
-from isaac_bank_exam_adapter import policy_observation_tensor
 from train import (
     _apply_action_ball_full_mdp_ppo_recipe,
     _action_ball_full_mdp_runtime_requested,
@@ -206,30 +204,14 @@ def _playback_exports_onnx(*, capture_requested, video_requested):
     return not capture_requested and not video_requested
 
 
-def _policy_inference_observation(raw, *, policy_module, device):
-    """Preserve RSL3 observation groups; flatten only legacy policies.
+def _policy_inference_observation(raw, *, device):
+    """Move the current RSL3 grouped observation to the policy device."""
 
-    RSL3's inference policy indexes the observation mapping using its
-    ``obs_groups`` contract.  Older HOPE policies instead consume one actor
-    tensor.  Playback must follow the loaded policy's interface rather than
-    imposing the legacy actor-only view on both generations.
-    """
-
-    value = raw
-    if isinstance(value, tuple):
-        if not value:
-            raise TypeError("empty observation tuple")
-        value = value[0]
-    if isinstance(getattr(policy_module, "obs_groups", None), Mapping):
-        if not isinstance(value, Mapping):
-            raise TypeError("grouped RSL policy requires an observation mapping")
-        return {
-            name: tensor.to(device=device)
-            if hasattr(tensor, "to")
-            else tensor
-            for name, tensor in value.items()
-        }
-    return policy_observation_tensor(raw, device=device)
+    grouped = raw[0] if isinstance(raw, tuple) else raw
+    return {
+        name: tensor.to(device=device)
+        for name, tensor in grouped.items()
+    }
 
 
 def _run_with_owned_play_environment(env, body):
@@ -391,7 +373,6 @@ def _run_created_environment(
     # grouped mapping; legacy policies consume the actor tensor.
     obs = _policy_inference_observation(
         env.get_observations(),
-        policy_module=ppo_runner.alg.policy,
         device=agent_cfg.device,
     )
     timestep = 0
@@ -401,7 +382,6 @@ def _run_created_environment(
             obs, _, _, _ = env.step(actions.to(env.unwrapped.device))
             obs = _policy_inference_observation(
                 obs,
-                policy_module=ppo_runner.alg.policy,
                 device=agent_cfg.device,
             )
         timestep += 1

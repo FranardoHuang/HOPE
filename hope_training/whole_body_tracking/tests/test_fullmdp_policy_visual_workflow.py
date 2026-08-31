@@ -241,36 +241,11 @@ def test_grouped_rsl_policy_keeps_observation_mapping():
     policy_obs = _Tensor()
     critic_obs = _Tensor()
     raw = ({"policy": policy_obs, "critic": critic_obs}, {"ignored": True})
-    module = SimpleNamespace(
-        obs_groups={"policy": ("policy",), "critic": ("critic",)}
-    )
-
     got = play_mod._policy_inference_observation(
         raw,
-        policy_module=module,
         device="cuda:0",
     )
 
     assert got == {"policy": policy_obs, "critic": critic_obs}
     assert policy_obs.devices == ["cuda:0"]
     assert critic_obs.devices == ["cuda:0"]
-
-
-def test_legacy_policy_keeps_actor_tensor_adapter(monkeypatch):
-    sentinel = object()
-    calls = []
-    monkeypatch.setattr(
-        play_mod,
-        "policy_observation_tensor",
-        lambda raw, *, device: calls.append((raw, device)) or sentinel,
-    )
-    raw = (object(), {"extras": True})
-
-    got = play_mod._policy_inference_observation(
-        raw,
-        policy_module=SimpleNamespace(),
-        device="cuda:1",
-    )
-
-    assert got is sentinel
-    assert calls == [(raw, "cuda:1")]
