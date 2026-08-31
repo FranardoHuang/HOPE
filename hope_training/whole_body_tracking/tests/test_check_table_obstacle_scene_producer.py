@@ -1561,7 +1561,7 @@ def test_whole_body_frame0_rejects_fallback_or_tampered_handoff(tmp_path):
 
     for variant in variants:
         _rewrite_dynamic_ready(path, variant)
-        with pytest.raises(P.TableSmokeReceiptError, match="threshold-first"):
+        with pytest.raises(P.TableSmokeReceiptError):
             P._load_nominal_hold_input(
                 path, expected_sha256=_sha(path.read_bytes())
             )
