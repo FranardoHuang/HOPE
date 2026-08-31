@@ -105,7 +105,7 @@ def _bundle_harness(*, num_envs: int = 2, angular_velocity_z_radps=None):
     initialize(racket)
     device = torch.device("cpu")
     motion.time_steps = torch.arange(num_envs, dtype=torch.int64, device=device)
-    portable = profile_mod._portable_catalog.load_portable_action_center_table()
+    portable = timing_test.profile_mod._portable_catalog.load_portable_action_center_table()
     racket.racket_target_pos_w = torch.tensor(
         [row.reference_racket_site_position_w_m for row in portable.actions],
         dtype=torch.float32,
