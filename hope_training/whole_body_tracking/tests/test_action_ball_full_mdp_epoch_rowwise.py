@@ -2684,7 +2684,10 @@ def test_same_drain_carries_milestone_window_and_only_ack_clears_it():
     )
     epoch.milestone.add_step_return(torch.tensor([1.0, 2.0]))
     actual = torch.zeros(2)
-    for ordinal in range(14):
+    # Exercise the same complete RewardManager cycle consumed by production.
+    # Fourteen was the retired lifecycle-only graph and made this drain test
+    # silently close an incomplete current reward window.
+    for ordinal in range(E.milestone_tensors.REWARD_TERM_COUNT):
         payment = torch.tensor([0.0, 1.0]) if ordinal == 0 else torch.zeros(2)
         epoch.milestone.add_reward(
             ordinal, payment, payment,
