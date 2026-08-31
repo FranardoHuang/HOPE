@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 import numpy as np
@@ -132,3 +133,70 @@ def test_optitrack_profile_pins_name_and_hash_the_same_exact_yaml(tmp_path):
         "sha256": M._sha256_file(plant),
         "size_bytes": plant.stat().st_size,
     }
+
+
+def test_phase4_ready_rebind_keeps_physical_authority_and_drops_stale_teacher(
+    tmp_path,
+):
+    source = {
+        "schema_version": 2,
+        "kind": "agibot_a3_action_dynamic_ready_candidate_v2",
+        "action_id": "source_action",
+        "authorization": {
+            "training_authorized": False,
+            "deployment_authorized": False,
+            "hardware_authorized": False,
+            "isaac_nominal_hold_validated": False,
+        },
+        "robot": {"family": "AgiBot A3"},
+        "physical_ready": {"joint_pos_rad": [0.0] * 31},
+        "runtime_plant": {"joint_stiffness": [1.0] * 31},
+        "hold_candidate": {"hold_qdes_joint_pos_rad": [0.0] * 31},
+        "sources": {
+            "stable_motion": {
+                "path": "old.motion.npz",
+                "sha256": "1" * 64,
+                "frame_index": 0,
+            }
+        },
+        "teacher_reference": {"motion_sha256": "1" * 64},
+        "physical_birth_composition": {"semantics": "old_teacher"},
+        "physical_birth_static_evidence": {"authority": "old_teacher"},
+        "frame0_handoff": {"teacher_frame0_state_sha256": "2" * 64},
+    }
+    source["content_sha256"] = M.hashlib.sha256(
+        M._canonical_ascii_json_bytes(source)
+    ).hexdigest()
+    source_path = tmp_path / "source.dynamic_ready.v2.json"
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    payload = M._derive_physical_only_dynamic_ready(
+        source=source,
+        source_path=source_path,
+        motion_path=Path("assets/new.motion.npz"),
+        motion_sha256="a" * 64,
+    )
+    derived = json.loads(payload)
+    assert derived["action_id"] == M.ACTION_ID
+    assert derived["ready_source"]["kind"] == M.PHASE4_READY_SOURCE_KIND
+    assert derived["ready_source"]["teacher_reference_duplicated"] is False
+    assert derived["physical_ready"] == source["physical_ready"]
+    assert derived["runtime_plant"] == source["runtime_plant"]
+    assert derived["hold_candidate"] == source["hold_candidate"]
+    assert derived["sources"]["stable_motion"] == {
+        "path": "assets/new.motion.npz",
+        "sha256": "a" * 64,
+        "frame_index": 0,
+    }
+    assert derived["sources"]["source_dynamic_ready"][
+        "teacher_reference_inherited"
+    ] is False
+    for stale in (
+        "teacher_reference",
+        "physical_birth_composition",
+        "physical_birth_static_evidence",
+        "frame0_handoff",
+    ):
+        assert stale not in derived
+    unsigned = dict(derived)
+    seal = unsigned.pop("content_sha256")
+    assert M.hashlib.sha256(M._canonical_ascii_json_bytes(unsigned)).hexdigest() == seal

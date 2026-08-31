@@ -42,6 +42,7 @@ SCOPE = "full"
 HIT_FRAME = 48
 POLICY_STEP_S = 0.02
 EXPECTED_PHASE4_KIND = "take061_slow_block_exact_face_phase4_v1"
+PHASE4_READY_SOURCE_KIND = "phase4_inherited_physical_ready_v1"
 
 
 class BundleError(RuntimeError):
@@ -59,6 +60,124 @@ def _sha256_file(path: Path) -> str:
 def _json_bytes(value: Any) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":"),
                        ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+
+
+def _canonical_ascii_json_bytes(value: Mapping[str, Any]) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+
+
+def _derive_physical_only_dynamic_ready(
+    *,
+    source: Mapping[str, Any],
+    source_path: Path,
+    motion_path: Path,
+    motion_sha256: str,
+) -> bytes:
+    """Rebind the proven physical reset without copying stale teacher truth.
+
+    The Phase-4 motion owns the teacher.  Dynamic-ready owns only the physical
+    spawn, hold command and exact plant contract.  Keeping those authorities
+    separate prevents a derived motion from inheriting the source action id or
+    a teacher-frame transcript that no longer describes its bytes.
+    """
+
+    unsigned_source = dict(source)
+    source_content_sha = unsigned_source.pop("content_sha256", None)
+    if (
+        source.get("schema_version") != 2
+        or source.get("kind")
+        != "agibot_a3_action_dynamic_ready_candidate_v2"
+        or not isinstance(source_content_sha, str)
+        or len(source_content_sha) != 64
+        or hashlib.sha256(
+            _canonical_ascii_json_bytes(unsigned_source)
+        ).hexdigest()
+        != source_content_sha
+    ):
+        raise BundleError("source dynamic-ready identity or content seal differs")
+    for key in ("robot", "physical_ready", "runtime_plant", "hold_candidate"):
+        if not isinstance(source.get(key), Mapping):
+            raise BundleError(f"source dynamic-ready lacks {key}")
+    authorization = source.get("authorization")
+    if (
+        not isinstance(authorization, Mapping)
+        or any(value is not False for value in authorization.values())
+    ):
+        raise BundleError("source dynamic-ready is not unauthorized")
+
+    result = deepcopy(source)
+    result.pop("content_sha256", None)
+    # These four fields describe the old measured teacher, not the physical
+    # birth.  The current Phase-4 motion is the sole teacher authority.
+    for key in (
+        "teacher_reference",
+        "physical_birth_composition",
+        "physical_birth_static_evidence",
+        "frame0_handoff",
+    ):
+        result.pop(key, None)
+    result["action_id"] = ACTION_ID
+    result["ready_source"] = {
+        "kind": PHASE4_READY_SOURCE_KIND,
+        "frame_index": 0,
+        "physical_birth_semantics": "inherited_content_pinned_safe_hold",
+        "teacher_authority": "separate_exact_phase4_motion_bytes",
+        "teacher_reference_duplicated": False,
+        "diagnostic_unauthorized": True,
+        "training_authorized": False,
+        "isaac_live_plant_match_required": True,
+    }
+    sources = dict(result.get("sources", {}))
+    sources["source_dynamic_ready"] = {
+        "path": str(source_path),
+        "sha256": _sha256_file(source_path),
+        "content_sha256": source_content_sha,
+        "source_action_id": source.get("action_id"),
+        "consumed_authority": "physical_ready_runtime_plant_hold_candidate_only",
+        "teacher_reference_inherited": False,
+        "nominal_hold_claim_inherited": False,
+    }
+    sources["stable_motion"] = {
+        "path": motion_path.as_posix(),
+        "sha256": motion_sha256,
+        "frame_index": 0,
+    }
+    result["sources"] = sources
+    result["required_next_gate"] = {
+        "kind": "isaac_action_ball_nominal_hold_v1",
+        "required_policy_steps": 60,
+        "required_physics_steps": 240,
+        "required_min_wait_s": 0.0,
+        "minimum_horizon_semantics": "physical_hold_only",
+        "zero_terminal_required": [
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
+            "robot_hit_table",
+            "base_fell_tilt",
+            "base_too_low",
+        ],
+    }
+    result["non_claims"] = [
+        "not an Isaac or PhysX closed-loop hold certificate",
+        "not training, deployment or hardware authorization",
+        "source nominal-hold claim is not inherited",
+        "teacher authority lives only in the exact Phase-4 motion",
+    ]
+    result["producer"] = {
+        "tool_path": str(Path(__file__).resolve()),
+        "tool_sha256": _sha256_file(Path(__file__).resolve()),
+        "derivation": "physical_only_phase4_ready_rebind_v1",
+    }
+    result["content_sha256"] = hashlib.sha256(
+        _canonical_ascii_json_bytes(result)
+    ).hexdigest()
+    return _json_bytes(result)
 
 
 def _read_json(path: Path, label: str) -> Mapping[str, Any]:
@@ -750,6 +869,15 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     prototype_rel = out_rel / "take061_slow_block_phase4_v1.prototype.v2.json"
     manifest_rel = out_rel / "take061_slow_block_phase4_v1.action_ball.v3.json"
     profile_pins_rel = out_rel / "take061_slow_block_phase4_v1.profile_pins.v1.json"
+    dynamic_ready_rel = (
+        out_rel / "take061_slow_block_phase4_v1.dynamic_ready.v2.json"
+    )
+    dynamic_ready_bytes = _derive_physical_only_dynamic_ready(
+        source=ready,
+        source_path=ready_path,
+        motion_path=motion_rel,
+        motion_sha256=motion_sha,
+    )
     aim = _finite(action_ball["landing_aim_w_xy_m"], (2,), "landing aim")
     reaction = 0.1
     teacher_rate_min = (
@@ -854,12 +982,21 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
         "outputs": {"motion": {"path": motion_rel.as_posix(), "sha256": motion_sha},
             "prototype": {"path": prototype_rel.as_posix(), "sha256": prototype_sha},
             "manifest": {"path": manifest_rel.as_posix(), "sha256": _sha256_bytes(manifest_bytes)},
-            "profile_pins": {"path": profile_pins_rel.as_posix(), "sha256": _sha256_bytes(profile_pins_bytes)}},
+            "profile_pins": {"path": profile_pins_rel.as_posix(), "sha256": _sha256_bytes(profile_pins_bytes)},
+            "dynamic_ready": {
+                "path": dynamic_ready_rel.as_posix(),
+                "sha256": _sha256_bytes(dynamic_ready_bytes),
+            }},
         "non_claims": ["formal motion admission", "backend contact", "policy", "deployment"],
     }
     binding_path = root / out_rel / "take061_slow_block_phase4_v1.binding.json"
-    output_payloads = {root / motion_rel: motion_bytes, root / prototype_rel: prototype_bytes,
-                       root / manifest_rel: manifest_bytes, root / profile_pins_rel: profile_pins_bytes}
+    output_payloads = {
+        root / motion_rel: motion_bytes,
+        root / prototype_rel: prototype_bytes,
+        root / manifest_rel: manifest_bytes,
+        root / profile_pins_rel: profile_pins_bytes,
+        root / dynamic_ready_rel: dynamic_ready_bytes,
+    }
     for path in output_payloads:
         if path.exists():
             raise BundleError(f"refusing to overwrite {path}")
