@@ -195,9 +195,15 @@ RSL_RL_VERSION = "3.1.2"
 COMPLETION_SCHEMA_VERSION = 5
 NUM_STEPS_PER_ENV = FULL_MDP_PPO_RECIPE.num_steps_per_env
 READY_POSE_SHA256 = "14c601215c4ffc44161da504d9bfefb9d29b02292ca4edace9ed88d0e508da17"
-FULL_A_ACTION_UID = 2552478955674699
-FULL_A_MOUNT_NORMAL_SIGN = 1
-FULL_A_FAMILY = "backhand"
+_FULL_A_FRESH_ACTION = (
+    _portable_catalog_module().load_portable_action_center_table().fresh_action
+)
+# Action identity has one source of truth: the exact portable catalog consumed
+# by the environment.  A copied runner constant previously survived a manifest
+# migration and rejected every otherwise-valid rollout row.
+FULL_A_ACTION_UID = _FULL_A_FRESH_ACTION.action_uid
+FULL_A_MOUNT_NORMAL_SIGN = _FULL_A_FRESH_ACTION.mount_normal_sign
+FULL_A_FAMILY = _FULL_A_FRESH_ACTION.family
 FULL_A_NUM_ENVS = FULL_MDP_PPO_RECIPE.num_envs
 FULL_A_NUM_UPDATES = FULL_MDP_PPO_RECIPE.max_iterations
 FULL_A_SAVE_INTERVAL = FULL_MDP_PPO_RECIPE.save_interval

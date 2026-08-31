@@ -185,6 +185,38 @@ def _table_termination_module():
 def _mujoco_module():
     return importlib.import_module("mujoco")
 
+
+def _portable_catalog_module():
+    """Load the action-identity authority from this exact source closure."""
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_portable_catalog.py"
+    )
+    name = "_hope_mujoco_consumer_action_ball_full_mdp_portable_catalog"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached FullMDP portable catalog origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load the FullMDP portable catalog")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
 FULL_MDP_PPO_RECIPE = _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
 REWARD_TERM_NAMES, REWARD_TERM_COUNT = _exact_reward_contract()
@@ -209,10 +241,13 @@ if (
     raise RuntimeError("FullMDP paddle prior contract differs")
 PADDLE_PRIOR_TERM_COUNT = len(PADDLE_PRIOR_TERM_NAMES)
 EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 10, 5, 6
+_FRESH_ACTION = (
+    _portable_catalog_module().load_portable_action_center_table().fresh_action
+)
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
     FULL_MDP_PPO_RECIPE.max_iterations, FULL_MDP_PPO_RECIPE.num_envs,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
-    2552478955674699)
+    _FRESH_ACTION.action_uid)
 TRANSITIONS_PER_UPDATE = NUM_ENVS * STEPS_PER_UPDATE
 def _names(raw): return frozenset(raw.split())
 EVENT_KEYS = _names("""scheduled_due_rows due_terminal_overlap_rows reveal_rows reveal_due_rows reveal_deferred_rows launch_rows missed_launch_rows flight_terminal_rows
