@@ -1631,31 +1631,6 @@ class MotionLoader:
             "joint_order_contract_sha256": joint_order_contract_sha256,
         }
 
-    @staticmethod
-    def _raw_first_three_pose_bytes_static(data, frame_count: int) -> bool:
-        """Prove an exact float32-static prefix before runtime conversion.
-
-        The split-ready roundoff exception is source-specific.  Comparing only
-        the runtime tensors would allow a float64 sub-ULP change to disappear
-        during MotionLoader's float32 conversion, while ``torch.equal`` also
-        treats ``+0.0`` and ``-0.0`` as equal.  Require native float32 source
-        arrays and compare their C-order row bytes without any numeric cast.
-        """
-
-        if int(frame_count) < 3:
-            return False
-        for channel_name in ("joint_pos", "body_pos_w", "body_quat_w"):
-            array = data[channel_name]
-            if array.dtype != np.dtype(np.float32):
-                return False
-            row0 = np.ascontiguousarray(array[0]).tobytes(order="C")
-            if (
-                row0 != np.ascontiguousarray(array[1]).tobytes(order="C")
-                or row0 != np.ascontiguousarray(array[2]).tobytes(order="C")
-            ):
-                return False
-        return True
-
     def __init__(
         self,
         motion_file,
@@ -1713,7 +1688,6 @@ class MotionLoader:
         self.measured_racket_contracts = []
         seg_lens = []
         self.kinematics_contracts = []
-        split_ready_raw_prefix_pose_bytes_static = []
         per_clip_fps = []
         for f, payload in zip(files, payloads):
             if payload is None:
@@ -1735,9 +1709,6 @@ class MotionLoader:
                     allow_legacy_link_origin_velocity=allow_legacy_link_origin_velocity,
                 )
                 self.kinematics_contracts.append(_kin)
-                split_ready_raw_prefix_pose_bytes_static.append(
-                    self._raw_first_three_pose_bytes_static(data, frame_count)
-                )
                 _measured = self._measured_racket_contract(data, f, frame_count)
                 measured_racket_presence.append(_measured is not None)
                 self.measured_racket_contracts.append(_measured)
@@ -1778,9 +1749,6 @@ class MotionLoader:
                         )
                     )
                 seg_lens.append(frame_count)
-        self._split_ready_raw_prefix_pose_bytes_static = tuple(
-            split_ready_raw_prefix_pose_bytes_static
-        )
         if any(measured_racket_presence) and not all(measured_racket_presence):
             missing = [files[index] for index, present in enumerate(measured_racket_presence) if not present]
             raise ValueError(
@@ -1828,12 +1796,6 @@ class MotionLoader:
         if self.num_segments > 1:
             self.seg_start[1:] = torch.cumsum(self.seg_len, dim=0)[:-1]
         self.kinematics_contract_exact = all(item["exact"] for item in self.kinematics_contracts)
-
-    @property
-    def split_ready_raw_prefix_pose_bytes_static(self) -> tuple[bool, ...]:
-        """Read-only source-byte evidence aligned one-to-one with clips."""
-
-        return self._split_ready_raw_prefix_pose_bytes_static
 
     @property
     def body_pos_w(self) -> torch.Tensor:
@@ -2067,12 +2029,6 @@ class MotionCommand(CommandTerm):
     _EXACT_RESUME_STATE_SCHEMA_VERSION = 2
     _ACTION_BALL_EXACT_RESUME_STATE_SCHEMA_VERSION = 5
     _ACTION_BALL_INT64_MAX = (1 << 63) - 1
-    # A measured source whose first three poses are bitwise static can carry a
-    # tiny frame-0 angular-velocity residue from float64 quaternion arithmetic
-    # before storage as float32.  This diagnostic-only bound applies to
-    # body_ang_vel_w alone; joint/linear velocity remain literal-zero gates.
-    _SPLIT_READY_TEACHER_START_BODY_ANG_ROUNDOFF_MAX = 1.0e-14
-
     def __init__(self, cfg: MotionCommandCfg, env: ManagerBasedRLEnv):
         super().__init__(cfg, env)
         _bind_disabled_time_resampling_fast_path(self)
@@ -12416,16 +12372,18 @@ class MotionCommand(CommandTerm):
         contract: the immutable clip is a single professional stroke rather than
         a ready-to-ready loop.  Its physical birth comes from the independently
         validated dynamic-ready binding, while frame 0 remains the teacher held
-        during the receipt-owned transition.  That mode retains all shape,
-        finiteness and unit-quaternion checks.  When its first three poses are
-        byte-identical in the source float32 arrays, a microscopic source-side angular-velocity
-        roundoff residue is admitted at the teacher start; joint and linear
-        start velocity remain literal-zero requirements.  The runtime
-        velocity properties below synthesize literal zeros for every held row
-        without mutating the immutable clip, and a real moving start is still
-        rejected.  The diagnostic deliberately does not claim an equal/
-        zero-speed end and consequently terminates after one stroke instead
-        of wrapping.
+        during the receipt-owned preparation window.  That mode retains all
+        shape, finiteness and unit-quaternion checks, but does not require the
+        immutable measured teacher to start at zero velocity.  A professional
+        stroke may truthfully be moving at its first retained sample.  During
+        preparation the runtime properties below expose frame-0 pose with
+        literal-zero reference velocity; playback then exposes the measured
+        position and velocity bytes together.  Requiring the source velocity
+        to be zero here would reject a coherent teacher whose velocity matches
+        its frame-0 -> frame-1 finite difference, without improving the actual
+        preparation contract.  The diagnostic also does not claim an equal/
+        zero-speed end and consequently retires after one stroke instead of
+        wrapping.
         """
 
         split_ready_teacher = bool(
@@ -12464,20 +12422,6 @@ class MotionCommand(CommandTerm):
             ("body_lin_vel_w", self.motion._body_lin_vel_w),
             ("body_ang_vel_w", self.motion._body_ang_vel_w),
         )
-        raw_static_prefixes = getattr(
-            self.motion,
-            "split_ready_raw_prefix_pose_bytes_static",
-            (),
-        )
-        if split_ready_teacher and (
-            type(raw_static_prefixes) is not tuple
-            or len(raw_static_prefixes) != int(self.motion.num_segments)
-            or any(type(value) is not bool for value in raw_static_prefixes)
-        ):
-            raise ValueError(
-                "measured N=1 diagnostic requires an exact tuple with one boolean "
-                "source-byte static-prefix receipt per clip"
-            )
         for channel_name, channel in (*pose_channels, *velocity_channels):
             endpoint_values = channel[torch.cat((starts, ends))]
             if not bool(torch.isfinite(endpoint_values).all()):
@@ -12488,9 +12432,6 @@ class MotionCommand(CommandTerm):
         for clip_index in range(int(self.motion.num_segments)):
             start_index = int(starts[clip_index].item())
             end_index = int(ends[clip_index].item())
-            split_static_first_three = bool(
-                split_ready_teacher and raw_static_prefixes[clip_index]
-            )
             if not split_ready_teacher:
                 for channel_name, channel in pose_channels:
                     mismatch_count, max_abs = self._first_tensor_mismatch(
@@ -12513,25 +12454,13 @@ class MotionCommand(CommandTerm):
                     value = channel[boundary_index]
                     if int(torch.count_nonzero(value).item()) != 0:
                         max_abs = float(torch.max(torch.abs(value)).item())
-                        if (
-                            split_static_first_three
-                            and channel_name == "body_ang_vel_w"
-                            and max_abs
-                            <= self._SPLIT_READY_TEACHER_START_BODY_ANG_ROUNDOFF_MAX
-                        ):
-                            # Do not rewrite MotionLoader storage: frame 0 is
-                            # part of the immutable measured playback.  The
-                            # held-reference accessors return freshly-created
-                            # literal zeros, so only the wait-time teacher is
-                            # canonicalized and playback bytes stay intact.
+                        if split_ready_teacher:
+                            # The split-ready lifecycle, not the source asset,
+                            # owns the stationary preparation reference.  Do
+                            # not rewrite truthful measured velocity bytes.
                             continue
-                        contract = (
-                            "measured N=1 diagnostic rejects moving teacher-start velocities"
-                            if split_ready_teacher
-                            else "canonical_ready_mode requires literal zero endpoint velocities"
-                        )
                         raise ValueError(
-                            f"{contract}: "
+                            "canonical_ready_mode requires literal zero endpoint velocities: "
                             f"clip={clip_index} boundary={boundary_name} channel={channel_name} "
                             f"max_abs={max_abs:.9g}"
                         )

@@ -146,16 +146,6 @@ def _command(clips: list[dict]):
     # accessors; this lightweight test double uses the same tensor identity.
     motion.body_lin_vel_w = motion._body_lin_vel_w
     motion.body_ang_vel_w = motion._body_ang_vel_w
-    motion.split_ready_raw_prefix_pose_bytes_static = tuple(
-        C.MotionLoader._raw_first_three_pose_bytes_static(
-            {
-                key: value.detach().cpu().numpy()
-                for key, value in clip.items()
-            },
-            len(clip["joint_pos"]),
-        )
-        for clip in clips
-    )
     command = C.MotionCommand.__new__(C.MotionCommand)
     command.robot = types.SimpleNamespace(
         data=types.SimpleNamespace(
@@ -259,31 +249,29 @@ def test_non_finite_boundary_fails():
         C.MotionCommand._validate_canonical_ready_clips(_command(clips))
 
 
-def test_scoped_measured_n1_accepts_nonloop_end_but_not_moving_start():
+def test_scoped_measured_n1_accepts_nonloop_end_and_truthful_moving_start():
     clip = _clip(0.0)
     clip["joint_pos"][-1, 7] += 0.4
     clip["body_pos_w"][-1, 1, 2] += 0.08
     clip["joint_vel"][-1, 7] = 2.4
+    clip["joint_vel"][0, 7] = 0.25
+    clip["body_lin_vel_w"][0, 1, 0] = -0.11
+    clip["body_ang_vel_w"][0, 2, 1] = 0.07
     command = _command([clip])
     command.action_ball_diagnostic_split_ready_teacher = True
     C.MotionCommand._validate_canonical_ready_clips(command)
 
-    clip["joint_vel"][0, 7] = 1.0e-5
-    with pytest.raises(ValueError, match="moving teacher-start velocities"):
-        moving_start = _command([clip])
-        moving_start.action_ball_diagnostic_split_ready_teacher = True
-        C.MotionCommand._validate_canonical_ready_clips(moving_start)
 
-
-def test_split_ready_roundoff_start_is_exactly_zero_only_while_held():
+def test_split_ready_moving_start_is_preserved_without_rewriting_teacher():
     clip = _static_first_three(_clip(0.0))
-    residue = 2.77555756e-15
-    clip["body_ang_vel_w"][0, 2, 1] = residue
+    clip["joint_vel"][0, 7] = 0.25
+    clip["body_lin_vel_w"][0, 1, 0] = -0.11
+    clip["body_ang_vel_w"][0, 2, 1] = 0.07
     command = _command([clip])
     command.action_ball_diagnostic_split_ready_teacher = True
 
-    # Admission accepts only the microscopic producer residue.  It must not
-    # edit the immutable measured timeline to make that happen.
+    # Admission does not edit the immutable measured timeline.  The separate
+    # preparation lifecycle owns its stationary frame-0 reference.
     motion_before = {
         "joint_pos": command.motion.joint_pos.detach().cpu().numpy().tobytes(),
         "joint_vel": command.motion.joint_vel.detach().cpu().numpy().tobytes(),
@@ -302,33 +290,9 @@ def test_split_ready_roundoff_start_is_exactly_zero_only_while_held():
         "body_ang_vel_w": command.motion._body_ang_vel_w.detach().cpu().numpy().tobytes(),
     }
     assert motion_after == motion_before
-    assert command.motion._body_ang_vel_w[0, 2, 1].item() != 0.0
-
-    command.num_envs = 1
-    command.device = torch.device("cpu")
-    command.time_steps = torch.tensor([0], dtype=torch.long)
-    command.speed_scale = torch.ones(1)
-    command.retiming_active = False
-    command.hold_counter = torch.ones(1, dtype=torch.long)
-    command.metrics = {"in_hold": torch.ones(1)}
-
-    # The actual frozen teacher is literal zero in all three velocity
-    # channels, not merely close to zero.
-    assert torch.count_nonzero(C.MotionCommand.joint_vel.fget(command)) == 0
-    assert (
-        torch.count_nonzero(C.MotionCommand.body_lin_vel_w.fget(command)) == 0
-    )
-    assert (
-        torch.count_nonzero(C.MotionCommand.body_ang_vel_w.fget(command)) == 0
-    )
-
-    # Once playback begins, frame-0 bytes are exposed unchanged; no hidden
-    # edit bleeds into frame 0 or the later professional stroke.
-    command.hold_counter.zero_()
-    command.metrics["in_hold"].zero_()
-    assert (
-        C.MotionCommand.body_ang_vel_w.fget(command)[0, 2, 1].item() != 0.0
-    )
+    assert command.motion.joint_vel[0, 7].item() == 0.25
+    assert command.motion._body_lin_vel_w[0, 1, 0].item() == pytest.approx(-0.11)
+    assert command.motion._body_ang_vel_w[0, 2, 1].item() == pytest.approx(0.07)
 
 
 def test_exact_take061_v4_start_roundoff_passes_split_ready_gate():
@@ -360,107 +324,13 @@ def test_exact_take061_v4_start_roundoff_passes_split_ready_gate():
     ) == residue
 
 
-@pytest.mark.parametrize("channel", ("joint_vel", "body_lin_vel_w"))
-def test_split_ready_roundoff_does_not_exempt_joint_or_linear_velocity(channel):
-    clip = _static_first_three(_clip(0.0))
-    clip[channel][0].reshape(-1)[0] = 2.77555756e-15
-    command = _command([clip])
-    command.action_ball_diagnostic_split_ready_teacher = True
-    with pytest.raises(ValueError, match="moving teacher-start velocities"):
-        C.MotionCommand._validate_canonical_ready_clips(command)
-
-
-def test_split_ready_angular_roundoff_bound_is_not_a_moving_start_tolerance():
-    clip = _static_first_three(_clip(0.0))
-    clip["body_ang_vel_w"][0, 2, 1] = 1.0e-13
-    command = _command([clip])
-    command.action_ball_diagnostic_split_ready_teacher = True
-    with pytest.raises(ValueError, match="moving teacher-start velocities"):
-        C.MotionCommand._validate_canonical_ready_clips(command)
-
-
-def test_split_ready_angular_roundoff_float32_threshold_is_closed():
-    clip = _static_first_three(_clip(0.0))
-    clip["body_ang_vel_w"][0, 2, 1] = float(
-        np.nextafter(np.float32(1.0e-14), np.float32(0.0))
-    )
-    command = _command([clip])
-    command.action_ball_diagnostic_split_ready_teacher = True
-    C.MotionCommand._validate_canonical_ready_clips(command)
-
-    clip["body_ang_vel_w"][0, 2, 1] = float(
-        np.nextafter(np.float32(1.0e-14), np.float32(np.inf))
-    )
-    command = _command([clip])
-    command.action_ball_diagnostic_split_ready_teacher = True
-    with pytest.raises(ValueError, match="moving teacher-start velocities"):
-        C.MotionCommand._validate_canonical_ready_clips(command)
-
-
 @pytest.mark.parametrize("bad", (float("nan"), float("inf"), float("-inf")))
-def test_split_ready_angular_roundoff_never_exempts_nonfinite(bad):
+def test_split_ready_moving_start_never_exempts_nonfinite(bad):
     clip = _static_first_three(_clip(0.0))
     clip["body_ang_vel_w"][0, 2, 1] = bad
     command = _command([clip])
     command.action_ball_diagnostic_split_ready_teacher = True
     with pytest.raises(ValueError, match="non-finite"):
-        C.MotionCommand._validate_canonical_ready_clips(command)
-
-
-def test_split_ready_angular_roundoff_requires_three_static_start_poses():
-    clip = _static_first_three(_clip(0.0))
-    clip["body_ang_vel_w"][0, 2, 1] = 2.77555756e-15
-    clip["joint_pos"][1, 7] += 1.0e-6
-    command = _command([clip])
-    command.action_ball_diagnostic_split_ready_teacher = True
-    with pytest.raises(ValueError, match="moving teacher-start velocities"):
-        C.MotionCommand._validate_canonical_ready_clips(command)
-
-
-def test_split_ready_angular_roundoff_requires_source_byte_identity():
-    clip = _static_first_three(_clip(0.0))
-    clip["body_ang_vel_w"][0, 2, 1] = 2.77555756e-15
-    # Numerically equal, but not byte-identical.  torch.equal would accept
-    # this prefix; the source receipt must reject it.
-    clip["joint_pos"][1, 0] = -0.0
-    assert torch.equal(clip["joint_pos"][0], clip["joint_pos"][1])
-    command = _command([clip])
-    command.action_ball_diagnostic_split_ready_teacher = True
-    with pytest.raises(ValueError, match="moving teacher-start velocities"):
-        C.MotionCommand._validate_canonical_ready_clips(command)
-
-
-@pytest.mark.parametrize("malformed", ([True], ("yes",), (1,), ()))
-def test_split_ready_roundoff_rejects_malformed_source_receipt(malformed):
-    clip = _static_first_three(_clip(0.0))
-    clip["body_ang_vel_w"][0, 2, 1] = 2.77555756e-15
-    command = _command([clip])
-    command.motion.split_ready_raw_prefix_pose_bytes_static = malformed
-    command.action_ball_diagnostic_split_ready_teacher = True
-    with pytest.raises(ValueError, match="exact tuple"):
-        C.MotionCommand._validate_canonical_ready_clips(command)
-
-
-def test_raw_static_prefix_rejects_float64_changes_hidden_by_float32_cast():
-    clip = {
-        key: value.detach().cpu().numpy().astype(np.float64)
-        for key, value in _static_first_three(_clip(0.0)).items()
-    }
-    clip["joint_pos"][1, 0] = np.nextafter(1.0, 2.0)
-    clip["joint_pos"][0, 0] = 1.0
-    clip["joint_pos"][2, 0] = 1.0
-    assert np.float32(clip["joint_pos"][1, 0]) == np.float32(1.0)
-    assert not C.MotionLoader._raw_first_three_pose_bytes_static(
-        clip, len(clip["joint_pos"])
-    )
-
-
-def test_split_ready_short_clip_cannot_claim_angular_roundoff_exemption():
-    clip = _clip(0.0, frames=2)
-    clip["body_ang_vel_w"][0, 2, 1] = 2.77555756e-15
-    command = _command([clip])
-    command.action_ball_diagnostic_split_ready_teacher = True
-    with pytest.raises(ValueError, match="moving teacher-start velocities"):
         C.MotionCommand._validate_canonical_ready_clips(command)
 
 
