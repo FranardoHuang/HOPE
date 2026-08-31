@@ -79,6 +79,8 @@ class DiagnosticActionTimingStaticTableProjection:
     reference_t_cycle_s: torch.Tensor
     reaction_margin_s: torch.Tensor
     mount_normal_sign: torch.Tensor
+    incoming_velocity_center_b_yaw_mps: torch.Tensor
+    incoming_spin_center_b_yaw_radps: torch.Tensor
     manifest_file_sha256: str
     manifest_canonical_sha256: str
     diagnostic_unauthorized: bool = True
@@ -464,6 +466,53 @@ def construct_action_ball_full_mdp_diagnostic_action_timing_static_table(
             device=device,
         ).contiguous()
 
+    def vector_column(name: str) -> torch.Tensor:
+        return torch.tensor(
+            [tuple(float(value) for value in getattr(row.ball_profile, name))
+             for row in rows],
+            dtype=torch.float32,
+            device=device,
+        ).contiguous()
+
+    # The current Phase4 diagnostic catalog is an exact-centre lane.  Its
+    # incoming question must come from each action's own ball profile, never
+    # from ContinuousQuestionCfg's legacy global velocity box.  Refuse to
+    # silently ignore a future non-zero curriculum width; that requires a
+    # device curriculum projection rather than pretending the centre is a
+    # distribution.
+    for slot, row in enumerate(rows):
+        profile = row.ball_profile
+        width_fields = tuple(
+            name for name in vars(profile)
+            if "_std_" in name
+            or (
+                name.startswith("incoming_direction_tangent_")
+                and name.endswith("_deg")
+            )
+        )
+        if any(
+            any(float(value) != 0.0 for value in getattr(profile, name))
+            if isinstance(getattr(profile, name), tuple)
+            else float(getattr(profile, name)) != 0.0
+            for name in width_fields
+        ):
+            raise DiagnosticActionTimingError(
+                "diagnostic exact-centre producer cannot consume a non-zero "
+                f"ball curriculum width at slot {slot}"
+            )
+    direction = vector_column("incoming_direction_center_b_yaw")
+    spin_direction = vector_column("spin_direction_center_b_yaw")
+    speed = torch.tensor(
+        [float(row.ball_profile.incoming_speed_center_mps) for row in rows],
+        dtype=torch.float32,
+        device=device,
+    ).contiguous()
+    spin_magnitude = torch.tensor(
+        [float(row.ball_profile.spin_magnitude_center_radps) for row in rows],
+        dtype=torch.float32,
+        device=device,
+    ).contiguous()
+
     return DiagnosticActionTimingStaticTableProjection(
         action_uid=torch.tensor(
             [int(row.action_uid) for row in rows],
@@ -483,6 +532,12 @@ def construct_action_ball_full_mdp_diagnostic_action_timing_static_table(
         reference_t_cycle_s=column("reference_t_cycle_s"),
         reaction_margin_s=column("reaction_margin_s"),
         mount_normal_sign=column("mount_normal_sign"),
+        incoming_velocity_center_b_yaw_mps=(
+            direction * speed.unsqueeze(1)
+        ).contiguous(),
+        incoming_spin_center_b_yaw_radps=(
+            spin_direction * spin_magnitude.unsqueeze(1)
+        ).contiguous(),
         manifest_file_sha256=PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256,
         manifest_canonical_sha256=PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256,
     )

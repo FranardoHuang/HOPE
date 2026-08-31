@@ -265,10 +265,9 @@ def _direct_projection(
     )
     rounds = d05_test.r05.INTERNAL_QUESTION_REDRAW_ROUNDS
     width = d05_test.r05.INTERNAL_QUESTION_DRAW_WIDTH
-    # A real finite, solvable incoming ball repeated across rows.  These are
-    # the normalized ContinuousQuestionCfg draws for v=(-3.5, 0.0, -0.3)
-    # m/s and zero spin; row-binding tests must not fail earlier in the
-    # production numerical solver because their arbitrary tape was singular.
+    # D05 owns and consumes this fixed-width RNG tape.  The current Phase4
+    # manifest declares zero ball-domain width, so the numerical question must
+    # remain at the action-owned incoming centre regardless of these values.
     draw = torch.tensor(
         (0.4, 0.5, 7.0 / 15.0, 0.5, 0.5, 0.5),
         dtype=torch.float32,
@@ -345,6 +344,14 @@ def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypat
         selected_env_index=torch.tensor([0], dtype=torch.int64),
     )
     result = captured["result"]
+    torch.testing.assert_close(
+        result.racket_task_f32[result.admitted, 21:24],
+        torch.tensor((-4.0, 2.0, 4.0), dtype=torch.float32).expand(
+            int(result.admitted.sum()), -1
+        ),
+        rtol=0.0,
+        atol=2.0e-6,
+    )
     bank = projection.round_bank
     torch.testing.assert_close(
         bank.motion_task_f32.reshape(-1, 5),

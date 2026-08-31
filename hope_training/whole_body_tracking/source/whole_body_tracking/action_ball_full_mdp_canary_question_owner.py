@@ -226,9 +226,6 @@ def _compose_recurring_question_projection(
         from whole_body_tracking.tasks.tracking.mdp import (
             action_ball_fixed_action_question_device as fixed_question,
         )
-        from whole_body_tracking.tasks.tracking.mdp import (
-            continuous_questions as questions,
-        )
     except ImportError as exc:
         raise CanaryQuestionConstructionHold(
             "recurring question numeric kernels are unavailable"
@@ -299,6 +296,12 @@ def _compose_recurring_question_projection(
     reference_t_cycle = gather(timing.reference_t_cycle_s)
     reaction_margin = gather(timing.reaction_margin_s)
     mount_sign = gather(timing.mount_normal_sign)
+    incoming_velocity_center_b_yaw = gather(
+        timing.incoming_velocity_center_b_yaw_mps
+    )
+    incoming_spin_center_b_yaw = gather(
+        timing.incoming_spin_center_b_yaw_radps
+    )
 
     contact_room = cadence.episode_tick.le(_I64_MAX - time_to_contact_ticks)
     safe_episode = torch.where(
@@ -446,26 +449,23 @@ def _compose_recurring_question_projection(
         active_reaction_margin = compact(reaction_margin)
         active_mount_sign = compact(mount_sign)
         active_ttc = compact(ttc)
-        active_draw_u01 = compact(draw_u01)
         active_candidate_identity = compact(candidate_identity)
         active_reveal_tick_row = compact(cadence.reveal_tick)
         active_contact_tick = compact(contact_tick)
 
-        # Sampling remains the Isaac adapter's cadence/RNG responsibility.
-        # Preserve the established canonical draw box exactly; the per-run
-        # question config below still owns solver tolerances and budgets.
-        defaults = questions.ContinuousQuestionCfg()
-        velocity_box = torch.tensor(
-            defaults.vel_range,
-            dtype=torch.float32,
-            device=device,
-        )
-        velocity = velocity_box[:, 0] + active_draw_u01[:, :, :3] * (
-            velocity_box[:, 1] - velocity_box[:, 0]
-        )
-        spin = (active_draw_u01[:, :, 3:6] * 2.0 - 1.0) * float(
-            defaults.spin_abs_max
-        )
+        # D05 still consumes its fixed-width RNG tape, but this exact-centre
+        # Phase4 lane has zero curriculum width.  Its physical question is the
+        # action-owned incoming centre expressed in the frozen episode heading,
+        # not the unrelated legacy ContinuousQuestionCfg box.
+        del active_draw_u01
+        active_velocity_center = compact(incoming_velocity_center_b_yaw)
+        active_spin_center = compact(incoming_spin_center_b_yaw)
+        velocity = _quat_rotate_wxyz(
+            compact(base_quat), active_velocity_center
+        ).unsqueeze(1).expand(active_count, rounds, 3).contiguous()
+        spin = _quat_rotate_wxyz(
+            compact(base_quat), active_spin_center
+        ).unsqueeze(1).expand(active_count, rounds, 3).contiguous()
         target = (
             profile.targets_xy_m.unsqueeze(0)
             .unsqueeze(0)

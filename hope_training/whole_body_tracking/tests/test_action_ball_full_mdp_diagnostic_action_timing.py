@@ -284,6 +284,15 @@ def test_static_timing_accepts_positive_exact_generic_n(num_envs):
     assert table.time_to_contact_ticks.shape == (len(rows),)
     assert table.teacher_rate_min.shape == (len(rows),)
     assert table.teacher_rate_max.shape == (len(rows),)
+    assert table.incoming_velocity_center_b_yaw_mps.shape == (len(rows), 3)
+    assert table.incoming_spin_center_b_yaw_radps.shape == (len(rows), 3)
+    torch.testing.assert_close(
+        table.incoming_velocity_center_b_yaw_mps,
+        torch.tensor([[-4.0, 2.0, 4.0]], dtype=torch.float32),
+        rtol=0.0,
+        atol=2.0e-6,
+    )
+    assert torch.count_nonzero(table.incoming_spin_center_b_yaw_radps) == 0
     assert torch.all(table.teacher_rate_min > 0.0)
     assert torch.all(table.teacher_rate_max >= table.teacher_rate_min)
     assert table.diagnostic_unauthorized is True
