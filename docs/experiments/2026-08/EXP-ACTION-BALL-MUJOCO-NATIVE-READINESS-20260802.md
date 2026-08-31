@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`r36-v5-dual-learning-live / diagnostic_unauthorized`
+- 状态：`r36-v5-dual-learning-live / contact-prior-candidate-validated / diagnostic_unauthorized`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -84,6 +84,22 @@ checkpoint 回放链在 `3fe375f5..4c43967d` 补上了训练时同一 dynamic-re
 显式视频输出改为 fresh no-clobber 目录。Pod 用真实 Phase-4 motion、dynamic-ready artifact
 与 nominal-hold receipt 复算安装得到 binding SHA=`1a6885f5…7330772`。这修复的是“回放
 必须和训练属于同一 MDP”，不是新增视觉准入门。
+
+到 update `690/268/1182`（Isaac GPU0 / Isaac GPU1 / Mu GPU2），三条旧配方给出分层而不是
+一刀切的结论：GPU1 仍在较早 balance/mimic 窗；GPU0 最近 100 轮 episode 已均值 `496.013 tick`、
+physical observed=`4,915`，却仍 `0 R03 / 0 contact`，所以旧配方的 mimic→hit 不是“再等就能解释”;
+Mu 最近 100 轮已有 `33 launch / 28 R03 / 1 selected contact / 1 crossing`，证明 hit 入口结构上
+可达，但概率极低且 legal landing/recovery 仍未出现。GPU0 同窗 paddle 位置/速度/拍面/长轴误差为
+`0.6270 m / 0.3192 m/s / 0.3677 rad / 0.2980 rad`，与大量非接触帧 paddle income 同时存在，
+形成了明确的时间信用稀释证据。
+
+`dad61048..00814042` 因此直接修已有 reward 的时间分布，而不新增 gate：ready/preparation/recovery
+以及远离接触的 playback 保留 `1x`，真实 playback 内按 raised-cosine 在 `|TTC|<=0.12 s` 连续增强，
+`0.06 s` 为 `2.5x`、接触为 `4x`。四项 kernel、teacher/achieved producer、最大权重和
+balance→mimic→hit→landing 自然链均不变；Isaac 与 Mu 共用同一纯 tensor 函数，各自从同义动作钟
+产生 TTC。Pod exact `00814042` 回归为共享/Isaac `368 passed, 26 skipped`、Mu
+`214 passed, 6 skipped`。这关闭数学/接线正确性，学习效果只由下一条 fresh canary 裁决，不能由
+旧 run 或 total return 代签。
 
 ## 2026-08-30 current correction（已被上节取代）
 

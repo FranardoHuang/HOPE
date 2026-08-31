@@ -2,6 +2,12 @@
 
 ## 2026-08-31 — R36 v5 物理出生、视觉工作流与双端起跑
 
+- `dad61048..00814042` 将四项 paddle prior 从 playback 全段固定 `4x` 改为接触邻域连续
+  `1x→4x→1x`；不增 Stage/Gate/Observation。Pod exact 共享/Isaac=`368 passed, 26 skipped`、
+  Mu=`214 passed, 6 skipped`。旧 GPU0 到 update 690 已有充分 survival/launch 却仍零 R03/contact；
+  Mu 最近 100 轮首次有 1 次 selected contact/crossing。下一项是 `model_300` 固定机位检查和 fresh
+  contact-prior learning canary，旧 run 不热补。
+
 - checkpoint 视频回放已修正为与训练相同的 dynamic-ready 出生 MDP，显式影片输出改为
   fresh no-clobber 目录。Pod 用真实 Phase-4 motion/artifact/nominal-hold receipt 完成 binding
   复算=`1a6885f5…7330772`。这使 `model_300` 画面可信，不新增 Gate。

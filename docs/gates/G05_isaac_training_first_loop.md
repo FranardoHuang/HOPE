@@ -37,6 +37,18 @@ dynamic-ready resolver/loader，视频显式输出只能写 fresh no-clobber 目
 Phase-4 motion/artifact/hold receipt 已安装并复算 binding=`1a6885f5…7330772`。这是修改
 回放工具的真实错配，不是把画面加为新的安全门。
 
+到 GPU0 update 690，近 100 轮 episode 平均已为 `496.013 tick`，physical observed=`4,915`，
+timeout/tilt/table=`4,891/50/16`，但 R03/contact 仍=`0/0`；同窗 paddle 误差为
+`0.6270 m / 0.3192 m/s / 0.3677 rad / 0.2980 rad`。因此旧配方 balance/survival 已形成，
+mimic→hit 仍未形成，不能再仅写“太早”。GPU1 update 268 仍属较早 balance/mimic 窗。
+Mu update 1182 最近 100 轮首次有 `1` 次 selected contact 与 `1` 次 crossing，但 legal landing/
+recovery 仍未证；自然链入口打开不等于该层已成功。
+
+`dad61048..00814042` 不加 Stage/Gate/Observation，只把四项 measured-paddle prior 的 playback
+固定 `4x` 改为接触邻域连续 `1x→4x→1x`，以免长 clip 的容易帧淹没接触窗。Pod exact
+共享/Isaac=`368 passed, 26 skipped`，Mu=`214 passed, 6 skipped`。G05 只承认接线验证；fresh
+学习 canary 与 `model_300` 固定机位画面未闭合，状态保持 `Partial / diagnostic_unauthorized`。
+
 ## 2026-08-30 R36 当前 Isaac 学习入口（仍 `Partial`）
 
 R35 Isaac 的最终冻结窗已给出可信负例：survival/balance 基本形成，`4,951` 次 physical launch 后仍为

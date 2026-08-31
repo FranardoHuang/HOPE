@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`r36-v5-dual-learning-live / diagnostic_unauthorized`
+> 状态：`r36-v5-dual-learning-live / contact-prior-candidate-validated / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-31
@@ -34,6 +34,9 @@
 - Observation V3 保持 actor/critic `215/231`；本轮没有新增 actor 字段、Gate 或 oracle。
 - checkpoint 固定机位回放必须安装训练时的同一份 dynamic-ready binding，并把影片写到
   fresh no-clobber 目录；否则画面属于另一个出生 MDP，不能用来判断学习。
+- 四项 measured-paddle prior 在全动作段保留原始 `1x`，只在真实 playback 的接触邻域按同一
+  time-to-contact 钟连续升到 `4x`：`|TTC|>=0.12 s` 为 `1x`、`0.06 s` 为 `2.5x`、接触为
+  `4x`。这不是新 Stage/Gate；它防止长动作中大量容易的非接触帧淹没真正决定击球的接触窗。
 
 ### 已验证的当前真值
 
@@ -48,17 +51,18 @@
 - `e5c02ea6` fresh Mu 61-update diagnostic 自然完成，RC=0；每轮 `24,576/24,576`
   UID/identity rows 正确，storage finite、reward conservation/fact-integrity 无故障，p50/p90=
   `6.667/7.153 s`。同 source 已从 fresh root 进入 100,000-update Mu long。
-- GPU0 Isaac 到 update 566 仍 finite；近 100 轮 episode 平均已到 `455.94 tick`，
-  launch=`4,734`，timeout/tilt/table=`4,639/490/226`，证明 balance/survival 与 hit 入口持续
-  打开；但 R03/contact 仍=`0/0`。同窗 playback 误差为
-  `0.591 m / 0.335 m/s / 0.343 rad / 0.303 rad`。这个窗的样本已更多进入晚期 playback，
-  不能用原始均值直接断言 mimic 退化；可确定的是 hit 仍未学会。
-- GPU1 fresh Isaac 到 update 105 持续 finite；近 100 轮 episode 平均 `121.66 tick`，
-  launch/R03/contact=`7/0/0`，tilt/table/timeout=`15,469/4,727/6`。它仍是早期 balance/mimic 学习，
-  不用这个窗裁决 hit；首个 `model_300` 专门用于直观排查是否在学错动作。
-- GPU2 Mu 到 update 838 持续 finite；近 100 轮 episode 平均 `159.99 tick`，
-  launch/R03/contact=`5/3/0`，tilt/table=`8,497/6,892`，仍主要败在 balance/mimic。两端都不能
-  称 hit 或 landing 已成功；landing 仍为`未测`。
+- GPU0 Isaac 到 update 690 仍 finite；近 100 轮 episode 平均 `496.013 tick`，
+  physical observed=`4,915`，timeout/tilt/table=`4,891/50/16`，证明 balance/survival 和 hit
+  入口都已充分打开；但 R03/contact 仍=`0/0`。同窗 playback 误差为
+  `0.6270 m / 0.3192 m/s / 0.3677 rad / 0.2980 rad`。这已不是“太早看不出”：当前旧配方
+  明确卡在接触窗位置/姿态质量。
+- GPU1 fresh Isaac 到 update 268 持续 finite；近 100 轮 episode 平均 `143.072 tick`，
+  physical observed/R03/contact=`131/0/0`，tilt/table/timeout=`13,706/3,361/112`。它仍是较早
+  balance/mimic 窗；首个 `model_300` 专门用固定机位排查动作是否学偏。
+- GPU2 Mu 到 update 1182 持续 finite；近 100 轮 episode 平均 `193.705 tick`，
+  launch/R03/selected-contact/crossing=`33/28/1/1`，tilt/table=`7,799/2,493`。首个真实
+  selected contact 证明 mimic→hit 入口没有被结构封死，但概率仍极低；legal landing/recovery
+  仍无证据，不能称 hit 或 landing 已学会。
 
 ### 已直接修复
 
@@ -81,6 +85,10 @@
 - [x] 修正 policy 视频工作流：`play.py` 复用训练的 dynamic-ready resolver/loader，显式
   `video_dir` 只能创建 fresh no-clobber 目录。Pod 已用真实 Phase-4 motion/artifact/hold receipt
   安装 binding=`1a6885f58af0ccd7a9d57c0b45949c6a408e686098c7d6d6dd271c2797330772`。
+- [x] `dad61048..00814042` 将同一四项 paddle prior 从 playback 全段固定 `4x` 改成接触窗连续
+  `1x→4x→1x`，Isaac 和 Mu 共用纯 tensor 核与各自同义 TTC；不增 observation、Stage 或 Gate。
+  Pod exact `00814042`：共享/Isaac `368 passed, 26 skipped`，Mu
+  `214 passed, 6 skipped`。数学与接线已闭合；学习收益仍须 fresh 小预算 canary，不能移签给旧 run。
 
 ### 当前唯一执行队列
 
@@ -98,6 +106,9 @@
 - [ ] GPU1 `model_300.diagnostic_nonresumable.pt` 出现后立即导出固定视角
   reset/pre-teacher/contact-window/recovery 视频；使用已实证的同一 dynamic-ready binding 和 fresh
   影片目录，并将画面与同窗 balance/mimic/launch/contact 分母对齐。
+- [ ] 任一 GPU 自然形成可用窗口后，从 `00814042` 或其文档后继的 clean exact source 发一条 fresh
+  contact-prior canary；与旧配方只比较 matched update/window 的接触窗 p/v/face 误差、R03/contact
+  和 episode/safety 分母，不用 total return 裁决。
 
 ### 结构减法（不阻塞已启动 long）
 
@@ -106,6 +117,9 @@
 - 下一性能刀只针对 profile 已显示的 D05/reset/command 重复数据搬运：跨 owner 事实保留，
   same-writer 回声、per-env Python 转录和每步 D2H 下沉。monolith 拆分按真正 owner 边界渐进落地，
   不做一次性重写，也不用新 Gate 补偿臃肿结构。
+- `hope_commands.py` 当前约 `32k` 行，已经成为审计和改动放大器。新 FullMDP 数学/状态所有权不得再
+  塞回该文件；优先把纯 paddle/task 数学、D05 construction、metric materialization 按真实 owner
+  抽成小模块。每次只迁移一个已有调用面并做等价对拍，不另造 adapter/gate 层。
 - 性能减法保留 reason/counter/safety/durable truth，但不用“安全”为名保留同写者仪式或重复身份验证。
 - dead Racket observation authority 删除后的 exact Pod 聚焦回归为 `171 passed`；历史
   semantic-surface fixture 的父提交假红已用显式 13-symbol source-evolution map 修复，未改 production digest。
