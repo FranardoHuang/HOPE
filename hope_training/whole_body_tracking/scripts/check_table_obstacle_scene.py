@@ -2367,17 +2367,17 @@ def _nominal_teacher_physical_contract(
         try:
             with np.load(motion_path, allow_pickle=False) as motion:
                 teacher_q = _finite_tuple(
-                    np.asarray(motion["joint_pos"])[0],
+                    np.asarray(motion["joint_pos"])[0].tolist(),
                     31,
                     "physical-only Phase4 teacher q",
                 )
                 teacher_root = _finite_tuple(
-                    np.asarray(motion["body_pos_w"])[0, 0],
+                    np.asarray(motion["body_pos_w"])[0, 0].tolist(),
                     3,
                     "physical-only Phase4 teacher root",
                 )
                 teacher_quat = _finite_tuple(
-                    np.asarray(motion["body_quat_w"])[0, 0],
+                    np.asarray(motion["body_quat_w"])[0, 0].tolist(),
                     4,
                     "physical-only Phase4 teacher quaternion",
                 )
