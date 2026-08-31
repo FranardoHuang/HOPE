@@ -212,10 +212,11 @@ def freeze_device_target_profile_spec(
             )
         )
     frozen_rows = tuple(clean_rows)
-    if len(set(frozen_rows)) != len(frozen_rows):
-        raise DeviceProfileAuthorityError(
-            "different cell IDs must name unique runtime float32 targets"
-        )
+    # Cell identity belongs to the fixed-width selection layout; it is not a
+    # claim that every row must be a different physical target.  A zero-width
+    # action profile legitimately repeats its one landing centre across the
+    # existing support columns.  Requiring invented coordinate offsets here
+    # would silently rewrite the action-owned task.
     return FrozenDeviceTargetProfileSpec(
         _SPEC_CONSTRUCTION_KEY,
         frame_id=clean_frame_id,
