@@ -5435,3 +5435,15 @@
   final source、rate与fresh仍待验。它已由本页顶部同日“exact rate闭合并双fresh替换”条目取代；当前数字与
   authority只认[课程实验§10](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)和
   [热路实验§16](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)。
+
+## 2026-08-31 — R36 `model_600` 固定机位关闭“早期不动”歧义
+
+- GPU1 fresh Isaac 产出 `model_600.diagnostic_nonresumable.pt`；同合同 400-step 固定机位
+  回放 RC=0，影片 SHA256=`0dd2b23d460fa1fdaa88d7d9e33d2a328bf1bc1f141f80e703c66c9b5b08b7a8`，
+  Pod 证据目录=`/workspace/franco/evidence/r36-policy-u600-fixedcam-6Ao1oR`。
+- 画面显示策略不是全程静止，但没有形成老师反手挡/可信接触窗，后段向桌面
+  倾覆且无恢复。update 700 的批量读数却是 mean episode=`500 tick`、timeout=`99.8%`、
+  R03/contact=`0/0`；因此结论是“整体 balance 已形成、单轨迹仍脆弱、mimic→hit 未形成”，
+  不是“什么都不动就是已学对”。Build4 仍因 Build1 `model_21800` actor 热启动而不是 fresh
+  早期对照。这提高已验证 contact-window prior treatment 的发射优先级；不改 task/球公式，
+  不新增 Gate，现役三条训练不热补。

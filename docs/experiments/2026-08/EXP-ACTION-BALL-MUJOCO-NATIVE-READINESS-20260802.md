@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`r36-v5-dual-learning-live / model300-visual-closed / contact-prior-candidate-validated / diagnostic_unauthorized`
+- 状态：`r36-v5-dual-learning-live / model600-visual-negative / contact-prior-candidate-validated / diagnostic_unauthorized`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -116,6 +116,14 @@ balance 的合理策略；接近 horizon 且 due/observed 充分后仍零 R03/co
 Build4 不能裁决该问题：`origin/build_4@324e60d1` 的 manifest/YAML 明确要求从 Build1
 `model_21800.pt` 位级载入8个 actor tensor，再重置 sigma/critic/optimizer。当前仓库与 Pod 没有原始
 Build1 model0/早期 checkpoint 序列，所以不存在公平的“Build4 fresh 早期会不会动”证据。
+
+GPU1 又从同一 fresh 谱系产出 `model_600`。同合同的 400-step 固定机位回放 RC=0，
+影片 SHA256=`0dd2b23d460fa1fdaa88d7d9e33d2a328bf1bc1f141f80e703c66c9b5b08b7a8`，证据目录为
+`/workspace/franco/evidence/r36-policy-u600-fixedcam-6Ao1oR`。图像证据显示它不是全程静止，但仍没有
+清晰的老师反手挡或可信接触窗，后段向桌面倾覆且没有恢复。同时 update 700 的批量窗
+mean episode=`500 tick`、timeout=`99.8%`、physical observed=`55`、R03/contact=`0/0`。因此正确结论是
+“批量 balance 已形成，但单轨迹稳定性仍脆弱且 mimic→hit 未形成”，而不是“早期静止已经正确”。
+这项证据提高接触窗 treatment 优先级，不改 task/球公式，不新增 Gate。
 
 `dad61048..00814042` 因此直接修已有 reward 的时间分布，而不新增 gate：ready/preparation/recovery
 以及远离接触的 playback 保留 `1x`，真实 playback 内按 raised-cosine 在 `|TTC|<=0.12 s` 连续增强，

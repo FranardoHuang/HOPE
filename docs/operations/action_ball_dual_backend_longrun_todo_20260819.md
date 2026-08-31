@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`r36-v5-dual-learning-live / model300-visual-closed / contact-prior-candidate-validated / diagnostic_unauthorized`
+> 状态：`r36-v5-dual-learning-live / model600-visual-negative / contact-prior-candidate-validated / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-31
@@ -61,6 +61,13 @@
   `0.5304 m / 0.3731 m/s / 0.3087 rad / 0.2812 rad`。它相对 update 0--299 的
   `119→147 tick` 已明显学会更多 balance；但该臂与 GPU0 同 seed，且 update 0--499 的学习账逐窗相同，
   所以它是实现等价/耐心对照，不是独立 seed 的科学复现。
+- GPU1 到 update 700 的单轮 mean episode 已到 `500 tick`，`99.8%` 是 timeout，
+  physical observed=`55`，R03/contact=`0/0`。`model_600` 的同合同 400-step 固定机位回放
+  RC=0，影片 SHA256=`0dd2b23d460fa1fdaa88d7d9e33d2a328bf1bc1f141f80e703c66c9b5b08b7a8`，
+  Pod 证据目录为 `/workspace/franco/evidence/r36-policy-u600-fixedcam-6Ao1oR`。画面前段不是
+  完全静止，但没有形成老师反手挡的接触窗动作，后段明显向桌面倾覆且无恢复。
+  单 env 回放不代签 512-env 分布；二者合读证明批量 balance 已形成、轨迹稳定性仍脆弱，
+  mimic→hit 负例更强，不支持继续用“太早”解释。
 - GPU2 Mu 的 update 1879--1978 持续 finite；该 100 轮 episode 平均 `369.536 tick`，
   launch/R03/raw/selected/crossing=`4,938/4,890/3,283/465/464`，selected/launch 约 `9.42%`，
   profiler-off wall p50/p90=`5.902/6.336 s`。hit 入口继续真实形成；但 legal landing/recovery
@@ -127,6 +134,9 @@
   画面显示策略不是出生即倒，也有周期性动作与存活/重置；但没有形成清晰的老师反手挡接触窗动作或可信
   击球，和同窗 R03/contact=`0/0`一致。确定性 teacher 视频仍证明中心题的球/拍心/contact target 对齐，
   因此下一步修接触窗学习信用，不再次改 task/球公式。
+- [x] GPU1 `model_600.diagnostic_nonresumable.pt` 已用同一固定机位和 dynamic-ready 绑定回放。
+  它排除“policy 全程不动”，但直接暴露了无清晰老师挥拍、单轨迹向桌面倾覆且无恢复；
+  与 update 700 的 512-env timeout 分布并列记录，不用一个视频代签总体成功率。
 - [ ] 任一 GPU 自然形成可用窗口后，从 `00814042` 或其文档后继的 clean exact source 发一条 fresh
   contact-prior canary；与旧配方只比较 matched update/window 的接触窗 p/v/face 误差、R03/contact
   和 episode/safety 分母，不用 total return 裁决。现有 GPU0/GPU1/GPU2 都是有用的自然学习对照，

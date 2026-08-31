@@ -61,6 +61,12 @@ GPU1 update 412--511 已推进到 `347.648/4,000/0/0`，但两臂同 seed 且 up
 误差持续改善时才视作 balance 暂态；接近 horizon 后仍零 R03/contact 继续按成熟负例处理。
 Build4 从 Build1 `model_21800` actor 热启动，不能冒充 fresh 早期对照。G05 状态不变。
 
+GPU1 `model_600` 的同合同 400-step 固定机位回放现已 RC=0，影片 SHA256=
+`0dd2b23d460fa1fdaa88d7d9e33d2a328bf1bc1f141f80e703c66c9b5b08b7a8`。画面显示不是纯静止，但没有
+清晰老师反手挡，后段向桌面倾覆且无恢复；同时 update 700 的 512-env mean episode=`500 tick`、
+timeout=`99.8%`、R03/contact=`0/0`。这证明批量 balance 形成但轨迹仍脆弱，mimic→hit 依然是
+成熟负例；不增视觉 Gate，下一学习结论由已验证的接触窗 treatment 与 matched 分母裁决。
+
 ## 2026-08-30 R36 当前 Isaac 学习入口（仍 `Partial`）
 
 R35 Isaac 的最终冻结窗已给出可信负例：survival/balance 基本形成，`4,951` 次 physical launch 后仍为
