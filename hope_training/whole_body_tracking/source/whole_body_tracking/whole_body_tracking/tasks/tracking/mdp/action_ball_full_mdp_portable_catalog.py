@@ -69,25 +69,25 @@ ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND = (
 ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT = 1
 ACTION_BALL_FULL_MDP_FRESH_ACTION_SLOT = 0
 PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH = (
-    "assets/motions/action_ball_full_mdp_n1_take061_optitrack_20260830/"
+    "assets/motions/action_ball_full_mdp_n1_take061_teacher_center_v3_20260831/"
     "take061_slow_block_phase4_v1.action_ball.v3.json"
 )
 PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256 = (
-    "0749383d9baa1d23b2ee53cd297ec585f3c5d575718f1794985031e022c3b5f7"
+    "20a188d9416d0af63fbe04e61dcb98e3f0aa239215e57028e384185afdfab62a"
 )
 PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
-    "0749383d9baa1d23b2ee53cd297ec585f3c5d575718f1794985031e022c3b5f7"
+    "20a188d9416d0af63fbe04e61dcb98e3f0aa239215e57028e384185afdfab62a"
 )
 PINNED_BALL_PHYSICS_RELATIVE_PATH = "configs/ball_physics_optitrack_20260730.yaml"
 PINNED_BALL_PHYSICS_FILE_SHA256 = (
     "3afb1c9a00f975d924169503d7dafab92ea6c0b96263336e27edcd1d6257ea14"
 )
 PINNED_PROFILE_PINS_RELATIVE_PATH = (
-    "assets/motions/action_ball_full_mdp_n1_take061_optitrack_20260830/"
+    "assets/motions/action_ball_full_mdp_n1_take061_teacher_center_v3_20260831/"
     "take061_slow_block_phase4_v1.profile_pins.v1.json"
 )
 PINNED_PROFILE_PINS_FILE_SHA256 = (
-    "bf0bb03054d6342ef22ae591b9ff067a21862e7f8a7b62cfaf38bb53b5c167ef"
+    "b4dcc70e1d8464934612f4bc1c8d19b408c3a71bf49db1e25de9cb11944368a2"
 )
 PINNED_SOLVER_MATH_MODULE_NAMES = (
     "continuous_questions.py",
@@ -102,6 +102,11 @@ FRESH_POLICY_STEP_S = 0.02
 FRESH_FIRST_REVEAL_TICK = 48
 FRESH_RECOVERY_END_OFFSET_TICKS = 77
 FRESH_HIDDEN_GAP_TICKS = 2
+# The executable clock is float32 and can close one tick later than the
+# materialized Python-float duration at an exact integer boundary.  Keep that
+# representation guard in the cadence owner instead of hiding it in a test or
+# adding a runtime admission rule.
+FRESH_FLOAT32_CLOSE_GUARD_TICKS = 1
 FRESH_REFERENCE_DUE_COUNT = 1
 FRESH_REFERENCE_DUE_TICKS = (48,)
 FRESH_EPISODE_HORIZON_TICKS = 500
@@ -215,14 +220,15 @@ def derive_portable_fresh_cadence(
         maximum_close
         + FRESH_RECOVERY_END_OFFSET_TICKS
         + FRESH_HIDDEN_GAP_TICKS
+        + FRESH_FLOAT32_CLOSE_GUARD_TICKS
     )
     due_ticks = tuple(
         FRESH_FIRST_REVEAL_TICK + cadence * ordinal
         for ordinal in range(FRESH_REFERENCE_DUE_COUNT)
     )
     if (
-        maximum_close != 309
-        or cadence != 388
+        maximum_close != 307
+        or cadence != 387
         or due_ticks != FRESH_REFERENCE_DUE_TICKS
         # The one advertised N1 opportunity and its retirement boundary must
         # both fit the episode.  Multi-shot cadence is not silently inferred.
@@ -236,6 +242,19 @@ def derive_portable_fresh_cadence(
         reference_due_ticks=due_ticks,
         episode_horizon_ticks=FRESH_EPISODE_HORIZON_TICKS,
     )
+
+
+def load_pinned_ball_physics_source_path() -> str:
+    """Return the already-validated physics source for numeric consumers.
+
+    FullMDP construction must not silently fall back to whichever venue YAML
+    an ambient process happens to expose.  Reusing the catalog validation
+    makes the selected asset and the executable contact model one dependency.
+    """
+
+    _load_catalog_source()
+    repo_root = Path(__file__).resolve().parents[8]
+    return str((repo_root / PINNED_BALL_PHYSICS_RELATIVE_PATH).resolve())
 
 
 def _load_runtime_plant_contract(repo_root: Path):
@@ -591,6 +610,7 @@ __all__ = [
     "FRESH_FIRST_REVEAL_TICK",
     "FRESH_RECOVERY_END_OFFSET_TICKS",
     "FRESH_HIDDEN_GAP_TICKS",
+    "FRESH_FLOAT32_CLOSE_GUARD_TICKS",
     "FRESH_REFERENCE_DUE_COUNT",
     "FRESH_REFERENCE_DUE_TICKS",
     "FRESH_EPISODE_HORIZON_TICKS",
@@ -600,6 +620,7 @@ __all__ = [
     "PortableActionCenterTable",
     "PortableFreshCadence",
     "derive_portable_fresh_cadence",
+    "load_pinned_ball_physics_source_path",
     "load_action_ball_full_mdp_diagnostic_catalog_table",
     "load_portable_action_center_table",
 ]

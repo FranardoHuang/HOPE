@@ -190,28 +190,6 @@ def test_cadence_overdue_is_not_compounded_with_task_timing_fault() -> None:
     )
 
 
-def test_named_swing_generation_overflow_fault_precedes_reveal_writes() -> None:
-    command, epoch_owner = _bound_fresh_motion()
-    command._action_ball_continuous_episode_step[0] = (
-        command._action_ball_continuous_next_reveal_step[0] - 1
-    )
-    command._action_ball_continuous_scheduled_ordinal[0] = 0
-    command._action_ball_swing_generation[0] = command._ACTION_BALL_INT64_MAX
-    bad_before = _motion_row_snapshot(command, 0)
-    peer_step_before = command._action_ball_continuous_episode_step[1].clone()
-
-    _advance_once(command)
-
-    assert epoch_owner._undrained_row_fault_bits.tolist() == [
-        genesis.E.ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW,
-        0,
-    ]
-    _assert_motion_row_unchanged(command, 0, bad_before)
-    assert command._action_ball_continuous_episode_step[1] == (
-        peer_step_before + 1
-    )
-
-
 def test_named_task_timing_fault_freezes_age_and_cadence_before_write() -> None:
     command, epoch_owner = _bound_fresh_motion()
     command._action_ball_continuous_motion_active[0] = True

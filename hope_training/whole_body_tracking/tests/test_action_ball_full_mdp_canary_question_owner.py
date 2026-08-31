@@ -235,7 +235,7 @@ def _direct_projection(
         episode_tick=torch.full((k,), 2, dtype=torch.int64),
         reveal_tick=torch.full((k,), 2, dtype=torch.int64),
         deadline_tick=torch.full((k,), 4, dtype=torch.int64),
-        next_reveal_tick=torch.full((k,), 295, dtype=torch.int64),
+        next_reveal_tick=torch.full((k,), 435, dtype=torch.int64),
         action_slot=(
             torch.zeros(k, dtype=torch.int64)
             if action_slot is None
@@ -300,7 +300,12 @@ def _direct_projection(
 
 
 def test_recurring_question_no_move_goal_is_the_installed_physical_spawn():
-    frozen_xy = torch.tensor([[0.081, -0.037]], dtype=torch.float32)
+    center = (
+        timing_test.profile_mod._portable_catalog
+        .load_portable_action_center_table().fresh_action
+        .base_spawn_center_w_xy_m
+    )
+    frozen_xy = torch.tensor([center], dtype=torch.float32)
     projection, harness, _cadence = _direct_projection(
         num_envs=1,
         source_rows=(0,),
@@ -321,7 +326,7 @@ def test_recurring_question_no_move_goal_is_the_installed_physical_spawn():
 
 def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypatch):
     captured = {}
-    solve = fixed_question.solve_fixed_action_question_device
+    solve = fixed_question.construct_reference_center_question_device
 
     def capture(**kwargs):
         result = solve(**kwargs)
@@ -330,7 +335,7 @@ def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypat
         return result
 
     monkeypatch.setattr(
-        fixed_question, "solve_fixed_action_question_device", capture
+        fixed_question, "construct_reference_center_question_device", capture
     )
     projection, harness, _cadence = _direct_projection(
         num_envs=1,
@@ -340,11 +345,11 @@ def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypat
     result = captured["result"]
     torch.testing.assert_close(
         result.racket_task_f32[result.admitted, 21:24],
-        torch.tensor((-4.0, 2.0, 4.0), dtype=torch.float32).expand(
-            int(result.admitted.sum()), -1
-        ),
+        captured["kwargs"]["incoming_linear_velocity_world_mps"][
+            result.admitted
+        ],
         rtol=0.0,
-        atol=2.0e-6,
+        atol=0.0,
     )
     bank = projection.round_bank
     torch.testing.assert_close(
@@ -437,30 +442,25 @@ def test_recurring_question_adapter_consumes_one_shared_numeric_result(monkeypat
     assert attempted == admitted + rejected
     assert torch.equal(result.admitted, result.construction_reason.eq(-1))
 
-    # Landing aim and incoming speed are numerical inputs, not decorative
-    # metadata.  Small in-domain mutations must move an admitted task.
+    # This constructor owns only the sealed teacher-compatible centre.  A
+    # changed aim or incoming ball must leave this exact lane and be rejected;
+    # future non-zero curriculum support is solved by the general solver.
     changed_aim = dict(original_kwargs)
     changed_aim["landing_aim_xy_m"] = (
         original_kwargs["landing_aim_xy_m"]
         + torch.tensor((0.04, -0.03), dtype=torch.float32)
     ).contiguous()
     aim_result = solve(**changed_aim)
-    both = result.admitted & aim_result.admitted
-    assert bool(both.any())
-    assert not torch.equal(
-        result.racket_task_f32[both], aim_result.racket_task_f32[both]
-    )
+    assert bool((result.admitted & ~aim_result.admitted).any())
+    assert not torch.equal(result.solver_residual_m, aim_result.solver_residual_m)
 
     changed_speed = dict(original_kwargs)
     changed_speed["incoming_linear_velocity_world_mps"] = (
         original_kwargs["incoming_linear_velocity_world_mps"] * 1.02
     ).contiguous()
     speed_result = solve(**changed_speed)
-    both = result.admitted & speed_result.admitted
-    assert bool(both.any())
-    assert not torch.equal(
-        result.racket_task_f32[both], speed_result.racket_task_f32[both]
-    )
+    assert bool((result.admitted & ~speed_result.admitted).any())
+    assert not torch.equal(result.solver_residual_m, speed_result.solver_residual_m)
 
 
 def test_physical_launch_horizon_is_reveal_relative_and_keeps_current_n1_bytes():
@@ -533,14 +533,14 @@ def test_shared_fixed_question_cuda_fixed_tape_is_deterministic_and_causal(
     """Exercise the complete shared numerical owner on one real CUDA tape."""
 
     captured = {}
-    solve = fixed_question.solve_fixed_action_question_device
+    solve = fixed_question.construct_reference_center_question_device
 
     def capture(**kwargs):
         captured["kwargs"] = kwargs
         return solve(**kwargs)
 
     monkeypatch.setattr(
-        fixed_question, "solve_fixed_action_question_device", capture
+        fixed_question, "construct_reference_center_question_device", capture
     )
     _direct_projection(
         num_envs=1,
@@ -575,22 +575,20 @@ def test_shared_fixed_question_cuda_fixed_tape_is_deterministic_and_causal(
         + torch.tensor((0.04, -0.03), device="cuda", dtype=torch.float32)
     ).contiguous()
     aim_result = solve(**changed_aim)
-    both = first.admitted & aim_result.admitted
-    assert bool(both.any())
     assert not torch.equal(
-        first.racket_task_f32[both], aim_result.racket_task_f32[both]
+        first.solver_residual_m, aim_result.solver_residual_m
     )
+    assert bool((first.admitted & ~aim_result.admitted).any())
 
     changed_speed = dict(cuda_kwargs)
     changed_speed["incoming_linear_velocity_world_mps"] = (
         cuda_kwargs["incoming_linear_velocity_world_mps"] * 1.02
     ).contiguous()
     speed_result = solve(**changed_speed)
-    both = first.admitted & speed_result.admitted
-    assert bool(both.any())
     assert not torch.equal(
-        first.racket_task_f32[both], speed_result.racket_task_f32[both]
+        first.solver_residual_m, speed_result.solver_residual_m
     )
+    assert bool((first.admitted & ~speed_result.admitted).any())
 
     invalid = dict(cuda_kwargs)
     invalid["landing_aim_xy_m"] = cuda_kwargs["landing_aim_xy_m"].clone()
@@ -871,7 +869,7 @@ def test_mask_first_numeric_owners_see_only_active_cells(monkeypatch, mask_value
     numeric_cells = int(mask.sum()) * 3 * 3
     expected_batch = [] if numeric_cells == 0 else [numeric_cells]
     assert calls == {
-        "solver": expected_batch,
+        "solver": [],
         "exact": expected_batch,
         "physical": expected_batch,
     }

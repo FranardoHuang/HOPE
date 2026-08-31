@@ -613,7 +613,7 @@ def test_fresh_a_c_episode_horizon_carries_one_slow_shot_through_retirement():
     accept_reveal_ticks = (first_reveal_tick,)
     shot_retirement_tick = accept_reveal_ticks[-1] + cadence_ticks
 
-    assert cadence_ticks == 388
+    assert cadence_ticks == 387
     assert accept_reveal_ticks == (48,)
     assert shot_retirement_tick == 436
 

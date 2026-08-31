@@ -97,13 +97,11 @@ class RecurringD05InternalQuestionBundle:
         "_contact_position_env_m",
         "_reference_quat",
         "_reference_omega",
+        "_reference_site_velocity",
         "_reference_site_speed",
         "_reference_normal",
         "_base_yaw_quat",
         "_contact_reach_offset_xy",
-        "_prototype_direction",
-        "_prototype_speed_min",
-        "_prototype_speed_max",
         "_policy_step_s",
         "_episode_length_s",
         "_venue",
@@ -127,13 +125,11 @@ class RecurringD05InternalQuestionBundle:
         contact_position_env_m: torch.Tensor,
         reference_quat: torch.Tensor,
         reference_omega: torch.Tensor,
+        reference_site_velocity: torch.Tensor,
         reference_site_speed: torch.Tensor,
         reference_normal: torch.Tensor,
         base_yaw_quat: torch.Tensor,
         contact_reach_offset_xy: torch.Tensor,
-        prototype_direction: torch.Tensor,
-        prototype_speed_min: torch.Tensor,
-        prototype_speed_max: torch.Tensor,
         policy_step_s: float,
         episode_length_s: float,
         venue: object,
@@ -161,13 +157,11 @@ class RecurringD05InternalQuestionBundle:
         self._contact_position_env_m = contact_position_env_m
         self._reference_quat = reference_quat
         self._reference_omega = reference_omega
+        self._reference_site_velocity = reference_site_velocity
         self._reference_site_speed = reference_site_speed
         self._reference_normal = reference_normal
         self._base_yaw_quat = base_yaw_quat
         self._contact_reach_offset_xy = contact_reach_offset_xy
-        self._prototype_direction = prototype_direction
-        self._prototype_speed_min = prototype_speed_min
-        self._prototype_speed_max = prototype_speed_max
         self._policy_step_s = policy_step_s
         self._episode_length_s = episode_length_s
         self._venue = venue
@@ -286,6 +280,7 @@ def _compose_recurring_question_projection(
     contact = gather(bundle._contact_position_env_m)
     reference_quat = gather(bundle._reference_quat)
     reference_omega = gather(bundle._reference_omega)
+    reference_site_velocity = gather(bundle._reference_site_velocity)
     reference_site_speed = gather(bundle._reference_site_speed)
     reference_normal = gather(bundle._reference_normal)
     base_quat = gather(bundle._base_yaw_quat)
@@ -390,10 +385,12 @@ def _compose_recurring_question_projection(
     reference_omega = _quat_rotate_wxyz(
         delta_yaw_quat, reference_omega
     ).contiguous()
+    reference_site_velocity = _quat_rotate_wxyz(
+        delta_yaw_quat, reference_site_velocity
+    ).contiguous()
     reference_normal = _quat_rotate_wxyz(
         delta_yaw_quat, reference_normal
     ).contiguous()
-    base_quat = frozen_yaw_quat
     reach_offset = reach_offset_world[:, :2].contiguous()
 
     # This is the single dynamic compaction boundary.  CUDA ``nonzero`` may
@@ -434,13 +431,12 @@ def _compose_recurring_question_projection(
         def compact(value: torch.Tensor) -> torch.Tensor:
             return torch.index_select(value, 0, active_index).contiguous()
 
-        active_slots = compact(slots)
         active_contact = compact(contact)
         active_reference_quat = compact(reference_quat)
         active_reference_omega = compact(reference_omega)
+        active_reference_site_velocity = compact(reference_site_velocity)
         active_reference_site_speed = compact(reference_site_speed)
         active_reference_normal = compact(reference_normal)
-        active_base_quat = compact(base_quat)
         active_reach_offset = compact(reach_offset)
         active_teacher_rate_min = compact(teacher_rate_min)
         active_teacher_rate_max = compact(teacher_rate_max)
@@ -477,15 +473,11 @@ def _compose_recurring_question_projection(
         normal_cells = _expand_round_cells(
             active_reference_normal, rounds, support
         )
-        base_cells = _expand_round_cells(active_base_quat, rounds, support)
         sign_cells = _expand_round_cells(active_mount_sign, rounds, support)
         base_goal = _expand_round_cells(
             active_contact[:, :2] - active_reach_offset, rounds, support
         )
-        fixed = fixed_question.solve_fixed_action_question_device(
-            action_slot=_flat_round_cells(
-                _expand_round_cells(active_slots, rounds, support)
-            ),
+        fixed = fixed_question.construct_reference_center_question_device(
             candidate_identity=_flat_round_cells(active_candidate_identity),
             contact_position_env_m=_flat_round_cells(contact_cells),
             incoming_linear_velocity_world_mps=(
@@ -496,12 +488,16 @@ def _compose_recurring_question_projection(
             ),
             landing_aim_xy_m=_flat_round_cells(target),
             reference_raw_a_normal_w=_flat_round_cells(normal_cells),
-            base_yaw_quat_wxyz=_flat_round_cells(base_cells),
             reference_racket_quat_wxyz=_flat_round_cells(
                 _expand_round_cells(active_reference_quat, rounds, support)
             ),
             reference_racket_angular_velocity_w_radps=_flat_round_cells(
                 _expand_round_cells(active_reference_omega, rounds, support)
+            ),
+            reference_racket_site_velocity_w_mps=_flat_round_cells(
+                _expand_round_cells(
+                    active_reference_site_velocity, rounds, support
+                )
             ),
             reference_racket_site_speed_mps=_flat_round_cells(
                 _expand_round_cells(active_reference_site_speed, rounds, support)
@@ -544,10 +540,6 @@ def _compose_recurring_question_projection(
                     support,
                 )
             ),
-            prototype_direction_b=bundle._prototype_direction,
-            prototype_speed_min_mps=bundle._prototype_speed_min,
-            prototype_speed_max_mps=bundle._prototype_speed_max,
-            prototype_face_sign=timing.mount_normal_sign,
             venue_params=bundle._venue,
             question_config=bundle._question_cfg,
             physical_params=bundle._physical_params,
@@ -836,24 +828,6 @@ def _base_yaw_quaternion(base_quat: torch.Tensor) -> torch.Tensor:
     ).contiguous()
 
 
-def _float32_ceil_device(value: torch.Tensor) -> torch.Tensor:
-    rounded = value.to(dtype=torch.float32)
-    return torch.where(
-        rounded.to(torch.float64) < value,
-        torch.nextafter(rounded, torch.full_like(rounded, float("inf"))),
-        rounded,
-    ).contiguous()
-
-
-def _float32_floor_device(value: torch.Tensor) -> torch.Tensor:
-    rounded = value.to(dtype=torch.float32)
-    return torch.where(
-        rounded.to(torch.float64) > value,
-        torch.nextafter(rounded, torch.full_like(rounded, float("-inf"))),
-        rounded,
-    ).contiguous()
-
-
 def construct_recurring_d05_internal_question_bundle(
     *,
     profile_owner: _profile.DeviceProfileAuthorityOwner,
@@ -1016,17 +990,6 @@ def construct_recurring_d05_internal_question_bundle(
     action_count = static.reference_racket_site_position_w_m.shape[0]
     if action_count < 1 or timing.teacher_rate_min.shape != (action_count,):
         raise CanaryQuestionError("recurring cold table row count differs")
-    face_offsets = torch.tensor(
-        [
-            racket_contact_geometry.face_center_from_site_local(int(sign))
-            for sign in timing.mount_normal_sign.detach().cpu().tolist()
-        ],
-        dtype=torch.float32,
-        device=device,
-    )
-    face_offset_w = _quat_rotate_wxyz(
-        static.reference_racket_quat_wxyz, face_offsets
-    )
     ball_offsets = torch.tensor(
         [
             racket_contact_geometry.ball_center_from_site_local(int(sign))
@@ -1045,45 +1008,29 @@ def construct_recurring_d05_internal_question_bundle(
     contact = (
         static.reference_racket_site_position_w_m + ball_offset_w
     ).contiguous()
-    face_velocity = static.reference_racket_site_velocity_w_mps + torch.cross(
-        static.reference_racket_angular_velocity_w_radps,
-        face_offset_w,
-        dim=1,
-    )
     # ExactFace's coupled rate equation consumes the native racket *site*
-    # speed separately from the rigid-point face-centre search envelope.
+    # speed.  The zero-width centre publishes that teacher directly rather
+    # than asking a second inverse solve for a different paddle answer.
     site_speed64 = torch.linalg.vector_norm(
         static.reference_racket_site_velocity_w_mps.to(torch.float64), dim=1
     )
-    face_speed64 = torch.linalg.vector_norm(face_velocity.to(torch.float64), dim=1)
     if not bool(
         (
             torch.isfinite(site_speed64)
             & site_speed64.gt(0.0)
-            & torch.isfinite(face_speed64)
-            & face_speed64.gt(0.0)
         ).all().item()
     ):
         raise CanaryQuestionError(
-            "Racket recurring reference site/face-centre speed is invalid"
+            "Racket recurring reference site speed is invalid"
         )
     base_yaw = _base_yaw_quaternion(static.reference_base_root_quat_wxyz)
-    inverse = base_yaw.clone()
-    inverse[:, 1:].neg_()
-    direction = (
-        _quat_rotate_wxyz(inverse, face_velocity).to(torch.float64)
-        / face_speed64.unsqueeze(1)
-    ).to(torch.float32).contiguous()
-    # Reference-direction search band only.  Uniform teacher time scaling
-    # scales ``v_site`` and ``omega`` together, so the exact rigid-point
-    # face-centre vector scales as a whole.  ExactFace later remains the sole
-    # authority for teacher-rate admission after the face normal changes.
-    speed_min = _float32_ceil_device(
-        timing.teacher_rate_min.to(torch.float64) * face_speed64
+    raw_local_normal = torch.zeros(
+        (action_count, 3), dtype=torch.float32, device=device
     )
-    speed_max = _float32_floor_device(
-        timing.teacher_rate_max.to(torch.float64) * face_speed64
-    )
+    raw_local_normal[:, 1] = 1.0
+    reference_normal = _quat_rotate_wxyz(
+        static.reference_racket_quat_wxyz, raw_local_normal
+    ).contiguous()
     cfg = getattr(racket_owner, "cfg", None)
     step_s = getattr(env, "step_dt", None)
     max_episode_length = getattr(env, "max_episode_length", None)
@@ -1092,7 +1039,9 @@ def construct_recurring_d05_internal_question_bundle(
         or type(max_episode_length) is not int
     ):
         raise CanaryQuestionError("recurring environment chronology differs")
-    venue = virtual_ball.load_venue_params()
+    venue = virtual_ball.load_venue_params(
+        _timing._portable_catalog.load_pinned_ball_physics_source_path()
+    )
     question_cfg = continuous_questions.ContinuousQuestionCfg(
         fixed_direction=True,
         n_iters=int(cfg.cq_n_iters),
@@ -1110,15 +1059,15 @@ def construct_recurring_d05_internal_question_bundle(
         contact_position_env_m=contact,
         reference_quat=static.reference_racket_quat_wxyz,
         reference_omega=static.reference_racket_angular_velocity_w_radps,
+        reference_site_velocity=(
+            static.reference_racket_site_velocity_w_mps
+        ),
         reference_site_speed=site_speed64.to(torch.float32).contiguous(),
-        reference_normal=static.reference_raw_face_normal_w,
+        reference_normal=reference_normal,
         base_yaw_quat=base_yaw,
         contact_reach_offset_xy=(
             static.reference_reach_offset_xy_m + ball_offset_w[:, :2]
         ).contiguous(),
-        prototype_direction=direction,
-        prototype_speed_min=speed_min,
-        prototype_speed_max=speed_max,
         policy_step_s=step_s,
         episode_length_s=step_s * max_episode_length,
         venue=venue,

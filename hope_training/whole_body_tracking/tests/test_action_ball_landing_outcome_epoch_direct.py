@@ -1093,6 +1093,7 @@ def _launch_selected_reset_clock_tape_into_real_r06():
     assert record is not None
     record.current_task_slot.zero_()
     record.phase[:, 0].fill_(E.PHASE_REVEAL_COMMITTED)
+    record.physical_launch_requested[:, 0].fill_(True)
     record.publication_ordinal[:, 0].copy_(publication)
     for field in E.fields(E.ActionEpochShotKey):
         getattr(record.identity.shot_key, field.name)[:, 0].copy_(

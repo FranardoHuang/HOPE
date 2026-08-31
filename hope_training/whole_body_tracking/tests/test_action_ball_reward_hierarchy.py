@@ -336,8 +336,13 @@ def test_measured_long_axis_reward_supervises_wrist_twist_including_contact_pin(
     target = torch.tensor([[1.0, 0.0, 0.0]]).repeat(3, 1)
     monkeypatch.setattr(
         hope_rewards_mod,
-        "_stage1_aligned_clip_long_axis_target",
-        lambda _cmd: target,
+        "stage1_aligned_clip_racket_target_now",
+        lambda _cmd: (
+            torch.zeros((3, 3)),
+            torch.zeros((3, 3)),
+            torch.zeros((3, 3)),
+            target,
+        ),
     )
     env = _fake_env(racket_target=cmd)
     reward = hope_rewards_mod.motion_racket_long_axis_tracking_cauchy(

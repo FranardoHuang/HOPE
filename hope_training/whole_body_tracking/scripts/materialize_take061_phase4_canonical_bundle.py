@@ -440,8 +440,124 @@ def _ceil_to_policy_tick(seconds: float) -> float:
     return ticks * POLICY_STEP_S
 
 
+def _teacher_contact_continuation(
+    *,
+    grid_reference: Mapping[str, np.ndarray],
+    ball_w: np.ndarray,
+    incoming_w: np.ndarray,
+    aim_w_xy: np.ndarray,
+    mount_sign: int,
+    ball_physics: Path,
+) -> Mapping[str, Any]:
+    """Replay the published robot-FK teacher through the shared ball model.
+
+    A fixed-action centre is useful only when successful imitation naturally
+    opens the next learning objective.  The older materializer verified the
+    inverse solver's paddle answer but published a different robot-FK teacher;
+    position and speed happened to be close while the face differed enough to
+    send a perfect teacher hit off the side of the table.
+    """
+
+    previous = os.environ.get("HOPE_BALL_PHYSICS_YAML")
+    os.environ["HOPE_BALL_PHYSICS_YAML"] = str(ball_physics.resolve())
+    try:
+        import torch
+        import virtual_ball
+
+        contact = torch.tensor(ball_w[None, :], dtype=torch.float32)
+        incoming = torch.tensor(incoming_w[None, :], dtype=torch.float32)
+        spin = torch.zeros_like(incoming)
+        quat = np.asarray(grid_reference["racket_quat_wxyz"], dtype=np.float64)
+        omega = np.asarray(
+            grid_reference["racket_angular_velocity_w_radps"], dtype=np.float64
+        )
+        site_velocity = np.asarray(
+            grid_reference["site_velocity_w_mps"], dtype=np.float64
+        )
+        raw_normal = _quat_apply_wxyz(
+            quat,
+            np.asarray(racket_geometry.face_normal_local(1), dtype=np.float64),
+        )
+        raw_normal /= np.linalg.norm(raw_normal)
+        face_offset = _quat_apply_wxyz(
+            quat,
+            np.asarray(
+                racket_geometry.face_center_from_site_local(mount_sign),
+                dtype=np.float64,
+            ),
+        )
+        face_velocity = site_velocity + np.cross(omega, face_offset)
+        normal = torch.tensor(
+            raw_normal[None, :] * mount_sign, dtype=torch.float32
+        )
+        paddle_velocity = torch.tensor(
+            face_velocity[None, :], dtype=torch.float32
+        )
+        params = virtual_ball.load_venue_params()
+        outgoing_velocity, outgoing_spin = virtual_ball.predict_paddle_contact(
+            incoming, paddle_velocity, normal, spin, params
+        )
+        landing = virtual_ball.coarse_landing(
+            contact,
+            outgoing_velocity,
+            outgoing_spin,
+            params,
+            surface_z=0.76 + float(params.ball_radius),
+            net_x=1.87,
+            h=0.001,
+            n_steps=1500,
+        )
+        landing_xy = (
+            landing["land_xy"][0].detach().cpu().numpy().astype(np.float64)
+        )
+        landing_error = float(np.linalg.norm(landing_xy - aim_w_xy))
+        normal_speed = float(
+            -torch.sum((incoming - paddle_velocity) * normal, dim=1)[0].item()
+        )
+        net_z = float(landing["net_z"][0].item())
+        valid = (
+            bool(landing["land_valid"][0].item())
+            and bool(landing["net_valid"][0].item())
+            and net_z > 0.9125 + float(params.ball_radius)
+            and landing_error < 0.02
+            and 1.4 <= normal_speed <= 7.2
+        )
+        if not valid:
+            raise BundleError(
+                "robot-FK teacher does not naturally open legal landing: "
+                f"land_xy={landing_xy.tolist()} error_m={landing_error} "
+                f"net_z_m={net_z} normal_speed_mps={normal_speed} "
+                f"land_valid={bool(landing['land_valid'][0].item())} "
+                f"net_valid={bool(landing['net_valid'][0].item())}"
+            )
+        return {
+            "teacher_landing_w_xy_m": landing_xy.tolist(),
+            "teacher_landing_error_m": landing_error,
+            "teacher_net_crossing_z_m": net_z,
+            "teacher_contact_normal_speed_mps": normal_speed,
+            "teacher_ball_center_surface_z_m": (
+                0.76 + float(params.ball_radius)
+            ),
+            "teacher_ball_center_net_top_z_m": (
+                0.9125 + float(params.ball_radius)
+            ),
+            "teacher_raw_face_normal_w": raw_normal.tolist(),
+            "teacher_face_center_velocity_w_mps": face_velocity.tolist(),
+            "teacher_landing_valid": True,
+            "teacher_net_crossing_valid": True,
+        }
+    finally:
+        if previous is None:
+            os.environ.pop("HOPE_BALL_PHYSICS_YAML", None)
+        else:
+            os.environ["HOPE_BALL_PHYSICS_YAML"] = previous
+
+
 def _materialize_profile_pins(
-    template_path: Path, ball_physics: Path, repo_root: Path
+    template_path: Path,
+    ball_physics: Path,
+    phase4_plant_mjb: Path,
+    repo_root: Path,
 ) -> tuple[Mapping[str, Any], bytes]:
     template = deepcopy(dict(_read_json(template_path, "profile-pins template")))
     solver = template.get("solver_payload")
@@ -481,6 +597,12 @@ def _materialize_profile_pins(
     template["solver_profile_sha256"] = solver_sha
     template["solver_implementation_source_sha256"] = implementation
     template["venue_yaml_sha256"] = venue["file_sha256"]
+    resolved_mjb = phase4_plant_mjb.resolve(strict=True)
+    template["phase4_plant_mjb"] = {
+        "relative_locator": resolved_mjb.name,
+        "sha256": _sha256_file(resolved_mjb),
+        "size_bytes": resolved_mjb.stat().st_size,
+    }
     return template, _json_bytes(template)
 
 
@@ -561,17 +683,46 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     )
     if grid_position_error >= 0.005 or grid_velocity_error >= 0.08:
         raise BundleError("policy-grid robot-FK contact exceeds Phase4 strict bounds")
-    if (action_ball.get("analytic_landing_valid") is not True
-            or action_ball.get("analytic_net_crossing_valid") is not True
-            or float(action_ball.get("analytic_landing_error_m", math.inf)) >= 0.02):
+    teacher_compatible_incoming = (
+        args.teacher_compatible_incoming_velocity_w_mps
+    )
+    if (teacher_compatible_incoming is None
+            and (action_ball.get("analytic_landing_valid") is not True
+                 or action_ball.get("analytic_net_crossing_valid") is not True
+                 or float(action_ball.get("analytic_landing_error_m", math.inf)) >= 0.02)):
         raise BundleError("Phase4 analytic contact continuation entrance is not valid")
     ball_b = _world_to_heading(ball_w - root0, yaw)
-    incoming_w = _finite(action_ball["incoming_velocity_w_mps"], (3,), "incoming velocity")
+    incoming_w = _finite(
+        action_ball["incoming_velocity_w_mps"]
+        if teacher_compatible_incoming is None
+        else teacher_compatible_incoming,
+        (3,),
+        "incoming velocity",
+    )
     incoming_b = _world_to_heading(incoming_w, yaw)
-    face_w = _unit(report["continuous_solver"]["signed_face_w"], "solver signed face")
+    teacher_face_w = _unit(
+        _quat_apply_wxyz(
+            grid_reference["racket_quat_wxyz"],
+            np.asarray(racket_geometry.face_normal_local(1), dtype=np.float64),
+        ),
+        "teacher signed face",
+    )
+    face_w = (
+        _unit(report["continuous_solver"]["signed_face_w"], "solver signed face")
+        if teacher_compatible_incoming is None
+        else teacher_face_w
+    )
     face_b = _world_to_heading(face_w, yaw)
     omega_w = grid_reference["racket_angular_velocity_w_radps"]
-    offset_w = _finite(exact["face_center_from_site_w_m"], (3,), "face offset")
+    offset_w = _quat_apply_wxyz(
+        grid_reference["racket_quat_wxyz"],
+        np.asarray(
+            racket_geometry.face_center_from_site_local(
+                int(exact["mount_normal_sign"])
+            ),
+            dtype=np.float64,
+        ),
+    )
     face_velocity_w = grid_reference["site_velocity_w_mps"] + np.cross(
         omega_w, offset_w
     )
@@ -584,7 +735,7 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     prototype_bytes = _json_bytes(prototype)
     prototype_sha = _sha256_bytes(prototype_bytes)
     profile_pins, profile_pins_bytes = _materialize_profile_pins(
-        args.profile_pins_template, args.ball_physics, root
+        args.profile_pins_template, args.ball_physics, args.mjcf, root
     )
     ball_physics_file_sha = _sha256_file(args.ball_physics)
     out_rel = Path(args.output_dir_rel)
@@ -596,11 +747,27 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
     profile_pins_rel = out_rel / "take061_slow_block_phase4_v1.profile_pins.v1.json"
     aim = _finite(action_ball["landing_aim_w_xy_m"], (2,), "landing aim")
     reaction = 0.1
-    teacher_rate_min = float(exact["teacher_rate"])
+    teacher_rate_min = (
+        float(exact["teacher_rate"])
+        if teacher_compatible_incoming is None
+        else 1.0
+    )
     if not 0.0 < teacher_rate_min <= 1.0:
         raise BundleError("Phase4 exact-face teacher rate must lie in (0,1]")
     raw_ttc = t_hit / teacher_rate_min + reaction
-    ttc = _ceil_to_policy_tick(raw_ttc)
+    ttc = (
+        _ceil_to_policy_tick(raw_ttc)
+        if teacher_compatible_incoming is None
+        else float(action_ball.get("time_to_contact_s", 5.3))
+    )
+    teacher_continuation = _teacher_contact_continuation(
+        grid_reference=grid_reference,
+        ball_w=ball_w,
+        incoming_w=incoming_w,
+        aim_w_xy=aim,
+        mount_sign=int(exact["mount_normal_sign"]),
+        ball_physics=args.ball_physics,
+    )
     profile = _singleton_profile(ball_b=ball_b, incoming_b=incoming_b,
                                  base_xy=root0[:2], ttc=ttc)
     action_uid = manifest_contract.derive_action_ball_action_uid(ACTION_ID, FAMILY, motion_sha)
@@ -660,14 +827,15 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
             "solver_profile_sha256": solver_sha, "physics_profile_sha256": physics_sha,
             "geometry_source_sha256": exact["geometry_source_sha256"]},
         "construction_checks": {"phase4_robust": True,
-            "analytic_landing_valid": action_ball["analytic_landing_valid"],
-            "analytic_net_crossing_valid": action_ball["analytic_net_crossing_valid"],
+            "analytic_landing_valid": teacher_continuation["teacher_landing_valid"],
+            "analytic_net_crossing_valid": teacher_continuation["teacher_net_crossing_valid"],
             "exact_site_position_error_m": position_error,
             "exact_site_velocity_error_mps": velocity_error,
             "policy_grid_robot_fk_site_position_error_m": grid_position_error,
             "policy_grid_robot_fk_site_velocity_error_mps": grid_velocity_error,
             "policy_grid_robot_fk_contact_frame": hit_frame,
-            "analytic_landing_error_m": action_ball["analytic_landing_error_m"],
+            "analytic_landing_error_m": teacher_continuation["teacher_landing_error_m"],
+            "teacher_contact_continuation": teacher_continuation,
             "fk": fk},
         "inputs": {"phase4_report": {"path": str(report_path), "sha256": _sha256_file(report_path)},
             "phase4_npz": {"path": str(npz_path), "sha256": _sha256_file(npz_path)},
@@ -720,6 +888,17 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--profile-pins-template", type=Path,
                         default=REPO_ROOT_DEFAULT / "configs/action_ball_profile_pins_20260728.json")
     result.add_argument("--output-dir-rel", required=True)
+    result.add_argument(
+        "--teacher-compatible-incoming-velocity-w-mps",
+        type=float,
+        nargs=3,
+        default=None,
+        metavar=("VX", "VY", "VZ"),
+        help=(
+            "publish this exact incoming centre and require the robot-FK "
+            "teacher itself to satisfy the shared landing model"
+        ),
+    )
     return result
 
 

@@ -112,11 +112,13 @@ def test_output_path_rejects_parent_escape(tmp_path):
     assert ".." in Path(args.output_dir_rel).parts
 
 
-def test_optitrack_profile_pins_name_and_hash_the_same_exact_yaml():
+def test_optitrack_profile_pins_name_and_hash_the_same_exact_yaml(tmp_path):
     physics = M.REPO_ROOT_DEFAULT / "configs/ball_physics_optitrack_20260730.yaml"
     template = M.REPO_ROOT_DEFAULT / "configs/action_ball_profile_pins_20260728.json"
+    plant = tmp_path / "runtime.mjb"
+    plant.write_bytes(b"pinned-test-plant")
     pins, _payload = M._materialize_profile_pins(
-        template, physics, M.REPO_ROOT_DEFAULT
+        template, physics, plant, M.REPO_ROOT_DEFAULT
     )
     venue = pins["physics_payload"]["venue_source"]
     assert venue["path"] == "configs/ball_physics_optitrack_20260730.yaml"
@@ -125,3 +127,8 @@ def test_optitrack_profile_pins_name_and_hash_the_same_exact_yaml():
         "3afb1c9a00f975d924169503d7dafab92ea6c0b96263336e27edcd1d6257ea14"
     )
     assert pins["venue_yaml_sha256"] == venue["file_sha256"]
+    assert pins["phase4_plant_mjb"] == {
+        "relative_locator": "runtime.mjb",
+        "sha256": M._sha256_file(plant),
+        "size_bytes": plant.stat().st_size,
+    }

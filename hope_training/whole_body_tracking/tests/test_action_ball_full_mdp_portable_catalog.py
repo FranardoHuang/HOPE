@@ -31,11 +31,11 @@ def test_portable_fresh_cadence_freezes_due_ticks_not_verdicts():
     table = catalog.load_portable_action_center_table()
     cadence = catalog.derive_portable_fresh_cadence(table)
     assert cadence.first_reveal_tick == 48
-    assert cadence.maximum_task_close_ticks == 309
-    assert cadence.cadence_ticks == 388
+    assert cadence.maximum_task_close_ticks == 307
+    assert cadence.cadence_ticks == 387
     assert cadence.reference_due_ticks == (48,)
     assert len(cadence.reference_due_ticks) == catalog.FRESH_REFERENCE_DUE_COUNT
-    assert cadence.reference_due_ticks[-1] + cadence.cadence_ticks == 436
+    assert cadence.reference_due_ticks[-1] + cadence.cadence_ticks == 435
     assert (
         cadence.reference_due_ticks[-1] + cadence.cadence_ticks
         < cadence.episode_horizon_ticks
@@ -80,7 +80,7 @@ def test_one_shot_reveal_launch_contact_close_fit_exact_n1_episode():
         contact_tick,
         close_tick,
         retirement_tick,
-    ) == (48, 50, 315, 359, 436)
+    ) == (48, 50, 315, 357, 435)
     assert contact_tick < close_tick < retirement_tick < cadence.episode_horizon_ticks
 
 

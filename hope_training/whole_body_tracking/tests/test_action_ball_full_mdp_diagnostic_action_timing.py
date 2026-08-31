@@ -177,7 +177,7 @@ def _reference_cadence(
         episode_tick=torch.full_like(lane, 2),
         reveal_tick=torch.full_like(lane, 2),
         deadline_tick=torch.full_like(lane, 4),
-        next_reveal_tick=torch.full_like(lane, 295),
+        next_reveal_tick=torch.full_like(lane, 434),
         swing_generation=lane + 1,
         ready_at_reveal=torch.ones(num_envs, dtype=torch.bool, device=device),
         action_slot=action_slot,
@@ -309,7 +309,10 @@ def test_static_timing_accepts_positive_exact_generic_n(num_envs):
     assert table.incoming_spin_center_b_yaw_radps.shape == (len(rows), 3)
     torch.testing.assert_close(
         table.incoming_velocity_center_b_yaw_mps,
-        torch.tensor([[-4.0, 2.0, 4.0]], dtype=torch.float32),
+        torch.tensor(
+            [[-4.38194513, 3.70106173, 2.72455478]],
+            dtype=torch.float32,
+        ),
         rtol=0.0,
         atol=2.0e-6,
     )
@@ -372,7 +375,7 @@ def test_static_timing_catalog_and_production_hold_remain_explicit():
         profile_mod.construct_action_ball_full_mdp_diagnostic_action_timing_static_table
     )
     assert tuple(signature.parameters) == ("racket_owner",)
-    assert profile_mod.diagnostic_catalog_max_task_close_ticks() == 309
+    assert profile_mod.diagnostic_catalog_max_task_close_ticks() == 307
     with pytest.raises(
         profile_mod.DiagnosticActionTimingProductionHold,
         match="formally admitted",
