@@ -6,7 +6,7 @@ consumed by the MuJoCo lane:
 
 * one centre question expressed from the live base yaw;
 * one venue-model reverse-integrated launch state; and
-* one measured motion teacher with the catalog's canonical retiming.
+* one admitted robot-FK motion teacher with the catalog's canonical retiming.
 
 The reverse flight implementation is imported lazily from ``physical_ball``.
 That helper is the engine-neutral Torch kernel used by Isaac's physical-ball
@@ -29,17 +29,15 @@ if str(_MDP) not in sys.path:
 from action_ball_frozen_task_frame_se2 import FrozenTaskFrameSE2
 
 
-_JOINT_ORDER_CONTRACT_ID = "a3-gmr-dof-pos-to-runtime-articulation-v1"
-_JOINT_ORDER_CONTRACT = (
-    Path(__file__).resolve().parents[3]
-    / "configs"
-    / "a3_joint_order_bijection_v1.json"
-)
-
-
 @dataclass(frozen=True)
 class PortableMotionTeacher:
-    """Device-resident measured reference for one catalog action."""
+    """Device-resident admitted robot-FK reference for one catalog action.
+
+    The historical ``measured_racket_*`` field names are retained as an
+    internal Mu FullMDP ABI.  Their values are reconstructed from the sealed
+    schema-2 wrist pose and the SHA-bound racket geometry; they are not a raw
+    mocap/measured-paddle channel.
+    """
 
     fps: float
     strike_frame: int
@@ -110,10 +108,44 @@ def _yaw_from_quaternion(torch, quaternion):
     )
 
 
+def _quat_mul_wxyz_numpy(np, left, right):
+    """Dependency-light NumPy quaternion product with broadcast semantics."""
+
+    lw, lx, ly, lz = np.moveaxis(left, -1, 0)
+    rw, rx, ry, rz = np.moveaxis(right, -1, 0)
+    return np.stack(
+        (
+            lw * rw - lx * rx - ly * ry - lz * rz,
+            lw * rx + lx * rw + ly * rz - lz * ry,
+            lw * ry - lx * rz + ly * rw + lz * rx,
+            lw * rz + lx * ry - ly * rx + lz * rw,
+        ),
+        axis=-1,
+    )
+
+
+def _quat_apply_wxyz_numpy(np, quaternion, vector):
+    """Apply WXYZ quaternions without importing either engine runtime."""
+
+    xyz = quaternion[..., 1:]
+    twice_cross = 2.0 * np.cross(xyz, vector)
+    return (
+        vector
+        + quaternion[..., :1] * twice_cross
+        + np.cross(xyz, twice_cross)
+    )
+
+
 def load_portable_motion_teacher(
     *, row, tracked_body_names, torch, dtype, device
 ):
-    """Load the sealed measured motion selected by one portable catalog row."""
+    """Load the sealed schema-2 trajectory selected by one portable row.
+
+    Phase4 admits the solved robot trajectory, not the raw measured paddle
+    used upstream during retargeting.  Reconstruct the teacher paddle from the
+    official wrist FK and the single exact racket-geometry contract so Mu and
+    Isaac consume the same authority without fabricating a schema-v4 oracle.
+    """
 
     import numpy as np
 
@@ -134,17 +166,6 @@ def load_portable_motion_teacher(
             "kinematics_schema_version",
             "body_pos_point",
             "body_lin_vel_point",
-            "measured_racket_site_pos_w",
-            "measured_racket_normal_w",
-            "measured_racket_long_axis_w",
-            "measured_racket_schema_version",
-            "measured_racket_position_semantics",
-            "measured_racket_normal_semantics",
-            "measured_racket_long_axis_semantics",
-            "measured_racket_retarget_admitted",
-            "measured_racket_robot_mount_normal_sign",
-            "measured_racket_joint_order_contract_id",
-            "measured_racket_joint_order_contract_sha256",
         }
         if required.difference(data.files):
             raise ValueError("portable teacher NPZ schema differs")
@@ -152,12 +173,16 @@ def load_portable_motion_teacher(
         joint_pos = np.asarray(data["joint_pos"], dtype=np.float32)
         joint_vel = np.asarray(data["joint_vel"], dtype=np.float32)
         names = tuple(str(value) for value in data["body_names"].tolist())
-        try:
-            local_order_sha = hashlib.sha256(
-                _JOINT_ORDER_CONTRACT.read_bytes()
-            ).hexdigest()
-        except OSError as exc:
-            raise ValueError("portable teacher joint-order contract is absent") from exc
+        body_pos_all = np.asarray(data["body_pos_w"], dtype=np.float32)
+        body_quat_all = np.asarray(data["body_quat_w"], dtype=np.float32)
+        body_lin_all = np.asarray(data["body_lin_vel_w"], dtype=np.float32)
+        body_ang_all = np.asarray(data["body_ang_vel_w"], dtype=np.float32)
+        import racket_contact_geometry as geometry
+
+        wrist_name = geometry.GEOMETRY_SOURCE_PAYLOAD[
+            "official_wrist_body_name"
+        ]
+        mount_sign = float(row.mount_normal_sign)
         if (
             fps_values.size != 1
             or not np.isfinite(fps_values).all()
@@ -167,54 +192,56 @@ def load_portable_motion_teacher(
             or joint_vel.shape != joint_pos.shape
             or len(set(tracked_body_names)) != len(tracked_body_names)
             or any(names.count(name) != 1 for name in tracked_body_names)
-            or int(
-                np.asarray(
-                    data["measured_racket_robot_mount_normal_sign"]
-                ).reshape(-1)[0]
-            )
-            != int(row.mount_normal_sign)
+            or names.count(wrist_name) != 1
+            or mount_sign not in (-1.0, 1.0)
             or int(np.asarray(data["kinematics_schema_version"]).reshape(-1)[0])
             != 2
             or str(np.asarray(data["body_pos_point"]).reshape(-1)[0])
             != "link_origin"
             or str(np.asarray(data["body_lin_vel_point"]).reshape(-1)[0])
             != "center_of_mass"
-            or str(
-                np.asarray(
-                    data["measured_racket_joint_order_contract_id"]
-                ).reshape(-1)[0]
-            )
-            != _JOINT_ORDER_CONTRACT_ID
-            or str(
-                np.asarray(
-                    data["measured_racket_joint_order_contract_sha256"]
-                ).reshape(-1)[0]
-            )
-            != local_order_sha
         ):
             raise ValueError("portable teacher identity/shape differs")
         body_indices = [names.index(name) for name in tracked_body_names]
-        body_pos = np.asarray(data["body_pos_w"], dtype=np.float32)[
-            :, body_indices
-        ]
-        body_quat = np.asarray(data["body_quat_w"], dtype=np.float32)[
-            :, body_indices
-        ]
-        body_lin = np.asarray(data["body_lin_vel_w"], dtype=np.float32)[
-            :, body_indices
-        ]
-        body_ang = np.asarray(data["body_ang_vel_w"], dtype=np.float32)[
-            :, body_indices
-        ]
+        body_pos = body_pos_all[:, body_indices]
+        body_quat = body_quat_all[:, body_indices]
+        body_lin = body_lin_all[:, body_indices]
+        body_ang = body_ang_all[:, body_indices]
         frames = joint_pos.shape[0]
-        measured_racket_pos = np.asarray(
-            data["measured_racket_site_pos_w"], dtype=np.float32
+        expected_body_pos = (frames, len(names), 3)
+        expected_body_quat = (frames, len(names), 4)
+        wrist = names.index(wrist_name)
+        wrist_position = body_pos_all[:, wrist]
+        wrist_quaternion = body_quat_all[:, wrist]
+        mount_quaternion = np.asarray(
+            geometry.GEOMETRY_SOURCE_PAYLOAD[
+                "racket_mount_quaternion_wxyz"
+            ],
+            dtype=np.float32,
         )
-        measured_racket_normal = np.asarray(
-            data["measured_racket_normal_w"], dtype=np.float32
+        site_quaternion = _quat_mul_wxyz_numpy(
+            np, wrist_quaternion, mount_quaternion
         )
-        measured_racket_long_axis = np.asarray(
-            data["measured_racket_long_axis_w"], dtype=np.float32
+        measured_racket_pos = wrist_position + _quat_apply_wxyz_numpy(
+            np,
+            wrist_quaternion,
+            np.asarray(geometry.RACKET_SITE_OFFSET_WRIST_M, dtype=np.float32),
+        )
+        measured_racket_normal = _quat_apply_wxyz_numpy(
+            np,
+            site_quaternion,
+            np.asarray(
+                geometry.GEOMETRY_SOURCE_PAYLOAD["raw_A_axis_local"],
+                dtype=np.float32,
+            ),
+        ) * np.float32(mount_sign)
+        measured_racket_long_axis = _quat_apply_wxyz_numpy(
+            np,
+            site_quaternion,
+            np.asarray(
+                geometry.RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+                dtype=np.float32,
+            ),
         )
         measured_shape = (frames, 3)
         measured_norm = np.linalg.norm(measured_racket_normal, axis=1)
@@ -224,6 +251,10 @@ def load_portable_motion_teacher(
         )
         if (
             frames < 2
+            or body_pos_all.shape != expected_body_pos
+            or body_quat_all.shape != expected_body_quat
+            or body_lin_all.shape != expected_body_pos
+            or body_ang_all.shape != expected_body_pos
             or body_pos.shape != (frames, len(body_indices), 3)
             or body_quat.shape != (frames, len(body_indices), 4)
             or body_lin.shape != body_pos.shape
@@ -231,28 +262,8 @@ def load_portable_motion_teacher(
             or measured_racket_pos.shape != measured_shape
             or measured_racket_normal.shape != measured_shape
             or measured_racket_long_axis.shape != measured_shape
-            or int(
-                np.asarray(data["measured_racket_schema_version"]).reshape(-1)[0]
-            )
-            != 4
-            or str(
-                np.asarray(data["measured_racket_position_semantics"]).reshape(-1)[0]
-            )
-            != "physical_blade_center"
-            or str(
-                np.asarray(data["measured_racket_normal_semantics"]).reshape(-1)[0]
-            )
-            != "signed_physical_hitting_face"
-            or str(
-                np.asarray(data["measured_racket_long_axis_semantics"]).reshape(-1)[0]
-            )
-            != "measured_paddle_butt_to_blade"
-            or int(
-                np.asarray(data["measured_racket_retarget_admitted"]).reshape(-1)[0]
-            )
-            != 1
             or not np.allclose(
-                np.linalg.norm(body_quat, axis=2),
+                np.linalg.norm(body_quat_all, axis=2),
                 1.0,
                 rtol=0.0,
                 atol=2.0e-5,
@@ -304,11 +315,11 @@ def load_portable_motion_teacher(
         ):
             raise ValueError("portable teacher strike frame differs")
 
-        # The schema-v4 measured teacher stores one official-site position per
-        # motion frame, but no redundant velocity array.  Materialize the exact
-        # phase-local derivative once at the cold loading boundary: centered in
-        # the interior and one-sided at each endpoint.  Runtime retiming then
-        # multiplies this source-rate velocity by the selected teacher rate.
+        # The canonical FK stores one official wrist pose per motion frame.
+        # Materialize the exact site derivative once at the cold loading
+        # boundary: centered in the interior and one-sided at each endpoint.
+        # Runtime retiming then multiplies this source-rate velocity by the
+        # selected teacher rate.
         frame_index = np.arange(frames, dtype=np.int64)
         previous = np.maximum(frame_index - 1, 0)
         following = np.minimum(frame_index + 1, frames - 1)

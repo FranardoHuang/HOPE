@@ -124,6 +124,38 @@ def _plant_contract_module():
     return module
 
 
+def _portable_catalog_module():
+    """Load the shared N1 cadence authority from this exact checkout."""
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_portable_catalog.py"
+    )
+    name = "_hope_mujoco_action_ball_full_mdp_portable_catalog"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached FullMDP portable catalog origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load the FullMDP portable catalog")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
 def _canonical_mujoco_identity_module():
     """Load the complete source-closure/model verifier from this checkout."""
 
@@ -1267,12 +1299,18 @@ def main(
 
     version, runner_type, distribution = _rsl3_runner()
     wait = _wait_module()
+    portable_catalog = _portable_catalog_module()
     ready_pose_payload, ready_pose_source = _ready_pose_input()
     plant_path = _plant_xml_input() if full_a_mode else None
     plant_before = _scan_plant_source(plant_path) if full_a_mode else None
     torch.manual_seed(0)
     task = wait.TaskCfg(
-        episode_length_s=30.0 if full_a_mode else 3.0,
+        episode_length_s=(
+            portable_catalog.FRESH_EPISODE_HORIZON_TICKS
+            * portable_catalog.FRESH_POLICY_STEP_S
+            if full_a_mode
+            else 3.0
+        ),
         action_scale_mode="vendor",
         reset_joint_noise_rad=0.0,
         reset_joint_vel_noise=0.0,

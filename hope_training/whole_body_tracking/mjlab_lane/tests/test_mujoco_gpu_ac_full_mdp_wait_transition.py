@@ -3591,27 +3591,27 @@ def test_portable_motion_teacher_waits_then_hits_the_catalog_strike_frame():
     )
 
 
-def test_portable_teacher_loads_schema_v4_and_derives_site_velocity(tmp_path):
+def test_portable_teacher_reconstructs_schema2_robot_fk_site_velocity(tmp_path):
     np = pytest.importorskip("numpy")
     frames = 3
     motion_file = tmp_path / "motion.npz"
     joint = np.zeros((frames, 31), dtype=np.float32)
-    body_pos = np.zeros((frames, 1, 3), dtype=np.float32)
-    body_quat = np.zeros((frames, 1, 4), dtype=np.float32)
+    wrist_name = wait_env.racket_contact_geometry.GEOMETRY_SOURCE_PAYLOAD[
+        "official_wrist_body_name"
+    ]
+    body_pos = np.zeros((frames, 2, 3), dtype=np.float32)
+    body_quat = np.zeros((frames, 2, 4), dtype=np.float32)
     body_quat[..., 0] = 1.0
-    measured_pos = np.asarray(
+    body_pos[:, 1] = np.asarray(
         [[0.00, 0.0, 1.0], [0.02, 0.0, 1.0], [0.06, 0.0, 1.0]],
         dtype=np.float32,
     )
-    contract_sha = hashlib.sha256(
-        wait_env.portable_question._JOINT_ORDER_CONTRACT.read_bytes()
-    ).hexdigest()
     np.savez(
         motion_file,
         fps=np.asarray([50.0], dtype=np.float64),
         joint_pos=joint,
         joint_vel=joint,
-        body_names=np.asarray(["pelvis_link"]),
+        body_names=np.asarray(["pelvis_link", wrist_name]),
         body_pos_w=body_pos,
         body_quat_w=body_quat,
         body_lin_vel_w=body_pos,
@@ -3619,27 +3619,6 @@ def test_portable_teacher_loads_schema_v4_and_derives_site_velocity(tmp_path):
         kinematics_schema_version=np.asarray([2], dtype=np.int64),
         body_pos_point=np.asarray(["link_origin"]),
         body_lin_vel_point=np.asarray(["center_of_mass"]),
-        measured_racket_site_pos_w=measured_pos,
-        measured_racket_normal_w=np.tile(
-            np.asarray([0.0, 1.0, 0.0], dtype=np.float32), (frames, 1)
-        ),
-        measured_racket_long_axis_w=np.tile(
-            np.asarray([1.0, 0.0, 0.0], dtype=np.float32), (frames, 1)
-        ),
-        measured_racket_schema_version=np.asarray([4], dtype=np.int64),
-        measured_racket_position_semantics=np.asarray(["physical_blade_center"]),
-        measured_racket_normal_semantics=np.asarray(
-            ["signed_physical_hitting_face"]
-        ),
-        measured_racket_long_axis_semantics=np.asarray(
-            ["measured_paddle_butt_to_blade"]
-        ),
-        measured_racket_retarget_admitted=np.asarray([1], dtype=np.int64),
-        measured_racket_robot_mount_normal_sign=np.asarray([1], dtype=np.int64),
-        measured_racket_joint_order_contract_id=np.asarray(
-            ["a3-gmr-dof-pos-to-runtime-articulation-v1"]
-        ),
-        measured_racket_joint_order_contract_sha256=np.asarray([contract_sha]),
     )
     row = SimpleNamespace(
         motion_file=str(motion_file),

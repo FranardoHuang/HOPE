@@ -304,7 +304,7 @@ def require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
         )
         != table.mount_normal_sign_per_clip
         or str(getattr(racket_cfg, "motion_teacher_racket_source", ""))
-        != "measured_channel"
+        != "robot_fk"
     ):
         raise ValueError(
             "fresh full-MDP Motion/Racket cfg differs from the code-owned "
@@ -2307,14 +2307,6 @@ class MotionCommand(CommandTerm):
                 int(self.motion.num_segments)
                 != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT
                 or self.motion.kinematics_contract_exact is not True
-                or self.motion.measured_racket_available is not True
-                or tuple(
-                    float(value)
-                    for value in (
-                        self.motion.measured_racket_mount_normal_sign_per_clip
-                    )
-                )
-                != table.mount_normal_sign_per_clip
                 or type(self._motion_payloads) is not tuple
                 or len(self._motion_payloads)
                 != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT
@@ -2326,7 +2318,7 @@ class MotionCommand(CommandTerm):
             ):
                 raise ValueError(
                     "fresh full-MDP diagnostic MotionLoader did not adopt the exact "
-                    "active N=1 schema-2/measured-racket catalog"
+                    "active N=1 schema-2 robot-FK catalog"
                 )
         if (
             bool(

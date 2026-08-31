@@ -169,9 +169,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             raise ValueError("initial-WAIT FullMDP slice requires deterministic reset")
         if type(full_a_mode) is not bool:
             raise TypeError("full_a_mode must be bool")
-        if full_a_mode and float(task_cfg.episode_length_s) != 30.0:
+        full_a_episode_length_s = (
+            portable_catalog.FRESH_EPISODE_HORIZON_TICKS
+            * portable_catalog.FRESH_POLICY_STEP_S
+        )
+        if full_a_mode and float(task_cfg.episode_length_s) != full_a_episode_length_s:
             raise ValueError(
-                "Full-A requires the shared exact 30s/1500-tick horizon"
+                "Full-A episode length differs from the portable N1 cadence horizon"
             )
         self.full_a_mode = full_a_mode
         self._fullmdp_initialized = False
@@ -378,15 +382,15 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             document = json.loads(payload.decode("utf-8"))
             normalized = document["hold_candidate"]["normalized_actor_action"]
             hold_qdes = document["hold_candidate"]["hold_qdes_joint_pos_rad"]
-            stable_motion = document["sources"]["stable_motion"]
         except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise RuntimeError("Full-A dynamic-ready artifact core fields differ") from exc
-        row = self._full_a_catalog.fresh_action
+        # The SHA-pinned dynamic-ready artifact owns only the physical reset
+        # pose and its exact hold command.  Its historical source action/motion
+        # is the Phase2 seed, not the admitted retimed Phase4 teacher.  Requiring
+        # those two identities to match would turn an upstream seed into a raw
+        # oracle and make every legitimate Phase3/4 retarget unconstructable.
         if (
-            document.get("action_id") != row.action_id
-            or stable_motion.get("sha256") != row.motion_sha256
-            or stable_motion.get("frame_index") != 0
-            or not isinstance(normalized, list)
+            not isinstance(normalized, list)
             or len(normalized) != self.num_actions
             or not isinstance(hold_qdes, list)
             or len(hold_qdes) != self.num_actions
@@ -396,7 +400,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             )
         ):
             raise RuntimeError(
-                "Full-A birth/actor prior and teacher do not bind one Take061 action"
+                "Full-A dynamic-ready hold prior shape or values differ"
             )
         action = self._torch.tensor(
             normalized, dtype=self.action_offset.dtype, device=self.device

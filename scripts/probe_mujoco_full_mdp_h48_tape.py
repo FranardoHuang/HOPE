@@ -197,7 +197,13 @@ def _probe(output_root: Path, ready_pose: Path) -> dict:
             os.environ["ACTIONBALL_READY_POSE"] = prior
     torch.manual_seed(cfg["environment_seed"])
     initial = cfg["initial_state"]
-    task = wait.TaskCfg(episode_length_s=30.0, action_scale_mode="vendor",
+    portable_catalog = runner._portable_catalog_module()
+    task = wait.TaskCfg(
+        episode_length_s=(
+            portable_catalog.FRESH_EPISODE_HORIZON_TICKS
+            * portable_catalog.FRESH_POLICY_STEP_S
+        ),
+        action_scale_mode="vendor",
         reset_joint_noise_rad=initial["joint_position_noise_rad"], reset_joint_vel_noise=initial["joint_velocity_noise_rad_s"],
         reset_root_xy_noise_m=initial["root_xy_noise_m"], reset_root_yaw_noise_rad=initial["root_yaw_noise_rad"])
     env = wait.FullMdpInitialWaitVecEnv(wait.SimCfg(nworld=cfg["num_envs"]), task,
@@ -312,7 +318,10 @@ def _cross_engine_probe(output_root: Path, ready_pose: Path, plant_xml: Path) ->
     torch.manual_seed(config["environment_seed"])
     initial = config["initial_state"]
     task = wait.TaskCfg(
-        episode_length_s=30.0,
+        episode_length_s=(
+            wait.portable_catalog.FRESH_EPISODE_HORIZON_TICKS
+            * wait.portable_catalog.FRESH_POLICY_STEP_S
+        ),
         action_scale_mode="vendor",
         reset_joint_noise_rad=initial["joint_position_noise_rad"],
         reset_joint_vel_noise=initial["joint_velocity_noise_rad_s"],

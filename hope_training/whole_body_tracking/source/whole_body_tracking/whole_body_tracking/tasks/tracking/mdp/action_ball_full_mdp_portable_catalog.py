@@ -73,10 +73,10 @@ PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH = (
     "take061_slow_block_phase4_v1.action_ball.v3.json"
 )
 PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256 = (
-    "ebed8cfa75b50415d143305bac910043c334cb25636c8fed4a40f97d957a6cbc"
+    "0749383d9baa1d23b2ee53cd297ec585f3c5d575718f1794985031e022c3b5f7"
 )
 PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
-    "ebed8cfa75b50415d143305bac910043c334cb25636c8fed4a40f97d957a6cbc"
+    "0749383d9baa1d23b2ee53cd297ec585f3c5d575718f1794985031e022c3b5f7"
 )
 PINNED_BALL_PHYSICS_RELATIVE_PATH = "configs/ball_physics_optitrack_20260730.yaml"
 PINNED_BALL_PHYSICS_FILE_SHA256 = (
@@ -87,7 +87,7 @@ PINNED_PROFILE_PINS_RELATIVE_PATH = (
     "take061_slow_block_phase4_v1.profile_pins.v1.json"
 )
 PINNED_PROFILE_PINS_FILE_SHA256 = (
-    "e5996c1eceacc9be3eb079add58277967d4228fff19150f24f2f337be165524d"
+    "bf0bb03054d6342ef22ae591b9ff067a21862e7f8a7b62cfaf38bb53b5c167ef"
 )
 PINNED_SOLVER_MATH_MODULE_NAMES = (
     "continuous_questions.py",
@@ -238,6 +238,27 @@ def derive_portable_fresh_cadence(
     )
 
 
+def _load_runtime_plant_contract(repo_root: Path):
+    """Load the one existing plant authority without importing MJLab."""
+
+    name = "_action_ball_full_mdp_runtime_plant_contract"
+    loaded = sys.modules.get(name)
+    if loaded is not None:
+        return loaded
+    path = (
+        repo_root
+        / "hope_training/whole_body_tracking/mjlab_lane/"
+        "mujoco_full_mdp_plant_contract.py"
+    )
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ValueError("FullMDP runtime plant authority is unavailable")
+    loaded = importlib.util.module_from_spec(spec)
+    sys.modules[name] = loaded
+    spec.loader.exec_module(loaded)
+    return loaded
+
+
 def _load_catalog_source():
     repo_root = Path(__file__).resolve().parents[8]
     manifest_path = (
@@ -275,6 +296,10 @@ def _load_catalog_source():
         raise ValueError("code-owned full-MDP physics binding is unavailable") from exc
     venue = profile_pins.get("physics_payload", {}).get("venue_source", {})
     implementation = profile_pins.get("solver_implementation_source_sha256", {})
+    plant_contract = _load_runtime_plant_contract(repo_root)
+    expected_phase4_plant_mjb = plant_contract.expected_plant_model_identity()[
+        "runtime_attach"
+    ]["final_augmented_mjb"]
     implementation_paths = {
         name: Path(__file__).resolve().with_name(name)
         for name in PINNED_SOLVER_MATH_MODULE_NAMES
@@ -292,6 +317,7 @@ def _load_catalog_source():
         != loaded.manifest.physics_profile_sha256
         or profile_pins.get("solver_profile_sha256")
         != loaded.manifest.solver_profile_sha256
+        or profile_pins.get("phase4_plant_mjb") != expected_phase4_plant_mjb
         or not set(implementation_paths).issubset(implementation)
         or any(
             hashlib.sha256(path.read_bytes()).hexdigest()

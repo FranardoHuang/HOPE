@@ -545,7 +545,13 @@ def _install_fake_stack(
             assert ready_pose_source == str(ready_pose)
             assert xml_path == (PLANT_XML if full_a_mode else None)
             assert full_a_mode is expected_mode
-            assert task.episode_length_s == (30.0 if full_a_mode else 3.0)
+            expected_episode_length_s = (
+                module._portable_catalog_module().FRESH_EPISODE_HORIZON_TICKS
+                * module._portable_catalog_module().FRESH_POLICY_STEP_S
+                if full_a_mode
+                else 3.0
+            )
+            assert task.episode_length_s == expected_episode_length_s
             self.num_envs, self.num_actions = num_envs, 31
             self.common_step_counter = 0
             self.full_a_mode = full_a_mode
