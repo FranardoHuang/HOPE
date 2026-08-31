@@ -41,18 +41,18 @@ PINNED_A3_USD_SHA256 = (
     "a3cd382943ff9f70beecf88c729a6cc1c052a3c0a0cbffe91003ec319ab78140"
 )
 DYNAMIC_READY_ARTIFACT_RELATIVE = Path(
-    "configs/action_ball_n1_measured_a3p0807_20260828/"
-    "take061.local_closest_robust_feasible.dynamic_ready.v2.json"
+    "assets/motions/action_ball_full_mdp_n1_take061_teacher_center_v5_20260831/"
+    "take061_slow_block_phase4_v1.dynamic_ready.v2.json"
 )
 DYNAMIC_READY_ARTIFACT_SHA256 = (
-    "b88d93c311b439bd61296b3b3a84198200d9c6938980471071992ec52d8df18f"
+    "14c601215c4ffc44161da504d9bfefb9d29b02292ca4edace9ed88d0e508da17"
 )
 DYNAMIC_READY_RECEIPT_RELATIVE = Path(
-    "configs/action_ball_n1_measured_a3p0807_20260828/"
-    "take061.local_closest_robust_feasible.nominal_hold.v1.json"
+    "assets/motions/action_ball_full_mdp_n1_take061_teacher_center_v5_20260831/"
+    "take061_slow_block_phase4_v1.nominal_hold.v1.json"
 )
 DYNAMIC_READY_RECEIPT_SHA256 = (
-    "b861e09db8482ecec2ceb5cea2c794d1c1afb23d92295b414078ce50e9b14c6c"
+    "872edf940c706cdc3a6b9adaec1bcefa62209b88f3bc63afe7229b435cdc261c"
 )
 BALL_PHYSICS_RELATIVE = Path("configs/ball_physics_optitrack_20260730.yaml")
 BALL_PHYSICS_SHA256 = (

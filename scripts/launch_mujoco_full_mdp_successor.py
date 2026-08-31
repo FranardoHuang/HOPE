@@ -36,7 +36,7 @@ PLANT_CONTRACT_RELATIVE = Path(
 )
 CHILD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CHILD_LOCALE = "C.UTF-8"
-READY_POSE_SHA256 = "b88d93c311b439bd61296b3b3a84198200d9c6938980471071992ec52d8df18f"
+READY_POSE_SHA256 = "14c601215c4ffc44161da504d9bfefb9d29b02292ca4edace9ed88d0e508da17"
 BALL_PHYSICS_RELATIVE = Path("configs/ball_physics_optitrack_20260730.yaml")
 BALL_PHYSICS_SHA256 = (
     "3afb1c9a00f975d924169503d7dafab92ea6c0b96263336e27edcd1d6257ea14"
