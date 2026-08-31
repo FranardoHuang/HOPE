@@ -1237,6 +1237,51 @@ def test_nominal_hold_artifact_pins_a3_motion_and_core_plant(tmp_path):
         )
 
 
+def test_nominal_hold_reads_phase4_teacher_from_exact_motion_bytes(tmp_path):
+    path, document, _contract = _nominal_hold_fixture(tmp_path)
+    physical_q = [0.0] * 31
+    physical_q[5] = 0.08
+    document["physical_ready"]["joint_pos_rad"] = physical_q
+    document["ready_source"] = {
+        "kind": "phase4_inherited_physical_ready_v1",
+        "teacher_authority": "separate_exact_phase4_motion_bytes",
+        "teacher_reference_duplicated": False,
+        "inherited_model_identity": False,
+        "inherited_hold_claim": False,
+        "inherited_nominal_hold_claim": False,
+    }
+
+    teacher_q = np.zeros((2, 31), dtype=np.float64)
+    teacher_q[0, 5] = -0.12
+    teacher_root = np.zeros((2, 1, 3), dtype=np.float64)
+    teacher_root[:, 0, 2] = 1.03
+    teacher_quat = np.zeros((2, 1, 4), dtype=np.float64)
+    teacher_quat[:, 0, 0] = 1.0
+    motion_path = tmp_path / "phase4_motion.npz"
+    np.savez(
+        motion_path,
+        joint_pos=teacher_q,
+        body_pos_w=teacher_root,
+        body_quat_w=teacher_quat,
+    )
+    document["sources"]["stable_motion"] = {
+        "path": str(motion_path.resolve()),
+        "sha256": _sha(motion_path.read_bytes()),
+    }
+    document.pop("content_sha256")
+    document["content_sha256"] = _sha(P._canonical_json_bytes(document))
+    path.write_bytes(P._canonical_json_bytes(document))
+
+    loaded = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+    assert loaded.teacher_physical_separated is True
+    assert loaded.teacher_joint_pos[5] == pytest.approx(-0.12)
+    assert loaded.teacher_root_pos == (0.0, 0.0, 1.03)
+    assert loaded.teacher_root_quat == (1.0, 0.0, 0.0, 0.0)
+    assert loaded.physical_joint_pos[5] == pytest.approx(0.08)
+
+
 def test_nominal_hold_separates_exact_teacher_from_composed_physical_birth(
     tmp_path,
 ):

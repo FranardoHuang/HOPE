@@ -2329,6 +2329,7 @@ def _nominal_teacher_physical_contract(
     document: Mapping[str, Any],
     *,
     joint_names: tuple[str, ...],
+    motion_path: Path,
     motion_sha256: str,
     physical: Mapping[str, Any],
 ) -> tuple[
@@ -2351,7 +2352,43 @@ def _nominal_teacher_physical_contract(
     teacher = document.get("teacher_reference")
     composition = document.get("physical_birth_composition")
     if teacher is None and composition is None:
-        return physical_root, physical_quat, physical_q, False
+        ready_source = document.get("ready_source")
+        if (
+            not isinstance(ready_source, Mapping)
+            or ready_source.get("kind")
+            != "phase4_inherited_physical_ready_v1"
+            or ready_source.get("teacher_authority")
+            != "separate_exact_phase4_motion_bytes"
+            or ready_source.get("teacher_reference_duplicated") is not False
+        ):
+            return physical_root, physical_quat, physical_q, False
+        try:
+            with np.load(motion_path, allow_pickle=False) as motion:
+                teacher_q = _finite_tuple(
+                    np.asarray(motion["joint_pos"])[0],
+                    31,
+                    "physical-only Phase4 teacher q",
+                )
+                teacher_root = _finite_tuple(
+                    np.asarray(motion["body_pos_w"])[0, 0],
+                    3,
+                    "physical-only Phase4 teacher root",
+                )
+                teacher_quat = _finite_tuple(
+                    np.asarray(motion["body_quat_w"])[0, 0],
+                    4,
+                    "physical-only Phase4 teacher quaternion",
+                )
+        except (KeyError, IndexError, OSError, ValueError) as exc:
+            raise TableSmokeReceiptError(
+                f"physical-only Phase4 motion frame zero is invalid: {exc}"
+            ) from exc
+        separated = bool(
+            teacher_q != physical_q
+            or teacher_root != physical_root
+            or teacher_quat != physical_quat
+        )
+        return teacher_root, teacher_quat, teacher_q, separated
     if not isinstance(teacher, Mapping) or not isinstance(
         composition, Mapping
     ):
@@ -2919,6 +2956,7 @@ def _load_nominal_hold_input(
     ) = _nominal_teacher_physical_contract(
         document,
         joint_names=names,
+        motion_path=motion_path,
         motion_sha256=motion_sha,
         physical=physical,
     )
