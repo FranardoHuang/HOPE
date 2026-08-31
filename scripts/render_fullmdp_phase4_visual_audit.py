@@ -377,13 +377,14 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--video-fps", type=int, default=25)
     args = parser.parse_args()
-    if args.out.exists() or args.video_fps <= 0:
-        raise SystemExit("output must be fresh and video-fps positive")
-    args.out.mkdir(parents=True, exist_ok=False)
-
     binding_json = json.loads(args.binding.read_text(encoding="utf-8"))
-    plant = binding_json["phase4_plant_mjb"]
-    if _sha256(args.mjb) != plant["sha256"] or args.mjb.stat().st_size != plant["size_bytes"]:
+    plant = binding_json.get("phase4_plant_mjb")
+    if plant is None:
+        plant = binding_json["inputs"]["mjcf"]
+    plant_matches = _sha256(args.mjb) == plant["sha256"]
+    if "size_bytes" in plant:
+        plant_matches = plant_matches and args.mjb.stat().st_size == plant["size_bytes"]
+    if not plant_matches:
         raise RuntimeError("render MJB differs from the Phase4 plant binding")
     ready_path = Path(binding_json["inputs"]["dynamic_ready"]["path"])
     if _sha256(ready_path) != binding_json["inputs"]["dynamic_ready"]["sha256"]:
@@ -391,6 +392,9 @@ def main() -> int:
     motion_path = REPO / binding_json["outputs"]["motion"]["path"]
     if _sha256(motion_path) != binding_json["outputs"]["motion"]["sha256"]:
         raise RuntimeError("motion bytes differ")
+    if args.out.exists() or args.video_fps <= 0:
+        raise SystemExit("output must be fresh and video-fps positive")
+    args.out.mkdir(parents=True, exist_ok=False)
 
     import mujoco
     import torch
