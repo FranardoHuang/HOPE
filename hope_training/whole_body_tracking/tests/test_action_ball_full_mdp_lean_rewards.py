@@ -310,6 +310,7 @@ class _ExactEnvRewardDispatcherRepresentation:
         value=None,
         paddle_playback_active=None,
         paddle_error_components=None,
+        paddle_contact_scale=None,
     ) -> torch.Tensor:
         if ordinal < R.LIFECYCLE_PAYMENT_COUNT:
             return self._test_reward_graph.pay(ordinal, scale=scale)
@@ -318,6 +319,7 @@ class _ExactEnvRewardDispatcherRepresentation:
             value,
             paddle_playback_active=paddle_playback_active,
             paddle_error_components=paddle_error_components,
+            paddle_contact_scale=paddle_contact_scale,
         )
 
 
