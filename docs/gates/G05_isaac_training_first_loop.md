@@ -32,10 +32,13 @@ timeout/tilt/table=`4,639/490/226`，但 R03/contact 仍=`0/0`。这证明 balan
 已产生连续 finite ACK。它的 `model_300` 只用于固定机位检查 balance/mimic/
 contact-window，不增 Gate。G05 仍保持 `Partial / diagnostic_unauthorized`。
 
-`3fe375f5..4c43967d` 另修正了 checkpoint 回放 MDP：`play.py` 现在复用训练的
-dynamic-ready resolver/loader，视频显式输出只能写 fresh no-clobber 目录。Pod 用真实
-Phase-4 motion/artifact/hold receipt 已安装并复算 binding=`1a6885f5…7330772`。这是修改
-回放工具的真实错配，不是把画面加为新的安全门。
+`d8fc5d12..5b32f42e` 已把 checkpoint 回放 MDP 收口到当前训练合同：`play.py` 复用训练的
+FullMDP owner factory、typed PPO identity、dynamic-ready resolver/loader 和代码拥有的 motion catalog；
+capture 不再触发 ONNX export，并只接受当前 RSL3 grouped observation，不保留旧 actor-tensor 兼容。
+Pod focused=`7 passed`，真实 `model_300` 400-step 回放 RC=0，影片 SHA256=
+`3e5c3a58fe831b3fd362f4ece02fab3bcbb4d1c95540569ef343f134bc6da13e`。画面显示不是出生即倒，
+但还没有形成清晰的老师反手挡接触窗动作或可信击球，与 R03/contact=`0/0`一致。这是修复并验证
+开发工作流，不是把画面加为新的安全门。
 
 到 GPU0 update 690，近 100 轮 episode 平均已为 `496.013 tick`，physical observed=`4,915`，
 timeout/tilt/table=`4,891/50/16`，但 R03/contact 仍=`0/0`；同窗 paddle 误差为
@@ -47,7 +50,10 @@ recovery 仍未证；自然链入口打开不等于该层已成功。
 `dad61048..00814042` 不加 Stage/Gate/Observation，只把四项 measured-paddle prior 的 playback
 固定 `4x` 改为接触邻域连续 `1x→4x→1x`，以免长 clip 的容易帧淹没接触窗。Pod exact
 共享/Isaac=`368 passed, 26 skipped`，Mu=`214 passed, 6 skipped`。G05 只承认接线验证；fresh
-学习 canary 与 `model_300` 固定机位画面未闭合，状态保持 `Partial / diagnostic_unauthorized`。
+学习 canary 尚未闭合；`model_300` 固定机位画面已经闭合。GPU0 update 760--859 的 recent-100
+episode/observed=`491.204/4,853`，R03/contact/crossing/landing 全零，是成熟的旧配方负例；GPU1
+update 326--425 的 episode/observed=`190.906/1,596`，仍作为较早耐心对照继续。状态保持
+`Partial / diagnostic_unauthorized`。
 
 ## 2026-08-30 R36 当前 Isaac 学习入口（仍 `Partial`）
 

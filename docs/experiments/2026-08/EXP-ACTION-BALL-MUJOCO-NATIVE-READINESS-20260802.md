@@ -1,14 +1,14 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`r36-v5-dual-learning-live / contact-prior-candidate-validated / diagnostic_unauthorized`
+- 状态：`r36-v5-dual-learning-live / model300-visual-closed / contact-prior-candidate-validated / diagnostic_unauthorized`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 本 successor 当前最高证据等级：v5 bundle、Isaac nominal hold、固定视角、双端 CUDA
-  fixed-action、Isaac fresh ACK与 Mu 61-update 身份修复诊断已有真 Pod 证据；双端学习仍处
-  balance/mimic 早窗
+- 本 successor 当前最高证据等级：v5 bundle、Isaac nominal hold、teacher 与真实 `model_300`
+  固定视角、双端 CUDA fixed-action、Isaac fresh ACK 与 Mu 自然 contact/crossing 已有真 Pod 证据；
+  Isaac 旧配方卡在 mimic→hit，Mu 的 hit 入口正在形成但 landing/recovery 仍未形成
 - 创建日期/最后复核日期：2026-08-02 / 2026-08-31
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
@@ -80,10 +80,14 @@ p50/p90=`11.060/11.291→10.755/10.943 s`。它只证明约 `3%` 的确定收益
 `/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`
 开始后继；首个 `model_300` 用于固定机位开发检查，不是新 Gate。
 
-checkpoint 回放链在 `3fe375f5..4c43967d` 补上了训练时同一 dynamic-ready binding，并将
-显式视频输出改为 fresh no-clobber 目录。Pod 用真实 Phase-4 motion、dynamic-ready artifact
-与 nominal-hold receipt 复算安装得到 binding SHA=`1a6885f5…7330772`。这修复的是“回放
-必须和训练属于同一 MDP”，不是新增视觉准入门。
+checkpoint 回放链在 `d8fc5d12..5b32f42e` 完整收口：它复用训练的 FullMDP owner factory、typed PPO
+identity、dynamic-ready binding 与代码拥有的 motion catalog；capture 不再误触发 ONNX export，只接受当前
+RSL3 grouped observation，不为旧 actor-tensor/checkpoint 增兼容支路。Pod focused=`7 passed`；真实
+`model_300` 400-step 回放 RC=0，影片 SHA256=
+`3e5c3a58fe831b3fd362f4ece02fab3bcbb4d1c95540569ef343f134bc6da13e`，证据目录为
+`/workspace/franco/evidence/r36-policy-u300-fixedcam-gDJxLV`。画面显示策略不是出生即倒，能产生周期性
+动作并存活/重置，但没有清晰形成老师反手挡的接触窗动作或可信击球；这与同窗 R03/contact=`0/0`
+一致。确定性 teacher 视频仍证明中心题球、拍心和 contact target 对齐，所以不再改 task/球公式。
 
 到 update `690/268/1182`（Isaac GPU0 / Isaac GPU1 / Mu GPU2），三条旧配方给出分层而不是
 一刀切的结论：GPU1 仍在较早 balance/mimic 窗；GPU0 最近 100 轮 episode 已均值 `496.013 tick`、
@@ -92,6 +96,14 @@ Mu 最近 100 轮已有 `33 launch / 28 R03 / 1 selected contact / 1 crossing`�
 可达，但概率极低且 legal landing/recovery 仍未出现。GPU0 同窗 paddle 位置/速度/拍面/长轴误差为
 `0.6270 m / 0.3192 m/s / 0.3677 rad / 0.2980 rad`，与大量非接触帧 paddle income 同时存在，
 形成了明确的时间信用稀释证据。
+
+后续只读窗进一步把“耐心等待”和“需要 treatment”分开：GPU0 Isaac update 760--859 的 episode
+均值=`491.204 tick`、observed=`4,853`，但 R03/contact/crossing/landing 仍全零，已是稳定的
+mimic→hit 负例；GPU1 Isaac update 326--425 的 episode 均值=`190.906 tick`、observed=`1,596`，仍是
+较早 balance/mimic 对照，不能据此判长期失败；GPU2 Mu update 1559--1658 已有
+`3,416 launch / 3,364 R03 / 1,337 raw / 229 selected / 230 crossing`，selected/launch 约
+`6.70%`，但 legal landing/recovery=`0/0`。因此保留三条自然对照，不在已有学习链正在推进时截断；
+contact-prior treatment 等独立 lane 后按 matched window 比较，而 landing 只有在 hit 基本形成后才调整。
 
 `dad61048..00814042` 因此直接修已有 reward 的时间分布，而不新增 gate：ready/preparation/recovery
 以及远离接触的 playback 保留 `1x`，真实 playback 内按 raised-cosine 在 `|TTC|<=0.12 s` 连续增强，

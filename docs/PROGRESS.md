@@ -2,6 +2,13 @@
 
 ## 2026-08-31 — R36 v5 物理出生、视觉工作流与双端起跑
 
+- 真实 GPU1 `model_300` 已用当前 RSL3 grouped observation 与训练同源 FullMDP/dynamic-ready/motion
+  catalog 导出 400-step 固定机位视频；Pod focused=`7 passed`、回放 RC=0，影片 SHA256=
+  `3e5c3a58…da13e`。画面不是出生即倒，但尚无清晰老师接触窗动作或可信击球。GPU0 recent-100 已是
+  `491.204 tick`且 `4,853 observed / 0 R03 / 0 contact` 的成熟负例；GPU1 仍是早期耐心对照；Mu
+  recent-100 已到 `229 selected / 230 crossing / 0 landing`。因此保留三条自然对照，下一独立 lane
+  才发 contact-prior treatment，不再改已由 teacher 视频验证对齐的 task/球公式，也不新增 Gate。
+
 - `dad61048..00814042` 将四项 paddle prior 从 playback 全段固定 `4x` 改为接触邻域连续
   `1x→4x→1x`；不增 Stage/Gate/Observation。Pod exact 共享/Isaac=`368 passed, 26 skipped`、
   Mu=`214 passed, 6 skipped`。旧 GPU0 到 update 690 已有充分 survival/launch 却仍零 R03/contact；

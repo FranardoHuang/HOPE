@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`r36-v5-dual-learning-live / contact-prior-candidate-validated / diagnostic_unauthorized`
+> 状态：`r36-v5-dual-learning-live / model300-visual-closed / contact-prior-candidate-validated / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-31
@@ -51,18 +51,18 @@
 - `e5c02ea6` fresh Mu 61-update diagnostic 自然完成，RC=0；每轮 `24,576/24,576`
   UID/identity rows 正确，storage finite、reward conservation/fact-integrity 无故障，p50/p90=
   `6.667/7.153 s`。同 source 已从 fresh root 进入 100,000-update Mu long。
-- GPU0 Isaac 到 update 690 仍 finite；近 100 轮 episode 平均 `496.013 tick`，
-  physical observed=`4,915`，timeout/tilt/table=`4,891/50/16`，证明 balance/survival 和 hit
-  入口都已充分打开；但 R03/contact 仍=`0/0`。同窗 playback 误差为
-  `0.6270 m / 0.3192 m/s / 0.3677 rad / 0.2980 rad`。这已不是“太早看不出”：当前旧配方
+- GPU0 Isaac 的 update 760--859 仍 finite；该 100 轮 episode 平均 `491.204 tick`，
+  physical observed=`4,853`，timeout/tilt/table=`4,884/50/80`，证明 balance/survival 和 hit
+  入口都已充分打开；但 R03/contact/crossing/landing 仍=`0/0/0/0`。同窗 playback 误差为
+  `0.6155 m / 0.3248 m/s / 0.3513 rad / 0.2416 rad`。这已不是“太早看不出”：当前旧配方
   明确卡在接触窗位置/姿态质量。
-- GPU1 fresh Isaac 到 update 268 持续 finite；近 100 轮 episode 平均 `143.072 tick`，
-  physical observed/R03/contact=`131/0/0`，tilt/table/timeout=`13,706/3,361/112`。它仍是较早
-  balance/mimic 窗；首个 `model_300` 专门用固定机位排查动作是否学偏。
-- GPU2 Mu 到 update 1182 持续 finite；近 100 轮 episode 平均 `193.705 tick`，
-  launch/R03/selected-contact/crossing=`33/28/1/1`，tilt/table=`7,799/2,493`。首个真实
-  selected contact 证明 mimic→hit 入口没有被结构封死，但概率仍极低；legal landing/recovery
-  仍无证据，不能称 hit 或 landing 已学会。
+- GPU1 fresh Isaac 的 update 326--425 持续 finite；该 100 轮 episode 平均 `190.906 tick`，
+  physical observed/R03/contact=`1,596/0/0`，tilt/table/timeout=`9,759/1,491/1,415`。它仍是较早
+  balance/mimic 窗，保留为耐心对照；不能用它否决长期可学性。
+- GPU2 Mu 的 update 1559--1658 持续 finite；该 100 轮 episode 平均 `218.490 tick`，
+  launch/R03/raw/selected/crossing=`3,416/3,364/1,337/229/230`，tilt/table=`5,550/3,450`，
+  profiler-off wall p50/p90=`6.338/6.620 s`。hit 入口正在真实形成，selected/launch 约 `6.70%`；
+  但 legal landing/recovery 仍=`0/0`，所以只能称 mimic→hit 在推进，不能称 hit 或 landing 已学会。
 
 ### 已直接修复
 
@@ -82,9 +82,13 @@
   不冒充主墙已消失。
 - [x] checkpoint cadence 改为 `300 update`，专用于尽早固定机位看真实 policy；
   `206 passed, 2 skipped`，不增 Gate，不改学习数学。
-- [x] 修正 policy 视频工作流：`play.py` 复用训练的 dynamic-ready resolver/loader，显式
-  `video_dir` 只能创建 fresh no-clobber 目录。Pod 已用真实 Phase-4 motion/artifact/hold receipt
-  安装 binding=`1a6885f58af0ccd7a9d57c0b45949c6a408e686098c7d6d6dd271c2797330772`。
+- [x] 修正真实 policy 视频工作流（`d8fc5d12..5b32f42e`）：`play.py` 复用训练的 FullMDP
+  owner factory、typed PPO identity、dynamic-ready resolver/loader 和代码拥有的 motion catalog；
+  capture 路径不再误触发 ONNX export，且只接受当前 RSL3 grouped observation，不保留旧 actor-tensor
+  兼容支路。显式 `video_dir` 只能创建 fresh no-clobber 目录。Pod focused=`7 passed`，真实
+  `model_300` 400-step 回放 RC=0；影片 SHA256=
+  `3e5c3a58fe831b3fd362f4ece02fab3bcbb4d1c95540569ef343f134bc6da13e`，证据目录为
+  `/workspace/franco/evidence/r36-policy-u300-fixedcam-gDJxLV`。
 - [x] `dad61048..00814042` 将同一四项 paddle prior 从 playback 全段固定 `4x` 改成接触窗连续
   `1x→4x→1x`，Isaac 和 Mu 共用纯 tensor 核与各自同义 TTC；不增 observation、Stage 或 Gate。
   Pod exact `00814042`：共享/Isaac `368 passed, 26 skipped`，Mu
@@ -103,12 +107,14 @@
 - [x] 等价加速与 `300 update` 可视存档的 fresh GPU1 Isaac long：
   `/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`。
 - [ ] 双端按 update 100/300/1000 读同一自然链。
-- [ ] GPU1 `model_300.diagnostic_nonresumable.pt` 出现后立即导出固定视角
-  reset/pre-teacher/contact-window/recovery 视频；使用已实证的同一 dynamic-ready binding 和 fresh
-  影片目录，并将画面与同窗 balance/mimic/launch/contact 分母对齐。
+- [x] GPU1 `model_300.diagnostic_nonresumable.pt` 已导出 400-step 固定视角真实 policy 视频。
+  画面显示策略不是出生即倒，也有周期性动作与存活/重置；但没有形成清晰的老师反手挡接触窗动作或可信
+  击球，和同窗 R03/contact=`0/0`一致。确定性 teacher 视频仍证明中心题的球/拍心/contact target 对齐，
+  因此下一步修接触窗学习信用，不再次改 task/球公式。
 - [ ] 任一 GPU 自然形成可用窗口后，从 `00814042` 或其文档后继的 clean exact source 发一条 fresh
   contact-prior canary；与旧配方只比较 matched update/window 的接触窗 p/v/face 误差、R03/contact
-  和 episode/safety 分母，不用 total return 裁决。
+  和 episode/safety 分母，不用 total return 裁决。现有 GPU0/GPU1/GPU2 都是有用的自然学习对照，
+  不为抢 treatment 人为截断；待独立 lane 可用再发。
 
 ### 结构减法（不阻塞已启动 long）
 
@@ -123,6 +129,10 @@
 - 性能减法保留 reason/counter/safety/durable truth，但不用“安全”为名保留同写者仪式或重复身份验证。
 - dead Racket observation authority 删除后的 exact Pod 聚焦回归为 `171 passed`；历史
   semantic-surface fixture 的父提交假红已用显式 13-symbol source-evolution map 修复，未改 production digest。
+- 当前 production 已无每步 full-manager snapshot，死 Racket registry 已删除，policy playback 也只保留
+  当前 RSL3 grouped observation。继续删除真正无消费者的兼容与同写者仪式；不做兼容旧 FullMDP/checkpoint
+  的 adapter 链。`build_4` 只吸收 direct-paddle、早期自然暴露等第一性原理，不复制其旧 runtime、混合
+  warm-start/replay/sigma 或 checkpoint ABI。
 
 ### 继续与停止
 
