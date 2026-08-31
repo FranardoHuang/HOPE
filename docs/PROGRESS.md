@@ -2,6 +2,9 @@
 
 ## 2026-08-31 — R36 v5 物理出生、视觉工作流与双端起跑
 
+- checkpoint 视频回放已修正为与训练相同的 dynamic-ready 出生 MDP，显式影片输出改为
+  fresh no-clobber 目录。Pod 用真实 Phase-4 motion/artifact/nominal-hold receipt 完成 binding
+  复算=`1a6885f5…7330772`。这使 `model_300` 画面可信，不新增 Gate。
 - Reward28 row 转录已在 actual-step close 批量化；Pod1 同 seed 两条 61-update 的整份
   ACK JSON 逐字节相等，p50/p90=`11.060/11.291→10.755/10.943 s`。这是约 3%
   的真实小收益，主墙仍是 D05/reset/command。fresh recipe 存档频率改为 300，

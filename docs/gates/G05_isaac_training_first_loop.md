@@ -22,8 +22,8 @@ G05 保持 `Partial / diagnostic_unauthorized`。
 Racket observation token/registry 及其 test/semantic glue。ActionEpoch selected-rubber、cold table 与
 D05/R05/generation 真链保留；这不改 reward、observation 或学习数学，只删无生产消费者的模拟权威。
 
-到 update 513，GPU0 近 100 轮 episode 平均已到 `353.37 tick`、launch=`4,041`、
-timeout/tilt/table=`3,862/2,093/878`，但 R03/contact 仍=`0/0`。这证明 balance/survival
+到 update 566，GPU0 近 100 轮 episode 平均已到 `455.94 tick`、launch=`4,734`、
+timeout/tilt/table=`4,639/490/226`，但 R03/contact 仍=`0/0`。这证明 balance/survival
 明显推进且 hit 入口有真分母，也明确证明 hit 还没学会；landing 仍`未测`。
 
 `67109ec2` 只包含完整 ACK 逐字节等价的 Reward row 批处理与 `300 update`
@@ -31,6 +31,11 @@ timeout/tilt/table=`3,862/2,093/878`，但 R03/contact 仍=`0/0`。这证明 bal
 `/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`
 已产生连续 finite ACK。它的 `model_300` 只用于固定机位检查 balance/mimic/
 contact-window，不增 Gate。G05 仍保持 `Partial / diagnostic_unauthorized`。
+
+`3fe375f5..4c43967d` 另修正了 checkpoint 回放 MDP：`play.py` 现在复用训练的
+dynamic-ready resolver/loader，视频显式输出只能写 fresh no-clobber 目录。Pod 用真实
+Phase-4 motion/artifact/hold receipt 已安装并复算 binding=`1a6885f5…7330772`。这是修改
+回放工具的真实错配，不是把画面加为新的安全门。
 
 ## 2026-08-30 R36 当前 Isaac 学习入口（仍 `Partial`）
 

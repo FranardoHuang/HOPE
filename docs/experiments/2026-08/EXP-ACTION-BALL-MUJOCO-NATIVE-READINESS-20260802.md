@@ -80,6 +80,11 @@ p50/p90=`11.060/11.291→10.755/10.943 s`。它只证明约 `3%` 的确定收益
 `/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`
 开始后继；首个 `model_300` 用于固定机位开发检查，不是新 Gate。
 
+checkpoint 回放链在 `3fe375f5..4c43967d` 补上了训练时同一 dynamic-ready binding，并将
+显式视频输出改为 fresh no-clobber 目录。Pod 用真实 Phase-4 motion、dynamic-ready artifact
+与 nominal-hold receipt 复算安装得到 binding SHA=`1a6885f5…7330772`。这修复的是“回放
+必须和训练属于同一 MDP”，不是新增视觉准入门。
+
 ## 2026-08-30 current correction（已被上节取代）
 
 ### 当前 adopted contract

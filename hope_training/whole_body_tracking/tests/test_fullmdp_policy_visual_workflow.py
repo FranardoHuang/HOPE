@@ -73,7 +73,7 @@ def test_policy_visual_installs_training_dynamic_ready_binding():
         commands=SimpleNamespace(
             motion=motion,
             racket_target=SimpleNamespace(
-                clip_names_per_clip=("take_061_unit04_bh",)
+                clip_names_per_clip=("take061_slow_block_phase4_v1",)
             ),
         )
     )
@@ -94,7 +94,7 @@ def test_policy_visual_installs_training_dynamic_ready_binding():
             "artifact_sha256": "a" * 64,
             "nominal_hold_receipt_path": "/exact/hold.json",
             "nominal_hold_receipt_sha256": "b" * 64,
-            "action_order": ["take_061_unit04_bh"],
+            "action_order": ["take061_slow_block_phase4_v1"],
             "motion_paths": ["/exact/take061.npz"],
         }
     ]

@@ -32,6 +32,8 @@
   racket-site、桌网球物理与 recovery 准入。v5 bundle 同时绑定 teacher、physical-ready、nominal-hold、
   exact ball physics 和 compiled Mu plant。
 - Observation V3 保持 actor/critic `215/231`；本轮没有新增 actor 字段、Gate 或 oracle。
+- checkpoint 固定机位回放必须安装训练时的同一份 dynamic-ready binding，并把影片写到
+  fresh no-clobber 目录；否则画面属于另一个出生 MDP，不能用来判断学习。
 
 ### 已验证的当前真值
 
@@ -46,13 +48,16 @@
 - `e5c02ea6` fresh Mu 61-update diagnostic 自然完成，RC=0；每轮 `24,576/24,576`
   UID/identity rows 正确，storage finite、reward conservation/fact-integrity 无故障，p50/p90=
   `6.667/7.153 s`。同 source 已从 fresh root 进入 100,000-update Mu long。
-- GPU0 Isaac 到 update 513 仍 finite；近 100 轮 episode 平均已到 `353.37 tick`，
-  launch=`4,041`，timeout/tilt/table=`3,862/2,093/878`，证明 balance/survival 与 hit 入口持续
+- GPU0 Isaac 到 update 566 仍 finite；近 100 轮 episode 平均已到 `455.94 tick`，
+  launch=`4,734`，timeout/tilt/table=`4,639/490/226`，证明 balance/survival 与 hit 入口持续
   打开；但 R03/contact 仍=`0/0`。同窗 playback 误差为
-  `0.534 m / 0.370 m/s / 0.310 rad / 0.282 rad`。这个窗的样本已更多进入晚期 playback，
+  `0.591 m / 0.335 m/s / 0.343 rad / 0.303 rad`。这个窗的样本已更多进入晚期 playback，
   不能用原始均值直接断言 mimic 退化；可确定的是 hit 仍未学会。
-- GPU2 Mu 到 update 690 持续 finite；近 100 轮 episode 平均 `154.78 tick`，
-  launch/R03/contact=`2/2/0`，tilt/table=`8,192/7,709`，仍主要败在 balance/mimic。两端都不能
+- GPU1 fresh Isaac 到 update 105 持续 finite；近 100 轮 episode 平均 `121.66 tick`，
+  launch/R03/contact=`7/0/0`，tilt/table/timeout=`15,469/4,727/6`。它仍是早期 balance/mimic 学习，
+  不用这个窗裁决 hit；首个 `model_300` 专门用于直观排查是否在学错动作。
+- GPU2 Mu 到 update 838 持续 finite；近 100 轮 episode 平均 `159.99 tick`，
+  launch/R03/contact=`5/3/0`，tilt/table=`8,497/6,892`，仍主要败在 balance/mimic。两端都不能
   称 hit 或 landing 已成功；landing 仍为`未测`。
 
 ### 已直接修复
@@ -73,6 +78,9 @@
   不冒充主墙已消失。
 - [x] checkpoint cadence 改为 `300 update`，专用于尽早固定机位看真实 policy；
   `206 passed, 2 skipped`，不增 Gate，不改学习数学。
+- [x] 修正 policy 视频工作流：`play.py` 复用训练的 dynamic-ready resolver/loader，显式
+  `video_dir` 只能创建 fresh no-clobber 目录。Pod 已用真实 Phase-4 motion/artifact/hold receipt
+  安装 binding=`1a6885f58af0ccd7a9d57c0b45949c6a408e686098c7d6d6dd271c2797330772`。
 
 ### 当前唯一执行队列
 
@@ -88,7 +96,8 @@
   `/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`。
 - [ ] 双端按 update 100/300/1000 读同一自然链。
 - [ ] GPU1 `model_300.diagnostic_nonresumable.pt` 出现后立即导出固定视角
-  reset/pre-teacher/contact-window/recovery 视频，并将画面与同窗 balance/mimic/launch/contact 分母对齐。
+  reset/pre-teacher/contact-window/recovery 视频；使用已实证的同一 dynamic-ready binding 和 fresh
+  影片目录，并将画面与同窗 balance/mimic/launch/contact 分母对齐。
 
 ### 结构减法（不阻塞已启动 long）
 
