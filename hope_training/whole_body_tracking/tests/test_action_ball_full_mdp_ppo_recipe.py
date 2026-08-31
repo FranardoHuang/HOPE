@@ -39,7 +39,7 @@ def test_v6_recipe_is_frozen_complete_and_keeps_total_training_work():
         recipe.num_steps_per_env,
         recipe.max_iterations,
         recipe.save_interval,
-    ) == (512, 48, 100_000, 2_000)
+    ) == (512, 48, 100_000, 300)
     assert recipe.empirical_normalization is False
     assert (recipe.num_learning_epochs, recipe.num_mini_batches) == (5, 1)
     assert (recipe.gamma, recipe.lam) == (0.99, 0.98)
