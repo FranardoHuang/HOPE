@@ -931,9 +931,13 @@ def _snapshot_device_profile(
             or any(character not in "0123456789abcdef" for character in semantic)
             for semantic in semantic_sha256s
         )
-        or len(set(semantic_sha256s)) != len(semantic_sha256s)
     ):
         raise DeviceR05Error("device profile structural binding differs")
+    # ``cell_ids`` identify the fixed-width draw slots and are unique.  Their
+    # targets need not be: a zero-width curriculum legitimately repeats one
+    # physical target in every slot, which also repeats its semantic digest.
+    # The content binding below hashes each (cell_id, semantic) pair plus the
+    # target bytes, so duplicate semantics do not create identity ambiguity.
     # This is a cold construction/restore check, never a reveal-path transfer.
     # Recompute the binding from the copied float32 bytes instead of trusting a
     # digest supplied by the same authority.  ``untyped_storage`` avoids

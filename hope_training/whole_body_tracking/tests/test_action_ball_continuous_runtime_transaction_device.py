@@ -108,7 +108,12 @@ setattr(
 
 
 
-def _profile():
+def _profile(*, repeated_target: bool = False):
+    targets = (
+        ((2.10, -0.20),) * 3
+        if repeated_target
+        else ((2.10, -0.20), (2.10, 0.20), (2.80, 0.0))
+    )
     return c03.ContinuousTargetProfile(
         frame_id="hope_world_table_xy_m",
         frame_binding_sha256="a" * 64,
@@ -116,16 +121,16 @@ def _profile():
         quantization_contract=c03.QUANTIZATION_CONTRACT,
         components=("landing_x_m", "landing_y_m"),
         cells=(
-            c03.TargetCell("near_left", (2.10, -0.20)),
-            c03.TargetCell("near_right", (2.10, 0.20)),
-            c03.TargetCell("deep_center", (2.80, 0.0)),
+            c03.TargetCell("near_left", targets[0]),
+            c03.TargetCell("near_right", targets[1]),
+            c03.TargetCell("deep_center", targets[2]),
         ),
     )
 
 
 class _ProfileAuthority:
-    def __init__(self, device):
-        portable = _profile()
+    def __init__(self, device, *, repeated_target: bool = False):
+        portable = _profile(repeated_target=repeated_target)
         self.receipt = object()
         cell_ids = tuple(cell.cell_id for cell in portable.cells)
         semantics = tuple(
@@ -157,6 +162,18 @@ class _ProfileAuthority:
     def require_owned_r05_profile(self, receipt):
         assert receipt is self.receipt
         return self.projection
+
+
+def test_profile_snapshot_accepts_unique_slots_with_one_zero_width_target():
+    authority = _ProfileAuthority(
+        torch.device("cpu"), repeated_target=True
+    )
+    assert len(set(authority.projection.cell_ids)) == 3
+    assert len(set(authority.projection.semantic_sha256s)) == 1
+    owned = r05._snapshot_device_profile(authority, authority.receipt)
+    assert owned.cell_ids == authority.projection.cell_ids
+    assert owned.semantic_sha256s == authority.projection.semantic_sha256s
+    assert torch.equal(owned.targets_xy_m, authority.projection.targets_xy_m)
 
 
 class _Genesis:
