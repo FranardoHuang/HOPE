@@ -971,6 +971,9 @@ class _RewardManager:
                         ),
                         dtype=torch.float32,
                     ),
+                    "paddle_contact_scale": torch.ones(
+                        self.count, dtype=torch.float32
+                    ),
                 }
                 if ordinal == REWARDS.PADDLE_MOTION_PRIOR_FIRST_ORDINAL
                 else {}
