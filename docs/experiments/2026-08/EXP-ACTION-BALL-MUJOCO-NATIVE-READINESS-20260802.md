@@ -38,9 +38,11 @@ raw env reset 不是训练出生，atomic ready write 后的姿态才是实际 r
 `/workspace/franco/runs/fullmdp-r36-v5-5dd39786-isaac-h48-20260831T0939Z`
 已持续到 update 149，recent-30 p50/p90 约 `10.74/10.96 s`。update 149 的 D05 due/accepted=
 `174/174`、playback-started=`179`，physical-launch/R03/contact=`0/0/0`；`200` 个完成 episode 平均
-`132.48 tick`，table/tilt=`120/80`。ball launch/contact 时钟约在 reveal 后 `252/265 tick`，所以当前先败在
-balance/survival 的接触前样本饥饿；这不是 target 错的证据，也不是 mimic 成功。用 update
-300/1000 的 episode、teacher-achieved paddle error、hard/table/fall 趋势和固定相机视频判读。
+132.48 tick`，table/tilt=`120/80`。到 update 305，近 30 轮已有 physical launch/observed=`79/79`，
+说明 hit 入口自然打开；但 R03/contact=`0/0`，平均 episode=`148.67 tick`，仍多数早于
+约 tick 300/313 的 launch/R03 时钟终止。四项 playback 误差为
+`0.313 m / 0.579 m/s / 0.216 rad / 0.224 rad`，nonfinite/conservation=`0/0`。这是
+balance→mimic 仍在学、hit 刚出现分母的证据，不是 target 错，也不是 mimic 已成功。
 
 Mu 精确诊断已给出 `uid_rows=0/24576, identity_rows=0/24576`。根因是 runner 和离线 consumer
 仍各自手抄 0807 旧 UID `2552478955674699`，而v5 portable catalog 真源为 `4098890508575574`。

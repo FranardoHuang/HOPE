@@ -40,15 +40,16 @@
   姿态可见不是训练起点，atomic write 后才是实际反手 ready；contact 帧的球/拍心/教师挥拍目标
   对齐。这是工作流证据，不是新 Gate。
 - `5dd39786` 的 Isaac/Mu 真 CUDA fixed-action 都完成 `512×48×31`，done/timeout=0，同一
-  action tape。Isaac update 149 前的 recent-30 p50/p90 约 `10.74/10.96 s`，不再把启动期的
-  `~7 s` 写成稳态。
+  action tape。Isaac update 276--305 在三卡并行负载下 p50/p90=`19.55/19.76 s`；这是当前运行
+  wall-time，不把启动期 `~7 s` 或单卡早窗 `~10.7 s` 冒充现态。
 - `e5c02ea6` fresh Mu 61-update diagnostic 自然完成，RC=0；每轮 `24,576/24,576`
   UID/identity rows 正确，storage finite、reward conservation/fact-integrity 无故障，p50/p90=
   `6.667/7.153 s`。同 source 已从 fresh root 进入 100,000-update Mu long。
-- Isaac update 149 的 D05 due/accepted=`174/174`、playback-started=`179`，但 physical-launch/R03/contact
-  仍为 `0/0/0`。当轮 `200` 个完成 episode 平均 `132.48 tick`，而首次 ball launch/contact 时钟约在
-  reveal 后 `252/265 tick`；因此当前首先是 balance/survival 的接触前样本饥饿，不能据此判 target 错，
-  也不能据此宣称 mimic 已学会。继续按 update 300/1000 看 episode、paddle error、table/tilt 和固定相机。
+- Isaac update 276--305 已累计 physical launch/observed=`79/79`，说明 balance/survival 首次将
+  hit 层入口自然打开；但 R03/contact=`0/0`，近 30 轮 `4,971` 个完成 episode 平均仅
+  `148.67 tick`，仍大量早于约 tick 300/313 的 launch/R03 时钟终止。四项 playback 误差为
+  `0.313 m / 0.579 m/s / 0.216 rad / 0.224 rad`，nonfinite/conservation=`0/0`。因此现在是
+  hit 入口刚出现、尚无可打分母，不是 target 错位证据，也不是 mimic 已成功。
 
 ### 已直接修复
 
@@ -74,8 +75,9 @@
 - [x] Mu fresh long：
   `/workspace/franco/runs/fullmdp-r36-v5-e5c02ea6-mujoco-h48-20260831T1034Z`。
 - [ ] 双端按 update 100/300/1000 读同一自然链。
-- [ ] Isaac update 300/1000 导出当前 policy 的固定视角 reset/pre-teacher/contact-window/recovery 视频。
-  尚无 contact 时仍导出 contact-window 球/拍/教师相对位置，不让日志平均值替代看图。
+- [ ] update 300/1000 持续读数值窗；当前 active recipe 的首个可用 policy checkpoint 是
+  `model_2000.pt`，到达后立即导出固定视角 reset/pre-teacher/contact-window/recovery 视频。
+  下一个 fresh recipe 发射前将 save cadence 缩到 `<=300 update`，不再让可视化落后数小时。
 
 ### 结构减法（不阻塞已启动 long）
 
@@ -84,6 +86,8 @@
 - command metric/Reward 同周期 pack、owner 窄投影、monolith 拆分、exact-resume consumer 和 external closure
   单命令物化继续独立落地；不热补 active run，不以“更优雅”为由停掉可学 policy。
 - 性能减法保留 reason/counter/safety/durable truth，但不用“安全”为名保留同写者仪式或重复身份验证。
+- dead Racket observation authority 删除后的 exact Pod 聚焦回归为 `171 passed`；历史
+  semantic-surface fixture 的父提交假红已用显式 13-symbol source-evolution map 修复，未改 production digest。
 
 ### 继续与停止
 

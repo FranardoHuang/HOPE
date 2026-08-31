@@ -19,6 +19,8 @@
   后来新增的 13 个 CUDA-graph symbol。仅更新该显式历史-source map，不改 production 覆盖或 digest。
 - `e5c02ea6` Mu 身份修复诊断自然完成 61 update，RC=0，p50/p90=`6.667/7.153 s`，
   每轮 UID/identity=`24,576/24,576`且 storage finite；同 source fresh 100,000-update long 已起跑。
+- Isaac update 276--305 首次累计 physical launch/observed=`79/79`，证明自然链已打开 hit 入口；
+  R03/contact 仍 `0/0`，近 30 轮平均 episode=`148.67 tick`，所以仍处 balance/mimic→hit 交接早窗。
 
 ## 2026-08-30 — 双后端 TODO 收为唯一当前清单
 

@@ -12,10 +12,11 @@ ready write 后姿态与 teacher contact frame 的球/拍心/挥拍目标对齐�
 `/workspace/franco/runs/fullmdp-r36-v5-5dd39786-isaac-h48-20260831T0939Z`
 正在持续 ACK；update 149 前 recent-30 p50/p90约 `10.74/10.96 s`。该 update D05 due/accepted=
 `174/174`、playback-started=`179`，但 physical-launch/R03/contact=`0/0/0`；完成 episode 平均
-`132.48 tick`，仍早于约 `252/265 tick` 的 ball launch/contact 时钟，所以首先是接触前
-balance/survival 样本饥饿。这只证明训练链入口正确，不证明 mimic/hit/landing 学会。下一判读点为
-update 300/1000 的 episode、teacher-achieved paddle error、hard/table/fall 趋势与同步视频。G05 保持
-`Partial / diagnostic_unauthorized`。
+`132.48 tick`。到 update 305，近 30 轮 physical launch/observed=`79/79`，证明下一层入口
+已自然打开；但 R03/contact=`0/0`，平均 episode=`148.67 tick`，仍多数早于约
+tick 300/313 的 launch/R03 时钟终止。四项 playback 误差为
+`0.313 m / 0.579 m/s / 0.216 rad / 0.224 rad`，所以尚不能称 mimic 或 hit 学会。
+G05 保持 `Partial / diagnostic_unauthorized`。
 
 本轮结构减法另删除了从未进入 runtime graph、production binder 永久 HOLD 的
 Racket observation token/registry 及其 test/semantic glue。ActionEpoch selected-rubber、cold table 与
