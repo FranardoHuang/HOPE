@@ -8,7 +8,7 @@
 > 证据等级：final V3/PPO V6两端runtime/rate与fresh prefix各为诊断E2；静态clone payload仍只是E1，
 > fixed-tape跨引擎physics parity、formal learning与promotion未完成
 >
-> 阅读边界：current结论只认§16；§1--15保留为热墙定位与已做减法的历史证据，旧Reward20/PPO版本不得
+> 阅读边界：current结论只认§17；§1--16保留为热墙定位与已做减法的历史证据，旧Reward20/PPO版本不得
 > 覆盖当前Reward28/PPO V5/Observation V3；Reward24只作V6历史。
 > 2026-08-27的现役候选已换为PPO V6；V5数值只作历史，当前速度结论见§17。
 
@@ -722,3 +722,29 @@ fault sample，而不是降低solver精度或增加安全Gate。
 
 §16全部证据保持`diagnostic_unauthorized=true`。rate和真实运行路径已闭合，但contact/landing、
 fixed-tape跨引擎physics parity、formal checkpoint、promotion、export、deployment与真机授权均没有因此完成。
+
+## 17. 2026-08-31 current：Reward row 批处理、真墙与结构边界
+
+R36 的 5-update profiler 将 Isaac H48 的稳态次级墙收敛到 D05/reset/command；PPO learning
+仍不到 `.1 s`，不是优化目标。Reward ledger 还有一处明确重复：28 个 term 在每个
+control step 各自 stack/copy，然后才在 actual-step close 汇总。`3e1bb5af` 保留原来的
+逐 term 累加顺序和 policy reward，只将这些 row 先存入有界列表，在 close 时一次
+stack/copy。
+
+Pod1 GPU1 用同 exact tape/seed 连续跑两条 profiler-off `512×48×61`：
+
+- baseline `b41ed809`：p50/p90=`11.060/11.291 s`；
+- candidate `136c23ee`：p50/p90=`10.755/10.943 s`，改善 `2.76%/3.08%`；
+- 两条 61 份 `HOPE_ACTION_EPOCH_UPDATE_ACK_JSON` 全量递归相等，不只是摘要字段相等。
+  Reward28、actual reward/conservation、episode/reset、D05、launch/contact、joint safety 及所有
+  reason/counter 都没有变化。
+
+因此该刀保留，但它只是确定性小减法，不冒充“update 墙已解决”。下一刀只攻
+D05/reset/command 中的 per-env Python、same-writer 回声和每步 D2H；真实跨 owner identity/
+generation/contact/outcome、reason/counter/safety 和 durable checkpoint 保留。不降低 solver 迭代、
+不修 PPO，不新增 success/safety Gate。
+
+`cba74f70` 另将 fresh recipe 的 save interval 从 2000 改为 300，使真实 policy 画面能进入
+日常开发循环。这不改 PPO 更新、Reward 或运行准入，也不把视频变成 Gate。
+Pod focused=`206 passed, 2 skipped`；fresh GPU1 long 已从 `67109ec2` 启动。所有证据仍为
+`diagnostic_unauthorized=true`。

@@ -22,6 +22,16 @@ G05 保持 `Partial / diagnostic_unauthorized`。
 Racket observation token/registry 及其 test/semantic glue。ActionEpoch selected-rubber、cold table 与
 D05/R05/generation 真链保留；这不改 reward、observation 或学习数学，只删无生产消费者的模拟权威。
 
+到 update 513，GPU0 近 100 轮 episode 平均已到 `353.37 tick`、launch=`4,041`、
+timeout/tilt/table=`3,862/2,093/878`，但 R03/contact 仍=`0/0`。这证明 balance/survival
+明显推进且 hit 入口有真分母，也明确证明 hit 还没学会；landing 仍`未测`。
+
+`67109ec2` 只包含完整 ACK 逐字节等价的 Reward row 批处理与 `300 update`
+存档频率。Pod focused=`206 passed, 2 skipped`；fresh GPU1 root
+`/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`
+已产生连续 finite ACK。它的 `model_300` 只用于固定机位检查 balance/mimic/
+contact-window，不增 Gate。G05 仍保持 `Partial / diagnostic_unauthorized`。
+
 ## 2026-08-30 R36 当前 Isaac 学习入口（仍 `Partial`）
 
 R35 Isaac 的最终冻结窗已给出可信负例：survival/balance 基本形成，`4,951` 次 physical launch 后仍为

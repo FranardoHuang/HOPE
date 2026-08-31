@@ -44,6 +44,12 @@ raw env reset 不是训练出生，atomic ready write 后的姿态才是实际 r
 `0.313 m / 0.579 m/s / 0.216 rad / 0.224 rad`，nonfinite/conservation=`0/0`。这是
 balance→mimic 仍在学、hit 刚出现分母的证据，不是 target 错，也不是 mimic 已成功。
 
+到 update 513，GPU0 Isaac 近 100 轮 episode 平均已到 `353.37 tick`，launch=
+`4,041`、timeout/tilt/table=`3,862/2,093/878`，但 R03/contact 仍=`0/0`。因为晚期
+playback 样本比例已显著改变，四项 raw 均值只用来定位 matched phase 评测，不直接评判
+政策退化。GPU2 Mu 到 update 690 的近 100 轮为 episode `154.78 tick`，
+launch/R03/contact=`2/2/0`，tilt/table=`8,192/7,709`；它仍主要败在 balance/mimic。
+
 Mu 精确诊断已给出 `uid_rows=0/24576, identity_rows=0/24576`。根因是 runner 和离线 consumer
 仍各自手抄 0807 旧 UID `2552478955674699`，而v5 portable catalog 真源为 `4098890508575574`。
 `e5c02ea6` 删掉这两个生产常量，统一从 exact portable catalog 取身份，但保留 ledger 对每行真漂移的
@@ -65,6 +71,14 @@ reward conservation/fact-integrity 无故障。同 source 已发 fresh long：
 consumer，production binder 永久 HOLD，只由 focused test 自行 mint/consume。因此删除该 capability、record、
 retained fields、binder、测试和 stale semantic exclusions；不动 ActionEpoch 实时 selected-rubber、cold table 或
 D05/R05/generation owner。这是删除无消费者的模拟权威，不是放宽真值校验。
+
+第二个确定性减法将 Reward28 每个 control step 的 28 次独立 row 转录收敛为一次
+batched close。Pod1 同 seed 两条 61-update probe 的整份 ACK JSON 逐字节相等；
+p50/p90=`11.060/11.291→10.755/10.943 s`。它只证明约 `3%` 的确定收益，
+没有把 D05/reset/command 主墙写成已解决。`67109ec2` 另将存档频率改为
+`300 update`，并从 fresh GPU1 root
+`/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`
+开始后继；首个 `model_300` 用于固定机位开发检查，不是新 Gate。
 
 ## 2026-08-30 current correction（已被上节取代）
 

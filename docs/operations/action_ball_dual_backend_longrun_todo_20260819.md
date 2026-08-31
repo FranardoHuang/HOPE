@@ -15,9 +15,10 @@
 
 ## 0.7 2026-08-31 current：R36 v5 直接修根因与双端学习闭环
 
-本节是唯一现役局部执行合同。当前 Isaac 训练源为 `5dd39786`；Mu 身份真源修复为
-`e5c02ea6`。正在训练的 Isaac root 继续严格绑定 `5dd39786`，不热补；Mu 从 fresh exact
-`e5c02ea6` 启动。所有结论限定为 `diagnostic_unauthorized`。
+本节是唯一现役局部执行合同。当前 GPU0 Isaac 严格绑定 `5dd39786`，GPU2 Mu 绑定
+`e5c02ea6`，都不热补。GPU1 已从 fresh clean exact `67109ec2` 启动后继 Isaac：它只合入
+已做完整等价对拍的 Reward ledger 批量转录和 `300 update` 存档频率，不改 PPO、Reward
+经济或自然课程。所有结论限定为 `diagnostic_unauthorized`。
 
 ### 已采用合同
 
@@ -45,11 +46,14 @@
 - `e5c02ea6` fresh Mu 61-update diagnostic 自然完成，RC=0；每轮 `24,576/24,576`
   UID/identity rows 正确，storage finite、reward conservation/fact-integrity 无故障，p50/p90=
   `6.667/7.153 s`。同 source 已从 fresh root 进入 100,000-update Mu long。
-- Isaac update 276--305 已累计 physical launch/observed=`79/79`，说明 balance/survival 首次将
-  hit 层入口自然打开；但 R03/contact=`0/0`，近 30 轮 `4,971` 个完成 episode 平均仅
-  `148.67 tick`，仍大量早于约 tick 300/313 的 launch/R03 时钟终止。四项 playback 误差为
-  `0.313 m / 0.579 m/s / 0.216 rad / 0.224 rad`，nonfinite/conservation=`0/0`。因此现在是
-  hit 入口刚出现、尚无可打分母，不是 target 错位证据，也不是 mimic 已成功。
+- GPU0 Isaac 到 update 513 仍 finite；近 100 轮 episode 平均已到 `353.37 tick`，
+  launch=`4,041`，timeout/tilt/table=`3,862/2,093/878`，证明 balance/survival 与 hit 入口持续
+  打开；但 R03/contact 仍=`0/0`。同窗 playback 误差为
+  `0.534 m / 0.370 m/s / 0.310 rad / 0.282 rad`。这个窗的样本已更多进入晚期 playback，
+  不能用原始均值直接断言 mimic 退化；可确定的是 hit 仍未学会。
+- GPU2 Mu 到 update 690 持续 finite；近 100 轮 episode 平均 `154.78 tick`，
+  launch/R03/contact=`2/2/0`，tilt/table=`8,192/7,709`，仍主要败在 balance/mimic。两端都不能
+  称 hit 或 landing 已成功；landing 仍为`未测`。
 
 ### 已直接修复
 
@@ -63,6 +67,12 @@
 - [x] 删除从未进入 runtime graph 的 Racket observation token/registry：它只有测试自产自销，
   production binder 永久 HOLD，却残留 capability/record/clone/stale 校验和 semantic exclusion。保留真正
   在线的 ActionEpoch selected-rubber、cold reference table 和 D05/R05/generation truth。
+- [x] Reward28 每个 control step 的 28 次独立 row 转录收敛为一次 batched close；61 个
+  ACK JSON 全量递归逐字节相等。Isaac GPU1 profiler-off p50/p90 从
+  `11.060/11.291 s` 降到 `10.755/10.943 s`（`-2.76%/-3.08%`）；这是真实小收益，
+  不冒充主墙已消失。
+- [x] checkpoint cadence 改为 `300 update`，专用于尽早固定机位看真实 policy；
+  `206 passed, 2 skipped`，不增 Gate，不改学习数学。
 
 ### 当前唯一执行队列
 
@@ -74,17 +84,19 @@
 - [x] `e5c02ea6` fresh Mu diagnostic 61-update rate window：RC=0，p50/p90=`6.667/7.153 s`。
 - [x] Mu fresh long：
   `/workspace/franco/runs/fullmdp-r36-v5-e5c02ea6-mujoco-h48-20260831T1034Z`。
+- [x] 等价加速与 `300 update` 可视存档的 fresh GPU1 Isaac long：
+  `/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`。
 - [ ] 双端按 update 100/300/1000 读同一自然链。
-- [ ] update 300/1000 持续读数值窗；当前 active recipe 的首个可用 policy checkpoint 是
-  `model_2000.pt`，到达后立即导出固定视角 reset/pre-teacher/contact-window/recovery 视频。
-  下一个 fresh recipe 发射前将 save cadence 缩到 `<=300 update`，不再让可视化落后数小时。
+- [ ] GPU1 `model_300.diagnostic_nonresumable.pt` 出现后立即导出固定视角
+  reset/pre-teacher/contact-window/recovery 视频，并将画面与同窗 balance/mimic/launch/contact 分母对齐。
 
 ### 结构减法（不阻塞已启动 long）
 
 - hot path 只保留数值真值和跨 owner 边界；删同 writer postcondition、每步 full-manager snapshot、可离线
   重建的转录和死 registry。完整字节证明下沉 launch/checkpoint，不常驻 reset/physics substep。
-- command metric/Reward 同周期 pack、owner 窄投影、monolith 拆分、exact-resume consumer 和 external closure
-  单命令物化继续独立落地；不热补 active run，不以“更优雅”为由停掉可学 policy。
+- 下一性能刀只针对 profile 已显示的 D05/reset/command 重复数据搬运：跨 owner 事实保留，
+  same-writer 回声、per-env Python 转录和每步 D2H 下沉。monolith 拆分按真正 owner 边界渐进落地，
+  不做一次性重写，也不用新 Gate 补偿臃肿结构。
 - 性能减法保留 reason/counter/safety/durable truth，但不用“安全”为名保留同写者仪式或重复身份验证。
 - dead Racket observation authority 删除后的 exact Pod 聚焦回归为 `171 passed`；历史
   semantic-surface fixture 的父提交假红已用显式 13-symbol source-evolution map 修复，未改 production digest。

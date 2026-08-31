@@ -13,7 +13,10 @@ Isaac fresh long 已起跑；Mu fresh long 在首 PPO update 前因 ledger 拒�
 `e5c02ea6` 已让两者直接从 exact portable catalog 取唯一 action identity，并保留 row-wise drift 检测；
 Pod focused=`275 passed, 1 skipped`。fresh Mu diagnostic 已自然完成 61 update，RC=0，
 p50/p90=`6.667/7.153 s`，每轮 UID/identity=`24,576/24,576`且 storage finite；同 source fresh
-long 已起跑。在双端 contact/outcome 分母和 first-divergence 都出现前，G06 保持
+long 已到 update 690。近 100 轮 episode 平均 `154.78 tick`，launch/R03/contact=
+`2/2/0`，tilt/table=`8,192/7,709`，因此 Mu 仍主要败在 balance/mimic，landing 为`未测`。
+这是学习分层证据，不代签 plant/contact response parity。在双端 contact/outcome 分母和
+first-divergence 都出现前，G06 保持
 `Partial / diagnostic_unauthorized`。
 
 ## 2026-08-30 R36 当前双端边界（仍 `Partial`）
