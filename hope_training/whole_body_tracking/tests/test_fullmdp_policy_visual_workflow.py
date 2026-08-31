@@ -127,3 +127,65 @@ def test_explicit_video_directory_is_fresh_and_no_clobber(tmp_path):
         play_mod._prepare_video_output_directory(
             str(output), str(tmp_path / "unused")
         )
+
+
+def test_fullmdp_policy_visual_reuses_training_owner_and_typed_ppo(monkeypatch):
+    owner_factory = object()
+    binding = SimpleNamespace(owner_factory=owner_factory)
+    cfg = _cfg(
+        task={
+            "action_ball_full_mdp_runtime": True,
+            "gym_task": "HOPE-PingPong-ActionBall-FullMdpA-AgibotA3-v0",
+        }
+    )
+    env_cfg = SimpleNamespace()
+    algo = {"runner": {}, "policy": {}, "algorithm": {}}
+    calls = []
+
+    monkeypatch.setattr(
+        play_mod,
+        "_resolve_action_ball_full_mdp_pre_gym_binding",
+        lambda **kwargs: calls.append(("binding", kwargs)) or binding,
+    )
+    monkeypatch.setattr(
+        play_mod,
+        "_configure_action_ball_full_mdp_joint_safety_evidence",
+        lambda cfg_value, binding_value: calls.append(
+            ("joint_safety", cfg_value, binding_value)
+        ),
+    )
+    monkeypatch.setattr(
+        play_mod,
+        "_apply_action_ball_full_mdp_ppo_recipe",
+        lambda algo_value, *, requested: calls.append(
+            ("ppo", algo_value, requested)
+        ),
+    )
+
+    kwargs = play_mod._prepare_action_ball_full_mdp_playback_runtime(
+        cfg,
+        env_cfg,
+        gym_registry="gym-registry",
+        num_envs=1,
+        algo=algo,
+    )
+
+    assert kwargs == {
+        "full_mdp_runtime_owner_factory": owner_factory,
+        "full_mdp_cold_restore_dormant": False,
+    }
+    assert calls == [
+        (
+            "binding",
+            {
+                "requested": True,
+                "task_id": "HOPE-PingPong-ActionBall-FullMdpA-AgibotA3-v0",
+                "gym_registry": "gym-registry",
+                "num_envs": 1,
+                "checkpoint_path": None,
+                "checkpoint_tolerant": False,
+            },
+        ),
+        ("joint_safety", env_cfg, binding),
+        ("ppo", algo, True),
+    ]

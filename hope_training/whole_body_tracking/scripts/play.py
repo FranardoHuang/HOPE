@@ -20,13 +20,16 @@ from omegaconf import OmegaConf
 
 from isaac_bank_exam_adapter import policy_observation_tensor
 from train import (
+    _apply_action_ball_full_mdp_ppo_recipe,
     _action_ball_full_mdp_runtime_requested,
     _apply_task_overrides,
     _build_training_hard_contract,
+    _configure_action_ball_full_mdp_joint_safety_evidence,
     _contract_diff,
     _is_noneish,
     _normalize_registry_name,
     _resolve_action_ball_dynamic_ready_bootstrap_request,
+    _resolve_action_ball_full_mdp_pre_gym_binding,
     _registry_clip_name,
     _sha256_file,
     resolve_motion_sources,
@@ -117,6 +120,38 @@ def _install_action_ball_dynamic_ready_playback(
         flush=True,
     )
     return binding
+
+
+def _prepare_action_ball_full_mdp_playback_runtime(
+    cfg,
+    env_cfg,
+    *,
+    gym_registry,
+    num_envs,
+    algo,
+):
+    """Reuse training's single FullMDP construction and actor identity."""
+
+    requested = _action_ball_full_mdp_runtime_requested(cfg.task)
+    binding = _resolve_action_ball_full_mdp_pre_gym_binding(
+        requested=requested,
+        task_id=str(cfg.task.gym_task),
+        gym_registry=gym_registry,
+        num_envs=num_envs,
+        checkpoint_path=None,
+        checkpoint_tolerant=False,
+    )
+    _configure_action_ball_full_mdp_joint_safety_evidence(env_cfg, binding)
+    _apply_action_ball_full_mdp_ppo_recipe(
+        algo,
+        requested=binding is not None,
+    )
+    if binding is None:
+        return {}
+    return {
+        "full_mdp_runtime_owner_factory": binding.owner_factory,
+        "full_mdp_cold_restore_dormant": False,
+    }
 
 
 def _prepare_video_output_directory(configured, fallback):
@@ -384,7 +419,17 @@ def _run_play(cfg, simulation_app):
         if hasattr(env_cfg.commands.motion, "speed_scale_per_clip"):
             env_cfg.commands.motion.speed_scale_per_clip = None
 
-    agent_cfg = RslRlOnPolicyRunnerCfg(**runner_kwargs(OmegaConf.to_container(cfg.algo, resolve=True), str(cfg.task.experiment_name)))
+    algo = OmegaConf.to_container(cfg.algo, resolve=True)
+    full_mdp_gym_kwargs = _prepare_action_ball_full_mdp_playback_runtime(
+        cfg,
+        env_cfg,
+        gym_registry=gym,
+        num_envs=num_envs,
+        algo=algo,
+    )
+    agent_cfg = RslRlOnPolicyRunnerCfg(
+        **runner_kwargs(algo, str(cfg.task.experiment_name))
+    )
     agent_cfg.seed = int(cfg.seed)
     agent_cfg.device = str(cfg.device)
 
@@ -458,7 +503,12 @@ def _run_play(cfg, simulation_app):
     _install_action_ball_dynamic_ready_playback(cfg, env_cfg)
 
     render_mode = "rgb_array" if cfg.video else None
-    env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
+    env = gym.make(
+        task_id,
+        cfg=env_cfg,
+        render_mode=render_mode,
+        **full_mdp_gym_kwargs,
+    )
 
     def _body(close_target):
         return _run_created_environment(
