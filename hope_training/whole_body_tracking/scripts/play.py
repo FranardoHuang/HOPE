@@ -154,6 +154,30 @@ def _prepare_action_ball_full_mdp_playback_runtime(
     }
 
 
+def _install_playback_motion_files(
+    env_cfg,
+    motion_files,
+    *,
+    full_mdp_runtime,
+):
+    """Install legacy clips or preserve FullMDP's code-owned catalog tuple."""
+
+    resolved = tuple(str(path) for path in motion_files)
+    if not resolved:
+        raise ValueError("policy playback requires at least one motion file")
+    if full_mdp_runtime:
+        current = tuple(env_cfg.commands.motion.motion_file or ())
+        if resolved != current:
+            raise RuntimeError(
+                "FullMDP playback motion differs from its code-owned catalog"
+            )
+        return current
+    env_cfg.commands.motion.motion_file = (
+        list(resolved) if len(resolved) > 1 else resolved[0]
+    )
+    return resolved
+
+
 def _prepare_video_output_directory(configured, fallback):
     """Return a video directory, making explicit outputs fresh/no-clobber."""
 
@@ -437,8 +461,12 @@ def _run_play(cfg, simulation_app):
 
     def _use_configured_motion_files():
         motion_files, _ = resolve_motion_sources(cfg, cwd=pathlib.Path.cwd())
-        env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
-        print(f"[play.py] local/config motion clips: {motion_files}", flush=True)
+        installed = _install_playback_motion_files(
+            env_cfg,
+            motion_files,
+            full_mdp_runtime=bool(full_mdp_gym_kwargs),
+        )
+        print(f"[play.py] local/config motion clips: {list(installed)}", flush=True)
 
     # resolve the checkpoint + reference motion
     wandb_path = cfg.wandb_path

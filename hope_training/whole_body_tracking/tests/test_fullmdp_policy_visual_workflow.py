@@ -192,3 +192,23 @@ def test_fullmdp_policy_visual_reuses_training_owner_and_typed_ppo(monkeypatch):
         ("joint_safety", env_cfg, binding),
         ("ppo", algo, True),
     ]
+
+
+def test_fullmdp_policy_visual_preserves_code_owned_motion_tuple():
+    motion = SimpleNamespace(motion_file=("/exact/take061.npz",))
+    env_cfg = SimpleNamespace(commands=SimpleNamespace(motion=motion))
+
+    installed = play_mod._install_playback_motion_files(
+        env_cfg,
+        ["/exact/take061.npz"],
+        full_mdp_runtime=True,
+    )
+
+    assert installed == ("/exact/take061.npz",)
+    assert motion.motion_file == ("/exact/take061.npz",)
+    with pytest.raises(RuntimeError, match="code-owned catalog"):
+        play_mod._install_playback_motion_files(
+            env_cfg,
+            ["/other/take061.npz"],
+            full_mdp_runtime=True,
+        )
