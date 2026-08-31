@@ -1,9 +1,9 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`r36-v5-dual-learning-live / model600-visual-negative / contact-prior-candidate-validated / diagnostic_unauthorized`
+> 状态：`r36-v5-dual-learning-live / model600-early-visual-observed / contact-prior-candidate-validated / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-31
+> 更新：2026-09-01
 >
 > `origin/main:docs/NOW.md` 是全项目唯一优先级权威。本页只维护
 > [FullMDP](../DEFINITIONS.md)（完整球路、击球、落点与恢复状态机）单动作双后端
@@ -51,26 +51,22 @@
 - `e5c02ea6` fresh Mu 61-update diagnostic 自然完成，RC=0；每轮 `24,576/24,576`
   UID/identity rows 正确，storage finite、reward conservation/fact-integrity 无故障，p50/p90=
   `6.667/7.153 s`。同 source 已从 fresh root 进入 100,000-update Mu long。
-- GPU0 Isaac 的 update 849--948 持续 finite；该 100 轮 episode 平均 `464.011 tick`，
-  physical observed=`4,735`，timeout/tilt/table=`4,717/439/140`；但 R03/contact/crossing/landing
-  仍=`0/0/0/0`。同窗 playback 误差为
-  `0.5910 m / 0.3327 m/s / 0.3364 rad / 0.2399 rad`。从 update 500 起多数窗口已接近
-  `500 tick` horizon，故这已不是“太早看不出”：当前旧配方明确卡在接触窗位置/姿态质量。
-- GPU1 fresh Isaac 的 update 412--511 持续 finite；该 100 轮 episode 平均 `347.648 tick`，
-  physical observed/R03/contact=`4,000/0/0`，tilt/table/timeout=`2,228/899/3,808`，四项误差=
-  `0.5304 m / 0.3731 m/s / 0.3087 rad / 0.2812 rad`。它相对 update 0--299 的
-  `119→147 tick` 已明显学会更多 balance；但该臂与 GPU0 同 seed，且 update 0--499 的学习账逐窗相同，
-  所以它是实现等价/耐心对照，不是独立 seed 的科学复现。
-- GPU1 到 update 700 的单轮 mean episode 已到 `500 tick`，`99.8%` 是 timeout，
-  physical observed=`55`，R03/contact=`0/0`。`model_600` 的同合同 400-step 固定机位回放
+- GPU0 Isaac 的 update 1669--1768 持续 finite；该 100 轮 episode 平均 `480.925 tick`，
+  launch/observed=`4,810/4,810`，timeout/tilt/table=`4,738/94/280`，R03/contact/landing=`0/0/0`；
+  playback 四项误差为 `0.6861 m / 0.3117 m/s / 0.2856 rad / 0.1568 rad`。
+- GPU1 fresh Isaac 的 update 1208--1307 持续 finite；该 100 轮 episode 平均 `493.602 tick`，
+  launch/observed=`4,897/4,897`，timeout/tilt/table=`4,867/48/46`，R03/contact/landing=`0/0/0`；
+  四项误差为 `0.6878 m / 0.3097 m/s / 0.3011 rad / 0.1711 rad`。它与 GPU0 同 seed，
+  仍主要用于实现等价和学习轨迹复核，不算独立 seed。
+- GPU1 `model_600` 的同合同 400-step 固定机位回放
   RC=0，影片 SHA256=`0dd2b23d460fa1fdaa88d7d9e33d2a328bf1bc1f141f80e703c66c9b5b08b7a8`，
   Pod 证据目录为 `/workspace/franco/evidence/r36-policy-u600-fixedcam-6Ao1oR`。画面前段不是
   完全静止，但没有形成老师反手挡的接触窗动作，后段明显向桌面倾覆且无恢复。
-  单 env 回放不代签 512-env 分布；二者合读证明批量 balance 已形成、轨迹稳定性仍脆弱，
-  mimic→hit 负例更强，不支持继续用“太早”解释。
-- GPU2 Mu 的 update 1879--1978 持续 finite；该 100 轮 episode 平均 `369.536 tick`，
-  launch/R03/raw/selected/crossing=`4,938/4,890/3,283/465/464`，selected/launch 约 `9.42%`，
-  profiler-off wall p50/p90=`5.902/6.336 s`。hit 入口继续真实形成；但 legal landing/recovery
+  单 env 回放不代签 512-env 分布，也不能把 600 update 的早期失败轨迹升级为长期学习负例；它只证明
+  视觉工作流有效、当前 checkpoint 还不会稳定模仿或击球。
+- GPU2 Mu 的 update 4421--4520 持续 finite；该 100 轮 episode 平均 `419.489 tick`，
+  launch/R03/raw/selected/crossing=`4,635/4,620/901/184/184`，selected/launch 约 `3.97%`，
+  profiler-off wall p50/p90=`5.677/6.373 s`。hit 入口继续真实存在；但 legal landing/recovery
   仍=`0/0`，所以只能称 mimic→hit 在推进，不能称 landing 已学会。三条均为
   nonfinite/conservation=`0/0`。
 
@@ -79,9 +75,11 @@
 - fresh Gaussian policy 在前几百 update 先把动作幅度压小、减少倾倒并延长 episode，是这个自然课程的合理
   暂态：只有活过 teacher/contact 时钟，mimic 和 hit 才有稳定样本。当前 Isaac 0--399 的 episode
   `119→171 tick`、速度误差 `0.817→0.520 m/s` 同时改善，支持“先学 balance”，不支持“策略什么都没学”。
-- 该解释有截止条件：episode 已长期接近 horizon、due/observed 分母充分后，R03/contact 仍为零就是
-  mimic→hit 负例。GPU0 已越过该截止，不能继续用耐心替代 treatment；GPU1 尚用于确认同一学习轨迹，
-  下一条 contact-prior 才是 matched treatment。
+- `episode≈500 tick` 只证明 policy 已能活到 teacher/contact 时钟，不能证明几百或一两千 update 已给足
+  mimic→hit 的学习预算。团队回忆中的成功谱系约到 `15k` update 才开始稳定打球，而可核的 Build4
+  初始化来源本身是 `model_21800`；原始 Build1 早期日志当前不在仓库或 Pod，因此 `15k` 只作为明确标注的
+  历史耐心先验，不冒充精确复现实验。当前按最接近存档点的 `1k / 5k / 15k / 21.8k` 观察趋势；
+  在 matched control 到达相应尺度前，不把零 R03/contact 写成“学不会”，也不因此截断现役 run。
 - `origin/build_4@324e60d1` 不能作为 fresh 早期动作对照：其 manifest/YAML 强制从 Build1
   `model_21800.pt` 位级热启动全部 8 个 actor tensor，只重置 sigma/critic/optimizer。仓库与 Pod 当前均无
   原始 Build1 run 的 model0/早期 checkpoint 序列，所以“Build4 一开始就会挥”只证明热启动 actor 会挥，
@@ -129,21 +127,23 @@
   `/workspace/franco/runs/fullmdp-r36-v5-e5c02ea6-mujoco-h48-20260831T1034Z`。
 - [x] 等价加速与 `300 update` 可视存档的 fresh GPU1 Isaac long：
   `/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`。
-- [ ] 双端按 update 100/300/1000 读同一自然链。
+- [ ] 双端按约 `1k / 5k / 15k / 21.8k` 的存档点读同一自然链；约 `15k` 是团队回忆的首个稳定击球
+  尺度，尚待原始 Build1 日志补证，不是新 Gate。
 - [x] GPU1 `model_300.diagnostic_nonresumable.pt` 已导出 400-step 固定视角真实 policy 视频。
   画面显示策略不是出生即倒，也有周期性动作与存活/重置；但没有形成清晰的老师反手挡接触窗动作或可信
   击球，和同窗 R03/contact=`0/0`一致。确定性 teacher 视频仍证明中心题的球/拍心/contact target 对齐，
-  因此下一步修接触窗学习信用，不再次改 task/球公式。
+  因此不再次改 task/球公式；先让 control 走到长期里程碑，再裁决是否需要接触窗学习 treatment。
 - [x] GPU1 `model_600.diagnostic_nonresumable.pt` 已用同一固定机位和 dynamic-ready 绑定回放。
   它排除“policy 全程不动”，但直接暴露了无清晰老师挥拍、单轨迹向桌面倾覆且无恢复；
-  与 update 700 的 512-env timeout 分布并列记录，不用一个视频代签总体成功率。
-- [ ] 任一 GPU 自然形成可用窗口后，从 `00814042` 或其文档后继的 clean exact source 发一条 fresh
+  与 update 700 的 512-env timeout 分布并列记录；这是早期诊断，不是长期学习 verdict。
+- [ ] 任一 GPU 自然形成独立 lane，且 matched control 已走到足以解释学习趋势的里程碑后，从
+  `00814042` 或其文档后继的 clean exact source 发一条 fresh
   contact-prior canary；与旧配方只比较 matched update/window 的接触窗 p/v/face 误差、R03/contact
   和 episode/safety 分母，不用 total return 裁决。现有 GPU0/GPU1/GPU2 都是有用的自然学习对照，
-  不为抢 treatment 人为截断；待独立 lane 可用再发。
+  不为抢 treatment 人为截断。候选已验证但不抢跑。
 - [x] 每小时守护 `task-first` 已从过期 R35 root 更新为上述三条 R36 live root；它按
-  balance→mimic→hit→landing 的截止条件、固定机位 checkpoint 视频和删除式结构审计工作，不再把
-  early stillness、Build4 热启动或新 Gate 当结论。
+  balance→mimic→hit→landing 的长期里程碑、定点固定机位视频和删除式结构审计工作，不再把
+  early stillness、几百 update 的零 contact、Build4 热启动或新 Gate 当结论。
 
 ### 结构减法（不阻塞已启动 long）
 

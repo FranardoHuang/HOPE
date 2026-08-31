@@ -13,18 +13,16 @@ Isaac fresh long 已起跑；Mu fresh long 在首 PPO update 前因 ledger 拒�
 `e5c02ea6` 已让两者直接从 exact portable catalog 取唯一 action identity，并保留 row-wise drift 检测；
 Pod focused=`275 passed, 1 skipped`。fresh Mu diagnostic 已自然完成 61 update，RC=0，
 p50/p90=`6.667/7.153 s`，每轮 UID/identity=`24,576/24,576`且 storage finite；同 source fresh
-long 的 update 1559--1658 recent-100 episode 平均 `218.490 tick`，launch/R03/raw/selected/
-crossing=`3,416/3,364/1,337/229/230`，tilt/table=`5,550/3,450`，profiler-off wall
-p50/p90=`6.338/6.620 s`。hit 入口正在形成，但 legal landing/recovery=`0/0`，所以 landing 还没有
+long 的 update 4421--4520 recent-100 episode 平均 `419.489 tick`，launch/R03/raw/selected/
+crossing=`4,635/4,620/901/184/184`，tilt/table=`1,024/1,096`，profiler-off wall
+p50/p90=`5.677/6.373 s`。hit 入口正在形成，但 legal landing/recovery=`0/0`，所以 landing 还没有
 成功证据；也不能因为已有 crossing 就宣称 contact response parity。
 这是学习分层证据，不代签 plant/contact response parity。在双端 contact/outcome 分母和
 first-divergence 都出现前，G06 保持
 `Partial / diagnostic_unauthorized`。
 
-Mu update 1879--1978 的 recent-100 又提高到 episode=`369.536 tick`，launch/R03/raw/selected/
-crossing=`4,938/4,890/3,283/465/464`，wall p50/p90=`5.902/6.336 s`；legal landing/recovery
-仍=`0/0`，nonfinite/conservation=`0/0`。这增强了“Mu 的 mimic→hit 已形成入口、hit→landing 仍未
-形成”的学习证据，但没有 matched Isaac contact response，故不提高 parity 等级。
+这增强了“Mu 的 mimic→hit 已形成入口、hit→landing 仍未形成”的学习证据，但 update 4.5k 仍低于
+团队回忆的约15k首个稳定击球尺度；没有 matched Isaac contact response，故不提高 parity 等级。
 
 ## 2026-08-30 R36 当前双端边界（仍 `Partial`）
 

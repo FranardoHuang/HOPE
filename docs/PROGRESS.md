@@ -1,5 +1,19 @@
 # 简短进度记录
 
+## 2026-09-01 — 修正 R36 早期学习判读与小时守护尺度
+
+- 纠正 `f2ca6503` 的过早“成熟负例”措辞：Isaac GPU0/GPU1 当前约 `1.77k/1.31k update`，
+  虽已能活到 horizon 且 launch/observed 分母充分，但这只证明 hit 学习窗已可见，不能证明 fresh policy
+  已得到足够 mimic→hit 预算。团队回忆约 `15k` 才开始稳定击球；可核的 Build4 则明确从 Build1
+  `model_21800` actor 位级热启动。原始 Build1 早期日志当前不在仓库或 Pod，所以 `15k` 只作标明来源的
+  耐心先验。现役三条不停止、不热补，改按约 `1k / 5k / 15k / 21.8k` 观察。
+- latest recent-100：GPU0 episode/launch/observed=`480.925/4,810/4,810`、GPU1=
+  `493.602/4,897/4,897`，两者 R03/contact/landing 均0；Mu update 4421--4520 已有
+  `4,635/4,620/901/184/184` launch/R03/raw/selected/crossing，但 landing/recovery仍0。三条
+  nonfinite/conservation均0。`model_600`视频保留为早期视觉样本，不再代签长期失败或抢跑 treatment。
+- 小时 `task-first` 继续保留，因为三条长跑需要跨日监测；职责收窄为只读健康守护、约
+  `1k/5k/15k/21.8k` 定点视频和删除式结构自查，不在几百 update 时用零 contact 提前干预。
+
 ## 2026-08-31 — R36 v5 物理出生、视觉工作流与双端起跑
 
 - early-stillness 判读与 Build4 对照已收口：fresh Isaac 0--399 update 的 episode `119→171 tick`

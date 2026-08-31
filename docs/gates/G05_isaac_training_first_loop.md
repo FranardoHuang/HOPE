@@ -40,37 +40,31 @@ Pod focused=`7 passed`，真实 `model_300` 400-step 回放 RC=0，影片 SHA256
 但还没有形成清晰的老师反手挡接触窗动作或可信击球，与 R03/contact=`0/0`一致。这是修复并验证
 开发工作流，不是把画面加为新的安全门。
 
-到 GPU0 update 690，近 100 轮 episode 平均已为 `496.013 tick`，physical observed=`4,915`，
-timeout/tilt/table=`4,891/50/16`，但 R03/contact 仍=`0/0`；同窗 paddle 误差为
-`0.6270 m / 0.3192 m/s / 0.3677 rad / 0.2980 rad`。因此旧配方 balance/survival 已形成，
-mimic→hit 仍未形成，不能再仅写“太早”。GPU1 update 268 仍属较早 balance/mimic 窗。
-Mu update 1182 最近 100 轮首次有 `1` 次 selected contact 与 `1` 次 crossing，但 legal landing/
-recovery 仍未证；自然链入口打开不等于该层已成功。
-
 `dad61048..00814042` 不加 Stage/Gate/Observation，只把四项 measured-paddle prior 的 playback
 固定 `4x` 改为接触邻域连续 `1x→4x→1x`，以免长 clip 的容易帧淹没接触窗。Pod exact
 共享/Isaac=`368 passed, 26 skipped`，Mu=`214 passed, 6 skipped`。G05 只承认接线验证；fresh
-学习 canary 尚未闭合；`model_300` 固定机位画面已经闭合。GPU0 update 760--859 的 recent-100
-episode/observed=`491.204/4,853`，R03/contact/crossing/landing 全零，是成熟的旧配方负例；GPU1
-update 326--425 的 episode/observed=`190.906/1,596`，仍作为较早耐心对照继续。状态保持
-`Partial / diagnostic_unauthorized`。
+学习 canary 尚未闭合；`model_300` 固定机位画面已经闭合。
 
-后续 update 849--948 的 GPU0 窗为 episode/observed=`464.011/4,735`、R03/contact=`0/0`；
-GPU1 update 412--511 已推进到 `347.648/4,000/0/0`，但两臂同 seed 且 update 0--499 的学习账逐窗
-相同，所以 GPU1 只证明等价实现没有改学习，不是独立 seed。fresh 早期少动只有在 episode 与 teacher
-误差持续改善时才视作 balance 暂态；接近 horizon 后仍零 R03/contact 继续按成熟负例处理。
-Build4 从 Build1 `model_21800` actor 热启动，不能冒充 fresh 早期对照。G05 状态不变。
+2026-09-01 的 recent-100 窗中，GPU0 update 1669--1768 的 episode/launch/observed=
+`480.925/4,810/4,810`，GPU1 update 1208--1307 为 `493.602/4,897/4,897`；两者 R03/contact/landing
+仍均为0，nonfinite/conservation均为0。两臂同 seed，所以 GPU1 只证明等价实现没有改学习，不是独立
+seed。这里不再把它们称作“成熟负例”：活到 horizon 只证明 hit 学习所需的时间窗已可见，不证明
+1--2k update 已给足学习预算。团队回忆约 `15k` 才开始稳定击球；Build4 又从 Build1 `model_21800`
+actor 热启动，不能冒充 fresh 早期对照。按约 `1k / 5k / 15k / 21.8k` 继续观察，G05 状态不变。
 
 GPU1 `model_600` 的同合同 400-step 固定机位回放现已 RC=0，影片 SHA256=
 `0dd2b23d460fa1fdaa88d7d9e33d2a328bf1bc1f141f80e703c66c9b5b08b7a8`。画面显示不是纯静止，但没有
 清晰老师反手挡，后段向桌面倾覆且无恢复；同时 update 700 的 512-env mean episode=`500 tick`、
-timeout=`99.8%`、R03/contact=`0/0`。这证明批量 balance 形成但轨迹仍脆弱，mimic→hit 依然是
-成熟负例；不增视觉 Gate，下一学习结论由已验证的接触窗 treatment 与 matched 分母裁决。
+timeout=`99.8%`、R03/contact=`0/0`。这是 mimic→hit 尚未形成的早期可视样本；
+`timeout≈100%`只说明该批活到horizon，不单独证明balance已经毕业。不要增加视觉 Gate，也不据此
+抢跑 treatment；下一学习结论由长期里程碑与 matched
+分母裁决。
 
 ## 2026-08-30 R36 当前 Isaac 学习入口（仍 `Partial`）
 
-R35 Isaac 的最终冻结窗已给出可信负例：survival/balance 基本形成，`4,951` 次 physical launch 后仍为
-`0 R03-valid / 0 contact`，所以不是“再等一些 update”就能解释的早期波动，而是 mimic→hit 合同需要修复。
+R35 Isaac 的最终冻结窗给出一个可信短窗负例：survival/balance 基本形成，`4,951` 次 physical launch 后仍为
+`0 R03-valid / 0 contact`。它足以推动时钟/target/plant 的直接合同修复，但不足以单独证明 fresh policy 在
+约 `15k` 的历史学习尺度上仍不会击球。
 详细分母、mimic 误差和安全账只在
 [当前实验记录](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)维护。
 

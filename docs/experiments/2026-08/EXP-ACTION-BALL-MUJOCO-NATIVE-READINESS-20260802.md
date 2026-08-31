@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`r36-v5-dual-learning-live / model600-visual-negative / contact-prior-candidate-validated / diagnostic_unauthorized`
+- 状态：`r36-v5-dual-learning-live / model600-early-visual-observed / contact-prior-candidate-validated / diagnostic_unauthorized`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -8,8 +8,9 @@
 - 复核/决策负责人：Franco
 - 本 successor 当前最高证据等级：v5 bundle、Isaac nominal hold、teacher 与真实 `model_300`
   固定视角、双端 CUDA fixed-action、Isaac fresh ACK 与 Mu 自然 contact/crossing 已有真 Pod 证据；
-  Isaac 旧配方卡在 mimic→hit，Mu 的 hit 入口正在形成但 landing/recovery 仍未形成
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-31
+  Isaac 到约1--2k update尚无hit，Mu到约4.5k已有hit入口但landing/recovery仍未形成；两者均未到
+  团队回忆的约15k稳定击球尺度
+- 创建日期/最后复核日期：2026-08-02 / 2026-09-01
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
@@ -89,41 +90,27 @@ RSL3 grouped observation，不为旧 actor-tensor/checkpoint 增兼容支路。P
 动作并存活/重置，但没有清晰形成老师反手挡的接触窗动作或可信击球；这与同窗 R03/contact=`0/0`
 一致。确定性 teacher 视频仍证明中心题球、拍心和 contact target 对齐，所以不再改 task/球公式。
 
-到 update `690/268/1182`（Isaac GPU0 / Isaac GPU1 / Mu GPU2），三条旧配方给出分层而不是
-一刀切的结论：GPU1 仍在较早 balance/mimic 窗；GPU0 最近 100 轮 episode 已均值 `496.013 tick`、
-physical observed=`4,915`，却仍 `0 R03 / 0 contact`，所以旧配方的 mimic→hit 不是“再等就能解释”;
-Mu 最近 100 轮已有 `33 launch / 28 R03 / 1 selected contact / 1 crossing`，证明 hit 入口结构上
-可达，但概率极低且 legal landing/recovery 仍未出现。GPU0 同窗 paddle 位置/速度/拍面/长轴误差为
-`0.6270 m / 0.3192 m/s / 0.3677 rad / 0.2980 rad`，与大量非接触帧 paddle income 同时存在，
-形成了明确的时间信用稀释证据。
+2026-09-01 的最新 recent-100 只读窗为：GPU0 Isaac update 1669--1768，episode=`480.925 tick`、
+launch/observed=`4,810/4,810`、R03/contact/landing=`0/0/0`；GPU1 Isaac update 1208--1307，
+episode=`493.602 tick`、launch/observed=`4,897/4,897`、R03/contact/landing=`0/0/0`；Mu update
+4421--4520，episode=`419.489 tick`、launch/R03/raw/selected/crossing=`4,635/4,620/901/184/184`，
+legal landing/recovery=`0/0`。三条 nonfinite/conservation 均为0。Mu 已证明 hit 入口在自然学习中
+反复出现；Isaac 当前只证明 balance/survival 与 launch 分母已形成，尚未证明 hit。
 
-后续只读窗进一步把“耐心等待”和“需要 treatment”分开：GPU0 Isaac update 760--859 的 episode
-均值=`491.204 tick`、observed=`4,853`，但 R03/contact/crossing/landing 仍全零，已是稳定的
-mimic→hit 负例；GPU1 Isaac update 326--425 的 episode 均值=`190.906 tick`、observed=`1,596`，仍是
-较早 balance/mimic 对照，不能据此判长期失败；GPU2 Mu update 1559--1658 已有
-`3,416 launch / 3,364 R03 / 1,337 raw / 229 selected / 230 crossing`，selected/launch 约
-`6.70%`，但 legal landing/recovery=`0/0`。因此保留三条自然对照，不在已有学习链正在推进时截断；
-contact-prior treatment 等独立 lane 后按 matched window 比较，而 landing 只有在 hit 基本形成后才调整。
-
-最新只读窗口继续支持同一裁决而不是翻转它。GPU0 update 849--948 为 episode/observed=
-`464.011/4,735`、R03/contact=`0/0`；GPU1 update 412--511 为 `347.648/4,000/0/0`，且与 GPU0
-同 seed 的 update 0--499 逐窗学习账相同，因此只能充当实现等价/耐心对照。Mu update 1879--1978
-已到 launch/R03/raw/selected/crossing=`4,938/4,890/3,283/465/464`，selected/launch=`9.42%`，
-但 legal landing/recovery=`0/0`。三条 nonfinite/conservation 均为0。
-
-“fresh 早期少动”可接受的因果条件也据此固定：episode length 和 teacher error 正在改善时，它是先学
-balance 的合理策略；接近 horizon 且 due/observed 充分后仍零 R03/contact，则是成熟 mimic→hit 负例。
-Build4 不能裁决该问题：`origin/build_4@324e60d1` 的 manifest/YAML 明确要求从 Build1
-`model_21800.pt` 位级载入8个 actor tensor，再重置 sigma/critic/optimizer。当前仓库与 Pod 没有原始
-Build1 model0/早期 checkpoint 序列，所以不存在公平的“Build4 fresh 早期会不会动”证据。
+这里纠正上一版过早的“成熟负例”措辞：`episode≈500 tick` 只说明 policy 能活到 teacher/contact 时钟，
+并不说明 600--1,800 update 已足够学会 mimic→hit。团队回忆中的成功谱系约到 `15k` update 才开始
+稳定击球；可核的 Build4 manifest 则明确从 Build1 `model_21800.pt` 位级载入8个 actor tensor，再重置
+sigma/critic/optimizer。当前仓库与 Pod 没有原始 Build1 model0/早期 checkpoint 序列，因此 `15k`
+只能作为标明来源的耐心先验，Build4 也不能冒充 fresh 早期对照。当前按约 `1k / 5k / 15k / 21.8k`
+里程碑继续观察；在 matched control 到达相应尺度前，零 R03/contact 不作为长期失败 verdict。
 
 GPU1 又从同一 fresh 谱系产出 `model_600`。同合同的 400-step 固定机位回放 RC=0，
 影片 SHA256=`0dd2b23d460fa1fdaa88d7d9e33d2a328bf1bc1f141f80e703c66c9b5b08b7a8`，证据目录为
 `/workspace/franco/evidence/r36-policy-u600-fixedcam-6Ao1oR`。图像证据显示它不是全程静止，但仍没有
 清晰的老师反手挡或可信接触窗，后段向桌面倾覆且没有恢复。同时 update 700 的批量窗
 mean episode=`500 tick`、timeout=`99.8%`、physical observed=`55`、R03/contact=`0/0`。因此正确结论是
-“批量 balance 已形成，但单轨迹稳定性仍脆弱且 mimic→hit 未形成”，而不是“早期静止已经正确”。
-这项证据提高接触窗 treatment 优先级，不改 task/球公式，不新增 Gate。
+“该早期 checkpoint 不是全程静止，但仍不会稳定模仿或击球”；它不证明长期会失败，也不单独提高
+接触窗 treatment 的发射优先级。task/球公式仍由独立 teacher 画面对齐证据保持，不新增 Gate。
 
 `dad61048..00814042` 因此直接修已有 reward 的时间分布，而不新增 gate：ready/preparation/recovery
 以及远离接触的 playback 保留 `1x`，真实 playback 内按 raised-cosine 在 `|TTC|<=0.12 s` 连续增强，
