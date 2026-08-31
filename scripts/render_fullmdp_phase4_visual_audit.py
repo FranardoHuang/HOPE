@@ -494,7 +494,10 @@ def main() -> int:
         "kind": "action_ball_full_mdp_phase4_visual_audit_v2",
         "diagnostic_unauthorized": True,
         "source_commit": source_commit,
-        "mjb": {"sha256": plant["sha256"], "size_bytes": plant["size_bytes"]},
+        "mjb": {
+            "sha256": plant["sha256"],
+            "size_bytes": int(plant.get("size_bytes", args.mjb.stat().st_size)),
+        },
         "action": {
             "action_id": row.action_id,
             "action_uid": row.action_uid,
