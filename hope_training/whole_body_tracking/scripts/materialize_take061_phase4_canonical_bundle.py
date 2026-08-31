@@ -214,9 +214,13 @@ def _policy_grid_racket_reference(
         if names.count(wrist_name) != 1:
             raise BundleError("policy-grid motion lacks the official wrist body")
         wrist = names.index(wrist_name)
-        position = np.asarray(archive["body_pos_w"], dtype=np.float64)
-        quaternion = np.asarray(archive["body_quat_w"], dtype=np.float64)
-        angular = np.asarray(archive["body_ang_vel_w"], dtype=np.float64)
+        # Mirror the runtime consumer bit-for-bit.  The schema-2 motion is
+        # float32 on disk, and the portable catalog derives its cold reference
+        # in float32.  Recomputing this row in float64 makes the separately
+        # stored scalar speed disagree with the consumed velocity vector.
+        position = np.asarray(archive["body_pos_w"], dtype=np.float32)
+        quaternion = np.asarray(archive["body_quat_w"], dtype=np.float32)
+        angular = np.asarray(archive["body_ang_vel_w"], dtype=np.float32)
         fps = float(np.asarray(archive["fps"]).reshape(-1)[0])
     if (
         position.ndim != 3
@@ -226,7 +230,7 @@ def _policy_grid_racket_reference(
         or not 2 <= hit_frame < len(position) - 2
     ):
         raise BundleError("policy-grid racket-reference arrays differ")
-    offset = np.asarray(racket_geometry.RACKET_SITE_OFFSET_WRIST_M, dtype=np.float64)
+    offset = np.asarray(racket_geometry.RACKET_SITE_OFFSET_WRIST_M, dtype=np.float32)
 
     def site_at(frame: int) -> np.ndarray:
         return position[frame, wrist] + _quat_apply_wxyz(
@@ -235,9 +239,10 @@ def _policy_grid_racket_reference(
 
     half_window = 2
     site_position = site_at(hit_frame)
+    step_s = np.float32(POLICY_STEP_S)
     site_velocity = (
         site_at(hit_frame + half_window) - site_at(hit_frame - half_window)
-    ) / (2 * half_window * POLICY_STEP_S)
+    ) / np.float32(2 * half_window) / step_s
     result = {
         "site_position_w_m": site_position,
         "site_velocity_w_mps": site_velocity,
@@ -786,9 +791,10 @@ def materialize(args: argparse.Namespace) -> Mapping[str, Any]:
             "motion_path": motion_rel.as_posix(), "motion_sha256": motion_sha,
             "strike_phase": hit_frame / (frames - 1), "reference_t_hit_s": t_hit,
             "reference_t_cycle_s": t_cycle,
-            "reference_racket_site_speed_mps": float(
-                np.linalg.norm(grid_reference["site_velocity_w_mps"])
-            ),
+            "reference_racket_site_speed_mps": math.sqrt(sum(
+                float(component) * float(component)
+                for component in grid_reference["site_velocity_w_mps"]
+            )),
             "reaction_margin_s": reaction, "teacher_rate_min": teacher_rate_min,
             "teacher_rate_max": 1.0,
             "family": FAMILY, "mount_normal_sign": int(exact["mount_normal_sign"]),
