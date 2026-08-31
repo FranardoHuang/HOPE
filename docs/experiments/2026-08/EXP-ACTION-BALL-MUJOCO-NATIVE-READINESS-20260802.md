@@ -90,12 +90,13 @@ RSL3 grouped observation，不为旧 actor-tensor/checkpoint 增兼容支路。P
 动作并存活/重置，但没有清晰形成老师反手挡的接触窗动作或可信击球；这与同窗 R03/contact=`0/0`
 一致。确定性 teacher 视频仍证明中心题球、拍心和 contact target 对齐，所以不再改 task/球公式。
 
-2026-09-01 的最新 recent-100 只读窗为：GPU0 Isaac update 1669--1768，episode=`480.925 tick`、
-launch/observed=`4,810/4,810`、R03/contact/landing=`0/0/0`；GPU1 Isaac update 1208--1307，
-episode=`493.602 tick`、launch/observed=`4,897/4,897`、R03/contact/landing=`0/0/0`；Mu update
-4421--4520，episode=`419.489 tick`、launch/R03/raw/selected/crossing=`4,635/4,620/901/184/184`，
-legal landing/recovery=`0/0`。三条 nonfinite/conservation 均为0。Mu 已证明 hit 入口在自然学习中
-反复出现；Isaac 当前只证明 balance/survival 与 launch 分母已形成，尚未证明 hit。
+2026-09-01 的最新 recent-100 只读窗为：GPU0 Isaac update 1820--1919，episode=`494.518 tick`、
+launch/observed=`4,883/4,883`、R03/contact/landing=`0/0/0`；GPU1 Isaac update 1355--1454，
+episode=`492.069 tick`、launch/observed=`4,866/4,866`、R03/contact/landing=`0/0/0`。Mu已越过首个
+`5k`里程碑：update 4906--5005 episode=`441.762 tick`，launch/R03/raw/selected/crossing=
+`4,491/4,461/2,046/36/36`，legal landing/recovery=`0/0`。三条 nonfinite/conservation 均为0。
+Mu的raw contact增加、selected contact相对上一窗下降，证明hit入口真实但质量未稳定；Isaac当前只证明
+balance/survival与launch分母已形成，尚未证明hit。
 
 这里纠正上一版过早的“成熟负例”措辞：`episode≈500 tick` 只说明 policy 能活到 teacher/contact 时钟，
 并不说明 600--1,800 update 已足够学会 mimic→hit。团队回忆中的成功谱系约到 `15k` update 才开始

@@ -45,8 +45,8 @@ Pod focused=`7 passed`，真实 `model_300` 400-step 回放 RC=0，影片 SHA256
 共享/Isaac=`368 passed, 26 skipped`，Mu=`214 passed, 6 skipped`。G05 只承认接线验证；fresh
 学习 canary 尚未闭合；`model_300` 固定机位画面已经闭合。
 
-2026-09-01 的 recent-100 窗中，GPU0 update 1669--1768 的 episode/launch/observed=
-`480.925/4,810/4,810`，GPU1 update 1208--1307 为 `493.602/4,897/4,897`；两者 R03/contact/landing
+2026-09-01 的 recent-100 窗中，GPU0 update 1820--1919 的 episode/launch/observed=
+`494.518/4,883/4,883`，GPU1 update 1355--1454 为 `492.069/4,866/4,866`；两者 R03/contact/landing
 仍均为0，nonfinite/conservation均为0。两臂同 seed，所以 GPU1 只证明等价实现没有改学习，不是独立
 seed。这里不再把它们称作“成熟负例”：活到 horizon 只证明 hit 学习所需的时间窗已可见，不证明
 1--2k update 已给足学习预算。团队回忆约 `15k` 才开始稳定击球；Build4 又从 Build1 `model_21800`

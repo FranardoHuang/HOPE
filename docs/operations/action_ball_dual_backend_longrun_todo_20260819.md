@@ -51,12 +51,11 @@
 - `e5c02ea6` fresh Mu 61-update diagnostic 自然完成，RC=0；每轮 `24,576/24,576`
   UID/identity rows 正确，storage finite、reward conservation/fact-integrity 无故障，p50/p90=
   `6.667/7.153 s`。同 source 已从 fresh root 进入 100,000-update Mu long。
-- GPU0 Isaac 的 update 1669--1768 持续 finite；该 100 轮 episode 平均 `480.925 tick`，
-  launch/observed=`4,810/4,810`，timeout/tilt/table=`4,738/94/280`，R03/contact/landing=`0/0/0`；
-  playback 四项误差为 `0.6861 m / 0.3117 m/s / 0.2856 rad / 0.1568 rad`。
-- GPU1 fresh Isaac 的 update 1208--1307 持续 finite；该 100 轮 episode 平均 `493.602 tick`，
-  launch/observed=`4,897/4,897`，timeout/tilt/table=`4,867/48/46`，R03/contact/landing=`0/0/0`；
-  四项误差为 `0.6878 m / 0.3097 m/s / 0.3011 rad / 0.1711 rad`。它与 GPU0 同 seed，
+- GPU0 Isaac 的 update 1820--1919 持续 finite；该 100 轮 episode 平均 `494.518 tick`，
+  launch/observed=`4,883/4,883`，timeout/tilt/table=`4,851/45/53`，R03/contact/landing=`0/0/0`。
+- GPU1 fresh Isaac 的 update 1355--1454 持续 finite；该 100 轮 episode 平均 `492.069 tick`，
+  launch/observed=`4,866/4,866`，timeout/tilt/table=`4,843/26/106`，R03/contact/landing=`0/0/0`。
+  它与 GPU0 同 seed，
   仍主要用于实现等价和学习轨迹复核，不算独立 seed。
 - GPU1 `model_600` 的同合同 400-step 固定机位回放
   RC=0，影片 SHA256=`0dd2b23d460fa1fdaa88d7d9e33d2a328bf1bc1f141f80e703c66c9b5b08b7a8`，
@@ -64,9 +63,10 @@
   完全静止，但没有形成老师反手挡的接触窗动作，后段明显向桌面倾覆且无恢复。
   单 env 回放不代签 512-env 分布，也不能把 600 update 的早期失败轨迹升级为长期学习负例；它只证明
   视觉工作流有效、当前 checkpoint 还不会稳定模仿或击球。
-- GPU2 Mu 的 update 4421--4520 持续 finite；该 100 轮 episode 平均 `419.489 tick`，
-  launch/R03/raw/selected/crossing=`4,635/4,620/901/184/184`，selected/launch 约 `3.97%`，
-  profiler-off wall p50/p90=`5.677/6.373 s`。hit 入口继续真实存在；但 legal landing/recovery
+- GPU2 Mu 已越过首个长期 `5k` 里程碑；update 4906--5005 持续 finite，100轮 episode 平均
+  `441.762 tick`，launch/R03/raw/selected/crossing=`4,491/4,461/2,046/36/36`，selected/launch约
+  `0.80%`，profiler-off wall p50/p90=`5.658/6.291 s`。raw contact增加但selected contact相对上一窗
+  下降，说明hit入口仍真实存在、质量尚未稳定；legal landing/recovery
   仍=`0/0`，所以只能称 mimic→hit 在推进，不能称 landing 已学会。三条均为
   nonfinite/conservation=`0/0`。
 
