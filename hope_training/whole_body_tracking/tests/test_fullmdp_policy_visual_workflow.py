@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sys
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+import types
 
 import pytest
 
@@ -13,7 +15,37 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+_TEMP_IMPORT_STUBS = []
+if "hydra" not in sys.modules and importlib.util.find_spec("hydra") is None:
+    hydra_stub = types.ModuleType("hydra")
+
+    def _main(**_kwargs):
+        return lambda function: function
+
+    hydra_stub.main = _main
+    sys.modules["hydra"] = hydra_stub
+    _TEMP_IMPORT_STUBS.append("hydra")
+if (
+    "omegaconf" not in sys.modules
+    and importlib.util.find_spec("omegaconf") is None
+):
+    omega_stub = types.ModuleType("omegaconf")
+
+    class _ListConfig(list):
+        pass
+
+    class _OmegaConf:
+        pass
+
+    omega_stub.ListConfig = _ListConfig
+    omega_stub.OmegaConf = _OmegaConf
+    sys.modules["omegaconf"] = omega_stub
+    _TEMP_IMPORT_STUBS.append("omegaconf")
+
 import play as play_mod  # noqa: E402
+
+for _stub_name in _TEMP_IMPORT_STUBS:
+    sys.modules.pop(_stub_name, None)
 
 
 def _cfg(**overrides):
