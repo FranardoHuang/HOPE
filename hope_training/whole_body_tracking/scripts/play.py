@@ -11,6 +11,7 @@ task-YAML override mapping from scripts/train.py.
 import json
 import os
 import sys
+from collections.abc import Mapping
 
 # allow `from train import _apply_task_overrides` (sibling script; no isaaclab imported at its top)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -205,6 +206,32 @@ def _playback_exports_onnx(*, capture_requested, video_requested):
     return not capture_requested and not video_requested
 
 
+def _policy_inference_observation(raw, *, policy_module, device):
+    """Preserve RSL3 observation groups; flatten only legacy policies.
+
+    RSL3's inference policy indexes the observation mapping using its
+    ``obs_groups`` contract.  Older HOPE policies instead consume one actor
+    tensor.  Playback must follow the loaded policy's interface rather than
+    imposing the legacy actor-only view on both generations.
+    """
+
+    value = raw
+    if isinstance(value, tuple):
+        if not value:
+            raise TypeError("empty observation tuple")
+        value = value[0]
+    if isinstance(getattr(policy_module, "obs_groups", None), Mapping):
+        if not isinstance(value, Mapping):
+            raise TypeError("grouped RSL policy requires an observation mapping")
+        return {
+            name: tensor.to(device=device)
+            if hasattr(tensor, "to")
+            else tensor
+            for name, tensor in value.items()
+        }
+    return policy_observation_tensor(raw, device=device)
+
+
 def _run_with_owned_play_environment(env, body):
     """Run ``body`` and close the final environment wrapper exactly once.
 
@@ -360,16 +387,23 @@ def _run_created_environment(
             os.path.join(log_dir, "videos", "play"),
         )
     frames = []
-    # IsaacLab/RSL-RL versions differ here: the wrapper may return the actor tensor directly,
-    # ``(actor_tensor, extras)``, or an observation mapping containing ``policy`` and privileged
-    # ``critic`` groups.  Always select the actor view and reject every other structure.
-    obs = policy_observation_tensor(env.get_observations(), device=agent_cfg.device)
+    # Follow the loaded policy's observation interface.  RSL3 consumes the
+    # grouped mapping; legacy policies consume the actor tensor.
+    obs = _policy_inference_observation(
+        env.get_observations(),
+        policy_module=ppo_runner.alg.policy,
+        device=agent_cfg.device,
+    )
     timestep = 0
     while simulation_app.is_running():
         with torch.inference_mode():
             actions = policy(obs)
             obs, _, _, _ = env.step(actions.to(env.unwrapped.device))
-            obs = policy_observation_tensor(obs, device=agent_cfg.device)
+            obs = _policy_inference_observation(
+                obs,
+                policy_module=ppo_runner.alg.policy,
+                device=agent_cfg.device,
+            )
         timestep += 1
         if capture_requested:
             if motion_cmd.post_swing_capture_complete():
