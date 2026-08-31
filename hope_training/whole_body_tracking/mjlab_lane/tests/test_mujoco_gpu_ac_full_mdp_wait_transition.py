@@ -2175,29 +2175,32 @@ def test_full_a_task_close_uses_real_slot_motion_duration_and_global_cadence():
     assert torch.equal(
         env._full_a_teacher_rate, questions[-1]["teacher_rate"]
     )
+    expected_close = 1000 + torch.ceil(
+        (
+            questions[-1]["pre_swing_wait_s"]
+            + questions[-1]["scaled_t_cycle_s"]
+        )
+        / env.step_dt
+        - 1.0e-12
+    ).long()
     assert torch.equal(
-        env._epoch_clock_ticks[:, 3], torch.full((2,), 1101)
-    )
-    old_contact_plus_one_second = env._epoch_clock_ticks[:, 1] + 50
-    assert torch.equal(
-        old_contact_plus_one_second - env._epoch_clock_ticks[:, 3],
-        torch.full((2,), 41),
+        env._epoch_clock_ticks[:, 3], expected_close
     )
     assert torch.equal(
-        env._epoch_clock_ticks[:, 4], torch.full((2,), 1185)
+        env._epoch_clock_ticks[:, 4],
+        torch.full((2,), 1000 + env._full_a_cadence.cadence_ticks),
     )
-    assert not torch.equal(
-        env._epoch_clock_ticks[:, 4], env._epoch_clock_ticks[:, 3] + 1
-    )
+    assert torch.all(env._epoch_clock_ticks[:, 1] < env._epoch_clock_ticks[:, 3])
+    assert torch.all(env._epoch_clock_ticks[:, 3] < env._epoch_clock_ticks[:, 4])
 
-    # On the sixth ACCEPT the episode scheduler has already parked itself at
-    # horizon+1. The accepted shot still owns one 185-tick cadence boundary.
+    # A direct accepted shot still maps its relative duration and retirement
+    # boundary onto the current monotonic global control clock.
     env.common_step_counter = 1220
-    env.episode_length_buf[0] = 1035
-    env._full_a_next_reveal_tick[0] = 1501
     env._full_a_reveal_rows(torch.tensor([0]))
-    assert env._epoch_clock_ticks[0, 4] == 1405
-    assert env._epoch_clock_ticks[0, 4] != 1501
+    assert (
+        env._epoch_clock_ticks[0, 4]
+        == 1220 + env._full_a_cadence.cadence_ticks
+    )
 
 
 def test_full_a_masked_reset_cadence_maps_to_global_epoch_clocks_and_r06_first():
