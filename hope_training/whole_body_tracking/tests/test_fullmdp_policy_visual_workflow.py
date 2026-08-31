@@ -130,10 +130,13 @@ def test_explicit_video_directory_is_fresh_and_no_clobber(tmp_path):
 
 
 def test_fullmdp_policy_visual_reuses_training_owner_and_typed_ppo(monkeypatch):
+    class _Task(dict):
+        __getattr__ = dict.__getitem__
+
     owner_factory = object()
     binding = SimpleNamespace(owner_factory=owner_factory)
     cfg = _cfg(
-        task=SimpleNamespace(
+        task=_Task(
             action_ball_full_mdp_runtime=True,
             gym_task="HOPE-PingPong-ActionBall-FullMdpA-AgibotA3-v0",
         )
