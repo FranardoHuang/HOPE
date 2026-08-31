@@ -69,21 +69,21 @@ ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND = (
 ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT = 1
 ACTION_BALL_FULL_MDP_FRESH_ACTION_SLOT = 0
 PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH = (
-    "assets/motions/action_ball_full_mdp_n1_take061_teacher_center_v3_20260831/"
+    "assets/motions/action_ball_full_mdp_n1_take061_teacher_center_v4_20260831/"
     "take061_slow_block_phase4_v1.action_ball.v3.json"
 )
 PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256 = (
-    "20a188d9416d0af63fbe04e61dcb98e3f0aa239215e57028e384185afdfab62a"
+    "698acd2f0ebd3cdffaa48dae1727667c5fa77bc451ba9a9ce9835e3eb7f87ede"
 )
 PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
-    "20a188d9416d0af63fbe04e61dcb98e3f0aa239215e57028e384185afdfab62a"
+    "698acd2f0ebd3cdffaa48dae1727667c5fa77bc451ba9a9ce9835e3eb7f87ede"
 )
 PINNED_BALL_PHYSICS_RELATIVE_PATH = "configs/ball_physics_optitrack_20260730.yaml"
 PINNED_BALL_PHYSICS_FILE_SHA256 = (
     "3afb1c9a00f975d924169503d7dafab92ea6c0b96263336e27edcd1d6257ea14"
 )
 PINNED_PROFILE_PINS_RELATIVE_PATH = (
-    "assets/motions/action_ball_full_mdp_n1_take061_teacher_center_v3_20260831/"
+    "assets/motions/action_ball_full_mdp_n1_take061_teacher_center_v4_20260831/"
     "take061_slow_block_phase4_v1.profile_pins.v1.json"
 )
 PINNED_PROFILE_PINS_FILE_SHA256 = (
