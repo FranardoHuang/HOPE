@@ -102,21 +102,15 @@ def _bundle_harness(*, num_envs: int = 2, angular_velocity_z_radps=None):
         racket_cls.initialize_action_ball_full_mdp_racket_action_reference_cold = (
             initialize
         )
-    contact_z = torch.tensor((1.02, 1.08), dtype=torch.float32)
-    for action_slot in range(len(rows)):
-        start = int(motion.motion.seg_start[action_slot].item())
-        length = int(motion.motion.seg_len[action_slot].item())
-        motion.motion._body_pos_w[
-            start : start + length, 1, 2
-        ] = contact_z[action_slot]
     initialize(racket)
     device = torch.device("cpu")
     motion.time_steps = torch.arange(num_envs, dtype=torch.int64, device=device)
+    portable = profile_mod._portable_catalog.load_portable_action_center_table()
     racket.racket_target_pos_w = torch.tensor(
-        [[0.51, -0.11, 1.02], [0.57, 0.13, 1.08]],
+        [row.reference_racket_site_position_w_m for row in portable.actions],
         dtype=torch.float32,
         device=device,
-    )[torch.arange(num_envs).remainder(2)].contiguous()
+    )[torch.arange(num_envs).remainder(len(portable.actions))].contiguous()
 
     hope_commands = sys.modules[f"{_PKG}.hope_commands"]
     exact_cfg = hope_commands.RacketTargetCommandCfg()

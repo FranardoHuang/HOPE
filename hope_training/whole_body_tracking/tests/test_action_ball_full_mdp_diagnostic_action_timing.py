@@ -73,29 +73,47 @@ def _install_reference_table(
 ):
     count = len(rows)
     loader = motion.motion
-    quat = torch.zeros(count, 4, dtype=torch.float32, device=device)
-    quat[:, 0] = 1.0
-    omega = torch.zeros(count, 3, dtype=torch.float32, device=device)
+    portable_by_id = {
+        row.action_id: row
+        for row in profile_mod._portable_catalog.load_portable_action_center_table().actions
+    }
+    portable = tuple(portable_by_id[row.action_id] for row in rows)
+    quat = torch.tensor(
+        [row.reference_racket_quat_wxyz for row in portable],
+        dtype=torch.float32,
+        device=device,
+    )
+    omega = torch.tensor(
+        [row.reference_racket_angular_velocity_w_radps for row in portable],
+        dtype=torch.float32,
+        device=device,
+    )
     if angular_velocity_z_radps is not None:
         omega[:, 2] = torch.as_tensor(
             angular_velocity_z_radps,
             dtype=torch.float32,
             device=device,
         )
-    velocity = torch.zeros(count, 3, dtype=torch.float32, device=device)
-    velocity[:, 0] = torch.tensor(
-        [row.reference_racket_site_speed_mps for row in rows],
+    velocity = torch.tensor(
+        [row.reference_racket_site_velocity_w_mps for row in portable],
         dtype=torch.float32,
         device=device,
     )
-    raw_normal = torch.zeros(count, 3, dtype=torch.float32, device=device)
-    raw_normal[:, 1] = 1.0
     reach = torch.tensor(
-        [[0.62, -0.11] for _row in rows],
+        [row.reference_reach_offset_xy_m for row in portable],
         dtype=torch.float32,
         device=device,
     )
-    base = quat.clone()
+    base = torch.tensor(
+        [row.reference_base_root_quat_wxyz for row in portable],
+        dtype=torch.float32,
+        device=device,
+    )
+    site_position = torch.tensor(
+        [row.reference_racket_site_position_w_m for row in portable],
+        dtype=torch.float32,
+        device=device,
+    )
     segment_lengths = torch.tensor(
         [round(row.reference_t_cycle_s / racket._env.step_dt) + 1 for row in rows],
         dtype=torch.int64,
@@ -126,7 +144,10 @@ def _install_reference_table(
         start = int(segment_starts[action_slot].item())
         length = int(segment_lengths[action_slot].item())
         strike = start + round(float(row.strike_phase) * (length - 1))
-        loader._body_pos_w[start : start + length, 1, :2] = reach[action_slot]
+        loader._body_pos_w[start : start + length, 1] = site_position[action_slot]
+        loader._body_pos_w[start : start + length, 0, :2] = (
+            site_position[action_slot, :2] - reach[action_slot]
+        )
         loader._body_pos_w[strike - 1, 1] -= (
             velocity[action_slot] * racket._env.step_dt
         )
