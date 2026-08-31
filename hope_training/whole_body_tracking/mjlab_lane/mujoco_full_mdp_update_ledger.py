@@ -793,17 +793,26 @@ class FullMdpUpdateLedger:
         bad_events = [name for name in (
             "missed_launch_rows", "recovery_completion_fault_rows",
         ) if events[name] != 0]
-        if bad or bad_events or any(misc[name] != transitions for name in (
+        exact_transition_counts = (
             "reward_terms_finite_rows", "actual_reward_finite_rows",
-            "slot0_rows", "uid_rows", "identity_rows",
-        )):
+            "slot0_rows", "uid_rows", "mount_sign_rows", "identity_rows",
+        )
+        count_mismatches = [
+            name for name in exact_transition_counts
+            if misc[name] != transitions
+        ]
+        if bad or bad_events or count_mismatches:
             details = (
                 [f"{name}={misc[name]}" for name in bad]
                 + [f"{name}={events[name]}" for name in bad_events]
+                + [
+                    f"{name}={misc[name]}/{transitions}"
+                    for name in count_mismatches
+                ]
             )
             raise RuntimeError(
                 "FullMDP ledger rollout evidence differs: "
-                + ",".join(details or ["identity_or_finite_rows"])
+                + ",".join(details)
             )
         family_counts = {"forehand": 0, "backhand": 0}
         family_counts[self.family] = misc["identity_rows"]

@@ -895,7 +895,12 @@ def test_prepare_rejects_action_identity_drift(field, value):
     result = _result(module)
     result[3][field][0] = value
     ledger.ingest(result)
-    with pytest.raises(RuntimeError, match="identity_or_finite_rows"):
+    expected_count = {
+        "full_a_action_slot": "slot0_rows=1/2",
+        "full_a_action_uid": "uid_rows=1/2",
+        "full_a_mount_normal_sign": "mount_sign_rows=1/2",
+    }[field]
+    with pytest.raises(RuntimeError, match=expected_count):
         _prepare(ledger, 0, environment_steps=1)
 
 
