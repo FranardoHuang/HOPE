@@ -49,6 +49,9 @@ for _stub_name in _TEMP_IMPORT_STUBS:
 
 
 def _cfg(**overrides):
+    class _Cfg(dict):
+        __getattr__ = dict.__getitem__
+
     values = {
         "task": {"action_ball_full_mdp_runtime": True},
         "action_ball_dynamic_ready_bootstrap": True,
@@ -58,7 +61,7 @@ def _cfg(**overrides):
         "action_ball_dynamic_ready_nominal_receipt_sha256": "b" * 64,
     }
     values.update(overrides)
-    return SimpleNamespace(**values)
+    return _Cfg(values)
 
 
 def test_policy_visual_installs_training_dynamic_ready_binding():
