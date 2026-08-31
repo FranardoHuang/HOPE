@@ -2,6 +2,13 @@
 
 ## 2026-08-31 — R36 v5 物理出生、视觉工作流与双端起跑
 
+- early-stillness 判读与 Build4 对照已收口：fresh Isaac 0--399 update 的 episode `119→171 tick`
+  与 teacher 速度误差改善支持先学 balance；GPU0 849--948 已是 `464.011 tick / 4,735 observed / 0 R03 /
+  0 contact` 的成熟负例。GPU1 同 seed 到 499 与 GPU0 逐窗一致，不算独立 seed；Build4 强制从
+  Build1 `model_21800` actor 热启动，也不能冒充 fresh 早期对照。Mu 1879--1978 已到
+  `465 selected / 464 crossing / 0 landing`。每小时 `task-first` 守护已更新到三条 R36 root、自然课程
+  截止条件与固定机位 checkpoint 视频；不再维护过期 R35 身份或新增 Gate。
+
 - 真实 GPU1 `model_300` 已用当前 RSL3 grouped observation 与训练同源 FullMDP/dynamic-ready/motion
   catalog 导出 400-step 固定机位视频；Pod focused=`7 passed`、回放 RC=0，影片 SHA256=
   `3e5c3a58…da13e`。画面不是出生即倒，但尚无清晰老师接触窗动作或可信击球。GPU0 recent-100 已是

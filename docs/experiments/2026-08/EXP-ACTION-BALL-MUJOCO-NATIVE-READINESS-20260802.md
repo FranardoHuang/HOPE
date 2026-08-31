@@ -105,6 +105,18 @@ mimic→hit 负例；GPU1 Isaac update 326--425 的 episode 均值=`190.906 tick
 `6.70%`，但 legal landing/recovery=`0/0`。因此保留三条自然对照，不在已有学习链正在推进时截断；
 contact-prior treatment 等独立 lane 后按 matched window 比较，而 landing 只有在 hit 基本形成后才调整。
 
+最新只读窗口继续支持同一裁决而不是翻转它。GPU0 update 849--948 为 episode/observed=
+`464.011/4,735`、R03/contact=`0/0`；GPU1 update 412--511 为 `347.648/4,000/0/0`，且与 GPU0
+同 seed 的 update 0--499 逐窗学习账相同，因此只能充当实现等价/耐心对照。Mu update 1879--1978
+已到 launch/R03/raw/selected/crossing=`4,938/4,890/3,283/465/464`，selected/launch=`9.42%`，
+但 legal landing/recovery=`0/0`。三条 nonfinite/conservation 均为0。
+
+“fresh 早期少动”可接受的因果条件也据此固定：episode length 和 teacher error 正在改善时，它是先学
+balance 的合理策略；接近 horizon 且 due/observed 充分后仍零 R03/contact，则是成熟 mimic→hit 负例。
+Build4 不能裁决该问题：`origin/build_4@324e60d1` 的 manifest/YAML 明确要求从 Build1
+`model_21800.pt` 位级载入8个 actor tensor，再重置 sigma/critic/optimizer。当前仓库与 Pod 没有原始
+Build1 model0/早期 checkpoint 序列，所以不存在公平的“Build4 fresh 早期会不会动”证据。
+
 `dad61048..00814042` 因此直接修已有 reward 的时间分布，而不新增 gate：ready/preparation/recovery
 以及远离接触的 playback 保留 `1x`，真实 playback 内按 raised-cosine 在 `|TTC|<=0.12 s` 连续增强，
 `0.06 s` 为 `2.5x`、接触为 `4x`。四项 kernel、teacher/achieved producer、最大权重和

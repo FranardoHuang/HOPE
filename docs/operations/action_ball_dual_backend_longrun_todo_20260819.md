@@ -51,18 +51,34 @@
 - `e5c02ea6` fresh Mu 61-update diagnostic 自然完成，RC=0；每轮 `24,576/24,576`
   UID/identity rows 正确，storage finite、reward conservation/fact-integrity 无故障，p50/p90=
   `6.667/7.153 s`。同 source 已从 fresh root 进入 100,000-update Mu long。
-- GPU0 Isaac 的 update 760--859 仍 finite；该 100 轮 episode 平均 `491.204 tick`，
-  physical observed=`4,853`，timeout/tilt/table=`4,884/50/80`，证明 balance/survival 和 hit
-  入口都已充分打开；但 R03/contact/crossing/landing 仍=`0/0/0/0`。同窗 playback 误差为
-  `0.6155 m / 0.3248 m/s / 0.3513 rad / 0.2416 rad`。这已不是“太早看不出”：当前旧配方
-  明确卡在接触窗位置/姿态质量。
-- GPU1 fresh Isaac 的 update 326--425 持续 finite；该 100 轮 episode 平均 `190.906 tick`，
-  physical observed/R03/contact=`1,596/0/0`，tilt/table/timeout=`9,759/1,491/1,415`。它仍是较早
-  balance/mimic 窗，保留为耐心对照；不能用它否决长期可学性。
-- GPU2 Mu 的 update 1559--1658 持续 finite；该 100 轮 episode 平均 `218.490 tick`，
-  launch/R03/raw/selected/crossing=`3,416/3,364/1,337/229/230`，tilt/table=`5,550/3,450`，
-  profiler-off wall p50/p90=`6.338/6.620 s`。hit 入口正在真实形成，selected/launch 约 `6.70%`；
-  但 legal landing/recovery 仍=`0/0`，所以只能称 mimic→hit 在推进，不能称 hit 或 landing 已学会。
+- GPU0 Isaac 的 update 849--948 持续 finite；该 100 轮 episode 平均 `464.011 tick`，
+  physical observed=`4,735`，timeout/tilt/table=`4,717/439/140`；但 R03/contact/crossing/landing
+  仍=`0/0/0/0`。同窗 playback 误差为
+  `0.5910 m / 0.3327 m/s / 0.3364 rad / 0.2399 rad`。从 update 500 起多数窗口已接近
+  `500 tick` horizon，故这已不是“太早看不出”：当前旧配方明确卡在接触窗位置/姿态质量。
+- GPU1 fresh Isaac 的 update 412--511 持续 finite；该 100 轮 episode 平均 `347.648 tick`，
+  physical observed/R03/contact=`4,000/0/0`，tilt/table/timeout=`2,228/899/3,808`，四项误差=
+  `0.5304 m / 0.3731 m/s / 0.3087 rad / 0.2812 rad`。它相对 update 0--299 的
+  `119→147 tick` 已明显学会更多 balance；但该臂与 GPU0 同 seed，且 update 0--499 的学习账逐窗相同，
+  所以它是实现等价/耐心对照，不是独立 seed 的科学复现。
+- GPU2 Mu 的 update 1879--1978 持续 finite；该 100 轮 episode 平均 `369.536 tick`，
+  launch/R03/raw/selected/crossing=`4,938/4,890/3,283/465/464`，selected/launch 约 `9.42%`，
+  profiler-off wall p50/p90=`5.902/6.336 s`。hit 入口继续真实形成；但 legal landing/recovery
+  仍=`0/0`，所以只能称 mimic→hit 在推进，不能称 landing 已学会。三条均为
+  nonfinite/conservation=`0/0`。
+
+### “早期少动”与 Build4 的公平解释
+
+- fresh Gaussian policy 在前几百 update 先把动作幅度压小、减少倾倒并延长 episode，是这个自然课程的合理
+  暂态：只有活过 teacher/contact 时钟，mimic 和 hit 才有稳定样本。当前 Isaac 0--399 的 episode
+  `119→171 tick`、速度误差 `0.817→0.520 m/s` 同时改善，支持“先学 balance”，不支持“策略什么都没学”。
+- 该解释有截止条件：episode 已长期接近 horizon、due/observed 分母充分后，R03/contact 仍为零就是
+  mimic→hit 负例。GPU0 已越过该截止，不能继续用耐心替代 treatment；GPU1 尚用于确认同一学习轨迹，
+  下一条 contact-prior 才是 matched treatment。
+- `origin/build_4@324e60d1` 不能作为 fresh 早期动作对照：其 manifest/YAML 强制从 Build1
+  `model_21800.pt` 位级热启动全部 8 个 actor tensor，只重置 sigma/critic/optimizer。仓库与 Pod 当前均无
+  原始 Build1 run 的 model0/早期 checkpoint 序列，所以“Build4 一开始就会挥”只证明热启动 actor 会挥，
+  不证明 fresh policy 应当立刻挥。后续只吸收 direct-paddle 与连续暴露原则，不兼容 Build4 checkpoint ABI。
 
 ### 已直接修复
 
@@ -115,6 +131,9 @@
   contact-prior canary；与旧配方只比较 matched update/window 的接触窗 p/v/face 误差、R03/contact
   和 episode/safety 分母，不用 total return 裁决。现有 GPU0/GPU1/GPU2 都是有用的自然学习对照，
   不为抢 treatment 人为截断；待独立 lane 可用再发。
+- [x] 每小时守护 `task-first` 已从过期 R35 root 更新为上述三条 R36 live root；它按
+  balance→mimic→hit→landing 的截止条件、固定机位 checkpoint 视频和删除式结构审计工作，不再把
+  early stillness、Build4 热启动或新 Gate 当结论。
 
 ### 结构减法（不阻塞已启动 long）
 

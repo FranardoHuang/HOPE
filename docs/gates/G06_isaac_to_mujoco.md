@@ -21,6 +21,11 @@ p50/p90=`6.338/6.620 s`。hit 入口正在形成，但 legal landing/recovery=`0
 first-divergence 都出现前，G06 保持
 `Partial / diagnostic_unauthorized`。
 
+Mu update 1879--1978 的 recent-100 又提高到 episode=`369.536 tick`，launch/R03/raw/selected/
+crossing=`4,938/4,890/3,283/465/464`，wall p50/p90=`5.902/6.336 s`；legal landing/recovery
+仍=`0/0`，nonfinite/conservation=`0/0`。这增强了“Mu 的 mimic→hit 已形成入口、hit→landing 仍未
+形成”的学习证据，但没有 matched Isaac contact response，故不提高 parity 等级。
+
 ## 2026-08-30 R36 当前双端边界（仍 `Partial`）
 
 R35 两端是不同的学习负例，不是 physics parity：Isaac 已跨过 balance 并产生充分 launch，却没有 R03/contact；

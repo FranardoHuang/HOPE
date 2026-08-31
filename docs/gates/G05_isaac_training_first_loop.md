@@ -55,6 +55,12 @@ episode/observed=`491.204/4,853`，R03/contact/crossing/landing 全零，是成�
 update 326--425 的 episode/observed=`190.906/1,596`，仍作为较早耐心对照继续。状态保持
 `Partial / diagnostic_unauthorized`。
 
+后续 update 849--948 的 GPU0 窗为 episode/observed=`464.011/4,735`、R03/contact=`0/0`；
+GPU1 update 412--511 已推进到 `347.648/4,000/0/0`，但两臂同 seed 且 update 0--499 的学习账逐窗
+相同，所以 GPU1 只证明等价实现没有改学习，不是独立 seed。fresh 早期少动只有在 episode 与 teacher
+误差持续改善时才视作 balance 暂态；接近 horizon 后仍零 R03/contact 继续按成熟负例处理。
+Build4 从 Build1 `model_21800` actor 热启动，不能冒充 fresh 早期对照。G05 状态不变。
+
 ## 2026-08-30 R36 当前 Isaac 学习入口（仍 `Partial`）
 
 R35 Isaac 的最终冻结窗已给出可信负例：survival/balance 基本形成，`4,951` 次 physical launch 后仍为
