@@ -23,6 +23,7 @@ num_envs: 2
 wandb_path: null      # <entity>/hope_wbc/<run_id>  (a trained run to load)
 checkpoint: null      # explicit local model_*.pt path (takes precedence over wandb_path / latest-local)
 export_dir: null      # optional isolated output directory (default: <checkpoint_dir>/exported)
+video_dir: null       # optional fresh no-clobber directory; use it to keep evidence outside a read-only run
 registry_name: null   # motion override for the local-checkpoint path (falls back to task.registry_name)
 registry_name_2: null # optional 2nd registry clip for unified policies
 motion_file: null     # explicit motion .npz override
@@ -32,6 +33,14 @@ video: false
 video_length: 200
 export_only: false    # build + validate + export, then exit without entering the rollout loop
 post_swing_capture_max_steps: 0 # >0 only with task.motion.post_swing_capture_output_dir
+
+# FullMDP policy playback must consume the same physical-ready binding as the
+# training source.  These remain null for every non-FullMDP task.
+action_ball_dynamic_ready_bootstrap: false
+action_ball_dynamic_ready_artifact_path: null
+action_ball_dynamic_ready_artifact_sha256: null
+action_ball_dynamic_ready_nominal_receipt_path: null
+action_ball_dynamic_ready_nominal_receipt_sha256: null
 
 hydra:
   job:

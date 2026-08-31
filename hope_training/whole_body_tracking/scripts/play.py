@@ -20,11 +20,13 @@ from omegaconf import OmegaConf
 
 from isaac_bank_exam_adapter import policy_observation_tensor
 from train import (
+    _action_ball_full_mdp_runtime_requested,
     _apply_task_overrides,
     _build_training_hard_contract,
     _contract_diff,
     _is_noneish,
     _normalize_registry_name,
+    _resolve_action_ball_dynamic_ready_bootstrap_request,
     _registry_clip_name,
     _sha256_file,
     resolve_motion_sources,
@@ -37,6 +39,103 @@ def _validate_play_seed(value):
     if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
         raise ValueError("play seed must be a plain int in [0, 4294967295]")
     return value
+
+
+def _install_action_ball_dynamic_ready_playback(
+    cfg,
+    env_cfg,
+    *,
+    load_binding=None,
+):
+    """Install the same physical-ready binding used by fresh FullMDP training.
+
+    A policy video is an inference workflow, not a training resume.  It must
+    nevertheless start from the exact physical-ready state that generated the
+    checkpoint; otherwise the picture is about a different MDP.  Reuse the
+    training resolver and runtime-binding loader instead of copying their
+    contract into a second visual-only implementation.
+    """
+
+    full_mdp_requested = _action_ball_full_mdp_runtime_requested(cfg.task)
+    requested, pins = _resolve_action_ball_dynamic_ready_bootstrap_request(
+        cfg,
+        action_ball_launch_requested=False,
+        action_ball_full_mdp_requested=full_mdp_requested,
+    )
+    if not requested:
+        return None
+    if load_binding is None:
+        from whole_body_tracking.utils.training_contract import (
+            load_action_ball_dynamic_ready_runtime_binding,
+        )
+
+        load_binding = load_action_ball_dynamic_ready_runtime_binding
+
+    motion_cfg = env_cfg.commands.motion
+    racket_cfg = env_cfg.commands.racket_target
+    action_order = tuple(
+        str(value)
+        for value in (getattr(racket_cfg, "clip_names_per_clip", ()) or ())
+    )
+    if len(action_order) != 1 or not action_order[0]:
+        raise RuntimeError(
+            "FullMDP policy playback requires one exact action identity"
+        )
+    raw_motion_paths = motion_cfg.motion_file
+    motion_paths = (
+        (raw_motion_paths,)
+        if isinstance(raw_motion_paths, str)
+        else tuple(raw_motion_paths)
+    )
+    if not motion_paths or any(
+        not isinstance(path, str) or not path.strip() for path in motion_paths
+    ):
+        raise RuntimeError(
+            "FullMDP policy playback requires exact resolved motion paths"
+        )
+    try:
+        binding = load_binding(
+            artifact_path=pins["action_ball_dynamic_ready_artifact_path"],
+            artifact_sha256=pins["action_ball_dynamic_ready_artifact_sha256"],
+            nominal_hold_receipt_path=(
+                pins["action_ball_dynamic_ready_nominal_receipt_path"]
+            ),
+            nominal_hold_receipt_sha256=(
+                pins["action_ball_dynamic_ready_nominal_receipt_sha256"]
+            ),
+            action_order=list(action_order),
+            motion_paths=list(motion_paths),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "FullMDP policy playback dynamic-ready binding is invalid"
+        ) from exc
+    motion_cfg.action_ball_dynamic_ready = binding
+    print(
+        "[play.py] FullMDP dynamic-ready playback binding verified: "
+        f"action={action_order[0]} binding_sha256={binding['binding_sha256']}",
+        flush=True,
+    )
+    return binding
+
+
+def _prepare_video_output_directory(configured, fallback):
+    """Return a video directory, making explicit outputs fresh/no-clobber."""
+
+    if configured is None:
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
+    if not isinstance(configured, str) or not configured.strip():
+        raise ValueError("video_dir must be null or one non-empty path")
+    output = os.path.abspath(configured.strip())
+    parent = os.path.dirname(output)
+    if not os.path.isdir(parent):
+        raise ValueError("video_dir parent must already exist")
+    try:
+        os.mkdir(output, 0o700)
+    except FileExistsError as exc:
+        raise ValueError("video_dir already exists; refusing to clobber") from exc
+    return output
 
 
 def _run_with_owned_play_environment(env, body):
@@ -183,6 +282,12 @@ def _run_created_environment(
     # Manual video capture: grab env.render() each step and encode to mp4 with imageio
     # (imageio-ffmpeg). Avoids gym RecordVideo's vec-env / flush quirks and reports exactly
     # how many frames were captured so a black/empty render is obvious instead of silent.
+    video_dir = None
+    if cfg.video:
+        video_dir = _prepare_video_output_directory(
+            cfg.get("video_dir", None),
+            os.path.join(log_dir, "videos", "play"),
+        )
     frames = []
     # IsaacLab/RSL-RL versions differ here: the wrapper may return the actor tensor directly,
     # ``(actor_tensor, extras)``, or an observation mapping containing ``policy`` and privileged
@@ -217,8 +322,7 @@ def _run_created_environment(
     if cfg.video:
         import numpy as np
 
-        video_dir = os.path.join(log_dir, "videos", "play")
-        os.makedirs(video_dir, exist_ok=True)
+        assert video_dir is not None
         video_path = os.path.join(video_dir, "play.mp4")
         valid = [np.asarray(f) for f in frames if f is not None and getattr(f, "size", 0) > 0]
         print(f"[INFO] captured {len(frames)} frames ({len(valid)} non-empty)", flush=True)
@@ -350,6 +454,8 @@ def _run_play(cfg, simulation_app):
                 motion_files.append(_dl(reg2))
                 print(f"[play.py] UNIFIED 2-clip export: clip0={reg}  clip1={reg2}", flush=True)
             env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
+
+    _install_action_ball_dynamic_ready_playback(cfg, env_cfg)
 
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
