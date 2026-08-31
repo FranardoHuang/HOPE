@@ -268,6 +268,8 @@ class MilestoneTensorAccumulator:
         "open_step_configured_abs_income", "r03_seen", "r07_outcome_seen",
         "r07_ready_seen",
         "_reward_evaluated", "_reward_i64_samples", "_reward_f64_samples",
+        "_reward_p_rows", "_reward_q_rows", "_reward_income_rows",
+        "_reward_eligible_rows", "_reward_valid_rows", "_reward_payment_rows",
         "_paddle_unavailable", "_paddle_i64_samples",
         "_paddle_f64_samples",
         "_num_envs", "_shot_shape", "_device",
@@ -308,6 +310,20 @@ class MilestoneTensorAccumulator:
                 dtype=torch.float64,
                 device=self._device,
             )
+            # RewardManager already keeps every term value alive until the
+            # same synchronous ``compute()`` call returns.  Retain those
+            # exact tensors for the few microseconds until ``close_actual_step``
+            # instead of launching one stack/copy/square/clamp bundle for each
+            # of the 28 terms.  The actual policy reward, manager ordering and
+            # sequential configured-income accumulation remain unchanged;
+            # only diagnostic transcription is batched at the existing cycle
+            # boundary.
+            self._reward_p_rows = []
+            self._reward_q_rows = []
+            self._reward_income_rows = []
+            self._reward_eligible_rows = []
+            self._reward_valid_rows = []
+            self._reward_payment_rows = []
             paddle_count = len(PADDLE_PLAYBACK_TERM_NAMES)
             self._paddle_unavailable = torch.zeros(
                 paddle_count, dtype=torch.int64, device=self._device
@@ -336,23 +352,29 @@ class MilestoneTensorAccumulator:
         if ordinal == 0:
             if self._scratch_open:
                 raise RuntimeError("milestone configured-income step is still open")
+            if any((
+                self._reward_p_rows, self._reward_q_rows,
+                self._reward_income_rows, self._reward_eligible_rows,
+                self._reward_valid_rows, self._reward_payment_rows,
+            )):
+                raise RuntimeError("milestone prior Reward row batch was not cleared")
             self._scratch_open = True
         elif not self._scratch_open:
             raise RuntimeError("milestone configured-income step was not opened")
+        if ordinal != len(self._reward_p_rows):
+            raise RuntimeError("milestone Reward row order differs")
         valid = eligible & finite
         p = torch.where(valid, primitive, 0).to(torch.float64)
         q = torch.where(valid, payment, 0).to(torch.float64)
         income = q * configured_scale
         self.open_step_configured_income.add_(income)
         self.open_step_configured_abs_income.add_(income.abs())
-        self._reward_evaluated[ordinal].fill_(primitive.numel())
-        self._reward_i64_samples[ordinal].copy_(torch.stack((
-            eligible, valid, valid & payment.ne(0),
-        )))
-        self._reward_f64_samples[ordinal].copy_(torch.stack((
-            p, p.square(), q, income, income.square(),
-            income.clamp_min(0), -income.clamp_max(0),
-        )))
+        self._reward_p_rows.append(p)
+        self._reward_q_rows.append(q)
+        self._reward_income_rows.append(income)
+        self._reward_eligible_rows.append(eligible)
+        self._reward_valid_rows.append(valid)
+        self._reward_payment_rows.append(payment)
 
     def add_paddle_motion_prior_playback(
         self,
@@ -447,6 +469,12 @@ class MilestoneTensorAccumulator:
         self._writable()
         if not self._scratch_open:
             raise RuntimeError("milestone actual reward step is not open")
+        if any(len(rows) != REWARD_TERM_COUNT for rows in (
+            self._reward_p_rows, self._reward_q_rows,
+            self._reward_income_rows, self._reward_eligible_rows,
+            self._reward_valid_rows, self._reward_payment_rows,
+        )):
+            raise RuntimeError("milestone actual reward step has incomplete rows")
         if (
             type(reward) is not torch.Tensor
             or reward.device != self.open_step_configured_income.device
@@ -454,6 +482,20 @@ class MilestoneTensorAccumulator:
             or reward.dtype is not torch.float32
         ):
             raise RuntimeError("milestone actual reward tensor ABI differs")
+        p = torch.stack(tuple(self._reward_p_rows))
+        q = torch.stack(tuple(self._reward_q_rows))
+        income = torch.stack(tuple(self._reward_income_rows))
+        eligible = torch.stack(tuple(self._reward_eligible_rows))
+        valid = torch.stack(tuple(self._reward_valid_rows))
+        payment = torch.stack(tuple(self._reward_payment_rows))
+        self._reward_evaluated.fill_(reward.numel())
+        self._reward_i64_samples.copy_(torch.stack((
+            eligible, valid, valid & payment.ne(0),
+        ), dim=1))
+        self._reward_f64_samples.copy_(torch.stack((
+            p, p.square(), q, income, income.square(),
+            income.clamp_min(0), -income.clamp_max(0),
+        ), dim=1))
         reward_i64 = torch.cat((
             self._reward_evaluated[:, None],
             self._reward_i64_samples.sum(dim=2, dtype=torch.int64),
@@ -506,6 +548,12 @@ class MilestoneTensorAccumulator:
         self._reward_evaluated.zero_()
         self._reward_i64_samples.zero_()
         self._reward_f64_samples.zero_()
+        self._reward_p_rows.clear()
+        self._reward_q_rows.clear()
+        self._reward_income_rows.clear()
+        self._reward_eligible_rows.clear()
+        self._reward_valid_rows.clear()
+        self._reward_payment_rows.clear()
         self._paddle_unavailable.zero_()
         self._paddle_i64_samples.zero_()
         self._paddle_f64_samples.zero_()

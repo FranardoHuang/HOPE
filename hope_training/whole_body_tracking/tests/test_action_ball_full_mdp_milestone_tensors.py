@@ -388,6 +388,12 @@ def test_cycle_batched_reductions_are_bitwise_equal_to_legacy_term_reductions():
         assert not bool(leaf._reward_evaluated.any())
         assert not bool(leaf._reward_i64_samples.any())
         assert not bool(leaf._reward_f64_samples.any())
+        assert leaf._reward_p_rows == []
+        assert leaf._reward_q_rows == []
+        assert leaf._reward_income_rows == []
+        assert leaf._reward_eligible_rows == []
+        assert leaf._reward_valid_rows == []
+        assert leaf._reward_payment_rows == []
         assert not bool(leaf._paddle_unavailable.any())
         assert not bool(leaf._paddle_i64_samples.any())
         assert not bool(leaf._paddle_f64_samples.any())
@@ -397,6 +403,20 @@ def test_hot_reward_term_path_contains_no_eager_reduction():
     source = inspect.getsource(M.MilestoneTensorAccumulator.add_reward)
     assert ".sum(" not in source
     assert ".amax(" not in source
+    assert "torch.stack" not in source
+    assert ".copy_(" not in source
+
+
+def test_actual_close_rejects_incomplete_batched_reward_rows():
+    leaf = M.MilestoneTensorAccumulator(2, torch.device("cpu"))
+    zeros = torch.zeros(2)
+    mask = torch.ones(2, dtype=torch.bool)
+    leaf.add_reward(
+        0, zeros, zeros, mask, mask,
+        torch.ones((), dtype=torch.float64),
+    )
+    with pytest.raises(RuntimeError, match="incomplete rows"):
+        leaf.close_actual_step(zeros)
 
 
 def test_decoder_does_not_recheck_same_writer_analytic_relationships():
