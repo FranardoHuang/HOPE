@@ -1,26 +1,68 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`r36-source-integrated / final-pod-validation-open / no-authorized-formal-run`
+- 状态：`r36-v5-isaac-learning-live / mujoco-catalog-identity-repair / diagnostic_unauthorized`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 本 successor 当前最高证据等级：R35长窗提供可信负例，R36源合同已集成；final exact Pod bundle
-  consumer、双端fixed-action、matched rate与fresh learning仍为`未测`
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-30
+- 本 successor 当前最高证据等级：v5 bundle、Isaac nominal hold、固定视角、双端 CUDA
+  fixed-action和Isaac fresh ACK已有真 Pod 证据；学习仍处 balance/mimic 早窗，Mu long 因 ledger
+  计数口径失配尚未起跑
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-31
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 `origin/main:docs/NOW.md`；功能分支内的 `docs/NOW.md` 只能是待合入提案。
 
-> **阅读规则：**当前执行合同只认“2026-08-30 current correction”、紧随其后的adoption table与
+> **阅读规则：**当前执行合同只认“2026-08-31 current correction”与
 > [双后端TODO当前节](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)。从
 > “2026-08-21 portable successor事实纠正”起的229/399、211/319、H24、`history=8`与旧schema/gate结论
 > 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
 
-## 2026-08-30 current correction
+## 2026-08-31 current correction
+
+### 当前结论
+
+R36 v5 已把“起始动作与老师动作互相代替”的错误拆掉：physical-ready 是 A3 闭环可站稳的
+出生姿态，teacher motion 保留真实 frame0 与速度，preparation window 由 Motion clock 冻结老师，不再
+伪造零速 motion。v5 bundle 绑定 teacher、dynamic-ready、nominal-hold、OptiTrack physics 与 current Mu plant。
+
+真 Isaac nominal hold 为 `1.2 s / 240 physics / 60 policy`，无 hard-limit/table/fall；固定视角已直接看到
+raw env reset 不是训练出生，atomic ready write 后的姿态才是实际 ready，teacher contact frame 中球、拍心与
+挥拍目标对齐。这类截图从现在起是 reset/reference/task/contact 改动的必做工作流，但不作为新
+发射 Gate。
+
+`5dd39786` 的双端真 CUDA fixed-action 都完成 `512×48×31`。Isaac fresh root
+`/workspace/franco/runs/fullmdp-r36-v5-5dd39786-isaac-h48-20260831T0939Z`
+已持续到 update 149，recent-30 p50/p90 约 `10.74/10.96 s`。update 149 的 D05 due/accepted=
+`174/174`、playback-started=`179`，physical-launch/R03/contact=`0/0/0`；`200` 个完成 episode 平均
+`132.48 tick`，table/tilt=`120/80`。ball launch/contact 时钟约在 reveal 后 `252/265 tick`，所以当前先败在
+balance/survival 的接触前样本饥饿；这不是 target 错的证据，也不是 mimic 成功。用 update
+300/1000 的 episode、teacher-achieved paddle error、hard/table/fall 趋势和固定相机视频判读。
+
+Mu 精确诊断已给出 `uid_rows=0/24576, identity_rows=0/24576`。根因是 runner 和离线 consumer
+仍各自手抄 0807 旧 UID `2552478955674699`，而v5 portable catalog 真源为 `4098890508575574`。
+`e5c02ea6` 删掉这两个生产常量，统一从 exact portable catalog 取身份，但保留 ledger 对每行真漂移的
+检测；Pod runner/ledger/consumer focused=`275 passed, 1 skipped`。fresh Mu diagnostic 已以新 root 起动，
+首 ACK/rate window 尚未签字。
+
+### 结构裁决
+
+| 处理 | 内容 | 第一性原理理由 |
+|---|---|---|
+| 直接删/合并 | 同 writer postcondition、每步 full-manager snapshot、死 registry、可离线重建转录 | 没有增加独立信息，却放大结构和热路税 |
+| 保留 | nonfinite、跨 owner identity/generation、真 contact/outcome、有限计数与 durable checkpoint | 这些是不可从同 writer 重建的真值 |
+| 后续独立落地 | owner 窄投影、metric/Reward 同周期 pack、external closure 单命令物化、exact resume | 提升可维护性，但不热补正在学的 source |
+| 拒绝 | 为了弥补同 writer/时钟/坐标错误再增 success/safety Gate | 会掩盖根因并使项目更难审计 |
+
+当日已执行第一个“死 registry”减法：整套 Racket observation token/registry 没有任何生产
+consumer，production binder 永久 HOLD，只由 focused test 自行 mint/consume。因此删除该 capability、record、
+retained fields、binder、测试和 stale semantic exclusions；不动 ActionEpoch 实时 selected-rubber、cold table 或
+D05/R05/generation owner。这是删除无消费者的模拟权威，不是放宽真值校验。
+
+## 2026-08-30 current correction（已被上节取代）
 
 ### 当前 adopted contract
 

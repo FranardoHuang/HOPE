@@ -17,10 +17,10 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import test_action_ball_continuous_racket_observation_projection as obs_test
+import test_action_ball_continuous_racket_selected_reset as reset_test
 
 
-HC = obs_test.HC
+HC = reset_test.HC
 
 
 def _load_scene_module():

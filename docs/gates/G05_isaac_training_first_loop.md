@@ -2,6 +2,25 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
+## 2026-08-31 R36 v5 实时 Isaac 证据（仍 `Partial`）
+
+`5dd39786` 的 v5 已分离物理出生姿态与 teacher truth；真 Isaac nominal hold 完成
+`1.2 s / 240 physics / 60 policy`，无 hard-limit/table/fall。固定视角也已直接确认 atomic
+ready write 后姿态与 teacher contact frame 的球/拍心/挥拍目标对齐。该视觉复核是工作流，不新增 Gate。
+
+真 CUDA fixed-action 已完成 `512×48×31`。fresh root
+`/workspace/franco/runs/fullmdp-r36-v5-5dd39786-isaac-h48-20260831T0939Z`
+正在持续 ACK；update 149 前 recent-30 p50/p90约 `10.74/10.96 s`。该 update D05 due/accepted=
+`174/174`、playback-started=`179`，但 physical-launch/R03/contact=`0/0/0`；完成 episode 平均
+`132.48 tick`，仍早于约 `252/265 tick` 的 ball launch/contact 时钟，所以首先是接触前
+balance/survival 样本饥饿。这只证明训练链入口正确，不证明 mimic/hit/landing 学会。下一判读点为
+update 300/1000 的 episode、teacher-achieved paddle error、hard/table/fall 趋势与同步视频。G05 保持
+`Partial / diagnostic_unauthorized`。
+
+本轮结构减法另删除了从未进入 runtime graph、production binder 永久 HOLD 的
+Racket observation token/registry 及其 test/semantic glue。ActionEpoch selected-rubber、cold table 与
+D05/R05/generation 真链保留；这不改 reward、observation 或学习数学，只删无生产消费者的模拟权威。
+
 ## 2026-08-30 R36 当前 Isaac 学习入口（仍 `Partial`）
 
 R35 Isaac 的最终冻结窗已给出可信负例：survival/balance 基本形成，`4,951` 次 physical launch 后仍为

@@ -2,6 +2,18 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+## 2026-08-31 R36 v5 双端固定输入与 Mu 学习阻塞（仍 `Partial`）
+
+`5dd39786` 的 Isaac/Mu 真 CUDA fixed-action 都完成 `512×48×31`，同 action tape、done/timeout=0；
+v5 bundle 已绑定 teacher、physical-ready、nominal-hold、OptiTrack physics 与 current Mu plant。这闭合了当前构造
+输入，不等于 plant/contact response parity。
+
+Isaac fresh long 已起跑；Mu fresh long 在首 PPO update 前因 ledger 拒绝。精确重放为
+`uid_rows=0/24576, identity_rows=0/24576`，证明不是 reset row，而是 runner/consumer 手抄了旧 UID。
+`e5c02ea6` 已让两者直接从 exact portable catalog 取唯一 action identity，并保留 row-wise drift 检测；
+Pod focused=`275 passed, 1 skipped`，fresh Mu diagnostic 正在新 root 运行。在 Mu durable ACK、
+双端 contact/outcome 分母和 first-divergence 都出现前，G06 保持 `Partial / diagnostic_unauthorized`。
+
 ## 2026-08-30 R36 当前双端边界（仍 `Partial`）
 
 R35 两端是不同的学习负例，不是 physics parity：Isaac 已跨过 balance 并产生充分 launch，却没有 R03/contact；

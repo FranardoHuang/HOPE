@@ -1,5 +1,21 @@
 # 简短进度记录
 
+## 2026-08-31 — R36 v5 物理出生、视觉工作流与双端起跑
+
+- physical-ready 与 teacher truth 已分离；真 Isaac nominal hold `1.2 s`无 hard/table/fall，固定视角
+  已直接核对 raw reset、atomic ready、teacher start、contact 与 recovery。后续 reset/reference/task/contact
+  改动都要出同样图片/视频，但不新增发射 Gate。
+- `5dd39786` 的双端 CUDA fixed-action 已完成 `512×48×31`。Isaac fresh long 正在持续 ACK，
+  早窗只证明 D05/admission/playback 入口已打开，contact 仍为 0；按 update 100/300 判读学习。
+- Mu 首 update 因 ledger 模糊身份/有限计数报错停止；`eefdbd72` 已改为精确计数差值并在 Pod
+  得到 `123 passed`。fresh 诊断后精确为 `uid_rows=0/24576, identity_rows=0/24576`：不是 reset
+  producer，是 runner/consumer 还手抄旧 action UID。`e5c02ea6` 改为唯一 portable-catalog 真源，
+  保留真漂移检测；Pod focused=`275 passed, 1 skipped`，fresh diagnostic 正在新 root 运行。
+- 现役 TODO 已改为“直接删同 writer 自证/每步 manager snapshot/死 registry，保留跨 owner 真值”的
+  结构减法；不以更多安全 Gate 补偿臃肿结构。G05/G06 仍为 `Partial / diagnostic_unauthorized`。
+- 已删除从未进入 runtime graph 的 Racket observation token/registry 及其 focused-test/semantic glue；
+  保留 ActionEpoch selected-rubber、cold table 和 D05/R05/generation 真正跨 owner 链。
+
 ## 2026-08-30 — 双后端 TODO 收为唯一当前清单
 
 - `action_ball_dual_backend_longrun_todo_20260819.md` 只保留 R36 当前合同、反例结论、未闭阻断、停止规则与

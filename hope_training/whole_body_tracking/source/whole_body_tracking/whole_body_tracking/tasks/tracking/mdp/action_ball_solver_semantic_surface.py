@@ -676,29 +676,8 @@ EXCLUDED: Dict[str, Dict[str, str]] = {
             "fresh_full_mdp_runtime_protocol"
         ),
         # The closure gate matches attributes by bare name.  These fresh-only
-        # row views/static-table projections therefore collide with legacy
-        # solver receipt fields even though the objects never enter that path.
-        "ActionBallContinuousRacketObservationView.action_slot": (
-            "overapproximated_name_collision"
-        ),
-        "ActionBallContinuousRacketObservationView.action_uid": (
-            "overapproximated_name_collision"
-        ),
-        "ActionBallContinuousRacketObservationView.swing_generation": (
-            "overapproximated_name_collision"
-        ),
-        "ActionBallContinuousRacketObservationView.time_to_contact_s": (
-            "overapproximated_name_collision"
-        ),
-        "ActionBallFullMdpRacketSelectedRubberView.action_slot": (
-            "overapproximated_name_collision"
-        ),
-        "ActionBallFullMdpRacketSelectedRubberView.action_uid": (
-            "overapproximated_name_collision"
-        ),
-        "ActionBallFullMdpRacketSelectedRubberView.swing_generation": (
-            "overapproximated_name_collision"
-        ),
+        # static-table projections therefore collide with legacy solver
+        # receipt fields even though the objects never enter that path.
         "RacketActionReferenceStaticTableProjection.diagnostic_unauthorized": (
             "overapproximated_name_collision"
         ),
@@ -706,9 +685,6 @@ EXCLUDED: Dict[str, Dict[str, str]] = {
             "overapproximated_name_collision"
         ),
         "RacketActionReferenceStaticTableProjection.reference_racket_quat_wxyz": (
-            "overapproximated_name_collision"
-        ),
-        "_ActionBallContinuousRacketObservationRecord.values": (
             "overapproximated_name_collision"
         ),
         # Drain records collide by bare attribute name with the solver path,
