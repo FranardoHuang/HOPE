@@ -1,5 +1,12 @@
 # 简短进度记录
 
+## 2026-09-01 — Mu 8k contact 差距收敛到拍边/拍框
+
+- Mu update 8173--8272 recent-100 的raw/selected=`4,329/254`；逐类分解为selected face
+  `254`、edge/rim ambiguous `4,075`、opposite/between-planes/invalid均`0`。raw中`94.13%`是拍边/
+  拍框，selected仅`5.87%`，landing仍`0`。这把当前hit-quality差距定位为拍心/拍面对齐；不放宽
+  selected truth、不把raw当成成功，也不在`15k`耐心里程碑前停跑或换Reward。
+
 ## 2026-09-01 — 修正 R36 早期学习判读与小时守护尺度
 
 - 纠正 `f2ca6503` 的过早“成熟负例”措辞：Isaac GPU0/GPU1 当前约 `1.77k/1.31k update`，

@@ -93,10 +93,12 @@ RSL3 grouped observation，不为旧 actor-tensor/checkpoint 增兼容支路。P
 2026-09-01 的最新 recent-100 只读窗为：GPU0 Isaac update 1820--1919，episode=`494.518 tick`、
 launch/observed=`4,883/4,883`、R03/contact/landing=`0/0/0`；GPU1 Isaac update 1355--1454，
 episode=`492.069 tick`、launch/observed=`4,866/4,866`、R03/contact/landing=`0/0/0`。Mu已越过首个
-`5k`里程碑：update 4906--5005 episode=`441.762 tick`，launch/R03/raw/selected/crossing=
-`4,491/4,461/2,046/36/36`，legal landing/recovery=`0/0`。三条 nonfinite/conservation 均为0。
-Mu的raw contact增加、selected contact相对上一窗下降，证明hit入口真实但质量未稳定；Isaac当前只证明
-balance/survival与launch分母已形成，尚未证明hit。
+Mu的`8k`后里程碑：update 8173--8272 recent-100 持续finite，raw/selected=
+`4,329/254`；contact class分解为selected face `254`、edge/rim ambiguous `4,075`、opposite/
+between-planes/invalid均`0`。因此raw的`94.13%`是拍边/拍框，真正selected占`5.87%`，legal
+landing仍`0`。这比“raw增、selected降”更精确：hit入口真实，当前主导学习差距是拍心/
+拍面对齐，不是opposite face或invalid classifier。不放宽selected truth，也不在`15k`耐心里程碑前
+换Reward；Isaac当前只证明balance/survival与launch分母已形成，尚未证明hit。
 
 这里纠正上一版过早的“成熟负例”措辞：`episode≈500 tick` 只说明 policy 能活到 teacher/contact 时钟，
 并不说明 600--1,800 update 已足够学会 mimic→hit。团队回忆中的成功谱系约到 `15k` update 才开始
