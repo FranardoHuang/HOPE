@@ -2,7 +2,20 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
-## 2026-08-31 R36 v5 实时 Isaac 证据（仍 `Partial`）
+## 2026-09-01 R36 v5 外部中断时的 Isaac 证据（仍 `Partial`）
+
+RunPod 余额耗尽从外部终止了两条 Isaac 进程；这不是 NaN、合同故障或学习停止条件。最后完整
+recent-100 为：GPU0 update 3605--3704，episode=`497.150 tick`、completed=`4,951`、
+due/observed=`4,948/4,889`、R03/contact/landing=`0/0/0`；GPU1 update 3105--3204，
+episode=`484.747 tick`、completed=`5,039`、due/observed=`5,048/4,980`、R03/contact/landing=
+`0/0/0`。nonfinite/conservation都为`0/0`。两个 run 均已进入 survival/launch 阶段但只到
+`3.2k/3.7k`，远早于约 `15k` 的历史耐心先验，因此 G05 不把零 R03 升级为长期失败。
+
+当前 Pod 只有 CPU；它只完成 current HEAD 的 renderer focused=`2 passed`与归档校验，不产生新的 Isaac
+事实。本地ignored archive已按tracked manifest完成GPU0逐文件与GPU1/Mu压缩包SHA/zstd/member-count复核。
+两套 checkpoint 都显式为 `diagnostic_nonresumable`，下一台 GPU 只允许 current-only fresh root，
+不得把它们称为 exact resume，也不为旧 checkpoint ABI 增 adapter。下文保留本轮逐步形成的证据链；
+凡写“正在运行”均以本段外部中断状态为准。
 
 `5dd39786` 的 v5 已分离物理出生姿态与 teacher truth；真 Isaac nominal hold 完成
 `1.2 s / 240 physics / 60 policy`，无 hard-limit/table/fall。固定视角也已直接确认 atomic

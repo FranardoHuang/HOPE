@@ -1,30 +1,37 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`r36-v5-dual-learning-live / model600-early-visual-observed / contact-prior-candidate-validated / diagnostic_unauthorized`
+- 状态：`r36-v5-external-balance-interrupted / local-archive-verified / diagnostic_unauthorized`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 本 successor 当前最高证据等级：v5 bundle、Isaac nominal hold、teacher 与真实 `model_300`
+- 本 successor 当前最高证据等级：v5 bundle、Isaac nominal hold、teacher 与真实 `model_300/600`
   固定视角、双端 CUDA fixed-action、Isaac fresh ACK 与 Mu 自然 contact/crossing 已有真 Pod 证据；
-  Isaac 到约1--2k update尚无hit，Mu到约4.5k已有hit入口但landing/recovery仍未形成；两者均未到
-  团队回忆的约15k稳定击球尺度
+  RunPod 因余额在 Isaac `3.2k/3.7k`、Mu `10.8k` 外部中断。Mu 已有真 hit 入口但全部 selected
+  contact 落己方台，legal landing/recovery 未形成；三条都没有到约 `15k` 的历史耐心尺度
 - 创建日期/最后复核日期：2026-08-02 / 2026-09-01
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 `origin/main:docs/NOW.md`；功能分支内的 `docs/NOW.md` 只能是待合入提案。
 
-> **阅读规则：**当前执行合同只认“2026-08-31 current correction”与
+> **阅读规则：**当前执行合同只认“2026-09-01 current correction”与
 > [双后端TODO当前节](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)。从
 > “2026-08-21 portable successor事实纠正”起的229/399、211/319、H24、`history=8`与旧schema/gate结论
 > 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`10/5/6` wire、PPO V5或
 > Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
 
-## 2026-08-31 current correction
+## 2026-09-01 current correction
 
 ### 当前结论
+
+2026-09-01 的当前状态是**外部余额中断后的证据固化**，不是学习或代码触发的停止。原 Pod 现在只有
+CPU，三条 GPU 训练进程均不存在；CPU 只用于 current HEAD 的结构测试与归档校验，不产生 CUDA、physics
+或 model_10000 视频证据。三条 run root、checkpoint、WAL/evidence、MJB 与固定机位证据已选择性迁移并
+完成本地 checksum/zstd/member-count复核；可重建 cache、PCH 与 run-local wheel site 没有迁移。tracked
+索引为[`action_ball_r36_interrupted_archive_20260901.json`](../../../configs/action_ball_r36_interrupted_archive_20260901.json)。下一台 GPU 不做旧 ABI 兼容，
+只恢复 current-only source 与精确依赖后重建 fresh root。
 
 R36 v5 已把“起始动作与老师动作互相代替”的错误拆掉：physical-ready 是 A3 闭环可站稳的
 出生姿态，teacher motion 保留真实 frame0 与速度，preparation window 由 Motion clock 冻结老师，不再
@@ -90,22 +97,27 @@ RSL3 grouped observation，不为旧 actor-tensor/checkpoint 增兼容支路。P
 动作并存活/重置，但没有清晰形成老师反手挡的接触窗动作或可信击球；这与同窗 R03/contact=`0/0`
 一致。确定性 teacher 视频仍证明中心题球、拍心和 contact target 对齐，所以不再改 task/球公式。
 
-2026-09-01 的最新 recent-100 只读窗为：GPU0 Isaac update 1820--1919，episode=`494.518 tick`、
-launch/observed=`4,883/4,883`、R03/contact/landing=`0/0/0`；GPU1 Isaac update 1355--1454，
-episode=`492.069 tick`、launch/observed=`4,866/4,866`、R03/contact/landing=`0/0/0`。
-Mu的`10k`里程碑已产生finite `model_10000.pt`；update 10095--10194 recent-100的
-raw/selected/edge=`3,101/44/3,057`。44次selected face contact全部是
-`OUTCOME_OWN_TABLE_LANDING=4`，legal landing与recovery success均`0`。因此当前两层差距已可分：
-raw主导仍是拍边/拍框；真正拍面接触也仍把球送回己方台面。这不是opposite face或
-invalid classifier，也不是下一层奖励被开关吞掉：racket position/velocity/normal与
-post-contact guidance已在同一自然过程中开放。不放宽selected/landing truth，也不在`15k`
-耐心里程碑前换Reward；Isaac当前只证明balance/survival与launch分母已形成，尚未证明hit。
+外部中断前最后一个完整 recent-100 窗为：GPU0 Isaac update 3605--3704，episode=`497.150 tick`、
+completed=`4,951`、due/observed=`4,948/4,889`、R03/contact/landing=`0/0/0`；GPU1 Isaac
+update 3105--3204，episode=`484.747 tick`、completed=`5,039`、due/observed=`5,048/4,980`、
+R03/contact/landing=`0/0/0`。两端四项 paddle error 分别为
+`.6877/.2121/.2993/.4192`与`.7306/.2491/.3076/.3257`，nonfinite/conservation均`0/0`。
+它们已反复跨过任务时钟但尚未形成 R03；`3.2k/3.7k` 仍显著早于约 `15k` 的历史尺度。
+
+Mu 最后完整窗为 update 10745--10844：episode=`470.951 tick`、completed=`5,229`、
+due/launch/R03=`5,216/4,773/4,775`，raw/selected/edge=`2,811/562/2,249`，crossing=`555`，
+legal/own-table=`0/555`，recovery success/failure=`0/54`，四项 paddle error=
+`.1348/.1754/.1176/.2304`，nonfinite/conservation=`0/0`。所以当前两层差距已可分：raw 主导仍是
+拍边/拍框；真正拍面接触也仍把球送回己方台面。这不是 opposite face、invalid classifier 或下一层奖励
+被开关吞掉：racket position/velocity/normal 与 post-contact guidance 已在同一自然过程中开放。
+不放宽 selected/landing truth，也不把外部中断当成在 `15k` 前换 Reward 的依据。
 
 `89a60e9f` 增加当前trace-v2的最小固定机位工作流：live policy trace只保存world0的完整`qpos`，
 离线renderer只接受同root、逐字节核验的`runtime.mjb/controller_trace.npz/summary.json`，不支持旧trace
-兼容。这是为开发者直接看model_10000姿态、球和出球方向而补的工作流，不是新Gate。当前因Pod1 SSH连续
-`connection refused`，exact Pod测试、真实trace和MP4均未测；恢复连通后先完成focused测试，再用fresh
-root生成证据，不触碰现役run/source。
+兼容。这是为开发者直接看 model_10000 姿态、球和出球方向而补的工作流，不是新 Gate。current HEAD
+`85b9b0f9` 已在 CPU Pod 跑完该新测试 `2 passed in 0.62s`；它只证明 schema/fixture/renderer 结构，
+CPU Pod 无 CUDA，旧 run 又没有 trace-v2，所以真实 model_10000 trace 与 MP4 仍为`未测`。下一台 GPU
+直接用 current-only trace 生成 fresh 证据，不为读取旧 trace 增兼容层。
 
 这里纠正上一版过早的“成熟负例”措辞：`episode≈500 tick` 只说明 policy 能活到 teacher/contact 时钟，
 并不说明 600--1,800 update 已足够学会 mimic→hit。团队回忆中的成功谱系约到 `15k` update 才开始

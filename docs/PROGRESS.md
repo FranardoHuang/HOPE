@@ -1,5 +1,20 @@
 # 简短进度记录
 
+## 2026-09-01 — R36 外部中断证据已本地固化，旧小时守护停止
+
+- RunPod余额耗尽外部中断两条Isaac（约`3.2k/3.7k`）和一条Mu（约`10.8k`）；不是trainer、physics或
+  learning停止。Isaac已形成survival/launch但仍无R03；Mu已有真hit入口，`2,811/562` raw/selected，
+  562次拍面接触全部落己方台。由于都早于约`15k`历史耐心尺度，不把中断或零landing改写成长期失败，
+  也不抢跑改Reward/加Stage/Gate。
+- 本地ignored archive已核验：GPU0展开树`83 files / 245,325,161 bytes`逐文件全绿；其余GPU1/Mu/
+  固定机位与Phase4证据包为`185,917,025 bytes`、解压`531,722,240 bytes`、169 members，SHA-256=
+  `1470e609…345`且zstd test通过。tracked索引与恢复边界见
+  [`action_ball_r36_interrupted_archive_20260901.json`](../configs/action_ball_r36_interrupted_archive_20260901.json)和
+  [`setup_local_sync.md`](operations/setup_local_sync.md)。checkpoint只作诊断/可视/迁移研究，不冒充exact resume。
+- 小时`task-first`已删除，因为原GPU进程与路径均不再live。下一台GPU只走current-only source、重新CUDA
+  fixed-action和fresh matched control；不维护旧FullMDP/trace/checkpoint兼容。可视化继续作为
+  reset/reference/task/contact改动后的日常工作流，不新增审批Gate。
+
 ## 2026-09-01 — current-only Mu policy固定机位工作流已实现，待Pod恢复验证
 
 - `89a60e9f` 让现有controller trace仅额外保存world0完整`qpos`，并新增只接受trace-v2与同root exact

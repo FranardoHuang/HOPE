@@ -1,0 +1,170 @@
+{
+  "kind": "action_ball_r36_external_interruption_archive_v1",
+  "schema_version": 1,
+  "status": "verified_local_ignored_archive",
+  "created_at_utc": "2026-09-01",
+  "source_branch": "Franco_codex/fullmdp-r36-final-20260830",
+  "source_head_before_archive_docs": "85b9b0f95fd85d9c6e10c6358ab805c8f4948fae",
+  "interruption": {
+    "cause": "runpod_account_balance_exhausted",
+    "natural_completion": false,
+    "training_fault": false
+  },
+  "local_restore_root": "vendor_assets/action_ball_r36_interrupted_20260901",
+  "source_runs": [
+    {
+      "run_name": "fullmdp-r36-v5-5dd39786-isaac-h48-20260831T0939Z",
+      "backend": "isaac",
+      "source_commit": "5dd3978656e1899adf32b6089614b7f5b5564156",
+      "last_complete_update": 3704,
+      "last_environment_steps": 91054080
+    },
+    {
+      "run_name": "fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z",
+      "backend": "isaac",
+      "source_commit": "67109ec2315af0ca617062bab8fa5f6b2fbfb7e7",
+      "last_complete_update": 3204,
+      "last_environment_steps": 78766080
+    },
+    {
+      "run_name": "fullmdp-r36-v5-e5c02ea6-mujoco-h48-20260831T1034Z",
+      "backend": "mujoco",
+      "source_commit": "e5c02ea6acc2b5d7d7a75c3e1d69ae37669b4fb5",
+      "last_complete_update": 10844
+    }
+  ],
+  "archive_units": [
+    {
+      "path": "runs/fullmdp-r36-v5-5dd39786-isaac-h48-20260831T0939Z",
+      "kind": "expanded_tree",
+      "file_count": 83,
+      "total_bytes": 245325161,
+      "sha256_manifest": "gpu0-expanded.SHA256SUMS",
+      "sha256_manifest_sha256": "ed4ad0df91cd83322d7da607b0fa4e7fc1df9b84a018c96ca23fde0dab97e8d3"
+    },
+    {
+      "path": "r36-interrupted-remaining-20260901.tar.zst",
+      "kind": "tar_zstd",
+      "file_size_bytes": 185917025,
+      "uncompressed_bytes": 531722240,
+      "member_count": 169,
+      "sha256": "1470e6090f072aa80036863eee79dac4380a6d09bdf0034a7e96ef0a29189345",
+      "contains": [
+        "full Isaac GPU1 run root",
+        "full MuJoCo run root excluding reconstructible caches and runtime_site",
+        "model_300 and model_600 fixed-camera evidence",
+        "Phase4 ready and teacher visual evidence"
+      ]
+    }
+  ],
+  "runtime_dependencies": [
+    {
+      "path": "vendor_assets/mujoco_warp_epa48_1/build_receipt.json",
+      "sha256": "336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041"
+    },
+    {
+      "path": "vendor_assets/mujoco_warp_epa48_1/wheelhouse/mujoco_warp-3.10.0.3+hope.epa48.1-py3-none-any.whl",
+      "sha256": "58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a"
+    },
+    {
+      "path": "vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl",
+      "sha256": "406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d"
+    }
+  ],
+  "key_artifacts": [
+    {
+      "backend": "isaac",
+      "path_suffix": "model_0.diagnostic_nonresumable.pt",
+      "sha256": "c4c8e0ff7f4f8d5ff76f16d0f3add202e20d689ce2810012a5a00febffa5f621"
+    },
+    {
+      "backend": "isaac",
+      "path_suffix": "model_2000.diagnostic_nonresumable.pt",
+      "sha256": "e313127acbd9a3cd11aa5d8ef2ee5b5b7f88c0afbd136ced3b87b1fff76e98ce"
+    },
+    {
+      "backend": "isaac",
+      "path_suffix": "model_300.diagnostic_nonresumable.pt",
+      "sha256": "d86a01c9572b6a1f04ac30aa99da2cab04771dc915fbe3b4d33d8bce555aa448"
+    },
+    {
+      "backend": "isaac",
+      "path_suffix": "model_600.diagnostic_nonresumable.pt",
+      "sha256": "df6252025efb547d2f3a0a82806ec499756e2c0cb90ee4d30cebb0db0634419e"
+    },
+    {
+      "backend": "isaac",
+      "path_suffix": "model_3000.diagnostic_nonresumable.pt",
+      "sha256": "c98ff3ad8a3eb0ebba071153cf57925f2f9194eee3e216edb74cfc6b2748940f"
+    },
+    {
+      "backend": "mujoco",
+      "path_suffix": "snapshots/model_0.pt",
+      "sha256": "4b21e8d584493ffe64733e1bc4cf46e88b846ce10b587ee880c5f795c2364853"
+    },
+    {
+      "backend": "mujoco",
+      "path_suffix": "snapshots/model_2000.pt",
+      "sha256": "54eed998dc8254f2abd488085be9d7152a897d98eaade6e2c0e0bb4f5b1e4b2a"
+    },
+    {
+      "backend": "mujoco",
+      "path_suffix": "snapshots/model_4000.pt",
+      "sha256": "e4ba09d140211eb53c903467a6414535c4c6ee9c39c1a1b515757ca00d9c32be"
+    },
+    {
+      "backend": "mujoco",
+      "path_suffix": "snapshots/model_6000.pt",
+      "sha256": "f17515f2965a98a172768a544850440c71fe80afff6f06c408465348b45526db"
+    },
+    {
+      "backend": "mujoco",
+      "path_suffix": "snapshots/model_8000.pt",
+      "sha256": "8a6b1703375bb242f7d18d5a80be8b3a556b3cf7b6869e5cfac267617e9d5d07"
+    },
+    {
+      "backend": "mujoco",
+      "path_suffix": "snapshots/model_10000.pt",
+      "sha256": "1930588bb3c531c4b75e91c43d5c869d1f54be4ee12208e96e747628c60a4b13"
+    },
+    {
+      "backend": "mujoco",
+      "path_suffix": "runtime.mjb",
+      "sha256": "d9c88297d4a687815c347a064792c66d99b61965ecea3576d235c8b13c286685"
+    }
+  ],
+  "visual_artifacts": [
+    {
+      "checkpoint_update": 300,
+      "sha256": "3e5c3a58fe831b3fd362f4ece02fab3bcbb4d1c95540569ef343f134bc6da13e"
+    },
+    {
+      "checkpoint_update": 600,
+      "sha256": "0dd2b23d460fa1fdaa88d7d9e33d2a328bf1bc1f141f80e703c66c9b5b08b7a8"
+    }
+  ],
+  "cpu_only_validation": {
+    "source_commit": "85b9b0f95fd85d9c6e10c6358ab805c8f4948fae",
+    "command_scope": "renderer focused tests only",
+    "result": "2 passed in 0.62s",
+    "pod_evidence_root": "/workspace/franco/evidence/r36-cpu-render-test-r6AAau",
+    "does_not_prove": [
+      "CUDA construction",
+      "physics or contact response",
+      "model_10000 trace or video"
+    ]
+  },
+  "excluded_reconstructible_content": [
+    "temporary directories",
+    "CUDA, Warp, Triton and XDG caches from the packed GPU1 and MuJoCo roots",
+    "MuJoCo run-local runtime_site",
+    "Python bytecode caches"
+  ],
+  "claims": {
+    "diagnostic_unauthorized": true,
+    "deployment_authorized": false,
+    "promotion_authorized": false,
+    "isaac_exact_resume_authorized": false,
+    "mujoco_exact_resume_authorized": false
+  }
+}

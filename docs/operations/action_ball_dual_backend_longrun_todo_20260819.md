@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`r36-v5-dual-learning-live / model600-early-visual-observed / contact-prior-candidate-validated / diagnostic_unauthorized`
+> 状态：`r36-v5-external-balance-interrupted / local-archive-verified / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-09-01
@@ -13,12 +13,33 @@
 
 <a id="fullmdp-v6-todo-current"></a>
 
-## 0.7 2026-08-31 current：R36 v5 直接修根因与双端学习闭环
+## 0.7 2026-09-01 current：R36 v5 外部中断、成果固化与下一台 GPU 接续
 
-本节是唯一现役局部执行合同。当前 GPU0 Isaac 严格绑定 `5dd39786`，GPU2 Mu 绑定
-`e5c02ea6`，都不热补。GPU1 已从 fresh clean exact `67109ec2` 启动后继 Isaac：它只合入
-已做完整等价对拍的 Reward ledger 批量转录和 `300 update` 存档频率，不改 PPO、Reward
-经济或自然课程。所有结论限定为 `diagnostic_unauthorized`。
+本节是唯一现役局部执行合同。2026-09-01 RunPod 因账户余额耗尽把三条 GPU 训练从外部中断；这不是
+trainer、physics 或学习判据触发的自然停止。原 Pod 现只剩 CPU，三条训练进程均已消失，故不存在可继续
+守护的 live run。GPU0 Isaac 严格绑定 `5dd39786`，GPU2 Mu 绑定 `e5c02ea6`，GPU1 Isaac 绑定
+`67109ec2`；三条 root、checkpoint、日志和可视证据只读保留并迁移到本地 ignored archive，绝不把
+外部中断伪写成 completion。所有结论仍限定为 `diagnostic_unauthorized`。
+
+最后一个完整 recent-100 窗如下。它们回答“中断时学到哪里”，不构成跨引擎 parity 或长期失败 verdict：
+
+| 项 | Isaac GPU0 update 3605--3704 | Isaac GPU1 update 3105--3204 | Mu update 10745--10844 |
+|---|---:|---:|---:|
+| mean episode length | 497.150 tick | 484.747 tick | 470.951 tick |
+| completed episodes | 4,951 | 5,039 | 5,229 |
+| due / physical launch | 4,948 / 4,889 observed | 5,048 / 4,980 observed | 5,216 / 4,773 |
+| R03 / raw / selected contact | 0 / 0 / 0 | 0 / 0 / 0 | 4,775 / 2,811 / 562 |
+| crossing / legal / own-table | 0 / 0 / 0 | 0 / 0 / 0 | 555 / 0 / 555 |
+| recovery success / failure | 0 / 未测 | 0 / 未测 | 0 / 54 |
+| paddle p/v/face/long error | .6877 / .2121 / .2993 / .4192 | .7306 / .2491 / .3076 / .3257 | .1348 / .1754 / .1176 / .2304 |
+| timeout / tilt / table | 4,897 / 44 / 10 | 4,444 / 470 / 125 | backend typed ledger；见 evidence |
+| nonfinite / conservation | 0 / 0 | 0 / 0 | 0 / 0 |
+
+两个 Isaac 都已学会基本 survival 并反复看见 launch/contact 时钟，但在 `3.2k/3.7k` 尚无 R03；这比
+团队回忆的约 `15k` 稳定击球尺度早很多，不能判“不会学”。Mu 到 `10.8k` 已有真 mimic→hit 入口，
+但 `2,811` 次 raw contact 中只有 `562` 次选中拍面，且这些选中接触全部落己方台。它说明当前主要差距是
+拍边/拍框与出球质量，不说明下一层被 Gate 吞掉，也仍未到耐心先验。下一台 GPU 应先把同一 fresh control
+续到约 `15k`/`21.8k` 的可比尺度；不能因本次云端中断临时改 Reward、增加 Stage 或恢复旧 ABI。
 
 ### 已采用合同
 
@@ -135,8 +156,8 @@
   `/workspace/franco/runs/fullmdp-r36-v5-e5c02ea6-mujoco-h48-20260831T1034Z`。
 - [x] 等价加速与 `300 update` 可视存档的 fresh GPU1 Isaac long：
   `/workspace/franco/runs/fullmdp-r36-67109ec2-isaac-h48-gpu1-20260831T1153Z`。
-- [ ] 双端按约 `1k / 5k / 15k / 21.8k` 的存档点读同一自然链；约 `15k` 是团队回忆的首个稳定击球
-  尺度，尚待原始 Build1 日志补证，不是新 Gate。
+- [x] 本次云端结束前已读 `1k/3k/3.7k/5k/10k` 可用窗并保存最后 recent-100；RunPod 余额中断发生在
+  Isaac `3.2k/3.7k` 与 Mu `10.8k`，所以 `15k/21.8k` 仍未测，不得把中断补成负例。
 - [x] GPU1 `model_300.diagnostic_nonresumable.pt` 已导出 400-step 固定视角真实 policy 视频。
   画面显示策略不是出生即倒，也有周期性动作与存活/重置；但没有形成清晰的老师反手挡接触窗动作或可信
   击球，和同窗 R03/contact=`0/0`一致。确定性 teacher 视频仍证明中心题的球/拍心/contact target 对齐，
@@ -144,16 +165,20 @@
 - [x] GPU1 `model_600.diagnostic_nonresumable.pt` 已用同一固定机位和 dynamic-ready 绑定回放。
   它排除“policy 全程不动”，但直接暴露了无清晰老师挥拍、单轨迹向桌面倾覆且无恢复；
   与 update 700 的 512-env timeout 分布并列记录；这是早期诊断，不是长期学习 verdict。
-- [ ] 任一 GPU 自然形成独立 lane，且 matched control 已走到足以解释学习趋势的里程碑后，从
+- [ ] 在下一台有 CUDA 的训练机恢复 current-only source、exact runtime wheels、MJB、bundle 与受选
+  checkpoint；先重做 fixed-action/finite 构造，再从 fresh no-clobber root 发 matched control。
+  Isaac checkpoint 均显式标记 `diagnostic_nonresumable`，只能用于可视/迁移初值研究，不能声称 exact resume。
+- [ ] matched control 到约 `15k` 且仍有可归因的 mimic→hit 差距后，才从
   `00814042` 或其文档后继的 clean exact source 发一条 fresh
   contact-prior canary；与旧配方只比较 matched update/window 的接触窗 p/v/face 误差、R03/contact
-  和 episode/safety 分母，不用 total return 裁决。现有 GPU0/GPU1/GPU2 都是有用的自然学习对照，
-  不为抢 treatment 人为截断。候选已验证但不抢跑。
-- [x] 每小时守护 `task-first` 已从过期 R35 root 更新为上述三条 R36 live root；它按
-  balance→mimic→hit→landing 的长期里程碑、定点固定机位视频和删除式结构审计工作，不再把
-  early stillness、几百 update 的零 contact、Build4 热启动或新 Gate 当结论。
+  和 episode/safety 分母，不用 total return 裁决。候选已验证但本轮没有抢跑。
+- [x] 本地 ignored archive 已完成逐文件/checksum/zstd/member-count复核；compact tracked manifest为
+  [`action_ball_r36_interrupted_archive_20260901.json`](../../configs/action_ball_r36_interrupted_archive_20260901.json)，
+  恢复路径与非exact-resume边界已写入[`setup_local_sync.md`](setup_local_sync.md)。远端root未删除。
+- [x] 每小时守护 `task-first` 已停止：它指向的三条 GPU 进程均因外部余额中断消失，继续轮询只会制造
+  过期状态。下一台训练机建立新 exact root 后再按新路径重建守护，不保留旧路径兼容。
 
-### 结构减法（不阻塞已启动 long）
+### 结构减法（不阻塞下一台 GPU 的 matched control）
 
 - hot path 只保留数值真值和跨 owner 边界；删同 writer postcondition、每步 full-manager snapshot、可离线
   重建的转录和死 registry。完整字节证明下沉 launch/checkpoint，不常驻 reset/physics substep。

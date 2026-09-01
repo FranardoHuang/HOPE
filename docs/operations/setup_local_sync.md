@@ -112,6 +112,7 @@ SONAME输入、记录观察SHA；新机器仍在安装阶段由人类完成一�
 | `vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl` | portable MuJoCo Full-A binder使用的exact upstream RSL-RL 3.1.2 wheel；只供fresh run-local隔离site，不替换ambient环境 | 公开PyPI exact wheel `rsl-rl-lib==3.1.2`为主恢复源；Pod1 preserved path仅作断网备用。两者都必须命中SHA-256 `406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d` | G06 portable MuJoCo focused gate及successor长跑 |
 | `vendor_assets/mujoco_warp_3_10_0_3_source/mujoco_warp-3.10.0.3.tar.gz` | project-owned EPA48 fork的exact upstream源码输入；不是可执行wheel | PyPI `mujoco-warp==3.10.0.3` sdist，tag `v3.10.0.3` / commit `710c34ca…5728`，SHA-256 `f22196465cb1350677f66d8b65aa23bf37d95e150ce3ba3c68ea934ba35e3070`；按下文显式恢复 | G06 EPA horizon build chain |
 | `vendor_assets/mujoco_warp_epa48_1/` | ignored、no-clobber的`mujoco-warp==3.10.0.3+hope.epa48.1` wheel与build receipt，也是Full-A runtime binder的固定输入 | 只由tracked provenance/patch和`build_mujoco_warp_epa48.py`离线构建；patched source在临时目录exact重建，不从PyPI找同名wheel，不安装进ambient环境 | G06 runtime import与EPA48 GPU fixture候选输入；当前不授权训练 |
+| `vendor_assets/action_ball_r36_interrupted_20260901/` | 2026-09-01 RunPod余额外部中断时的R36诊断训练证据：展开的Isaac GPU0 root、打包的Isaac GPU1/Mu root、checkpoint、固定机位视频和Phase4视觉材料 | 从本地Dropbox-backed ignored副本恢复，并严格按[`action_ball_r36_interrupted_archive_20260901.json`](../../configs/action_ball_r36_interrupted_archive_20260901.json)核SHA/member count；不是exact-resume、promotion或部署输入 | G05/G06学习证据与下一台GPU接续 |
 | Planned ignored root `vendor_assets/mocap/optitrack_20260730_full/` | 2026-07-30 full OptiTrack raw C3D and canonical extracted NPZ for ball, `PPP1/PPP2` rackets and table in one clock; calibration/schema evidence, not automatically a 73 body-motion teacher | **UNRESOLVED in this checkout:** restore exact private C3D/extracted bytes and record SHA/source path. The tracked extractor/docs do not recreate missing measurements | G03 physics/calibration and marker-to-site method |
 | RunPod historical M3c/M2f `model_16999.pt` checkpoints | Warm starts for the four-arm face-pairing comparison; never fresh-formal inputs | Existing ignored run trees under `/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/` | G05/G06 legacy causal diagnosis |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated Isaac A3 ping-pong URDF asset | Rebuilt from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` using `scripts/prepare_a3_isaac_asset.py` | G04/G05 |
@@ -309,6 +310,53 @@ host=`17 passed, 1 skipped`；exact Pod GPU2实际10+10次结果为
 `PASS_EPA48_FIXED_FIXTURE_REPLAY`（stock24 mask256/contact0，fork48 mask0/contact1且raw contact finite）。
 证据root=`/workspace/franco/mktemp/epa48-tracked-replay-20260821-v1`，summary SHA-256=`af6694…dee`；
 标准lock覆盖全程，结束apps empty/lock free。其余科学HOLD见实验真源。
+
+## 2026-09-01 R36 外部中断证据恢复
+
+RunPod余额耗尽使R36三条GPU训练在Isaac约`3.2k/3.7k`、Mu约`10.8k`时外部中断。它们不是自然完成，
+也不是trainer、physics或learning停止条件触发。可继承内容已经保存在本地ignored根；唯一tracked索引是
+[`configs/action_ball_r36_interrupted_archive_20260901.json`](../../configs/action_ball_r36_interrupted_archive_20260901.json)。
+不要重新下载可重建cache，也不要为旧trace、旧checkpoint或旧FullMDP ABI增加兼容层。
+
+恢复到fresh checkout时，先把整个目录复制到checkout外staging，随后执行：
+
+```bash
+R36_ARCHIVE=vendor_assets/action_ball_r36_interrupted_20260901
+R36_GPU0="$R36_ARCHIVE/runs/fullmdp-r36-v5-5dd39786-isaac-h48-20260831T0939Z"
+R36_PACK="$R36_ARCHIVE/r36-interrupted-remaining-20260901.tar.zst"
+
+test -d "$R36_GPU0"
+test -f "$R36_ARCHIVE/gpu0-expanded.SHA256SUMS"
+test -f "$R36_PACK"
+
+printf '%s  %s\n' \
+  ed4ad0df91cd83322d7da607b0fa4e7fc1df9b84a018c96ca23fde0dab97e8d3 \
+  "$R36_ARCHIVE/gpu0-expanded.SHA256SUMS" | shasum -a 256 -c -
+printf '%s  %s\n' \
+  1470e6090f072aa80036863eee79dac4380a6d09bdf0034a7e96ef0a29189345 \
+  "$R36_PACK" | shasum -a 256 -c -
+
+(cd "$R36_GPU0" && shasum -a 256 -c ../../gpu0-expanded.SHA256SUMS)
+zstd -t "$R36_PACK"
+test "$(zstd -dc "$R36_PACK" | tar -tf - | wc -l | tr -d ' ')" = 169
+```
+
+展开压缩包必须用fresh no-clobber目标，不覆盖已存在的run或证据目录：
+
+```bash
+R36_UNPACK_STAGE=$(mktemp -d ../r36-interrupted-unpack.XXXXXX)
+zstd -dc "$R36_PACK" | tar -xf - -C "$R36_UNPACK_STAGE"
+```
+
+本地2026-09-01复核结果：GPU0展开树为`83 files / 245,325,161 bytes`且逐文件全部命中清单；压缩包为
+`185,917,025 bytes`、解压后`531,722,240 bytes`、`169`个member，SHA-256与zstd frame test均通过。
+压缩包包含完整Isaac GPU1与Mu run root、update 300/600固定机位证据和Phase4 ready/teacher视觉材料；不包含
+临时目录、可重建CUDA/Warp/Triton/XDG cache、Mu run-local `runtime_site`或Python bytecode。
+
+恢复这些字节只允许以下用途：读取日志/receipt，固定机位或离线评测checkpoint，以及在下一台GPU上用
+current-only代码研究迁移初值。Isaac checkpoint明示`diagnostic_nonresumable`；Mu snapshot也没有环境、owner、
+RNG和WAL exact-resume authority。下一次训练必须先恢复上节EPA48/RSL3 wheel，重新做CUDA fixed-action和
+finite构造，再在fresh root发matched control；不得把本archive当成exact resume、promotion或部署授权。
 
 ## ChingMu measured-racket rebuild contract
 

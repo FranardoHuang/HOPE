@@ -2,7 +2,13 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
-## 2026-08-31 R36 v5 双端固定输入与 Mu 学习阻塞（仍 `Partial`）
+## 2026-09-01 R36 v5 外部中断时的双端边界（仍 `Partial`）
+
+RunPod 余额耗尽使两条 Isaac 与一条 Mu GPU 进程从外部消失；没有 backend 自然 completion，也没有
+nonfinite/conservation 故障。三条 root 已迁移到本地 ignored archive，并完成逐文件或压缩包SHA/zstd/
+member-count复核；CPU Pod 只做结构测试与 checksum，不能补 CUDA、contact response 或 model_10000
+视频证据。下一台 GPU 只恢复 current-only source/依赖，
+不为旧 trace/checkpoint 增兼容。
 
 `5dd39786` 的 Isaac/Mu 真 CUDA fixed-action 都完成 `512×48×31`，同 action tape、done/timeout=0；
 v5 bundle 已绑定 teacher、physical-ready、nominal-hold、OptiTrack physics 与 current Mu plant。这闭合了当前构造
@@ -13,9 +19,10 @@ Isaac fresh long 已起跑；Mu fresh long 在首 PPO update 前因 ledger 拒�
 `e5c02ea6` 已让两者直接从 exact portable catalog 取唯一 action identity，并保留 row-wise drift 检测；
 Pod focused=`275 passed, 1 skipped`。fresh Mu diagnostic 已自然完成 61 update，RC=0，
 p50/p90=`6.667/7.153 s`，每轮 UID/identity=`24,576/24,576`且 storage finite；同 source fresh
-long 已越过update 10k并产生finite `model_10000.pt`；10095--10194 recent-100的
-raw/selected/edge=`3,101/44/3,057`。这44次selected face contact全部结算为
-`OUTCOME_OWN_TABLE_LANDING=4`，legal landing/recovery success均`0`。这证明hit入口存在，但当前同时存在
+long 已越过update 10k并产生finite `model_10000.pt`；外部中断前最后完整窗10745--10844的
+due/launch/R03=`5,216/4,773/4,775`，raw/selected/edge=`2,811/562/2,249`，crossing=`555`。
+562次selected face contact全部结算为`OUTCOME_OWN_TABLE_LANDING=4`，legal landing=`0`、
+recovery success/failure=`0/54`。这证明hit入口存在，但当前同时存在
 拍边/拍框占主导与拍面接触后出球方向错误；不是opposite face或invalid classifier。所以landing还没有
 成功证据；也不能因为已有 crossing 就宣称 contact response parity。
 这是学习分层证据，不代签 plant/contact response parity。在双端 contact/outcome 分母和
@@ -23,10 +30,11 @@ first-divergence 都出现前，G06 保持
 `Partial / diagnostic_unauthorized`。
 
 `89a60e9f` 已实现current-only controller-trace-v2→fixed-camera renderer，复用同一run构造出的
-`runtime.mjb`和world0 `qpos`，没有新增训练Gate或旧ABI兼容。当前Pod1 SSH连续`connection refused`，
-所以exact CUDA构造、focused回归和model_10000真实视频仍未测；该实现不改变G06状态。
+`runtime.mjb`和world0 `qpos`，没有新增训练Gate或旧ABI兼容。current HEAD `85b9b0f9` 的CPU Pod
+focused=`2 passed in 0.62s`；旧run没有trace-v2且CPU无CUDA，所以model_10000真实trace/视频仍`未测`。
+该实现不改变G06状态。
 
-这增强了“Mu 的 mimic→hit 已形成入口、hit→landing 仍未形成”的学习证据，但 update 5k 仍低于
+这增强了“Mu 的 mimic→hit 已形成入口、hit→landing 仍未形成”的学习证据，但 update 10.8k 仍低于
 团队回忆的约15k首个稳定击球尺度；没有 matched Isaac contact response，故不提高 parity 等级。
 
 ## 2026-08-30 R36 当前双端边界（仍 `Partial`）
