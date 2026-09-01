@@ -63,12 +63,13 @@
   完全静止，但没有形成老师反手挡的接触窗动作，后段明显向桌面倾覆且无恢复。
   单 env 回放不代签 512-env 分布，也不能把 600 update 的早期失败轨迹升级为长期学习负例；它只证明
   视觉工作流有效、当前 checkpoint 还不会稳定模仿或击球。
-- GPU2 Mu 已越过 `8k`；update 8173--8272 的recent-100仍finite，raw/selected=
-  `4,329/254`。逐类拆账为selected face `254`、edge/rim ambiguous `4,075`、opposite/
-  between-planes/invalid均`0`，即raw中约`94.13%`是拍边/拍框，约`5.87%`是真正选中拍面。
-  这不是classifier未分类的噪声，而是正在转成明确的hit-quality问题：policy已多次把球带到球拍
-  边界，但拍心/拍面对齐还未学稳。legal landing仍`0`，所以不放宽selected truth、不把raw
-  冒充hit，也不在`15k`耐心里程碑前因此停跑或改Reward。三条均保持
+- GPU2 Mu 已越过 `10k`并自然产生finite `model_10000.pt`；update 10095--10194
+  recent-100的raw/selected/edge=`3,101/44/3,057`。这44次selected face contact全部结算为
+  `OUTCOME_OWN_TABLE_LANDING=4`，legal landing仍`0`，recovery success=`0`。因此九成以上raw仍是
+  拍边/拍框；少量拍面真接触也没有学到正确出球方向，而是把球送回己方台面。这是
+  balance/mimic→hit入口后的真实hit-quality差距，不是classifier噪声；现有racket position/
+  velocity/normal与post-contact引导已自然重叠开放，下一层并未被Gate吞掉。不放宽selected
+  truth、不把own-table冒充legal landing，也不在`15k`耐心里程碑前因此停跑或改Reward。三条均保持
   nonfinite/conservation=`0/0`。
 
 ### “早期少动”与 Build4 的公平解释

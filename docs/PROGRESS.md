@@ -1,5 +1,13 @@
 # 简短进度记录
 
+## 2026-09-01 — Mu 10k 出现拍面接触，但全部落回己方台面
+
+- finite `model_10000.pt`已自然产生。update 10095--10194 recent-100的raw/selected/edge=
+  `3,101/44/3,057`；44次selected face contact全部是`OUTCOME_OWN_TABLE_LANDING=4`，legal
+  landing/recovery success均`0`。当前差距因而拆成两层：拍边/拍框仍占主导，且真正
+  拍面接触后的出球方向仍错。下一层racket/task/post-contact引导已自然重叠开放；不新增
+  Gate、不放宽真值，也不在`15k`前抢跑改Reward。
+
 ## 2026-09-01 — Mu 8k contact 差距收敛到拍边/拍框
 
 - Mu update 8173--8272 recent-100 的raw/selected=`4,329/254`；逐类分解为selected face

@@ -92,13 +92,14 @@ RSL3 grouped observation，不为旧 actor-tensor/checkpoint 增兼容支路。P
 
 2026-09-01 的最新 recent-100 只读窗为：GPU0 Isaac update 1820--1919，episode=`494.518 tick`、
 launch/observed=`4,883/4,883`、R03/contact/landing=`0/0/0`；GPU1 Isaac update 1355--1454，
-episode=`492.069 tick`、launch/observed=`4,866/4,866`、R03/contact/landing=`0/0/0`。Mu已越过首个
-Mu的`8k`后里程碑：update 8173--8272 recent-100 持续finite，raw/selected=
-`4,329/254`；contact class分解为selected face `254`、edge/rim ambiguous `4,075`、opposite/
-between-planes/invalid均`0`。因此raw的`94.13%`是拍边/拍框，真正selected占`5.87%`，legal
-landing仍`0`。这比“raw增、selected降”更精确：hit入口真实，当前主导学习差距是拍心/
-拍面对齐，不是opposite face或invalid classifier。不放宽selected truth，也不在`15k`耐心里程碑前
-换Reward；Isaac当前只证明balance/survival与launch分母已形成，尚未证明hit。
+episode=`492.069 tick`、launch/observed=`4,866/4,866`、R03/contact/landing=`0/0/0`。
+Mu的`10k`里程碑已产生finite `model_10000.pt`；update 10095--10194 recent-100的
+raw/selected/edge=`3,101/44/3,057`。44次selected face contact全部是
+`OUTCOME_OWN_TABLE_LANDING=4`，legal landing与recovery success均`0`。因此当前两层差距已可分：
+raw主导仍是拍边/拍框；真正拍面接触也仍把球送回己方台面。这不是opposite face或
+invalid classifier，也不是下一层奖励被开关吞掉：racket position/velocity/normal与
+post-contact guidance已在同一自然过程中开放。不放宽selected/landing truth，也不在`15k`
+耐心里程碑前换Reward；Isaac当前只证明balance/survival与launch分母已形成，尚未证明hit。
 
 这里纠正上一版过早的“成熟负例”措辞：`episode≈500 tick` 只说明 policy 能活到 teacher/contact 时钟，
 并不说明 600--1,800 update 已足够学会 mimic→hit。团队回忆中的成功谱系约到 `15k` update 才开始
