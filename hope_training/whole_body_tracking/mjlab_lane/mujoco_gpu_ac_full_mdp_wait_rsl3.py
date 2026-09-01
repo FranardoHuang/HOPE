@@ -799,7 +799,7 @@ def _write_fresh_bytes(path: Path, payload: bytes) -> None:
 def _run_controller_trace(
     *, runner, env, root: Path, checkpoint: str, steps: int,
     action_tape: str | None, termination_bit_contract: dict[str, int],
-    torch_module,
+    runtime_mjb_identity: dict, torch_module,
 ) -> dict:
     """Trace the live MuJoCo PD owner under a frozen policy/action tape."""
 
@@ -847,6 +847,9 @@ def _run_controller_trace(
     env.enable_controller_trace()
     obs = env.get_observations()
     torch_module.manual_seed(20260829)
+    qpos_world0 = [
+        env.sim.data.qpos[0].detach().cpu().numpy().copy()
+    ]
     rows = {name: [] for name in (
         "actions", "q_before", "dq_before", "pre_clamp_qdes",
         "executable_qdes", "q_min", "q_max", "q_after", "dq_after",
@@ -864,6 +867,9 @@ def _run_controller_trace(
                 actions = torch_module.from_numpy(replay_actions[step]).to(env.device)
             obs, _reward, done, extras = env.step(actions)
             trace = env.controller_trace()
+            qpos_world0.append(
+                env.sim.data.qpos[0].detach().cpu().numpy().copy()
+            )
             rows["actions"].append(actions.detach().cpu().numpy().copy())
             for name in rows:
                 if name == "actions":
@@ -886,6 +892,7 @@ def _run_controller_trace(
     arrays["phase"] = np.stack(phases)
     arrays["done"] = np.stack(dones)
     arrays["termination_bits"] = np.stack(termination_bits)
+    arrays["qpos_world0"] = np.stack(qpos_world0)
     arrays["selected_joint_indices"] = np.asarray(selected, dtype=np.int64)
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **arrays)
@@ -935,8 +942,8 @@ def _run_controller_trace(
         arrays["done"] & (arrays["termination_bits"] == 0)
     ))
     summary = {
-        "schema_version": 1,
-        "kind": "action_ball_mujoco_full_mdp_controller_trace_v1",
+        "schema_version": 2,
+        "kind": "action_ball_mujoco_full_mdp_controller_trace_v2",
         "diagnostic_unauthorized": True,
         "training_authorized": False,
         "checkpoint_authority": False,
@@ -949,6 +956,8 @@ def _run_controller_trace(
         "input_action_tape_sha256": action_tape_sha256,
         "trace_npz": trace_path.name,
         "trace_npz_sha256": trace_sha256,
+        "runtime_mjb": dict(runtime_mjb_identity),
+        "qpos_world0_shape": list(arrays["qpos_world0"].shape),
         "sample_rows": int(steps * env.num_envs),
         "done_rows": int(np.count_nonzero(arrays["done"])),
         "termination_reason_rows": termination_reason_rows,
@@ -1416,6 +1425,7 @@ def main(
             steps=diagnostic_controller_trace_steps,
             action_tape=diagnostic_controller_trace_action_tape,
             termination_bit_contract=wait.FULLMDP_TERMINATION_BITS,
+            runtime_mjb_identity=augmented_mjb,
             torch_module=torch,
         )
         _best_effort_stdout_marker(

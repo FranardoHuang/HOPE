@@ -1376,6 +1376,9 @@ def test_controller_trace_reads_the_live_pd_owner_not_a_copied_law():
     plant = (LANE / "a3_train_ppo.py").read_text()
     assert "env.enable_controller_trace()" in source
     assert "trace = env.controller_trace()" in source
+    assert 'arrays["qpos_world0"] = np.stack(qpos_world0)' in source
+    assert '"action_ball_mujoco_full_mdp_controller_trace_v2"' in source
+    assert "runtime_mjb_identity=augmented_mjb" in main_source
     assert 'bits = extras.get("termination_bits")' in source
     assert 'termination_reason_rows["done_without_reason"]' in source
     assert "termination_bit_contract.items()" in source
