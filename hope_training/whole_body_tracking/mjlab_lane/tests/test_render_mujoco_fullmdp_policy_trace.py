@@ -25,7 +25,7 @@ def _sha(path):
 
 def _trace_root(tmp_path):
     root = tmp_path / "trace"
-    root.mkdir()
+    root.mkdir(parents=True)
     qpos = np.zeros((4, 7), dtype=np.float32)
     qpos[:, 3] = 1.0
     np.savez_compressed(root / "controller_trace.npz", qpos_world0=qpos)
