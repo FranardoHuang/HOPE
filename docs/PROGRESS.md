@@ -1,5 +1,12 @@
 # 简短进度记录
 
+## 2026-09-01 — current-only Mu policy固定机位工作流已实现，待Pod恢复验证
+
+- `89a60e9f` 让现有controller trace仅额外保存world0完整`qpos`，并新增只接受trace-v2与同root exact
+  `runtime.mjb`的离线固定机位renderer；不复制环境、不增加Stage/Gate、不兼容旧trace。focused测试与
+  model_10000真实视频原计划直接在Pod1跑，但04:xx CST连续两次SSH均`connection refused`，所以当前只称
+  **实现完成、Pod验证未测**，不把源码或host结果冒充视频证据。
+
 ## 2026-09-01 — Mu 10k 出现拍面接触，但全部落回己方台面
 
 - finite `model_10000.pt`已自然产生。update 10095--10194 recent-100的raw/selected/edge=

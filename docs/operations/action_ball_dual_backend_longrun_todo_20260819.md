@@ -71,6 +71,12 @@
   velocity/normal与post-contact引导已自然重叠开放，下一层并未被Gate吞掉。不放宽selected
   truth、不把own-table冒充legal landing，也不在`15k`耐心里程碑前因此停跑或改Reward。三条均保持
   nonfinite/conservation=`0/0`。
+- `89a60e9f` 已把现有controller-trace前向收窄成可视化所需的唯一新数据：只额外保存world0逐policy
+  step的完整`qpos`，并由同一trace root里的exact `runtime.mjb`离线固定机位渲染；不复制环境、不加
+  Stage/Gate，也不兼容旧trace。渲染命令为
+  `MUJOCO_GL=egl python scripts/render_mujoco_fullmdp_policy_trace.py --trace-root <fresh-trace-root> --out <fresh-output> --fps 50`。
+  2026-09-01 04:xx CST两次连接Pod1均为`connection refused`，所以当前状态仅为
+  **代码已提交、exact Pod构造/回归/真实model_10000视频未测**；不得把host结构测试或源码审阅写成视频闭环。
 
 ### “早期少动”与 Build4 的公平解释
 

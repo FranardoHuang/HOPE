@@ -22,6 +22,10 @@ raw/selected/edge=`3,101/44/3,057`。这44次selected face contact全部结算�
 first-divergence 都出现前，G06 保持
 `Partial / diagnostic_unauthorized`。
 
+`89a60e9f` 已实现current-only controller-trace-v2→fixed-camera renderer，复用同一run构造出的
+`runtime.mjb`和world0 `qpos`，没有新增训练Gate或旧ABI兼容。当前Pod1 SSH连续`connection refused`，
+所以exact CUDA构造、focused回归和model_10000真实视频仍未测；该实现不改变G06状态。
+
 这增强了“Mu 的 mimic→hit 已形成入口、hit→landing 仍未形成”的学习证据，但 update 5k 仍低于
 团队回忆的约15k首个稳定击球尺度；没有 matched Isaac contact response，故不提高 parity 等级。
 

@@ -101,6 +101,12 @@ invalid classifier，也不是下一层奖励被开关吞掉：racket position/v
 post-contact guidance已在同一自然过程中开放。不放宽selected/landing truth，也不在`15k`
 耐心里程碑前换Reward；Isaac当前只证明balance/survival与launch分母已形成，尚未证明hit。
 
+`89a60e9f` 增加当前trace-v2的最小固定机位工作流：live policy trace只保存world0的完整`qpos`，
+离线renderer只接受同root、逐字节核验的`runtime.mjb/controller_trace.npz/summary.json`，不支持旧trace
+兼容。这是为开发者直接看model_10000姿态、球和出球方向而补的工作流，不是新Gate。当前因Pod1 SSH连续
+`connection refused`，exact Pod测试、真实trace和MP4均未测；恢复连通后先完成focused测试，再用fresh
+root生成证据，不触碰现役run/source。
+
 这里纠正上一版过早的“成熟负例”措辞：`episode≈500 tick` 只说明 policy 能活到 teacher/contact 时钟，
 并不说明 600--1,800 update 已足够学会 mimic→hit。团队回忆中的成功谱系约到 `15k` update 才开始
 稳定击球；可核的 Build4 manifest 则明确从 Build1 `model_21800.pt` 位级载入8个 actor tensor，再重置
